@@ -2874,20 +2874,16 @@ function setBrand(brand) {
 
   if (brand === 'vr') {
     body.classList.remove('vitre');
-    btnVR.classList.remove('inactive');
-    btnVIT.classList.add('inactive');
-    pill.textContent = 'VR Marcas';
-    pill.className = 'topbar-pill';
-    if (finB) { finB.textContent = 'VR Marcas'; finB.className = 'badge bvr'; }
+    if (btnVR)  btnVR.classList.remove('inactive');
+    if (btnVIT) btnVIT.classList.add('inactive');
+    if (pill)   { pill.textContent = 'VR Marcas'; pill.className = 'topbar-pill'; }
+    if (finB)   { finB.textContent = 'VR Marcas'; finB.className = 'badge bvr'; }
   } else {
     body.classList.add('vitre');
-    btnVIT.classList.remove('inactive');
-    btnVR.classList.add('inactive');
-    pill.textContent = 'Vitre';
-    pill.className = 'topbar-pill';
-    pill.style.background = '#FCE7F3';
-    pill.style.color = '#831843';
-    if (finB) { finB.textContent = 'Vitre'; finB.className = 'badge bvit'; }
+    if (btnVIT) btnVIT.classList.remove('inactive');
+    if (btnVR)  btnVR.classList.add('inactive');
+    if (pill)   { pill.textContent = 'Vitre'; pill.className = 'topbar-pill'; pill.style.background = '#FCE7F3'; pill.style.color = '#831843'; }
+    if (finB)   { finB.textContent = 'Vitre'; finB.className = 'badge bvit'; }
   }
 }
 
@@ -2927,7 +2923,7 @@ function orcStep(n) {
   }
   if (n===4) orcUpdateSummary();
   if (n===3) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==="function") orcLoadMatPrecos(); }
-  if (n===5) { const v = window._orcCalc; if(v) document.getElementById('orcSimValor').value = 'R$ '+orcFmt(v.finalPrice||0); }
+  if (n===5) { const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); } }
 }
 
 function orcSyncStep3Result() {
