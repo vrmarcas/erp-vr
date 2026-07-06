@@ -8067,36 +8067,45 @@ var _FB_CONFIG = {
 };
 var _FB_MASTER = 'nannacarla0@gmail.com'; // master principal
 
-// Inicialização Firebase
-// ── MODO BYPASS (Firebase temporariamente desativado) ─────────────────────────
-// Stubs para evitar erros nas funções que referenciam _fbAuth/_fbDb
-var _noOpPromise = { then: function(cb){ try{ cb(); }catch(e){} return this; }, catch: function(){ return this; } };
-var _fbAuth = {
-  signInWithEmailAndPassword: function(){ return _noOpPromise; },
-  signOut: function(){ return _noOpPromise; },
-  sendPasswordResetEmail: function(){ return _noOpPromise; },
-  onAuthStateChanged: function(){}
-};
-var _fbDb = {
-  collection: function(){ return { doc: function(){ return { get: function(){ return _noOpPromise; }, set: function(){ return _noOpPromise; }, onSnapshot: function(){ return function(){}; } }; }, get: function(){ return _noOpPromise; } }; }
-};
-var _fbCurrentUser  = null;
-var _fbSaveTimers   = {};
+// ── Firebase inicializado ─────────────────────────────────────────────────────
+firebase.initializeApp(_FB_CONFIG);
+var _fbAuth = firebase.auth();
+var _fbDb   = firebase.firestore();
+var _fbCurrentUser   = null;
+var _fbSaveTimers    = {};
 var _fbUnsubscribers = [];
 var _fbPendingVerUser = null;
 var _fbSaveAllTimer  = null;
 var _FB_KEYS = ['os','clientes','crm','orcamentos','retalhos','stock','config'];
 
-// Auto-login direto como Master (bypass temporário)
-document.addEventListener('DOMContentLoaded', function() {
-  setTimeout(function() {
-    var ov = document.getElementById('authOverlay');
-    if (ov) ov.classList.remove('show');
-    _currentSession = { user: 'Master', funcao: 'master', loginTime: Date.now(), lastActivity: Date.now() };
-    secSetSession(_currentSession);
-    if (typeof authApplySession === 'function') authApplySession();
-    if (typeof secStartInactivityTimer === 'function') secStartInactivityTimer();
-  }, 300);
+// ── Listener de autenticação ───────────────────────────────────────────────────
+firebase.auth().onAuthStateChanged(function(user) {
+  var ov = document.getElementById('authOverlay');
+  if (user) {
+    _fbCurrentUser = user;
+    // Busca função/perfil do usuário no Firestore
+    _fbDb.collection('usuarios').doc(user.email).get().then(function(doc) {
+      var funcao = user.email === _FB_MASTER ? 'master' : 'vendedor';
+      if (doc.exists && doc.data().funcao) funcao = doc.data().funcao;
+      _currentSession = { user: user.email, funcao: funcao, loginTime: Date.now(), lastActivity: Date.now() };
+      secSetSession(_currentSession);
+      if (ov) ov.classList.remove('show');
+      if (typeof authApplySession === 'function') authApplySession();
+      if (typeof secStartInactivityTimer === 'function') secStartInactivityTimer();
+    }).catch(function() {
+      // Sem Firestore configurado, usa defaults
+      var funcao = user.email === _FB_MASTER ? 'master' : 'vendedor';
+      _currentSession = { user: user.email, funcao: funcao, loginTime: Date.now(), lastActivity: Date.now() };
+      secSetSession(_currentSession);
+      if (ov) ov.classList.remove('show');
+      if (typeof authApplySession === 'function') authApplySession();
+      if (typeof secStartInactivityTimer === 'function') secStartInactivityTimer();
+    });
+  } else {
+    _fbCurrentUser = null;
+    if (ov) ov.classList.add('show');
+    if (typeof _fbResetLoginForm === 'function') _fbResetLoginForm();
+  }
 });
 
 // ── Override authLogin ─────────────────────────────────────────────────────────
