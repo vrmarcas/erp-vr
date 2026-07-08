@@ -769,6 +769,32 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .dre-val-pos{color:#059669;font-weight:700}
 .dre-val-neg{color:#DC2626;font-weight:700}
 .dre-pct{font-size:10px;color:var(--muted);margin-left:6px;font-weight:400}
+
+/* ── CR Summary Bar ─────────────────────────────────────────────────────────── */
+.fin-cr-summary-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.fin-cr-scard{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:12px;border:1px solid var(--border);background:var(--surface)}
+.fin-cr-scard-pend{background:#FFFBEB;border-color:#FDE68A}
+.fin-cr-scard-ok{background:#F0FDF4;border-color:#BBF7D0}
+.fin-cr-scard-err{background:#FFF5F5;border-color:#FCA5A5}
+.fin-cr-scard-ico{font-size:22px;line-height:1}
+.fin-cr-scard-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.fin-cr-scard-val{font-size:20px;font-weight:900;color:var(--text);font-feature-settings:"tnum";margin-top:2px}
+/* Marca badges na tabela */
+.fin-marca-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;display:inline-block}
+.fin-marca-vr{background:#EDE9FE;color:#5B21B6}
+.fin-marca-vit{background:#FCE7F3;color:#9D174D}
+/* Origem badges */
+.fin-origem-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700}
+.fin-origem-os{background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE}
+.fin-origem-manual{background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE}
+/* Categoria badges CP */
+.fin-cat-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700}
+/* Botão Baixar CP — destaque */
+.fin-baixar-btn{padding:4px 12px;background:linear-gradient(135deg,#059669,#10B981);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;transition:.15s;box-shadow:0 2px 6px rgba(5,150,105,.25)}
+.fin-baixar-btn:hover{background:linear-gradient(135deg,#047857,#059669);box-shadow:0 3px 10px rgba(5,150,105,.35);transform:translateY(-1px)}
+/* DRE intro box */
+.fin-dre-intro{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;background:#F0F9FF;border:1px solid #BAE6FD;border-radius:10px;margin-bottom:16px;font-size:12px;color:#0369A1;line-height:1.5}
+.fin-dre-intro span{font-size:22px;flex-shrink:0}
 </style>
 <!-- Firebase SDK (Compat — carregado antes dos scripts) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -2507,10 +2533,36 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
       <!-- ── ABA: CONTAS A RECEBER ── -->
       <div id="finPgCR" style="display:none">
+        <!-- Mini KPIs sumário -->
+        <div class="fin-cr-summary-bar">
+          <div class="fin-cr-scard fin-cr-scard-pend">
+            <div class="fin-cr-scard-ico">📥</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Total a Receber</div>
+              <div class="fin-cr-scard-val" id="finCRSumPend">R$ 0</div>
+            </div>
+          </div>
+          <div class="fin-cr-scard fin-cr-scard-ok">
+            <div class="fin-cr-scard-ico">✅</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Recebido no Mês</div>
+              <div class="fin-cr-scard-val" id="finCRSumRec">R$ 0</div>
+            </div>
+          </div>
+          <div class="fin-cr-scard fin-cr-scard-err">
+            <div class="fin-cr-scard-ico">⚠️</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Em Atraso</div>
+              <div class="fin-cr-scard-val" id="finCRSumAtras">R$ 0</div>
+            </div>
+          </div>
+        </div>
         <div class="card">
           <div class="card-h">
             <div class="card-h-left">📥 Contas a Receber <span id="finCRCount" style="font-size:11px;color:var(--muted)"></span></div>
-            <div style="display:flex;gap:6px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <input id="finCRSearch" type="text" placeholder="🔍 Buscar cliente..." onkeyup="finCRRender()"
+                style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text);min-width:160px">
               <select id="finCRStatusFlt" onchange="finCRRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="">Todos os status</option>
                 <option value="pendente">Pendente</option>
@@ -2521,7 +2573,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             </div>
           </div>
           <table class="table">
-            <thead><tr><th>Vencimento</th><th>Cliente</th><th>Descrição</th><th>Marca / Canal</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Cliente</th><th>Origem</th><th>Marca</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead>
             <tbody id="finCRBody"></tbody>
           </table>
         </div>
@@ -2529,10 +2581,34 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
       <!-- ── ABA: CONTAS A PAGAR ── -->
       <div id="finPgCP" style="display:none">
+        <!-- Mini KPIs sumário CP -->
+        <div class="fin-cr-summary-bar">
+          <div class="fin-cr-scard fin-cr-scard-err">
+            <div class="fin-cr-scard-ico">📤</div>
+            <div>
+              <div class="fin-cr-scard-lbl">A Pagar (Pendente)</div>
+              <div class="fin-cr-scard-val" id="finCPSumPend">R$ 0</div>
+            </div>
+          </div>
+          <div class="fin-cr-scard" style="background:#F1F5F9">
+            <div class="fin-cr-scard-ico">✅</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Pago no Mês</div>
+              <div class="fin-cr-scard-val" id="finCPSumPago">R$ 0</div>
+            </div>
+          </div>
+          <div class="fin-cr-scard fin-cr-scard-pend">
+            <div class="fin-cr-scard-ico">📅</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Agendado</div>
+              <div class="fin-cr-scard-val" id="finCPSumAgend">R$ 0</div>
+            </div>
+          </div>
+        </div>
         <div class="card">
           <div class="card-h">
             <div class="card-h-left">📤 Contas a Pagar <span id="finCPCount" style="font-size:11px;color:var(--muted)"></span></div>
-            <div style="display:flex;gap:6px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
               <select id="finCPCatFlt" onchange="finCPRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="">Todas as categorias</option>
                 <option value="Pessoal">Pessoal</option>
@@ -2552,7 +2628,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             </div>
           </div>
           <table class="table">
-            <thead><tr><th>Vencimento</th><th>Descrição</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Forma</th><th>Status</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Fornecedor / Despesa</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead>
             <tbody id="finCPBody"></tbody>
           </table>
         </div>
@@ -2560,20 +2636,34 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
       <!-- ── ABA: DRE ── -->
       <div id="finPgDRE" style="display:none">
+        <!-- Mini descrição do que é o DRE -->
+        <div class="fin-dre-intro">
+          <span>📊</span>
+          <div>
+            <strong>Demonstrativo de Resultado do Exercício (DRE)</strong><br>
+            <span>Relatório gerencial baseado nas transações recebidas e despesas pagas registradas no ERP. Selecione o período para filtrar.</span>
+          </div>
+        </div>
         <div class="card">
           <div class="card-h">
-            <div class="card-h-left">📋 DRE — Demonstrativo de Resultados</div>
-            <div style="display:flex;gap:6px;align-items:center">
-              <select id="finDREMes" onchange="finDREBuild()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+            <div class="card-h-left">📋 DRE Gerencial</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="font-size:11px;color:var(--muted)">Período:</span>
+              <select id="finDREMes" onchange="finDREBuild()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="0">Acumulado Anual</option>
                 <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
                 <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
                 <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
                 <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
               </select>
+              <button class="topbar-btn ghost" style="font-size:11px" onclick="finDREBuild()">🔄 Atualizar</button>
             </div>
           </div>
-          <div id="finDREContent" style="padding:4px 0"></div>
+          <div id="finDREContent" style="padding:4px 0">
+            <div style="text-align:center;color:var(--muted);padding:30px;font-size:13px">
+              Clique em <strong>🔄 Atualizar</strong> ou selecione um período para gerar o relatório
+            </div>
+          </div>
         </div>
       </div>
 
@@ -5047,23 +5137,31 @@ function finSetBrand(b) {
 
 function finTab(t) {
   _finActiveTab = t;
+  // Mapa explícito para evitar problemas com maiúsculas (CR, CP, DRE)
+  var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', dre:'DRE'};
   ['dash','cr','cp','dre'].forEach(function(tab){
-    var btn=document.getElementById('finTabBtn'+tab.charAt(0).toUpperCase()+tab.slice(1));
-    var pg =document.getElementById('finPg'+tab.charAt(0).toUpperCase()+tab.slice(1));
+    var suffix = idSuffix[tab];
+    var btn = document.getElementById('finTabBtn'+suffix);
+    var pg  = document.getElementById('finPg'+suffix);
     if(btn) btn.classList.toggle('on', tab===t);
-    if(pg)  pg.style.display = tab===t ? 'block' : 'none';
+    if(pg)  pg.style.display = (tab===t) ? 'block' : 'none';
   });
   finRefreshAll();
 }
 
 function finRefreshAll() {
-  finRender();
-  finCRRender();
-  finCPRender();
   finDashKPIs();
   finBarChartRender();
   finDonutRender();
+  finRender();
+  finCRRender();
+  finCPRender();
+  // DRE é sempre reconstruído ao entrar na aba
   if(_finActiveTab==='dre') finDREBuild();
+  // Atualizar indicadores de totais da aba CR
+  finCRUpdateSummary();
+  // Atualizar sumário da aba CP
+  finCPUpdateSummary();
 }
 
 function finFilterTX(arr) {
@@ -5174,26 +5272,56 @@ function finDonutRender() {
   leg.innerHTML=legHtml;
 }
 
+// ── Contas a Receber — Sumário de totais ─────────────────────────────────────
+function finCRUpdateSummary() {
+  var pend  = FIN_CR.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var rec   = FIN_CR.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
+  var atras = FIN_CR.filter(function(r){return r.status==='vencido';}).reduce(function(s,r){return s+r.valor;},0);
+  var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
+  set('finCRSumPend',pend); set('finCRSumRec',rec); set('finCRSumAtras',atras);
+}
+
 // ── Contas a Receber Render ───────────────────────────────────────────────────
 function finCRRender() {
   var tbody=document.getElementById('finCRBody');
   var cnt=document.getElementById('finCRCount');
   if(!tbody) return;
   var statusFlt=(document.getElementById('finCRStatusFlt')||{}).value||'';
+  var q=((document.getElementById('finCRSearch')||{}).value||'').toLowerCase();
   var list=FIN_CR.filter(function(r){
     var bOk=_finBrand==='todas'||r.marca===_finBrand;
     var sOk=!statusFlt||r.status===statusFlt;
-    return bOk&&sOk;
+    var qOk=!q||(r.cliente.toLowerCase().includes(q)||r.descricao.toLowerCase().includes(q));
+    return bOk&&sOk&&qOk;
   });
-  if(cnt) cnt.textContent='('+list.length+' registros)';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Nenhum registro encontrado</td></tr>';return;}
+  if(cnt) cnt.textContent='('+list.length+' registro'+(list.length!==1?'s':'')+')';
+  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(r){
-    var mLabel=r.marca==='vr'?'<span style="background:#EDE9FE;color:#5B21B6;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">VR — Merc.Pago</span>':'<span style="background:#FCE7F3;color:#9D174D;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">Vitre — Nubank</span>';
+    // Marca badge
+    var mLabel=r.marca==='vr'
+      ?'<span class="fin-marca-badge fin-marca-vr">VR — MP</span>'
+      :'<span class="fin-marca-badge fin-marca-vit">Vitre — Nu</span>';
+    // Origem badge: tem osRef = veio do fluxo de Orçamento; senão = Manual
+    var origem=r.osRef
+      ?'<span class="fin-origem-badge fin-origem-os">📋 '+r.osRef+'</span>'
+      :'<span class="fin-origem-badge fin-origem-manual">✏️ Manual</span>';
+    // Status badge
     var statusMap={pendente:'pendente',recebido:'recebido',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMap[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
-    var acoes=r.status==='pendente'?'<button onclick="finCRBaixa(\'' +r.id+ '\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button>':'';
-    acoes+=' <button onclick="finCRDel(\'' +r.id+ '\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
-    return '<tr><td>'+r.vencimento+'</td><td><strong>'+r.cliente+'</strong></td><td style="font-size:11px;color:var(--muted)">'+r.descricao+'</td><td>'+mLabel+'</td><td style="font-weight:700;color:#059669">'+finFmt(r.valor)+'</td><td>'+badge+'</td><td><div class="fin-tbl-actions">'+acoes+'</div></td></tr>';
+    // Ações
+    var acoes=(r.status==='pendente'||r.status==='vencido')
+      ?'<button onclick="finCRBaixa(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button> ':
+      '';
+    acoes+='<button onclick="finCRDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
+    return '<tr>'
+      +'<td><strong>'+r.cliente+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
+      +'<td>'+origem+'</td>'
+      +'<td>'+mLabel+'</td>'
+      +'<td style="font-weight:800;color:#059669;font-size:13px">'+finFmt(r.valor)+'</td>'
+      +'<td>'+r.vencimento+'</td>'
+      +'<td>'+badge+'</td>'
+      +'<td><div class="fin-tbl-actions">'+acoes+'</div></td>'
+      +'</tr>';
   }).join('');
 }
 
@@ -5236,7 +5364,18 @@ function finCRSalvar(){
   showToast('Conta a receber registrada!','ok');
 }
 
+// ── Contas a Pagar — Sumário ──────────────────────────────────────────────────
+function finCPUpdateSummary() {
+  var pend  = FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';}).reduce(function(s,r){return s+r.valor;},0);
+  var pago  = FIN_CP.filter(function(r){return r.status==='pago';}).reduce(function(s,r){return s+r.valor;},0);
+  var agend = FIN_CP.filter(function(r){return r.status==='agendado';}).reduce(function(s,r){return s+r.valor;},0);
+  var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
+  set('finCPSumPend',pend); set('finCPSumPago',pago); set('finCPSumAgend',agend);
+}
+
 // ── Contas a Pagar Render ─────────────────────────────────────────────────────
+var FIN_CAT_ICONS = {'Pessoal':'👥','Operacional':'⚙️','Matéria-prima':'🪵','Impostos':'🏛️','Empréstimos':'🏦','Outros':'📌'};
+var FIN_CAT_COLORS = {'Pessoal':'#7C3AED','Operacional':'#3B82F6','Matéria-prima':'#F59E0B','Impostos':'#EF4444','Empréstimos':'#6B7280','Outros':'#10B981'};
 function finCPRender() {
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
@@ -5249,17 +5388,30 @@ function finCPRender() {
     var sOk=!stFlt||r.status===stFlt;
     return bOk&&cOk&&sOk;
   });
-  if(cnt) cnt.textContent='('+list.length+' registros · '+finFmt(list.reduce(function(s,r){return s+r.valor;},0))+')';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum registro encontrado</td></tr>';return;}
-  var catColors={'Pessoal':'#7C3AED','Operacional':'#3B82F6','Matéria-prima':'#F59E0B','Impostos':'#EF4444','Empréstimos':'#6B7280','Outros':'#10B981'};
+  var total=list.reduce(function(s,r){return s+r.valor;},0);
+  if(cnt) cnt.textContent='('+list.length+' lançamento'+(list.length!==1?'s':'')+' · '+finFmt(total)+')';
+  if(!list.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(r){
     var statusMapCP={pendente:'pendente',pago:'pago',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMapCP[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
-    var catC=catColors[r.categoria]||'#6B7280';
-    var catBadge='<span style="background:'+catC+'22;color:'+catC+';padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">'+r.categoria+'</span>';
-    var acoesStr=r.status!=='pago'?'<button onclick="finCPPagar(\'' +r.id+ '\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Pago</button>':'';
-    acoesStr+=' <button onclick="finCPDel(\'' +r.id+ '\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
-    return '<tr><td>'+r.vencimento+'</td><td><strong>'+r.descricao+'</strong></td><td>'+catBadge+'</td><td style="font-size:11px;color:var(--muted)">'+(r.fornecedor||'—')+'</td><td style="font-weight:700;color:#DC2626">'+finFmt(r.valor)+'</td><td style="font-size:11px">'+r.formaPgto+'</td><td>'+badge+'</td><td><div class="fin-tbl-actions">'+acoesStr+'</div></td></tr>';
+    var catC=FIN_CAT_COLORS[r.categoria]||'#6B7280';
+    var catIco=FIN_CAT_ICONS[r.categoria]||'📌';
+    var catBadge='<span class="fin-cat-badge" style="background:'+catC+'18;color:'+catC+';border:1px solid '+catC+'33">'+catIco+' '+r.categoria+'</span>';
+    var acoesStr='';
+    if(r.status!=='pago'){
+      acoesStr='<button onclick="finCPPagar(\''+r.id+'\')" class="fin-baixar-btn">✓ Baixar</button> ';
+    } else {
+      acoesStr='<span style="font-size:10px;color:#059669;font-weight:700">✅ Pago em '+(r.dataPagamento||'—')+'</span> ';
+    }
+    acoesStr+='<button onclick="finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
+    return '<tr>'
+      +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Despesa interna')+'</div></td>'
+      +'<td>'+catBadge+'</td>'
+      +'<td style="font-weight:800;color:#DC2626;font-size:13px">'+finFmt(r.valor)+'</td>'
+      +'<td>'+r.vencimento+'</td>'
+      +'<td>'+badge+'</td>'
+      +'<td><div class="fin-tbl-actions">'+acoesStr+'</div></td>'
+      +'</tr>';
   }).join('');
 }
 
@@ -8939,165 +9091,4 @@ function fbSaveAll() {
   }, 3000);
 }
 
-// ── Listeners em tempo real (OS, Clientes, CRM) ───────────────────────────────
-function fbInitListeners() {
-  _fbUnsubscribers.forEach(function(u) { try { u(); } catch(e) {} });
-  _fbUnsubscribers = [];
-  ['os', 'clientes', 'crm'].forEach(function(key) {
-    var unsub = _fbDb.collection('erp').doc(key).onSnapshot(function(doc) {
-      if (!doc.exists) return;
-      var data = doc.data();
-      if (!data || !data.d) return;
-      // Ignorar updates gerados por nós mesmos nos últimos 5s
-      if (data.by === (_fbCurrentUser && _fbCurrentUser.email) && (Date.now() - data.ts) < 5000) return;
-      _fbApplyDoc(key, data.d);
-      try {
-        if (key === 'os') {
-          if (typeof renderOsTable  === 'function') renderOsTable();
-          if (typeof renderKanban   === 'function') renderKanban();
-          syncSidebarBadges();
-        }
-        if (key === 'clientes' && typeof cliRenderTable === 'function') cliRenderTable();
-        if (key === 'crm'      && typeof crmRender      === 'function') crmRender();
-      } catch(e) {}
-    }, function(e) { console.warn('fbListener err', key, e); });
-    _fbUnsubscribers.push(unsub);
-  });
-}
-
-// ── Override showToast para disparar fbSaveAll em ações OK ────────────────────
-(function() {
-  var _orig = (typeof showToast === 'function') ? showToast : function(){};
-  showToast = function(msg, type) {
-    _orig(msg, type);
-    if (type === 'ok' && _fbCurrentUser) fbSaveAll();
-  };
-})();
-
-// ════════════════════════════════════════════════════════════════════════════
-// GERENCIAR USUÁRIOS (apenas master)
-// ════════════════════════════════════════════════════════════════════════════
-
-function fbConvidarUsuario(email, funcao) {
-  if (!email || !email.includes('@')) { showToast('E-mail inválido', 'err'); return; }
-  if (!_fbCurrentUser || _fbCurrentUser.email !== _FB_MASTER) { showToast('Apenas o master pode convidar', 'err'); return; }
-  // Criar usuário via Firebase Auth REST API (não altera sessão atual)
-  fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + _FB_CONFIG.apiKey, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email, password: _fbGenTempPass(), returnSecureToken: false })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.error) {
-      var msg = data.error.message;
-      showToast(msg === 'EMAIL_EXISTS' ? 'E-mail já cadastrado' : 'Erro: ' + msg, 'err');
-      return;
-    }
-    // Salvar role
-    _fbDb.collection('user_roles').doc(email).set({
-      funcao: funcao || 'producao', criadoEm: Date.now(), criadoPor: _fbCurrentUser.email
-    });
-    // Enviar link de definição de senha (serve como convite)
-    _fbAuth.sendPasswordResetEmail(email).then(function() {
-      showToast('Convite enviado para ' + email, 'ok');
-      setTimeout(fbRenderUserPanel_reload, 500);
-    });
-  })
-  .catch(function(e) { showToast('Erro de rede: ' + e.message, 'err'); });
-}
-
-function _fbGenTempPass() {
-  return 'Tmp' + Math.random().toString(36).slice(-8) + '!';
-}
-
-function fbAlterarRole(email, novaFuncao) {
-  if (!_fbCurrentUser || _fbCurrentUser.email !== _FB_MASTER) { showToast('Apenas o master pode alterar', 'err'); return; }
-  _fbDb.collection('user_roles').doc(email).set({ funcao: novaFuncao }, { merge: true }).then(function() {
-    showToast('Permissão de ' + email + ' atualizada', 'ok');
-  });
-}
-
-function fbListarUsuarios(callback) {
-  _fbDb.collection('user_roles').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(Object.assign({ email: doc.id }, doc.data())); });
-    if (callback) callback(list);
-  });
-}
-
-// ── Painel de usuários Firebase na aba Config. Usuários ───────────────────────
-(function() {
-  var _cfgTabFb = cfgTab;
-  cfgTab = function(n) {
-    _cfgTabFb(n);
-    if (n === 3) setTimeout(fbRenderUserPanel, 100);
-  };
-})();
-
-function fbRenderUserPanel_reload() {
-  var panel = document.getElementById('fbUserPanel');
-  if (panel) panel.remove();
-  fbRenderUserPanel();
-}
-
-function fbRenderUserPanel() {
-  if (!_fbCurrentUser || _fbCurrentUser.email !== _FB_MASTER) return;
-  // Encontra container da aba de usuários
-  var container = document.getElementById('cfgUsrContent');
-  if (!container) {
-    var tabs = document.querySelectorAll('[id^="cfgTab"]');
-    tabs.forEach(function(t) { if (t.style.display !== 'none') container = t; });
-  }
-  if (!container) return;
-  if (document.getElementById('fbUserPanel')) return; // já existe
-
-  var FUNCAO_OPTS = [
-    { v: 'producao',   l: 'Produção'  },
-    { v: 'comercial',  l: 'Comercial'  },
-    { v: 'financeiro', l: 'Financeiro' }
-  ];
-
-  var panel = document.createElement('div');
-  panel.id = 'fbUserPanel';
-  panel.style.cssText = 'margin-top:28px;border-top:2px solid var(--border);padding-top:20px';
-  panel.innerHTML =
-    '<div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:4px">☁️ Usuários Online (Firebase)</div>'
-    + '<div style="font-size:11px;color:var(--muted);margin-bottom:16px">Convide colaboradores para acessar o ERP. Cada um receberá um e-mail para definir sua senha.</div>'
-    + '<div id="fbUserList" style="margin-bottom:16px"><div style="font-size:11px;color:var(--muted)">Carregando…</div></div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-    +   '<input type="email" id="fbInviteEmail" placeholder="email@empresa.com" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)">'
-    +   '<select id="fbInviteFuncao" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text)">'
-    +     FUNCAO_OPTS.map(function(o) { return '<option value="' + o.v + '">' + o.l + '</option>'; }).join('')
-    +   '</select>'
-    +   '<button onclick="fbConvidarUsuario(document.getElementById(\'fbInviteEmail\').value,document.getElementById(\'fbInviteFuncao\').value)"'
-    +     ' style="padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
-    +     '✉️ Convidar'
-    +   '</button>'
-    + '</div>'
-    + '<div style="font-size:10px;color:var(--muted);margin-top:10px">O link de convite expira em 24h. O usuário define sua própria senha no primeiro acesso.</div>';
-
-  container.appendChild(panel);
-
-  // Carregar lista de usuários
-  fbListarUsuarios(function(users) {
-    var listEl = document.getElementById('fbUserList');
-    if (!listEl) return;
-    if (!users.length) {
-      listEl.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px 0">Nenhum colaborador cadastrado ainda.</div>';
-      return;
-    }
-    listEl.innerHTML = users.map(function(u) {
-      var opts = FUNCAO_OPTS.map(function(f) {
-        return '<option value="' + f.v + '"' + (u.funcao === f.v ? ' selected' : '') + '>' + f.l + '</option>';
-      }).join('');
-      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">'
-        + '<div style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + u.email + '</div>'
-        + '<select onchange="fbAlterarRole(\'' + u.email + '\',this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg2);color:var(--text)">' + opts + '</select>'
-        + '</div>';
-    }).join('');
-  });
-}
-
-
-// ════════════════════════════════════�
+// ── Li
