@@ -2733,108 +2733,6 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
     </div>
 
-    <!-- MODAL: Nova Conta a Receber -->
-    <div id="finCROverlay" class="gen-overlay" onclick="if(event.target===this)finCROverlayClose()" style="z-index:600">
-      <div class="gen-modal" style="width:480px">
-        <div class="gen-modal-hdr"><span class="gen-modal-title">📥 Nova Conta a Receber</span><button class="gen-modal-close" onclick="finCROverlayClose()">✕</button></div>
-        <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
-          <div class="fg2">
-            <div class="fg"><label>Cliente</label><input type="text" id="finCRCliente" placeholder="Nome do cliente"></div>
-            <div class="fg"><label>Marca / Canal</label>
-              <select id="finCRMarca">
-                <option value="vr">VR Marcas — Mercado Pago</option>
-                <option value="vitre">Vitre — Nubank</option>
-              </select>
-            </div>
-          </div>
-          <div class="fg"><label>Descrição</label><input type="text" id="finCRDesc" placeholder="Ex: Orçamento #045 — Painel Fachada"></div>
-          <div class="fg2">
-            <div class="fg"><label>Valor (R$)</label><input type="number" id="finCRValor" min="0" step="0.01" placeholder="0,00"></div>
-            <div class="fg"><label>Vencimento</label><input type="date" id="finCRVenc"></div>
-          </div>
-          <div class="fg2">
-            <div class="fg"><label>Forma de Recebimento</label>
-              <select id="finCRMetodo">
-                <option value="PIX">PIX</option>
-                <option value="Cartão">Cartão de Crédito</option>
-                <option value="Boleto">Boleto</option>
-                <option value="Dinheiro">Dinheiro</option>
-                <option value="Link">Link de Pagamento</option>
-              </select>
-            </div>
-            <div class="fg"><label>Status</label>
-              <select id="finCRStatus">
-                <option value="pendente">Pendente</option>
-                <option value="recebido">Recebido</option>
-              </select>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <button class="topbar-btn ghost" style="flex:1" onclick="finCROverlayClose()">Cancelar</button>
-            <button class="topbar-btn" style="flex:2" onclick="finCRSalvar()">💾 Salvar</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- MODAL: Nova Conta a Pagar -->
-    <div id="finCPOverlay" class="gen-overlay" onclick="if(event.target===this)finCPOverlayClose()" style="z-index:600">
-      <div class="gen-modal" style="width:500px">
-        <div class="gen-modal-hdr"><span class="gen-modal-title">📤 Nova Despesa</span><button class="gen-modal-close" onclick="finCPOverlayClose()">✕</button></div>
-        <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
-          <div class="fg"><label>Descrição</label><input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho"></div>
-          <div class="fg2">
-            <div class="fg"><label>Categoria</label>
-              <select id="finCPCat">
-                <optgroup label="── CUSTO (CMV)">
-                  <option value="Matéria-Prima">🪵 Matéria-Prima</option>
-                  <option value="Mão de Obra Direta">🔧 Mão de Obra Direta</option>
-                </optgroup>
-                <optgroup label="── DESPESA">
-                  <option value="Pessoal Admin">👥 Pessoal Admin</option>
-                  <option value="Operacional">⚙️ Operacional</option>
-                  <option value="Impostos">🏛️ Impostos</option>
-                  <option value="Empréstimos">🏦 Empréstimos</option>
-                  <option value="Outros">📌 Outros</option>
-                </optgroup>
-              </select>
-            </div>
-            <div class="fg"><label>Marca</label>
-              <select id="finCPMarca">
-                <option value="vr">VR Marcas</option>
-                <option value="vitre">Vitre</option>
-                <option value="ambos">Ambas</option>
-              </select>
-            </div>
-          </div>
-          <div class="fg2">
-            <div class="fg"><label>Valor (R$)</label><input type="number" id="finCPValor" min="0" step="0.01" placeholder="0,00"></div>
-            <div class="fg"><label>Vencimento</label><input type="date" id="finCPVenc"></div>
-          </div>
-          <div class="fg2">
-            <div class="fg"><label>Fornecedor</label><input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú..."></div>
-            <div class="fg"><label>Forma de Pagamento</label>
-              <select id="finCPFormaPgto">
-                <option value="Banco">Banco / TED / PIX</option>
-                <option value="Boleto">Boleto</option>
-                <option value="Dinheiro">Dinheiro</option>
-                <option value="Cartão PJ">Cartão PJ</option>
-              </select>
-            </div>
-          </div>
-          <div class="fg"><label>Status</label>
-            <select id="finCPStatus">
-              <option value="agendado">Agendado</option>
-              <option value="pago">Pago</option>
-            </select>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <button class="topbar-btn ghost" style="flex:1" onclick="finCPOverlayClose()">Cancelar</button>
-            <button class="topbar-btn" style="flex:2" onclick="finCPSalvar()">💾 Salvar</button>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- ==============================
          CLIENTES
@@ -3237,6 +3135,113 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
 <!-- TOAST CONTAINER -->
 <div id="toastContainer"></div>
+
+
+<!-- MODAL: Nova Conta a Receber -->
+<!-- MODAL: Nova Conta a Receber -->
+<div id="finCROverlay" class="gen-overlay" onclick="if(event.target===this)finCROverlayClose()" style="z-index:600">
+  <div class="gen-modal" style="width:480px">
+    <div class="gen-modal-hdr"><span class="gen-modal-title">📥 Nova Conta a Receber</span><button class="gen-modal-close" onclick="finCROverlayClose()">✕</button></div>
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      <div class="fg2">
+        <div class="fg"><label>Cliente</label><input type="text" id="finCRCliente" placeholder="Nome do cliente"></div>
+        <div class="fg"><label>Marca / Canal</label>
+          <select id="finCRMarca">
+            <option value="vr">VR Marcas — Mercado Pago</option>
+            <option value="vitre">Vitre — Nubank</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label>Descrição</label><input type="text" id="finCRDesc" placeholder="Ex: Orçamento #045 — Painel Fachada"></div>
+      <div class="fg2">
+        <div class="fg"><label>Valor (R$)</label><input type="number" id="finCRValor" min="0" step="0.01" placeholder="0,00"></div>
+        <div class="fg"><label>Vencimento</label><input type="date" id="finCRVenc"></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Forma de Recebimento</label>
+          <select id="finCRMetodo">
+            <option value="PIX">PIX</option>
+            <option value="Cartão">Cartão de Crédito</option>
+            <option value="Boleto">Boleto</option>
+            <option value="Dinheiro">Dinheiro</option>
+            <option value="Link">Link de Pagamento</option>
+          </select>
+        </div>
+        <div class="fg"><label>Status</label>
+          <select id="finCRStatus">
+            <option value="pendente">Pendente</option>
+            <option value="recebido">Recebido</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="topbar-btn ghost" style="flex:1" onclick="finCROverlayClose()">Cancelar</button>
+        <button class="topbar-btn" style="flex:2" onclick="finCRSalvar()">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nova Conta a Pagar -->
+<!-- MODAL: Nova Conta a Pagar -->
+<div id="finCPOverlay" class="gen-overlay" onclick="if(event.target===this)finCPOverlayClose()" style="z-index:600">
+  <div class="gen-modal" style="width:500px">
+    <div class="gen-modal-hdr"><span class="gen-modal-title">📤 Nova Despesa</span><button class="gen-modal-close" onclick="finCPOverlayClose()">✕</button></div>
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      <div class="fg"><label>Descrição</label><input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho"></div>
+      <div class="fg2">
+        <div class="fg"><label>Categoria</label>
+          <select id="finCPCat">
+            <optgroup label="── CUSTO (CMV)">
+              <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+              <option value="Mão de Obra Direta">🔧 Mão de Obra Direta</option>
+            </optgroup>
+            <optgroup label="── DESPESA">
+              <option value="Pessoal Admin">👥 Pessoal Admin</option>
+              <option value="Operacional">⚙️ Operacional</option>
+              <option value="Impostos">🏛️ Impostos</option>
+              <option value="Empréstimos">🏦 Empréstimos</option>
+              <option value="Outros">📌 Outros</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="fg"><label>Marca</label>
+          <select id="finCPMarca">
+            <option value="vr">VR Marcas</option>
+            <option value="vitre">Vitre</option>
+            <option value="ambos">Ambas</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Valor (R$)</label><input type="number" id="finCPValor" min="0" step="0.01" placeholder="0,00"></div>
+        <div class="fg"><label>Vencimento</label><input type="date" id="finCPVenc"></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Fornecedor</label><input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú..."></div>
+        <div class="fg"><label>Forma de Pagamento</label>
+          <select id="finCPFormaPgto">
+            <option value="Banco">Banco / TED / PIX</option>
+            <option value="Boleto">Boleto</option>
+            <option value="Dinheiro">Dinheiro</option>
+            <option value="Cartão PJ">Cartão PJ</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label>Status</label>
+        <select id="finCPStatus">
+          <option value="agendado">Agendado</option>
+          <option value="pago">Pago</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="topbar-btn ghost" style="flex:1" onclick="finCPOverlayClose()">Cancelar</button>
+        <button class="topbar-btn" style="flex:2" onclick="finCPSalvar()">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- BUSCA GLOBAL -->
 <div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)searchClose()">
