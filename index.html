@@ -2355,37 +2355,256 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
          FINANCEIRO
          ============================== -->
     <div id="pg-financeiro" style="display:none">
-      <div class="fin-period-bar">
-        <span style="font-size:11px;font-weight:700;color:var(--muted)">Período:</span>
-        <button class="fin-period-btn on" id="finPHoje" onclick="finSetPeriod('hoje')">Hoje</button>
-        <button class="fin-period-btn" id="finPSem" onclick="finSetPeriod('semana')">Esta semana</button>
-        <button class="fin-period-btn" id="finPMes" onclick="finSetPeriod('mes')">Este mês</button>
-        <button class="fin-period-btn" id="finPTudo" onclick="finSetPeriod('tudo')">Tudo</button>
-      </div>
-      <div class="g2">
-        <div class="card">
-          <div class="card-h"><div class="card-h-left">💳 VR Marcas — Mercado Pago</div><span class="badge bvr">PJ</span></div>
-          <div class="fin-row"><div class="fin-label">PIX</div><div><div class="fin-val" style="color:#059669" id="finVRpix">R$ 4.320,00</div></div></div>
-          <div class="fin-row"><div class="fin-label">Cartão de Crédito</div><div><div class="fin-val" style="color:var(--vr-mid)" id="finVRcartao">R$ 2.180,00</div></div></div>
-          <div class="fin-row"><div class="fin-label">Dinheiro</div><div><div class="fin-val" style="color:#D97706" id="finVRdin">R$ 650,00</div></div></div>
-          <div class="fin-row" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px;border-bottom:none"><div class="fin-label" style="font-weight:700;color:var(--text)">Total Bruto</div><div class="fin-val" style="font-size:16px;color:var(--vr-mid)" id="finVRtotal">R$ 7.150,00</div></div>
-          <button class="topbar-btn" style="margin-top:10px;width:100%;background:transparent;color:var(--vr-mid);border:1px solid var(--vr-mid)" onclick="finBaixaManual('vr')">+ Baixa Manual</button>
+
+      <!-- Topbar: filtro marca + período -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div class="fin-brand-filter">
+          <span style="font-size:11px;font-weight:700;color:var(--muted)">Marca:</span>
+          <button class="fin-brand-btn on" id="finBrandTodas" onclick="finSetBrand('todas')">Todas</button>
+          <button class="fin-brand-btn" id="finBrandVR" onclick="finSetBrand('vr')">VR Marcas</button>
+          <button class="fin-brand-btn" id="finBrandVT" onclick="finSetBrand('vitre')">Vitre</button>
         </div>
-        <div class="card">
-          <div class="card-h"><div class="card-h-left">💳 Vitre — Nubank</div><span class="badge bvit">PF</span></div>
-          <div class="fin-row"><div class="fin-label">PIX</div><div><div class="fin-val" style="color:#059669" id="finVTpix">R$ 1.240,00</div></div></div>
-          <div class="fin-row"><div class="fin-label">Cartão de Crédito</div><div><div class="fin-val" style="color:var(--vt-mid)" id="finVTcartao">R$ 890,00</div></div></div>
-          <div class="fin-row"><div class="fin-label">Dinheiro</div><div><div class="fin-val" style="color:#D97706" id="finVTdin">R$ 220,00</div></div></div>
-          <div class="fin-row" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px;border-bottom:none"><div class="fin-label" style="font-weight:700;color:var(--text)">Total Bruto</div><div class="fin-val" style="font-size:16px;color:var(--vt-mid)" id="finVTtotal">R$ 2.350,00</div></div>
-          <button class="topbar-btn" style="margin-top:10px;width:100%;background:transparent;color:var(--vt-mid);border:1px solid var(--vt-mid)" onclick="finBaixaManual('vitre')">+ Baixa Manual</button>
+        <div class="fin-brand-filter">
+          <span style="font-size:11px;font-weight:700;color:var(--muted)">Período:</span>
+          <button class="fin-brand-btn on" id="finPMes" onclick="finSetPeriod('mes')">Este mês</button>
+          <button class="fin-brand-btn" id="finPTrim" onclick="finSetPeriod('trim')">Trimestre</button>
+          <button class="fin-brand-btn" id="finPAno" onclick="finSetPeriod('ano')">Ano</button>
         </div>
       </div>
-      <div class="card">
-        <div class="card-h"><div class="card-h-left">📋 Transações <span id="finTxCount" style="font-size:11px;color:var(--muted)"></span></div></div>
-        <table class="table">
-          <tr><th>Data</th><th>Cliente</th><th>OS</th><th>Marca</th><th>Valor</th><th>Método</th><th>Status</th></tr>
-          <tbody id="finTxBody"></tbody>
-        </table>
+
+      <!-- Tab bar -->
+      <div class="fin-tab-bar">
+        <button class="fin-tab-btn on" id="finTabBtnDash" onclick="finTab('dash')">📊 Dashboard</button>
+        <button class="fin-tab-btn" id="finTabBtnCR" onclick="finTab('cr')">📥 Contas a Receber</button>
+        <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
+        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="finTab('dre')">📋 DRE</button>
+      </div>
+
+      <!-- ── ABA: DASHBOARD ── -->
+      <div id="finPgDash">
+        <!-- KPI Cards -->
+        <div class="fin-kpi-grid">
+          <div class="fin-kpi">
+            <div class="fin-kpi-lbl">💰 Caixa Atual</div>
+            <div class="fin-kpi-val" id="finKpiCaixa">R$ 0</div>
+            <div class="fin-kpi-sub">Entradas − Saídas pagas</div>
+          </div>
+          <div class="fin-kpi">
+            <div class="fin-kpi-lbl">📥 A Receber no Mês</div>
+            <div class="fin-kpi-val" style="color:#059669" id="finKpiReceber">R$ 0</div>
+            <div class="fin-kpi-sub" id="finKpiReceberSub">— pendentes</div>
+          </div>
+          <div class="fin-kpi">
+            <div class="fin-kpi-lbl">📤 A Pagar no Mês</div>
+            <div class="fin-kpi-val" style="color:#DC2626" id="finKpiPagar">R$ 0</div>
+            <div class="fin-kpi-sub" id="finKpiPagarSub">— pendentes</div>
+          </div>
+          <div class="fin-kpi">
+            <div class="fin-kpi-lbl">🔮 Saldo Projetado</div>
+            <div class="fin-kpi-val" id="finKpiProjetado">R$ 0</div>
+            <div class="fin-kpi-sub">Caixa + Receber − Pagar</div>
+          </div>
+        </div>
+
+        <!-- Gráficos -->
+        <div class="fin-chart-row">
+          <!-- Barras: Entradas vs Saídas por semana -->
+          <div class="card">
+            <div class="card-h"><div class="card-h-left">📊 Fluxo de Caixa — Entradas vs. Saídas</div></div>
+            <div id="finBarChart" style="padding:4px 0"></div>
+          </div>
+          <!-- Donut: Despesas por categoria -->
+          <div class="card">
+            <div class="card-h"><div class="card-h-left">🍩 Despesas por Categoria</div></div>
+            <div class="fin-donut-wrap">
+              <svg id="finDonut" width="130" height="130" viewBox="0 0 130 130"></svg>
+              <div class="fin-donut-legend" id="finDonutLegend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Últimas transações -->
+        <div class="card">
+          <div class="card-h">
+            <div class="card-h-left">💳 Últimas Transações <span id="finTxCount" style="font-size:11px;color:var(--muted)"></span></div>
+            <button class="topbar-btn ghost" style="font-size:11px" onclick="finBaixaManual()">+ Baixa Manual</button>
+          </div>
+          <table class="table">
+            <thead><tr><th>Data</th><th>Cliente</th><th>OS</th><th>Marca</th><th>Valor</th><th>Método</th><th>Status</th></tr></thead>
+            <tbody id="finTxBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── ABA: CONTAS A RECEBER ── -->
+      <div id="finPgCR" style="display:none">
+        <div class="card">
+          <div class="card-h">
+            <div class="card-h-left">📥 Contas a Receber <span id="finCRCount" style="font-size:11px;color:var(--muted)"></span></div>
+            <div style="display:flex;gap:6px">
+              <select id="finCRStatusFlt" onchange="finCRRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+                <option value="">Todos os status</option>
+                <option value="pendente">Pendente</option>
+                <option value="recebido">Recebido</option>
+                <option value="vencido">Vencido</option>
+              </select>
+              <button class="topbar-btn" onclick="finCRNovoModal()">+ Nova Conta</button>
+            </div>
+          </div>
+          <table class="table">
+            <thead><tr><th>Vencimento</th><th>Cliente</th><th>Descrição</th><th>Marca / Canal</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody id="finCRBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── ABA: CONTAS A PAGAR ── -->
+      <div id="finPgCP" style="display:none">
+        <div class="card">
+          <div class="card-h">
+            <div class="card-h-left">📤 Contas a Pagar <span id="finCPCount" style="font-size:11px;color:var(--muted)"></span></div>
+            <div style="display:flex;gap:6px">
+              <select id="finCPCatFlt" onchange="finCPRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+                <option value="">Todas as categorias</option>
+                <option value="Pessoal">Pessoal</option>
+                <option value="Operacional">Operacional</option>
+                <option value="Matéria-prima">Matéria-prima</option>
+                <option value="Impostos">Impostos</option>
+                <option value="Empréstimos">Empréstimos</option>
+                <option value="Outros">Outros</option>
+              </select>
+              <select id="finCPStatusFlt" onchange="finCPRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+                <option value="">Todos os status</option>
+                <option value="agendado">Agendado</option>
+                <option value="pago">Pago</option>
+                <option value="vencido">Vencido</option>
+              </select>
+              <button class="topbar-btn" onclick="finCPNovoModal()">+ Nova Despesa</button>
+            </div>
+          </div>
+          <table class="table">
+            <thead><tr><th>Vencimento</th><th>Descrição</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th><th>Forma</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody id="finCPBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── ABA: DRE ── -->
+      <div id="finPgDRE" style="display:none">
+        <div class="card">
+          <div class="card-h">
+            <div class="card-h-left">📋 DRE — Demonstrativo de Resultados</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="finDREMes" onchange="finDREBuild()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+                <option value="0">Acumulado Anual</option>
+                <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+                <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+                <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+                <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+              </select>
+            </div>
+          </div>
+          <div id="finDREContent" style="padding:4px 0"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- MODAL: Nova Conta a Receber -->
+    <div id="finCROverlay" class="overlay" style="display:none;z-index:600">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-h"><span>📥 Nova Conta a Receber</span><button class="modal-close" onclick="finCROverlayClose()">✕</button></div>
+        <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+          <div class="fg2">
+            <div class="fg"><label>Cliente</label><input type="text" id="finCRCliente" placeholder="Nome do cliente"></div>
+            <div class="fg"><label>Marca / Canal</label>
+              <select id="finCRMarca">
+                <option value="vr">VR Marcas — Mercado Pago</option>
+                <option value="vitre">Vitre — Nubank</option>
+              </select>
+            </div>
+          </div>
+          <div class="fg"><label>Descrição</label><input type="text" id="finCRDesc" placeholder="Ex: Orçamento #045 — Painel Fachada"></div>
+          <div class="fg2">
+            <div class="fg"><label>Valor (R$)</label><input type="number" id="finCRValor" min="0" step="0.01" placeholder="0,00"></div>
+            <div class="fg"><label>Vencimento</label><input type="date" id="finCRVenc"></div>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Forma de Recebimento</label>
+              <select id="finCRMetodo">
+                <option value="PIX">PIX</option>
+                <option value="Cartão">Cartão de Crédito</option>
+                <option value="Boleto">Boleto</option>
+                <option value="Dinheiro">Dinheiro</option>
+                <option value="Link">Link de Pagamento</option>
+              </select>
+            </div>
+            <div class="fg"><label>Status</label>
+              <select id="finCRStatus">
+                <option value="pendente">Pendente</option>
+                <option value="recebido">Recebido</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="topbar-btn ghost" style="flex:1" onclick="finCROverlayClose()">Cancelar</button>
+            <button class="topbar-btn" style="flex:2" onclick="finCRSalvar()">💾 Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Nova Conta a Pagar -->
+    <div id="finCPOverlay" class="overlay" style="display:none;z-index:600">
+      <div class="modal" style="max-width:500px">
+        <div class="modal-h"><span>📤 Nova Despesa</span><button class="modal-close" onclick="finCPOverlayClose()">✕</button></div>
+        <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+          <div class="fg"><label>Descrição</label><input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho"></div>
+          <div class="fg2">
+            <div class="fg"><label>Categoria</label>
+              <select id="finCPCat">
+                <option value="Pessoal">Pessoal</option>
+                <option value="Operacional">Operacional</option>
+                <option value="Matéria-prima">Matéria-prima</option>
+                <option value="Impostos">Impostos</option>
+                <option value="Empréstimos">Empréstimos</option>
+                <option value="Outros">Outros</option>
+              </select>
+            </div>
+            <div class="fg"><label>Marca</label>
+              <select id="finCPMarca">
+                <option value="vr">VR Marcas</option>
+                <option value="vitre">Vitre</option>
+                <option value="ambos">Ambas</option>
+              </select>
+            </div>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Valor (R$)</label><input type="number" id="finCPValor" min="0" step="0.01" placeholder="0,00"></div>
+            <div class="fg"><label>Vencimento</label><input type="date" id="finCPVenc"></div>
+          </div>
+          <div class="fg2">
+            <div class="fg"><label>Fornecedor</label><input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú..."></div>
+            <div class="fg"><label>Forma de Pagamento</label>
+              <select id="finCPFormaPgto">
+                <option value="Banco">Banco / TED / PIX</option>
+                <option value="Boleto">Boleto</option>
+                <option value="Dinheiro">Dinheiro</option>
+                <option value="Cartão PJ">Cartão PJ</option>
+              </select>
+            </div>
+          </div>
+          <div class="fg"><label>Status</label>
+            <select id="finCPStatus">
+              <option value="agendado">Agendado</option>
+              <option value="pago">Pago</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="topbar-btn ghost" style="flex:1" onclick="finCPOverlayClose()">Cancelar</button>
+            <button class="topbar-btn" style="flex:2" onclick="finCPSalvar()">💾 Salvar</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2852,6 +3071,8 @@ function nav(page, el) {
   if (page === 'orcamento') { setTimeout(function(){ orcStep(1); }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
+  // Ao entrar no Financeiro, renderizar todos os painéis
+  if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
@@ -4683,44 +4904,402 @@ function osLiberar(id) {
 // ============================================================
 // FINANCEIRO
 // ============================================================
-var _finPeriod = 'hoje';
+// ============================================================
+// GESTÃO FINANCEIRA GLOBAL — State
+// ============================================================
+var _finPeriod = 'mes';
+var _finBrand  = 'todas';
+var _finActiveTab = 'dash';
+
+// Contas a Receber
+var FIN_CR = [
+  {id:'cr001',cliente:'CLARO — Display PDV',descricao:'Orçamento #045 — Display PS Cristal',valor:2480,vencimento:'10/07/2026',status:'pendente',marca:'vr',metodo:'PIX',osRef:'OS-045',dataCriacao:'08/07/2026',dataRecebimento:null},
+  {id:'cr002',cliente:'OI Telecom',descricao:'Orçamento #044 — Painel Fachada',valor:8700,vencimento:'12/07/2026',status:'pendente',marca:'vr',metodo:'Boleto',osRef:'OS-044',dataCriacao:'06/07/2026',dataRecebimento:null},
+  {id:'cr003',cliente:'Camila Rocha',descricao:'Orçamento #042 — Placa Casamento',valor:420,vencimento:'05/07/2026',status:'recebido',marca:'vitre',metodo:'PIX',osRef:'OS-042',dataCriacao:'03/07/2026',dataRecebimento:'05/07/2026'},
+  {id:'cr004',cliente:'MEGA Varejo',descricao:'Orçamento #040 — Display Farmácia 50 un',valor:9500,vencimento:'20/07/2026',status:'pendente',marca:'vr',metodo:'Link',osRef:'',dataCriacao:'01/07/2026',dataRecebimento:null},
+  {id:'cr005',cliente:'João Pedro',descricao:'Orçamento #038 — Letra Caixa',valor:380,vencimento:'02/07/2026',status:'vencido',marca:'vitre',metodo:'PIX',osRef:'',dataCriacao:'28/06/2026',dataRecebimento:null}
+];
+
+// Contas a Pagar (baseado na planilha real de Jul/2026)
+var FIN_CP = [
+  {id:'cp001',descricao:'VIVO FIXO',categoria:'Operacional',valor:165.17,vencimento:'30/06/2026',status:'pago',marca:'vr',fornecedor:'Vivo',formaPgto:'Banco',dataCriacao:'01/07/2026',dataPagamento:'01/07/2026'},
+  {id:'cp002',descricao:'VALLIM',categoria:'Matéria-prima',valor:634.50,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Vallim',formaPgto:'Banco',dataCriacao:'01/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp003',descricao:'TARIFAS ITAÚ',categoria:'Operacional',valor:719.37,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Itaú',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp004',descricao:'VALE TRANSPORTE',categoria:'Pessoal',valor:1380,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp005',descricao:'SALÁRIO DO PAULO',categoria:'Pessoal',valor:2574.34,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp006',descricao:'SALÁRIO DO JOSÉ',categoria:'Pessoal',valor:1204.74,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp007',descricao:'SALÁRIO DO VANDEILSON',categoria:'Pessoal',valor:1668.31,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp008',descricao:'SALÁRIO DA DAIANE',categoria:'Pessoal',valor:1686.59,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp009',descricao:'SALÁRIO DO MICHEL',categoria:'Pessoal',valor:1686.59,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp010',descricao:'SALÁRIO DA GREICY',categoria:'Pessoal',valor:1202.62,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp011',descricao:'PRÓ-LABORE DO RONALDO',categoria:'Pessoal',valor:2670,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp012',descricao:'PRÓ-LABORE DA VALÉRIA',categoria:'Pessoal',valor:2670,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp013',descricao:'GEOPLAS',categoria:'Matéria-prima',valor:550.67,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Geoplas',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp014',descricao:'INCINERA',categoria:'Operacional',valor:308.40,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Incinera',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp015',descricao:'TR COMÉRCIO',categoria:'Matéria-prima',valor:1758,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'T&R Comércio',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp016',descricao:'EMPRÉSTIMO BRADESCO',categoria:'Empréstimos',valor:4886.36,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Bradesco',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp017',descricao:'CENTRAL CLICK',categoria:'Operacional',valor:913.42,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Central Click',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
+  {id:'cp018',descricao:'CARTÃO ITAÚ',categoria:'Operacional',valor:9619.93,vencimento:'08/07/2026',status:'pago',marca:'vr',fornecedor:'Itaú',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'08/07/2026'},
+  {id:'cp019',descricao:'PRONAMPE ITAÚ',categoria:'Empréstimos',valor:2487.41,vencimento:'10/07/2026',status:'pago',marca:'vr',fornecedor:'Itaú',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'10/07/2026'},
+  {id:'cp020',descricao:'CONTABILIDADE',categoria:'Operacional',valor:700,vencimento:'10/07/2026',status:'pago',marca:'vr',fornecedor:'Escritório Contábil',formaPgto:'Dinheiro',dataCriacao:'02/07/2026',dataPagamento:'10/07/2026'},
+  {id:'cp021',descricao:'SUPER SIMPLES',categoria:'Impostos',valor:5317.10,vencimento:'20/07/2026',status:'agendado',marca:'vr',fornecedor:'Receita Federal',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
+  {id:'cp022',descricao:'DARF',categoria:'Impostos',valor:1384.24,vencimento:'20/07/2026',status:'agendado',marca:'vr',fornecedor:'Receita Federal',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
+  {id:'cp023',descricao:'FGTS',categoria:'Impostos',valor:803.44,vencimento:'07/07/2026',status:'pago',marca:'vr',fornecedor:'Caixa',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'07/07/2026'},
+  {id:'cp024',descricao:'SEGURO EMPRESA',categoria:'Operacional',valor:665.07,vencimento:'15/07/2026',status:'agendado',marca:'vr',fornecedor:'Itaú Seguros',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
+  {id:'cp025',descricao:'CENTRAL DO ACRÍLICO',categoria:'Matéria-prima',valor:590.45,vencimento:'15/07/2026',status:'agendado',marca:'vr',fornecedor:'Central do Acrílico',formaPgto:'Banco',dataCriacao:'08/07/2026',dataPagamento:null},
+  {id:'cp026',descricao:'ENEL',categoria:'Operacional',valor:997.34,vencimento:'18/07/2026',status:'agendado',marca:'vr',fornecedor:'Enel',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
+  {id:'cp027',descricao:'CDL',categoria:'Operacional',valor:82.72,vencimento:'25/07/2026',status:'agendado',marca:'vr',fornecedor:'CDL',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
+  {id:'cp028',descricao:'ISABELLA — VITRE',categoria:'Pessoal',valor:745.28,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'}
+];
+
+// ============================================================
+// FINANCEIRO — Funções Globais
+// ============================================================
+function finFmt(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function finMesAtual(){ return new Date().getMonth()+1; }
+
 function finSetPeriod(p) {
-  _finPeriod=p;
-  ['finPHoje','finPSem','finPMes','finPTudo'].forEach(function(id){var b=document.getElementById(id);if(b)b.classList.remove('on');});
-  var map={hoje:'finPHoje',semana:'finPSem',mes:'finPMes',tudo:'finPTudo'};
-  var btn=document.getElementById(map[p]); if(btn) btn.classList.add('on');
-  finRender();
-}
-function finRender() {
-  var tx=FIN_TX.filter(function(t){
-    if(_finPeriod==='hoje') return t.dia===1;
-    if(_finPeriod==='semana') return t.sem===1;
-    if(_finPeriod==='mes') return t.mes===7;
-    return true;
+  _finPeriod = p;
+  ['finPMes','finPTrim','finPAno'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.classList.toggle('on', id==='finP'+{mes:'Mes',trim:'Trim',ano:'Ano'}[p]);
   });
-  function sum(marca,metodo){return tx.filter(function(t){return t.marca===marca&&t.metodo===metodo;}).reduce(function(s,t){return s+t.valor;},0);}
-  function fmt(v){return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
-  var vrPix=sum('vr','PIX'),vrCart=sum('vr','Cartão'),vrDin=sum('vr','Dinheiro');
-  var vtPix=sum('vit','PIX'),vtCart=sum('vit','Cartão'),vtDin=sum('vit','Dinheiro');
-  function setEl(id,v){var el=document.getElementById(id);if(el)el.textContent=fmt(v);}
-  setEl('finVRpix',vrPix);setEl('finVRcartao',vrCart);setEl('finVRdin',vrDin);setEl('finVRtotal',vrPix+vrCart+vrDin);
-  setEl('finVTpix',vtPix);setEl('finVTcartao',vtCart);setEl('finVTdin',vtDin);setEl('finVTtotal',vtPix+vtCart+vtDin);
-  var tbody=document.getElementById('finTxBody'), cntEl=document.getElementById('finTxCount');
-  if(cntEl) cntEl.textContent='('+tx.length+' registros)';
+  finRefreshAll();
+}
+
+function finSetBrand(b) {
+  _finBrand = b;
+  ['finBrandTodas','finBrandVR','finBrandVT'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.classList.toggle('on', id==='finBrand'+{todas:'Todas',vr:'VR',vitre:'VT'}[b]);
+  });
+  finRefreshAll();
+}
+
+function finTab(t) {
+  _finActiveTab = t;
+  ['dash','cr','cp','dre'].forEach(function(tab){
+    var btn=document.getElementById('finTabBtn'+tab.charAt(0).toUpperCase()+tab.slice(1));
+    var pg =document.getElementById('finPg'+tab.charAt(0).toUpperCase()+tab.slice(1));
+    if(btn) btn.classList.toggle('on', tab===t);
+    if(pg)  pg.style.display = tab===t ? 'block' : 'none';
+  });
+  finRefreshAll();
+}
+
+function finRefreshAll() {
+  finRender();
+  finCRRender();
+  finCPRender();
+  finDashKPIs();
+  finBarChartRender();
+  finDonutRender();
+  if(_finActiveTab==='dre') finDREBuild();
+}
+
+function finFilterTX(arr) {
+  var mes=finMesAtual();
+  return arr.filter(function(t){
+    var brandOk = _finBrand==='todas'||t.marca===_finBrand||(t.marca==='vit'&&_finBrand==='vitre');
+    var periOk = true;
+    if(_finPeriod==='mes'&&t.mes) periOk=(t.mes===mes);
+    return brandOk && periOk;
+  });
+}
+
+function finFilterArr(arr, campoMarca) {
+  return arr.filter(function(r){
+    var brandOk = _finBrand==='todas'||r[campoMarca]===_finBrand||(_finBrand==='todas');
+    if(_finBrand!=='todas') brandOk=(r[campoMarca]===_finBrand);
+    return brandOk;
+  });
+}
+
+// ── KPI Cards ─────────────────────────────────────────────────────────────────
+function finDashKPIs() {
+  var mes = finMesAtual();
+  var tx  = FIN_TX.filter(function(t){return t.mes===mes&&t.status==='recebido';});
+  var cpPago=FIN_CP.filter(function(c){return c.status==='pago';});
+  var entradas = tx.reduce(function(s,t){return s+t.valor;},0);
+  var saidas   = cpPago.reduce(function(s,c){return s+c.valor;},0);
+  var caixa    = entradas - saidas;
+  var crPend   = FIN_CR.filter(function(c){return c.status==='pendente';});
+  var cpPend   = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
+  var totalReceber = crPend.reduce(function(s,c){return s+c.valor;},0);
+  var totalPagar   = cpPend.reduce(function(s,c){return s+c.valor;},0);
+  var projetado    = caixa + totalReceber - totalPagar;
+  function setEl(id,v,cls){var el=document.getElementById(id);if(el){el.textContent=typeof v==='string'?v:finFmt(v);if(cls)el.style.color=cls;}}
+  setEl('finKpiCaixa', caixa, caixa>=0?'#059669':'#DC2626');
+  setEl('finKpiReceber', totalReceber);
+  var crSub=document.getElementById('finKpiReceberSub');
+  if(crSub) crSub.textContent=crPend.length+' pendente'+(crPend.length!==1?'s':'');
+  setEl('finKpiPagar', totalPagar);
+  var cpSub=document.getElementById('finKpiPagarSub');
+  if(cpSub) cpSub.textContent=cpPend.length+' pendente'+(cpPend.length!==1?'s':'');
+  setEl('finKpiProjetado', projetado, projetado>=0?'#059669':'#DC2626');
+}
+
+// ── Bar Chart (Entradas vs Saídas por semana) ─────────────────────────────────
+function finBarChartRender() {
+  var el=document.getElementById('finBarChart'); if(!el) return;
+  var semanas=['Sem 1','Sem 2','Sem 3','Sem 4'];
+  // Distribuição simulada baseada em FIN_TX e FIN_CP
+  var mes=finMesAtual();
+  var txMes=FIN_TX.filter(function(t){return t.mes===mes;});
+  var totalEnt=txMes.reduce(function(s,t){return s+t.valor;},0)||1;
+  var totalSai=FIN_CP.filter(function(c){return c.status==='pago';}).reduce(function(s,c){return s+c.valor;},0)||1;
+  // Dividir proporcionalmente por semana (simplificado)
+  var distE=[0.35,0.25,0.22,0.18], distS=[0.20,0.40,0.25,0.15];
+  var maxVal=Math.max(totalEnt*0.35,totalSai*0.40);
+  var html='';
+  semanas.forEach(function(sem,i){
+    var ent=totalEnt*distE[i], sai=totalSai*distS[i];
+    var pctE=Math.round(ent/maxVal*100), pctS=Math.round(sai/maxVal*100);
+    html+='<div style="margin-bottom:10px">'
+      +'<div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">'+sem+'</div>'
+      +'<div class="fin-bar-item">'
+        +'<span style="font-size:10px;color:var(--muted);width:48px">Entradas</span>'
+        +'<div class="fin-bar-track"><div class="fin-bar-fill" style="width:'+pctE+'%;background:#059669"><span class="fin-bar-lbl">'+finFmt(ent)+'</span></div></div>'
+      +'</div>'
+      +'<div class="fin-bar-item" style="margin-top:3px">'
+        +'<span style="font-size:10px;color:var(--muted);width:48px">Saídas</span>'
+        +'<div class="fin-bar-track"><div class="fin-bar-fill" style="width:'+pctS+'%;background:#DC2626"><span class="fin-bar-lbl">'+finFmt(sai)+'</span></div></div>'
+      +'</div>'
+    +'</div>';
+  });
+  el.innerHTML=html;
+}
+
+// ── Donut Chart (SVG puro) ────────────────────────────────────────────────────
+function finDonutRender() {
+  var svg=document.getElementById('finDonut');
+  var leg=document.getElementById('finDonutLegend');
+  if(!svg||!leg) return;
+  var cats={
+    'Pessoal':   {color:'#7C3AED',total:0},
+    'Operacional':{color:'#3B82F6',total:0},
+    'Matéria-prima':{color:'#F59E0B',total:0},
+    'Impostos':  {color:'#EF4444',total:0},
+    'Empréstimos':{color:'#6B7280',total:0},
+    'Outros':    {color:'#10B981',total:0}
+  };
+  FIN_CP.filter(function(c){return c.status==='pago';}).forEach(function(c){
+    if(cats[c.categoria]) cats[c.categoria].total+=c.valor;
+    else cats['Outros'].total+=c.valor;
+  });
+  var total=Object.values(cats).reduce(function(s,c){return s+c.total;},0)||1;
+  var cx=65,cy=65,r=52,stroke=22;
+  var offset=0, paths='', legHtml='';
+  var circumference=2*Math.PI*r;
+  Object.keys(cats).forEach(function(k){
+    var c=cats[k]; if(c.total===0) return;
+    var pct=c.total/total;
+    var dash=circumference*pct;
+    var gap=circumference*(1-pct);
+    var rot=offset*360-90;
+    paths+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+c.color+'" stroke-width="'+stroke+'" stroke-dasharray="'+dash.toFixed(2)+' '+gap.toFixed(2)+'" stroke-dashoffset="'+(-circumference*offset).toFixed(2)+'" transform="rotate(-90 '+cx+' '+cy+')" style="transition:.4s"/>';
+    legHtml+='<div class="fin-donut-leg-item"><div class="fin-donut-dot" style="background:'+c.color+'"></div><span style="flex:1">'+k+'</span><span style="font-weight:700">'+Math.round(pct*100)+'%</span></div>';
+    offset+=pct;
+  });
+  svg.innerHTML=paths+'<text x="'+cx+'" y="'+(cy+4)+'" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text)">'+Math.round(total/1000)+'K</text>';
+  leg.innerHTML=legHtml;
+}
+
+// ── Contas a Receber Render ───────────────────────────────────────────────────
+function finCRRender() {
+  var tbody=document.getElementById('finCRBody');
+  var cnt=document.getElementById('finCRCount');
   if(!tbody) return;
-  if(!tx.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
-  var cM={PIX:'#059669','Cartão':'#7C3AED',Dinheiro:'#D97706'};
-  tbody.innerHTML=tx.map(function(t){
-    return '<tr><td>'+t.data+'</td><td>'+t.cliente+'</td><td>#'+t.os+'</td><td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td><td style="font-weight:700;color:var(--ok)">'+fmt(t.valor)+'</td><td style="color:'+(cM[t.metodo]||'#6B7280')+'">'+t.metodo+'</td><td><span style="color:#059669;font-size:11px">✅ '+t.status+'</span></td></tr>';
+  var statusFlt=(document.getElementById('finCRStatusFlt')||{}).value||'';
+  var list=FIN_CR.filter(function(r){
+    var bOk=_finBrand==='todas'||r.marca===_finBrand;
+    var sOk=!statusFlt||r.status===statusFlt;
+    return bOk&&sOk;
+  });
+  if(cnt) cnt.textContent='('+list.length+' registros)';
+  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Nenhum registro encontrado</td></tr>';return;}
+  tbody.innerHTML=list.map(function(r){
+    var mLabel=r.marca==='vr'?'<span style="background:#EDE9FE;color:#5B21B6;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">VR — Merc.Pago</span>':'<span style="background:#FCE7F3;color:#9D174D;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">Vitre — Nubank</span>';
+    var badge='<span class="fin-status-badge fin-status-'+r.status+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
+    var acoes=r.status==='pendente'?'<button onclick="finCRBaixa(\'' +r.id+ '\')" style="padding:2px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Baixar</button>':'';
+    acoes+=' <button onclick="finCRDel(\'' +r.id+ '\')" style="padding:2px 7px;background:transparent;color:#DC2626;border:1px solid #DC2626;border-radius:5px;font-size:10px;cursor:pointer">✕</button>';
+    return '<tr><td>'+r.vencimento+'</td><td><strong>'+r.cliente+'</strong></td><td style="font-size:11px;color:var(--muted)">'+r.descricao+'</td><td>'+mLabel+'</td><td style="font-weight:700;color:#059669">'+finFmt(r.valor)+'</td><td>'+badge+'</td><td><div class="fin-tbl-actions">'+acoes+'</div></td></tr>';
   }).join('');
 }
+
+function finCRBaixa(id) {
+  var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
+  var hoje=new Date();
+  r.status='recebido';
+  r.dataRecebimento=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  FIN_TX.unshift({data:r.dataRecebimento,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:hoje.getDate()===hoje.getDate()?1:0,sem:1,mes:hoje.getMonth()+1});
+  finCRRender(); finDashKPIs(); finBarChartRender();
+  showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
+}
+
+function finCRDel(id) {
+  FIN_CR=FIN_CR.filter(function(x){return x.id!==id;});
+  finCRRender(); finDashKPIs();
+}
+
+function finCRNovoModal() {
+  var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+2).padStart(2,'0'),yy=t.getFullYear();
+  var vencEl=document.getElementById('finCRVenc');
+  if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
+  document.getElementById('finCROverlay').style.display='flex';
+}
+function finCROverlayClose(){ document.getElementById('finCROverlay').style.display='none'; }
+function finCRSalvar(){
+  var cliente=(document.getElementById('finCRCliente')||{}).value||'';
+  var desc=(document.getElementById('finCRDesc')||{}).value||'';
+  var valor=parseFloat((document.getElementById('finCRValor')||{}).value||'0');
+  var vencRaw=(document.getElementById('finCRVenc')||{}).value||'';
+  var marca=(document.getElementById('finCRMarca')||{}).value||'vr';
+  var metodo=(document.getElementById('finCRMetodo')||{}).value||'PIX';
+  var status=(document.getElementById('finCRStatus')||{}).value||'pendente';
+  if(!cliente||!valor||!vencRaw){showToast('Preencha cliente, valor e vencimento','warn');return;}
+  var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
+  var hoje=new Date();
+  var id='cr'+Date.now();
+  FIN_CR.unshift({id:id,cliente:cliente,descricao:desc,valor:valor,vencimento:venc,status:status,marca:marca,metodo:metodo,osRef:'',dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataRecebimento:status==='recebido'?venc:null});
+  finCROverlayClose(); finCRRender(); finDashKPIs();
+  showToast('Conta a receber registrada!','ok');
+}
+
+// ── Contas a Pagar Render ─────────────────────────────────────────────────────
+function finCPRender() {
+  var tbody=document.getElementById('finCPBody');
+  var cnt=document.getElementById('finCPCount');
+  if(!tbody) return;
+  var catFlt=(document.getElementById('finCPCatFlt')||{}).value||'';
+  var stFlt=(document.getElementById('finCPStatusFlt')||{}).value||'';
+  var list=FIN_CP.filter(function(r){
+    var bOk=_finBrand==='todas'||r.marca===_finBrand||r.marca==='ambos';
+    var cOk=!catFlt||r.categoria===catFlt;
+    var sOk=!stFlt||r.status===stFlt;
+    return bOk&&cOk&&sOk;
+  });
+  if(cnt) cnt.textContent='('+list.length+' registros · '+finFmt(list.reduce(function(s,r){return s+r.valor;},0))+')';
+  if(!list.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhum registro encontrado</td></tr>';return;}
+  var catColors={'Pessoal':'#7C3AED','Operacional':'#3B82F6','Matéria-prima':'#F59E0B','Impostos':'#EF4444','Empréstimos':'#6B7280','Outros':'#10B981'};
+  tbody.innerHTML=list.map(function(r){
+    var badge='<span class="fin-status-badge fin-status-'+r.status+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
+    var catC=catColors[r.categoria]||'#6B7280';
+    var catBadge='<span style="background:'+catC+'22;color:'+catC+';padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700">'+r.categoria+'</span>';
+    var acoesStr=r.status!=='pago'?'<button onclick="finCPPagar(\'' +r.id+ '\')" style="padding:2px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Pago</button>':'';
+    acoesStr+=' <button onclick="finCPDel(\'' +r.id+ '\')" style="padding:2px 7px;background:transparent;color:#DC2626;border:1px solid #DC2626;border-radius:5px;font-size:10px;cursor:pointer">✕</button>';
+    return '<tr><td>'+r.vencimento+'</td><td><strong>'+r.descricao+'</strong></td><td>'+catBadge+'</td><td style="font-size:11px;color:var(--muted)">'+(r.fornecedor||'—')+'</td><td style="font-weight:700;color:#DC2626">'+finFmt(r.valor)+'</td><td style="font-size:11px">'+r.formaPgto+'</td><td>'+badge+'</td><td><div class="fin-tbl-actions">'+acoesStr+'</div></td></tr>';
+  }).join('');
+}
+
+function finCPPagar(id) {
+  var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  var hoje=new Date();
+  r.status='pago';
+  r.dataPagamento=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  finCPRender(); finDashKPIs(); finDonutRender();
+  showToast(r.descricao+' marcado como pago','ok');
+}
+function finCPDel(id){ FIN_CP=FIN_CP.filter(function(x){return x.id!==id;}); finCPRender(); finDashKPIs(); }
+
+function finCPNovoModal() {
+  var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
+  var vencEl=document.getElementById('finCPVenc');
+  if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
+  document.getElementById('finCPOverlay').style.display='flex';
+}
+function finCPOverlayClose(){ document.getElementById('finCPOverlay').style.display='none'; }
+function finCPSalvar(){
+  var desc=(document.getElementById('finCPDesc')||{}).value||'';
+  var cat=(document.getElementById('finCPCat')||{}).value||'Outros';
+  var marca=(document.getElementById('finCPMarca')||{}).value||'vr';
+  var valor=parseFloat((document.getElementById('finCPValor')||{}).value||'0');
+  var vencRaw=(document.getElementById('finCPVenc')||{}).value||'';
+  var forn=(document.getElementById('finCPForn')||{}).value||'';
+  var forma=(document.getElementById('finCPFormaPgto')||{}).value||'Banco';
+  var status=(document.getElementById('finCPStatus')||{}).value||'agendado';
+  if(!desc||!valor||!vencRaw){showToast('Preencha descrição, valor e vencimento','warn');return;}
+  var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
+  var hoje=new Date();
+  FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,formaPgto:forma,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
+  finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
+  showToast('Despesa registrada!','ok');
+}
+
+// ── DRE ───────────────────────────────────────────────────────────────────────
+function finDREBuild() {
+  var el=document.getElementById('finDREContent'); if(!el) return;
+  var mesFlt=parseInt((document.getElementById('finDREMes')||{}).value||'0');
+  var mes=finMesAtual();
+  var txFiltro=FIN_TX.filter(function(t){return t.status==='recebido'&&(mesFlt===0||(t.mes&&t.mes===mesFlt));});
+  var cpFiltro=FIN_CP.filter(function(c){return c.status==='pago'&&(mesFlt===0||(c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mesFlt));});
+  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
+  var impostos=receitaBruta*0.07;
+  var receitaLiq=receitaBruta-impostos;
+  var cmv=cpFiltro.filter(function(c){return c.categoria==='Matéria-prima';}).reduce(function(s,c){return s+c.valor;},0);
+  var lucroBruto=receitaLiq-cmv;
+  var desp=cpFiltro.filter(function(c){return c.categoria!=='Matéria-prima';}).reduce(function(s,c){return s+c.valor;},0);
+  var lucroLiq=lucroBruto-desp;
+  var pct=function(v){return receitaBruta>0?'<span class="dre-pct">'+(v/receitaBruta*100).toFixed(1)+'%</span>':'';};
+  var r=function(lbl,val,cls,indent){
+    var c=cls||'';
+    var style=indent?'padding-left:24px':'';
+    return '<div class="dre-row '+c+'" style="'+style+'"><span>'+lbl+'</span><div>'+finFmt(val)+pct(val)+'</div></div>';
+  };
+  var cpPessoal=cpFiltro.filter(function(c){return c.categoria==='Pessoal';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpOp=cpFiltro.filter(function(c){return c.categoria==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpEmp=cpFiltro.filter(function(c){return c.categoria==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpImp=cpFiltro.filter(function(c){return c.categoria==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
+
+  var recVR=txFiltro.filter(function(t){return t.marca==='vr';}).reduce(function(s,t){return s+t.valor;},0);
+  var recVT=txFiltro.filter(function(t){return t.marca==='vit';}).reduce(function(s,t){return s+t.valor;},0);
+
+  el.innerHTML=
+    '<div class="dre-section">RECEITAS</div>'
+    +r('(+) VR Marcas — Mercado Pago',recVR,'',true)
+    +r('(+) Vitre — Nubank',recVT,'',true)
+    +r('(+) Receita Bruta de Vendas',receitaBruta,'total')
+    +r('(−) Impostos e Deduções (7%)',impostos,'',true)
+    +r('(=) Receita Líquida',receitaLiq,receitaLiq>=0?'total resultado-pos':'total resultado-neg')
+    +'<div class="dre-section" style="margin-top:12px">CUSTOS</div>'
+    +r('(−) CMV — Matéria-prima consumida',cmv,'',true)
+    +r('(=) Lucro Bruto',lucroBruto,lucroBruto>=0?'total resultado-pos':'total resultado-neg')
+    +'<div class="dre-section" style="margin-top:12px">DESPESAS OPERACIONAIS</div>'
+    +r('(−) Pessoal (salários + pró-labore)',cpPessoal,'',true)
+    +r('(−) Operacional (aluguel, energia, etc)',cpOp,'',true)
+    +r('(−) Empréstimos e Financiamentos',cpEmp,'',true)
+    +r('(−) Impostos sobre operação',cpImp,'',true)
+    +r('(=) Total de Despesas Operacionais',desp,'total')
+    +'<div class="dre-section" style="margin-top:12px">RESULTADO</div>'
+    +r(lucroLiq>=0?'(=) 🟢 Lucro Líquido do Período':'(=) 🔴 Prejuízo do Período',lucroLiq,lucroLiq>=0?'total resultado-pos':'total resultado-neg');
+}
+
+// ── finRender (mantém dashboard de transações) ────────────────────────────────
+function finSetPeriod_old(p) { /* legacy stub */ }
+function finRender() {
+  var mes=finMesAtual();
+  var tx=finFilterTX(FIN_TX);
+  function sum(marca,metodo){return tx.filter(function(t){return (t.marca===marca||marca==='all')&&(t.metodo===metodo||metodo==='all');}).reduce(function(s,t){return s+t.valor;},0);}
+  var cntEl=document.getElementById('finTxCount');
+  if(cntEl) cntEl.textContent='('+tx.length+' registros)';
+  var tbody=document.getElementById('finTxBody');
+  if(!tbody) return;
+  if(!tx.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
+  var cM={PIX:'#059669',Cartão:'#7C3AED',Dinheiro:'#D97706'};
+  tbody.innerHTML=tx.slice(0,20).map(function(t){
+    return '<tr><td>'+t.data+'</td><td>'+t.cliente+'</td><td>#'+t.os+'</td><td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td><td style="font-weight:700;color:var(--ok)">'+finFmt(t.valor)+'</td><td style="color:'+(cM[t.metodo]||'#6B7280')+'">'+(t.metodo||'—')+'</td><td><span style="color:#059669;font-size:11px">✅ '+t.status+'</span></td></tr>';
+  }).join('');
+}
+
 function finBaixaManual(marca) {
   var val=prompt('Valor da baixa manual (R$):');
   if(!val||isNaN(parseFloat(val))) return;
   var v=parseFloat(val), hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  FIN_TX.unshift({data:dia,cliente:'Baixa Manual',os:'—',marca:marca==='vitre'?'vit':marca,valor:v,metodo:'Dinheiro',status:'manual',dia:1,sem:1,mes:hoje.getMonth()+1});
-  finRender(); showToast('Baixa de R$ '+v.toLocaleString('pt-BR')+' registrada!','ok');
+  var m=marca||(confirm('VR Marcas? (OK=VR, Cancelar=Vitre)')?'vr':'vit');
+  FIN_TX.unshift({data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+  finRender(); finDashKPIs();
+  showToast('Baixa de '+finFmt(v)+' registrada!','ok');
 }
 
 // ============================================================
@@ -8572,10 +9151,4 @@ function prazoAplicar(isoDate) {
   kbOpen = function(id) {
     _kbOpenOrig(id);
     var os = KB_OS[id];
-    if (os) setTimeout(function() { prazoRenderSug(os); }, 50);
-  };
-})();
-
-</script>
-</body>
-</html>
+    if (os) setTimeout(function() { prazoRenderSug(os); },
