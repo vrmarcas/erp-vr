@@ -800,12 +800,53 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .fin-tipo-despesa{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:800;text-transform:uppercase;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;margin-right:2px}
 /* Relatórios impressão */
 .rel-block{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px}
+/* ── Relatórios ──────────────────────────────────────────────────────── */
+.rel-tab-bar{display:flex;align-items:center;gap:6px;padding:0 0 0 0;margin-bottom:16px;border-bottom:2px solid var(--border);overflow-x:auto}
+.rel-tab-btn{padding:9px 16px;font-size:12px;font-weight:600;border:none;background:none;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;white-space:nowrap;transition:.15s}
+.rel-tab-btn.on{color:var(--brand-mid);border-bottom-color:var(--brand-mid);font-weight:800}
+.rel-tab-btn:hover:not(.on){color:var(--text);background:var(--bg2);border-radius:6px 6px 0 0}
+.rel-tab-spacer{flex:1}
+.caixa-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+.caixa-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.caixa-card-lbl{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.caixa-card-val{font-size:18px;font-weight:800;color:var(--text)}
+.caixa-saldo-pos{color:#059669!important}
+.caixa-saldo-neg{color:#DC2626!important}
+.rel-section-hd{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:18px 0 8px;padding:6px 10px;background:var(--bg2);border-radius:6px}
+.rel-table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.rel-table thead tr{background:#1E293B}
+.rel-table thead th{padding:9px 12px;text-align:left;color:#fff;font-size:11px;font-weight:700}
+.rel-table thead th:last-child{text-align:right}
+.rel-table tbody tr{border-bottom:1px solid var(--border);transition:.1s}
+.rel-table tbody tr:hover{background:var(--bg2)}
+.rel-table tbody td{padding:7px 12px;font-size:12px}
+.rel-table tbody td:last-child{text-align:right;font-weight:700}
+.rel-table tfoot tr{background:var(--bg2)}
+.rel-table tfoot td{padding:8px 12px;font-size:12px;font-weight:800}
+.rel-table tfoot td:last-child{text-align:right}
+.rel-metodo-badge{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
+.rel-met-banco{background:#DBEAFE;color:#1D4ED8}
+.rel-met-cartao{background:#FDE8FF;color:#7C3AED}
+.rel-met-boleto{background:#FEF3C7;color:#92400E}
+.rel-met-avista{background:#D1FAE5;color:#065F46}
+.rel-met-crediario{background:#FEE2E2;color:#991B1B}
+.rel-met-dinheiro{background:#D1FAE5;color:#065F46}
+.rel-saldo-row{background:linear-gradient(90deg,rgba(5,150,105,.06),transparent);border-left:3px solid #059669}
+.rel-saldo-neg-row{background:linear-gradient(90deg,rgba(220,38,38,.06),transparent);border-left:3px solid #DC2626}
+@media(max-width:760px){.caixa-grid{grid-template-columns:1fr 1fr}}
+
 .rel-header{font-size:13px;font-weight:800;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--border);color:var(--text)}
 @media print {
-  .sidebar,.topbar,.topbar-btn,button,.fin-tab-bar,.fin-brand-filter,.fin-kpi-grid,.fin-chart-row,#pg-financeiro .card:not(.rel-block){display:none!important}
+  .sidebar,.topbar,.topbar-btn,.fin-tab-bar,.fin-brand-filter,.fin-kpi-grid,.fin-chart-row,.rel-tab-bar,
+  #pg-financeiro .card:not(.rel-block){display:none!important}
   #pg-relatorios{display:block!important}
+  #pg-relatorios [id^="relPg"]{display:block!important}
+  .rel-block,.caixa-card,.rel-table{break-inside:avoid}
   .rel-block{border:1px solid #ccc;border-radius:0;box-shadow:none;margin-bottom:16pt}
   body{background:#fff;color:#000}
+  .caixa-grid{grid-template-columns:repeat(5,1fr)}
+  .caixa-saldo-pos{color:#059669!important}
+  .caixa-saldo-neg{color:#DC2626!important}
 }
 </style>
 <!-- Firebase SDK (Compat — carregado antes dos scripts) -->
@@ -2818,24 +2859,106 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
          RELATÓRIOS FINANCEIROS
          ============================== -->
     <div id="pg-relatorios" style="display:none">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <!-- Cabeçalho -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
         <div>
-          <h2 style="font-size:16px;font-weight:800;margin:0">🖨️ Relatórios Financeiros</h2>
-          <p style="font-size:11px;color:var(--muted);margin:2px 0 0">Selecione o mês e gere os relatórios para impressão ou exportação</p>
+          <h2 style="font-size:16px;font-weight:800;margin:0">📊 Central de Relatórios</h2>
+          <p style="font-size:11px;color:var(--muted);margin:2px 0 0">Fechamento de caixa, relatórios mensais, DRE e contas</p>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <select id="relMes" onchange="relatoriosRender()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+      </div>
+      <!-- Abas -->
+      <div class="rel-tab-bar">
+        <button class="rel-tab-btn on" id="relTabBtnCaixa" onclick="relTab('caixa',this)">🏧 Caixa Diário</button>
+        <button class="rel-tab-btn" id="relTabBtnMensal" onclick="relTab('mensal',this)">📅 Relatório Mensal</button>
+        <button class="rel-tab-btn" id="relTabBtnDRE" onclick="relTab('dre',this)">📋 DRE</button>
+        <button class="rel-tab-btn" id="relTabBtnContas" onclick="relTab('contas',this)">📌 Contas Pagas</button>
+        <div class="rel-tab-spacer"></div>
+        <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="window.print()">🖨️ Imprimir</button>
+      </div>
+
+      <!-- ── Caixa Diário ───────────────────────────────────────────── -->
+      <div id="relPgCaixa">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Data</label>
+            <input type="date" id="relCaixaData" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)" onchange="relCaixaDiario()">
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Caixa Anterior (R$)</label>
+            <input type="number" id="relCaixaAnt" step="0.01" placeholder="0,00" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);width:140px" oninput="relCaixaDiario()">
+          </div>
+          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="relSalvarCaixaAnt()">💾 Salvar Caixa</button>
+        </div>
+        <!-- Cards resumo -->
+        <div class="caixa-grid" id="relCaixaGrid"></div>
+        <!-- Tabela entradas -->
+        <div class="rel-section-hd">📥 Entradas do Dia</div>
+        <div id="relCaixaEntradas"></div>
+        <!-- Tabela saídas -->
+        <div class="rel-section-hd">📤 Saídas do Dia</div>
+        <div id="relCaixaSaidas"></div>
+        <!-- Fechamento -->
+        <div id="relCaixaFechamento"></div>
+      </div><!-- /relPgCaixa -->
+
+      <!-- ── Relatório Mensal ───────────────────────────────────────── -->
+      <div id="relPgMensal" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Mês</label>
+            <select id="relMensalMes" onchange="relMensal()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+              <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+              <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+              <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Ano</label>
+            <select id="relMensalAno" onchange="relMensal()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="2025">2025</option><option value="2026" selected>2026</option><option value="2027">2027</option>
+            </select>
+          </div>
+        </div>
+        <div id="relMensalConteudo"></div>
+      </div><!-- /relPgMensal -->
+
+      <!-- ── DRE ───────────────────────────────────────────────────── -->
+      <div id="relPgDRE" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <select id="relMes" onchange="relatoriosRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
             <option value="0">Acumulado Anual</option>
             <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
             <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
             <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
             <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
           </select>
-          <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800" onclick="window.print()">🖨️ Imprimir</button>
         </div>
-      </div>
-      <!-- Conteúdo gerado por relatoriosRender() -->
-      <div id="relConteudo"></div>
+        <div id="relConteudo"></div>
+      </div><!-- /relPgDRE -->
+
+      <!-- ── Contas Pagas ──────────────────────────────────────────── -->
+      <div id="relPgContas" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Mês</label>
+            <select id="relContasMes" onchange="relContasPagas()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+              <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+              <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+              <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Ano</label>
+            <select id="relContasAno" onchange="relContasPagas()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="2025">2025</option><option value="2026" selected>2026</option><option value="2027">2027</option>
+            </select>
+          </div>
+        </div>
+        <div id="relContasConteudo"></div>
+      </div><!-- /relPgContas -->
+
     </div><!-- /pg-relatorios -->
 
     <!-- ==============================
@@ -5638,8 +5761,276 @@ function finBaixaManual(marca) {
 }
 
 // ============================================================
-// RELATÓRIOS FINANCEIROS (página de impressão)
+// RELATÓRIOS FINANCEIROS — Central de Relatórios
 // ============================================================
+
+// ── Navegação entre abas de relatório ─────────────────────────────────────────
+function relTab(t, el) {
+  ['Caixa','Mensal','DRE','Contas'].forEach(function(k){
+    var btn=document.getElementById('relTabBtn'+k);
+    var pg =document.getElementById('relPg'+k);
+    if(btn) btn.classList.toggle('on', k.toLowerCase()===t);
+    if(pg)  pg.style.display=(k.toLowerCase()===t)?'block':'none';
+  });
+  if(t==='caixa')  relCaixaDiario();
+  if(t==='mensal') relMensal();
+  if(t==='dre')    relatoriosRender();
+  if(t==='contas') relContasPagas();
+}
+
+// ── Helper: normaliza forma de pagamento ──────────────────────────────────────
+function relNormMetodo(m) {
+  if(!m) return 'À Vista';
+  var ml=(m||'').toLowerCase();
+  if(ml.indexOf('pix')>=0||ml.indexOf('banco')>=0||ml.indexOf('trans')>=0||ml.indexOf('dep')>=0) return 'Banco';
+  if(ml.indexOf('cart')>=0||ml.indexOf('link')>=0||ml.indexOf('cred')>=0&&ml.indexOf('card')>=0) return 'Cartão';
+  if(ml.indexOf('bolet')>=0) return 'Boleto';
+  if(ml.indexOf('credi')>=0) return 'Crediário';
+  if(ml.indexOf('dinh')>=0||ml.indexOf('vista')>=0||ml.indexOf('cash')>=0) return 'À Vista';
+  return m;
+}
+function relMetodoBadge(m) {
+  var cls={Banco:'rel-met-banco',Cartão:'rel-met-cartao',Boleto:'rel-met-boleto','À Vista':'rel-met-avista',Crediário:'rel-met-crediario',Dinheiro:'rel-met-dinheiro'};
+  return '<span class="rel-metodo-badge '+(cls[m]||'rel-met-avista')+'">'+m+'</span>';
+}
+
+// ── CAIXA DIÁRIO ──────────────────────────────────────────────────────────────
+function relCaixaDiario() {
+  // Inicializar data = hoje se vazia
+  var dtIn=document.getElementById('relCaixaData');
+  if(dtIn&&!dtIn.value){
+    var now=new Date();
+    dtIn.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  }
+  var dtVal=(dtIn&&dtIn.value)||'';
+  var dtBR='';
+  if(dtVal){
+    var p=dtVal.split('-');
+    dtBR=p[2]+'/'+p[1]+'/'+p[0];
+  }
+
+  // Carregar caixa anterior salvo
+  var cxAntEl=document.getElementById('relCaixaAnt');
+  var cxAntKey='erp_caixa_ant_'+dtBR;
+  if(cxAntEl&&cxAntEl.value===''){
+    var saved=localStorage.getItem(cxAntKey);
+    if(saved) cxAntEl.value=parseFloat(saved).toFixed(2);
+  }
+  var cxAnt=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
+
+  // ENTRADAS: FIN_CR recebidos na data
+  var loadCR=[];try{loadCR=JSON.parse(localStorage.getItem('erp_fin_cr')||'[]');}catch(e){}
+  var allCR=loadCR.length>0?loadCR:FIN_CR;
+  var entradas=allCR.filter(function(r){return r.status==='recebido'&&r.dataRecebimento===dtBR;});
+
+  // SAÍDAS: FIN_CP pagos na data
+  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
+  var allCP=loadCP.length>0?loadCP:FIN_CP;
+  var saidas=allCP.filter(function(c){return c.status==='pago'&&c.dataPagamento===dtBR;});
+
+  var totEnt=entradas.reduce(function(s,r){return s+r.valor;},0);
+  var totSai=saidas.reduce(function(s,c){return s+c.valor;},0);
+  var segCaixa=cxAnt+totEnt-totSai;
+
+  // Breakdown por método de pagamento
+  var metTot={Banco:0,Cartão:0,Boleto:0,'À Vista':0,Crediário:0};
+  entradas.forEach(function(r){var m=relNormMetodo(r.metodo);metTot[m]=(metTot[m]||0)+r.valor;});
+
+  var f=finFmt;
+
+  // Grid cards
+  var gridEl=document.getElementById('relCaixaGrid'); if(!gridEl) return;
+  gridEl.innerHTML=
+    '<div class="caixa-card"><div class="caixa-card-lbl">Caixa Anterior</div><div class="caixa-card-val">'+f(cxAnt)+'</div></div>'+
+    '<div class="caixa-card"><div class="caixa-card-lbl">Total Entradas</div><div class="caixa-card-val caixa-saldo-pos">'+f(totEnt)+'</div></div>'+
+    '<div class="caixa-card"><div class="caixa-card-lbl">Total Saídas</div><div class="caixa-card-val caixa-saldo-neg">'+f(totSai)+'</div></div>'+
+    '<div class="caixa-card"><div class="caixa-card-lbl">Ent. + Cx. Anterior</div><div class="caixa-card-val">'+f(cxAnt+totEnt)+'</div></div>'+
+    '<div class="caixa-card" style="border-color:'+(segCaixa>=0?'#10B981':'#EF4444')+';background:'+(segCaixa>=0?'#F0FDF4':'#FFF5F5')+'"><div class="caixa-card-lbl">Segue no Caixa</div><div class="caixa-card-val '+(segCaixa>=0?'caixa-saldo-pos':'caixa-saldo-neg')+'">'+f(segCaixa)+'</div></div>';
+
+  // Tabela entradas
+  var entEl=document.getElementById('relCaixaEntradas'); if(!entEl) return;
+  if(entradas.length===0){
+    entEl.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;border:1px dashed var(--border);border-radius:8px">Nenhuma entrada registrada para '+( dtBR||'a data selecionada')+'</div>';
+  } else {
+    var rows=entradas.map(function(r){
+      var met=relNormMetodo(r.metodo);
+      return '<tr><td>'+r.cliente+'</td><td style="font-size:11px;color:var(--muted)">'+(r.descricao||'—')+'</td>'
+        +'<td>'+relMetodoBadge(met)+'</td>'
+        +'<td style="text-align:right;color:#059669;font-weight:800">'+f(r.valor)+'</td></tr>';
+    }).join('');
+    // Totais por método
+    var metRow=Object.keys(metTot).filter(function(k){return metTot[k]>0;}).map(function(k){
+      return relMetodoBadge(k)+' <strong>'+f(metTot[k])+'</strong>';
+    }).join(' &nbsp; ');
+    entEl.innerHTML='<table class="rel-table"><thead><tr><th>Cliente</th><th>Descrição</th><th>Forma</th><th>Valor</th></tr></thead>'
+      +'<tbody>'+rows+'</tbody>'
+      +'<tfoot><tr><td colspan="2" style="font-size:11px;color:var(--muted)">'+metRow+'</td><td></td><td style="text-align:right;color:#059669">'+f(totEnt)+'</td></tr></tfoot>'
+      +'</table>';
+  }
+
+  // Tabela saídas
+  var saiEl=document.getElementById('relCaixaSaidas'); if(!saiEl) return;
+  if(saidas.length===0){
+    saiEl.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;border:1px dashed var(--border);border-radius:8px">Nenhuma saída registrada para '+( dtBR||'a data selecionada')+'</div>';
+  } else {
+    var sRows=saidas.map(function(c){
+      return '<tr><td>'+c.descricao+'</td><td style="font-size:11px;color:var(--muted)">'+(c.categoria||'—')+'</td>'
+        +'<td>'+relMetodoBadge(c.formaPgto||'Banco')+'</td>'
+        +'<td style="text-align:right;color:#DC2626;font-weight:800">'+f(c.valor)+'</td></tr>';
+    }).join('');
+    saiEl.innerHTML='<table class="rel-table"><thead><tr><th>Descrição</th><th>Categoria</th><th>Forma</th><th>Valor</th></tr></thead>'
+      +'<tbody>'+sRows+'</tbody>'
+      +'<tfoot><tr><td colspan="3">Total Saídas</td><td style="text-align:right;color:#DC2626">'+f(totSai)+'</td></tr></tfoot>'
+      +'</table>';
+  }
+
+  // Fechamento
+  var fecEl=document.getElementById('relCaixaFechamento'); if(!fecEl) return;
+  fecEl.innerHTML=
+    '<div class="rel-block" style="margin-top:4px;padding:16px 20px">'
+    +'<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--text)">📋 Fechamento do Caixa — '+( dtBR||'—')+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:6px;max-width:360px">'
+    +_relFecRow('Caixa Anterior', f(cxAnt), '#64748B', false)
+    +_relFecRow('(+) Total de Entradas', f(totEnt), '#059669', false)
+    +_relFecRow('(=) Total Entradas + Caixa Ant.', f(cxAnt+totEnt), '#1D4ED8', false)
+    +_relFecRow('(−) Total de Saídas', f(totSai), '#DC2626', false)
+    +'<div style="height:1px;background:var(--border);margin:4px 0"></div>'
+    +_relFecRow('SEGUE NO CAIXA', f(segCaixa), segCaixa>=0?'#059669':'#DC2626', true)
+    +'</div></div>';
+}
+function _relFecRow(lbl,val,clr,bold){
+  return '<div style="display:flex;justify-content:space-between;padding:5px 10px;background:var(--bg2);border-radius:6px">'
+    +'<span style="font-size:12px;font-weight:'+(bold?800:500)+';color:'+(bold?clr:'var(--text)')+'">'+lbl+'</span>'
+    +'<span style="font-size:12px;font-weight:800;color:'+clr+'">'+val+'</span>'
+    +'</div>';
+}
+function relSalvarCaixaAnt() {
+  var dtIn=document.getElementById('relCaixaData');
+  var cxAntEl=document.getElementById('relCaixaAnt');
+  if(!dtIn||!dtIn.value){ showToast('Selecione uma data primeiro','warn'); return; }
+  var p=dtIn.value.split('-'); var dtBR=p[2]+'/'+p[1]+'/'+p[0];
+  var val=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
+  localStorage.setItem('erp_caixa_ant_'+dtBR, val);
+  showToast('Caixa anterior salvo para '+dtBR,'ok');
+}
+
+// ── RELATÓRIO MENSAL ──────────────────────────────────────────────────────────
+function relMensal() {
+  var el=document.getElementById('relMensalConteudo'); if(!el) return;
+  var mes=parseInt((document.getElementById('relMensalMes')||{}).value||'7');
+  var ano=parseInt((document.getElementById('relMensalAno')||{}).value||'2026');
+  var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  var loadCR=[];try{loadCR=JSON.parse(localStorage.getItem('erp_fin_cr')||'[]');}catch(e){}
+  var allCR=loadCR.length>0?loadCR:FIN_CR;
+  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
+  var allCP=loadCP.length>0?loadCP:FIN_CP;
+
+  var daysInMonth=new Date(ano,mes,0).getDate();
+  var f=finFmt;
+  var totEntMes=0, totSaiMes=0;
+
+  var rows='';
+  for(var d=1;d<=daysInMonth;d++){
+    var dtBR=String(d).padStart(2,'0')+'/'+String(mes).padStart(2,'0')+'/'+ano;
+    var ent=allCR.filter(function(r){return r.status==='recebido'&&r.dataRecebimento===dtBR;});
+    var sai=allCP.filter(function(c){return c.status==='pago'&&c.dataPagamento===dtBR;});
+    var totEnt=ent.reduce(function(s,r){return s+r.valor;},0);
+    var totSai=sai.reduce(function(s,c){return s+c.valor;},0);
+    if(totEnt===0&&totSai===0) continue;
+    totEntMes+=totEnt; totSaiMes+=totSai;
+    var saldoDia=totEnt-totSai;
+    rows+='<tr>'
+      +'<td style="font-weight:700">'+dtBR+'</td>'
+      +'<td style="color:#059669">'+f(totEnt)+'</td>'
+      +'<td style="color:#DC2626">'+f(totSai)+'</td>'
+      +'<td style="font-weight:800;color:'+(saldoDia>=0?'#059669':'#DC2626')+'">'+f(saldoDia)+'</td>'
+      +'<td style="font-size:11px;color:var(--muted)">'+ent.length+' ent. / '+sai.length+' saí.</td>'
+      +'</tr>';
+  }
+
+  var saldoMes=totEntMes-totSaiMes;
+  if(!rows){
+    el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">Nenhuma movimentação lançada em '+mesesNome[mes]+' '+ano+'</div>';
+    return;
+  }
+
+  el.innerHTML='<div style="margin-bottom:12px;font-size:12px;font-weight:700;color:var(--muted)">'+mesesNome[mes]+' '+ano+'</div>'
+    +'<table class="rel-table"><thead><tr>'
+    +'<th>Data</th><th>Entradas</th><th>Saídas</th><th>Saldo do Dia</th><th>Lançamentos</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'<tfoot><tr>'
+    +'<td style="font-weight:800">TOTAL MÊS</td>'
+    +'<td style="color:#059669;font-weight:800">'+f(totEntMes)+'</td>'
+    +'<td style="color:#DC2626;font-weight:800">'+f(totSaiMes)+'</td>'
+    +'<td style="font-weight:900;color:'+(saldoMes>=0?'#059669':'#DC2626')+'">'+f(saldoMes)+'</td>'
+    +'<td></td>'
+    +'</tr></tfoot>'
+    +'</table>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px">'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Entradas</div><div class="caixa-card-val caixa-saldo-pos">'+f(totEntMes)+'</div></div>'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Saídas</div><div class="caixa-card-val caixa-saldo-neg">'+f(totSaiMes)+'</div></div>'
+    +'<div class="caixa-card" style="border-color:'+(saldoMes>=0?'#10B981':'#EF4444')+'"><div class="caixa-card-lbl">Saldo do Mês</div><div class="caixa-card-val '+(saldoMes>=0?'caixa-saldo-pos':'caixa-saldo-neg')+'">'+f(saldoMes)+'</div></div>'
+    +'</div>';
+}
+
+// ── CONTAS PAGAS ──────────────────────────────────────────────────────────────
+function relContasPagas() {
+  var el=document.getElementById('relContasConteudo'); if(!el) return;
+  var mes=parseInt((document.getElementById('relContasMes')||{}).value||'7');
+  var ano=parseInt((document.getElementById('relContasAno')||{}).value||'2026');
+  var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
+  var allCP=loadCP.length>0?loadCP:FIN_CP;
+
+  var lista=allCP.filter(function(c){
+    if(c.status!=='pago'||!c.dataPagamento) return false;
+    var p=c.dataPagamento.split('/');
+    return parseInt(p[1])===mes&&parseInt(p[2])===ano;
+  }).sort(function(a,b){
+    var pa=a.dataPagamento.split('/'),pb=b.dataPagamento.split('/');
+    var da=new Date(pa[2],pa[1]-1,pa[0]),db=new Date(pb[2],pb[1]-1,pb[0]);
+    return da-db;
+  });
+
+  var f=finFmt;
+  var total=lista.reduce(function(s,c){return s+c.valor;},0);
+  var totDesp=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='despesa';}).reduce(function(s,c){return s+c.valor;},0);
+  var totCusto=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='custo';}).reduce(function(s,c){return s+c.valor;},0);
+
+  if(lista.length===0){
+    el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">Nenhuma conta paga em '+mesesNome[mes]+' '+ano+'</div>';
+    return;
+  }
+
+  var rows=lista.map(function(c,i){
+    var tipo=FIN_TIPO_MAP[finNormCat(c.categoria)]||'despesa';
+    var tipoBadge='<span class="fin-tipo-'+tipo+' fin-badge">'+( tipo==='custo'?'Custo':'Despesa')+'</span>';
+    return '<tr><td style="color:var(--muted);font-size:11px">'+c.vencimento+'</td>'
+      +'<td style="font-weight:700">'+c.dataPagamento+'</td>'
+      +'<td>'+c.descricao+'</td>'
+      +'<td>'+tipoBadge+' '+(c.categoria||'—')+'</td>'
+      +'<td>'+relMetodoBadge(c.formaPgto||'Banco')+'</td>'
+      +'<td style="text-align:right;color:#DC2626;font-weight:800">'+f(c.valor)+'</td></tr>';
+  }).join('');
+
+  el.innerHTML='<div style="margin-bottom:12px;font-size:13px;font-weight:800">Relatório de Contas Pagas — '+mesesNome[mes]+' '+ano+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Pago</div><div class="caixa-card-val caixa-saldo-neg">'+f(total)+'</div></div>'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Custos</div><div class="caixa-card-val" style="color:#D97706">'+f(totCusto)+'</div></div>'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Despesas</div><div class="caixa-card-val" style="color:#7C3AED">'+f(totDesp)+'</div></div>'
+    +'</div>'
+    +'<table class="rel-table"><thead><tr>'
+    +'<th>Vencimento</th><th>Pagamento</th><th>Descrição</th><th>Categoria</th><th>Forma</th><th>Valor</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'<tfoot><tr><td colspan="5">Total Pago em '+mesesNome[mes]+'</td><td style="text-align:right;color:#DC2626">'+f(total)+'</td></tr></tfoot>'
+    +'</table>';
+}
+
+// ── DRE (mantido) ─────────────────────────────────────────────────────────────
 function relatoriosRender() {
   var el=document.getElementById('relConteudo'); if(!el) return;
   var mesFlt=parseInt((document.getElementById('relMes')||{}).value||'0');
