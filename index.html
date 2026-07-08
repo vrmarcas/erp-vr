@@ -3253,27 +3253,6 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
 <!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
 <div id="pg-fornecedores" style="display:none">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
-    <div>
-      <h2 style="margin:0;font-size:18px;font-weight:800">🏭 Fornecedores</h2>
-      <p style="margin:4px 0 0;font-size:12px;color:var(--muted)">Cadastro, histórico de compras e contato rápido</p>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="fornSearch" type="text" placeholder="🔍 Buscar fornecedor..." oninput="fornRender()"
-        style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);min-width:180px">
-      <select id="fornCatFlt" onchange="fornRender()"
-        style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
-        <option value="">Todas as categorias</option>
-        <option value="Matéria-Prima">🪵 Matéria-Prima</option>
-        <option value="Mão de Obra">🔧 Mão de Obra</option>
-        <option value="Serviços">⚙️ Serviços</option>
-        <option value="Equipamentos">🔩 Equipamentos</option>
-        <option value="Embalagens">📦 Embalagens</option>
-        <option value="Outros">📌 Outros</option>
-      </select>
-      <button class="topbar-btn" onclick="fornNovoModal()">+ Novo Fornecedor</button>
-    </div>
-  </div>
 
   <!-- KPIs fornecedores -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px" id="fornKpiRow">
@@ -3294,15 +3273,35 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     </div>
   </div>
 
+  <!-- Barra de filtros -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+    <input id="fornSearch" type="text" placeholder="🔍 Buscar por nome ou produto..." oninput="fornRender()"
+      style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+    <select id="fornCatFlt" onchange="fornRender()"
+      style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+      <option value="">Todas as categorias</option>
+      <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+      <option value="Mão de Obra">🔧 Mão de Obra</option>
+      <option value="Serviços">⚙️ Serviços</option>
+      <option value="Equipamentos">🔩 Equipamentos</option>
+      <option value="Embalagens">📦 Embalagens</option>
+      <option value="Outros">📌 Outros</option>
+    </select>
+  </div>
+
   <!-- Grid de cards de fornecedores -->
   <div id="fornGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px"></div>
-  <div id="fornEmpty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted)">
-    <div style="font-size:48px;margin-bottom:12px">🏭</div>
-    <div style="font-size:15px;font-weight:700;margin-bottom:6px">Nenhum fornecedor cadastrado</div>
-    <div style="font-size:12px">Clique em "+ Novo Fornecedor" para adicionar</div>
+
+  <!-- Empty state com CTA proeminente -->
+  <div id="fornEmpty" style="display:none;text-align:center;padding:60px 20px">
+    <div style="font-size:64px;margin-bottom:16px;opacity:.5">🏭</div>
+    <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhum fornecedor cadastrado</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:24px">Cadastre seus fornecedores para ter controle de compras, histórico e contato rápido</div>
+    <button onclick="fornNovoModal()" style="padding:14px 32px;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(79,70,229,.4)">
+      🏭 Cadastrar Primeiro Fornecedor
+    </button>
   </div>
 </div>
-
 <!-- MODAL: Novo Fornecedor -->
 <div class="gen-overlay" id="fornOverlay" onclick="if(event.target===this)fornCloseModal()">
   <div class="gen-modal" style="width:520px">
@@ -3736,7 +3735,7 @@ function fornRender() {
   var q = ((document.getElementById('fornSearch')||{}).value||'').toLowerCase();
   var catFlt = (document.getElementById('fornCatFlt')||{}).value||'';
   var filtered = list.filter(function(f){
-    var qOk = !q || f.nome.toLowerCase().includes(q) || (f.obs||'').toLowerCase().includes(q);
+    var qOk = !q || f.nome.toLowerCase().includes(q) || (f.obs||'').toLowerCase().includes(q) || (f.email||'').toLowerCase().includes(q);
     var cOk = !catFlt || f.categoria===catFlt;
     return qOk && cOk;
   });
@@ -3748,7 +3747,8 @@ function fornRender() {
   var compMes = list.reduce(function(s,f){
     return s+(f.historico||[]).filter(function(h){
       if(!h.data) return false;
-      var d=new Date(h.data); return d.getMonth()+1===mesAtual&&d.getFullYear()===anoAtual;
+      var p=h.data.split('/'); if(p.length<3) return false;
+      return parseInt(p[1])===mesAtual && parseInt(p[2])===anoAtual;
     }).reduce(function(hs,h){return hs+h.valor;},0);
   },0);
   var kT=document.getElementById('fornKpiTotal'); if(kT) kT.textContent=list.length;
@@ -3760,34 +3760,57 @@ function fornRender() {
   if(!grid) return;
   if(!filtered.length){ grid.innerHTML=''; if(empty) empty.style.display='block'; return; }
   if(empty) empty.style.display='none';
+
   grid.innerHTML=filtered.map(function(f){
     var cor = FORN_CAT_COLOR[f.categoria]||'#6B7280';
     var ico = FORN_CAT_ICON[f.categoria]||'📌';
     var hist = f.historico||[];
     var totalF = hist.reduce(function(s,h){return s+h.valor;},0);
     var ultimaCompra = hist.length ? hist[hist.length-1] : null;
-    return '<div class="card" style="border-top:3px solid '+cor+';cursor:default">'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
-        +'<div>'
-          +'<div style="font-size:15px;font-weight:800;color:var(--text)">'+f.nome+'</div>'
-          +'<span style="font-size:10px;font-weight:700;background:'+cor+'18;color:'+cor+';border:1px solid '+cor+'33;padding:2px 8px;border-radius:10px">'+ico+' '+f.categoria+'</span>'
+    var phone = f.whatsapp ? f.whatsapp.replace(/\D/g,'') : '';
+    var waLink = phone ? 'window.open(\'https://wa.me/55'+phone+'\',\'_blank\')' : 'showToast(\'WhatsApp não cadastrado\',\'warn\')';
+    var emailLink = f.email ? 'window.location.href=\'mailto:'+f.email+'\'' : 'showToast(\'E-mail não cadastrado\',\'warn\')';
+
+    return '<div class="card" style="border-top:3px solid '+cor+';transition:box-shadow .15s" '
+      +'onmouseenter="this.style.boxShadow=\'0 4px 20px rgba(0,0,0,.1)\'" '
+      +'onmouseleave="this.style.boxShadow=\'\'">'
+
+      // Header: name + badge
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="font-size:15px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.nome+'</div>'
+          +'<span style="display:inline-block;margin-top:4px;font-size:10px;font-weight:700;background:'+cor+'18;color:'+cor+';border:1px solid '+cor+'33;padding:2px 9px;border-radius:10px">'+ico+' '+f.categoria+'</span>'
         +'</div>'
-        +'<div style="display:flex;gap:6px">'
-          +(f.whatsapp?'<button data-ph="'+f.whatsapp.replace(/\D/g,'')+'" onclick="window.open(decodeURIComponent(\'https%3A//wa.me/55\')+this.dataset.ph,\'_blank\')" style="background:#25D366;color:#fff;border:none;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:12px">💬</button>':'')
-          +'<button data-fid="'+f.id+'" onclick="fornEditar(this.dataset.fid)" style="background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px">✏️</button>'
-          +'<button data-fid2="'+f.id+'" onclick="if(confirm(\'Excluir '+f.nome+'?\'))fornExcluir(this.dataset.fid2)" style="background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px">🗑️</button>'
+        +'<div style="display:flex;gap:5px;margin-left:8px">'
+          +'<button onclick="fornEditar(\''+f.id+'\')" style="background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px" title="Editar">✏️</button>'
+          +'<button onclick="if(confirm(\'Excluir '+f.nome.replace(/'/g,'')+'?\'))fornExcluir(\''+f.id+'\')" style="background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px" title="Excluir">🗑️</button>'
         +'</div>'
       +'</div>'
-      +(f.cnpj?'<div style="font-size:11px;color:var(--muted);margin-bottom:4px">📄 CNPJ: '+f.cnpj+'</div>':'')
-      +(f.telefone?'<div style="font-size:11px;color:var(--muted);margin-bottom:4px">📞 '+f.telefone+'</div>':'')
-      +(f.obs?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-style:italic">'+f.obs+'</div>':'')
-      +'<div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center">'
+
+      // Contact row
+      +'<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">'
+        +(f.whatsapp
+          ?'<button onclick="'+waLink+'" style="display:flex;align-items:center;gap:4px;padding:5px 10px;background:#DCFCE7;color:#15803D;border:1px solid #86EFAC;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📱 '+f.whatsapp+'</button>'
+          :'<span style="font-size:11px;color:var(--muted);padding:5px 0">Sem WhatsApp</span>')
+        +(f.email
+          ?'<button onclick="'+emailLink+'" style="display:flex;align-items:center;gap:4px;padding:5px 10px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+f.email+'">✉️ '+f.email+'</button>'
+          :'')
+      +'</div>'
+
+      // Obs
+      +(f.obs?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;padding:7px 9px;background:var(--bg2);border-radius:7px;line-height:1.5;font-style:italic">'+f.obs+'</div>':'')
+
+      // Footer: total comprado + historico button
+      +'<div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">'
         +'<div>'
-          +'<div style="font-size:10px;color:var(--muted)">Total comprado</div>'
-          +'<div style="font-size:15px;font-weight:800;color:#059669">'+finFmt(totalF)+'</div>'
-          +(ultimaCompra?'<div style="font-size:10px;color:var(--muted)">Última: '+ultimaCompra.data+'</div>':'')
+          +'<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Total comprado</div>'
+          +'<div style="font-size:17px;font-weight:900;color:#059669">'+finFmt(totalF)+'</div>'
+          +(ultimaCompra?'<div style="font-size:10px;color:var(--muted)">Última compra: '+ultimaCompra.data+'</div>':'<div style="font-size:10px;color:var(--muted)">Nenhuma compra ainda</div>')
         +'</div>'
-        +'<button data-fid3="'+f.id+'" onclick="fornHistAbrir(this.dataset.fid3)" class="topbar-btn" style="font-size:11px">📋 Histórico ('+hist.length+')</button>'
+        +'<button data-fid3="'+f.id+'" onclick="fornHistAbrir(this.dataset.fid3)" '
+          +'style="padding:8px 14px;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">'
+          +'📋 Compras ('+hist.length+')'
+        +'</button>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -3825,6 +3848,7 @@ function fornSalvar() {
     cnpj: (document.getElementById('fornCNPJ')||{}).value||'',
     whatsapp: (document.getElementById('fornWA')||{}).value||'',
     telefone: (document.getElementById('fornTel')||{}).value||'',
+    email: (document.getElementById('fornEmail')||{}).value||'',
     obs: (document.getElementById('fornObs')||{}).value||'',
     criado: new Date().toLocaleDateString('pt-BR')
   };
@@ -4014,7 +4038,7 @@ function nav(page, el) {
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
-  if (page === 'fornecedores') { setTimeout(function(){ fornRender(); }, 0); }
+  if (page === 'fornecedores') { setTimeout(function(){ fornSeedDemo(); fornRender(); }, 0); }
   if (page === 'crm')        { setTimeout(function(){ if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 800); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
