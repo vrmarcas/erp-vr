@@ -749,8 +749,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .fin-tbl-btn{padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;border:none;transition:.15s}
 .fin-tbl-btn-ok{background:#D1FAE5;color:#065F46}
 .fin-tbl-btn-ok:hover{background:#059669;color:#fff}
-.fin-tbl-btn-del{background:transparent;color:#DC2626;border:1px solid #FCA5A5 !important}
-.fin-tbl-btn-del:hover{background:#FEE2E2}
+.fin-tbl-btn-del{background:transparent;color:#DC2626;border:1px solid #FCA5A5 !important;font-size:13px;padding:4px 8px}
+.fin-tbl-btn-del:hover{background:#FEE2E2;color:#991B1B}
 /* Status badges */
 .fin-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.3px}
 .fin-badge-pendente{background:#FEF3C7;color:#92400E}
@@ -3067,7 +3067,10 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="fg"><label>Chave PIX</label><input type="text" id="bankVRPix" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
               <div class="fg"><label>Tipo da Chave PIX</label><select id="bankVRPixTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
             </div>
-            <button class="topbar-btn" style="margin-top:14px" onclick="cfgSalvarBanco('vr')">💾 Salvar Banco VR Marcas</button>
+            <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="topbar-btn" style="flex:1" onclick="cfgSalvarBanco('vr')">💾 Salvar Banco VR Marcas</button>
+            <button class="topbar-btn" style="background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;padding:7px 14px" onclick="cfgLimparBanco('vr')" title="Remover conta bancária VR">🗑️ Remover</button>
+          </div>
           </div>
           <div class="card">
             <div class="card-h"><div class="card-h-left" style="color:#B85C28">🌿 Vitre — Dados Bancários</div></div>
@@ -3081,7 +3084,10 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="fg"><label>Chave PIX</label><input type="text" id="bankVTPix" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
               <div class="fg"><label>Tipo da Chave PIX</label><select id="bankVTPixTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
             </div>
-            <button class="topbar-btn" style="margin-top:14px;background:linear-gradient(135deg,#B85C28,#1D6B6B)" onclick="cfgSalvarBanco('vt')">💾 Salvar Banco Vitre</button>
+            <div style="display:flex;gap:8px;margin-top:14px">
+            <button class="topbar-btn" style="flex:1;background:linear-gradient(135deg,#B85C28,#1D6B6B)" onclick="cfgSalvarBanco('vt')">💾 Salvar Banco Vitre</button>
+            <button class="topbar-btn" style="background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;padding:7px 14px" onclick="cfgLimparBanco('vt')" title="Remover conta bancária Vitre">🗑️ Remover</button>
+          </div>
           </div>
         </div>
 
@@ -3530,7 +3536,7 @@ function nav(page, el) {
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
-  if (page === 'relatorios') { setTimeout(function(){ relatoriosRender(); }, 0); }
+  if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
@@ -5611,7 +5617,7 @@ function finCRRender() {
     var acoes=(r.status==='pendente'||r.status==='vencido')
       ?'<button onclick="finCRBaixa(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button> ':
       '';
-    acoes+='<button onclick="finCRDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
+    acoes+='<button onclick="if(confirm(\'Excluir esta conta a receber?\')) finCRDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
     return '<tr>'
       +'<td><strong>'+r.cliente+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
       +'<td>'+origem+'</td>'
@@ -5762,7 +5768,7 @@ function finCPRender() {
     } else {
       acoesStr='<span style="font-size:10px;color:#059669;font-weight:700">✅ Pago em '+(r.dataPagamento||'—')+'</span> ';
     }
-    acoesStr+='<button onclick="finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
+    acoesStr+='<button onclick="if(confirm(\'Excluir esta despesa?\')) finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
     return '<tr>'
       +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Lançamento interno')+'</div></td>'
       +'<td>'+tipoBadge+' '+catBadge+'</td>'
@@ -8368,6 +8374,19 @@ function cfgSalvarBanco(marca) {
   };
   bankSave(d);
   showToast('Banco '+(marca==='vr'?'VR Marcas':'Vitre')+' salvo ✓','ok');
+}
+function cfgLimparBanco(marca) {
+  var nome = marca==='vr' ? 'VR Marcas' : 'Vitre';
+  if(!confirm('Remover os dados bancários de ' + nome + '?')) return;
+  var d = bankLoad();
+  delete d[marca];
+  bankSave(d);
+  // Limpar campos na tela
+  var p = marca==='vr'?'bankVR':'bankVT';
+  ['Nome','Agencia','Conta','Titular','Doc','Pix'].forEach(function(k){
+    var el = document.getElementById(p+k); if(el) el.value='';
+  });
+  showToast('Conta bancária de '+nome+' removida','ok');
 }
 
 function cfgCarregarBanco() {
