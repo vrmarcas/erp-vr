@@ -2944,6 +2944,61 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
           </div>
+
+          <!-- ── Calculadora de Markup ── -->
+          <div class="card" style="margin-top:18px">
+            <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div></div>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Informe o custo e os fatores para calcular o preço de venda automaticamente.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+              <div class="fg">
+                <label>Custo Unitário (R$)</label>
+                <input type="number" id="mkCalcCusto" step="0.01" min="0" placeholder="Ex: 10,00" oninput="mkCalc()">
+              </div>
+              <div class="fg">
+                <label>DGA — Desp. Gerais e Adm. (%)</label>
+                <input type="number" id="mkCalcDGA" step="0.1" min="0" max="100" value="39" oninput="mkCalc()">
+              </div>
+              <div class="fg">
+                <label>Comissões de Vendedores (%)</label>
+                <input type="number" id="mkCalcCOM" step="0.1" min="0" max="100" value="0" oninput="mkCalc()">
+              </div>
+              <div class="fg">
+                <label>Impostos sobre Venda (%)</label>
+                <input type="number" id="mkCalcIMP" step="0.1" min="0" max="100" value="7" oninput="mkCalc()">
+              </div>
+              <div class="fg">
+                <label>Margem de Lucro Desejada (%)</label>
+                <input type="number" id="mkCalcMLD" step="0.1" min="0" max="100" value="30" oninput="mkCalc()">
+              </div>
+              <div class="fg">
+                <label style="font-weight:700;color:var(--brand-mid)">Total do Markup (%)</label>
+                <input type="text" id="mkCalcTotal" readonly style="background:var(--bg2);font-weight:700;color:var(--brand-mid)">
+              </div>
+            </div>
+            <!-- Result box -->
+            <div id="mkCalcResult" style="margin-top:18px;display:none;background:linear-gradient(135deg,#4F46E5,#7C3AED);border-radius:12px;padding:18px 22px;color:#fff">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;text-align:center">
+                <div>
+                  <div style="font-size:11px;opacity:.8;margin-bottom:4px">Custo Unitário</div>
+                  <div style="font-size:20px;font-weight:800" id="mkResumoCusto">R$ 0,00</div>
+                </div>
+                <div>
+                  <div style="font-size:11px;opacity:.8;margin-bottom:4px">Preço de Venda</div>
+                  <div style="font-size:24px;font-weight:800" id="mkResumoVenda">R$ 0,00</div>
+                </div>
+                <div>
+                  <div style="font-size:11px;opacity:.8;margin-bottom:4px">Lucro Bruto</div>
+                  <div style="font-size:20px;font-weight:800" id="mkResumoLucro">R$ 0,00</div>
+                </div>
+              </div>
+              <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.2);padding-top:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;font-size:11px;opacity:.9">
+                <div><div style="opacity:.7">DGA</div><span id="mkDGAval">R$ 0,00</span></div>
+                <div><div style="opacity:.7">Comissões</div><span id="mkCOMval">R$ 0,00</span></div>
+                <div><div style="opacity:.7">Impostos</div><span id="mkIMPval">R$ 0,00</span></div>
+                <div><div style="opacity:.7">Margem Lucro</div><span id="mkMLDval">R$ 0,00</span></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ── ABA 4: MÃO DE OBRA ── -->
@@ -5584,10 +5639,33 @@ function finCRDel(id) {
   finCRRender(); finDashKPIs();
 }
 
+function finPopularContas(selectId) {
+  var sel = document.getElementById(selectId);
+  if(!sel) return;
+  var bd = bankLoad();
+  var opts = '<option value="">— Selecione a conta —</option>';
+  if(bd.vr && bd.vr.nome) {
+    var label = bd.vr.nome;
+    if(bd.vr.conta) label += ' (' + bd.vr.conta + ')';
+    opts += '<option value="vr">🟣 ' + label + ' — VR</option>';
+  } else {
+    opts += '<option value="mp_vr">🟣 Mercado Pago — VR</option>';
+  }
+  if(bd.vt && bd.vt.nome) {
+    var labelVt = bd.vt.nome;
+    if(bd.vt.conta) labelVt += ' (' + bd.vt.conta + ')';
+    opts += '<option value="vt">🌸 ' + labelVt + ' — Vitre</option>';
+  } else {
+    opts += '<option value="nu_vitre">🌸 Nubank — Vitre</option>';
+  }
+  opts += '<option value="dinheiro">💵 Caixa / Dinheiro</option>';
+  sel.innerHTML = opts;
+}
 function finCRNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+2).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCRVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
+  finPopularContas('finCRConta');
   document.getElementById('finCROverlay').classList.add('open');
 }
 function finCROverlayClose(){ document.getElementById('finCROverlay').classList.remove('open'); }
@@ -5710,6 +5788,7 @@ function finCPNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCPVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
+  finPopularContas('finCPConta');
   document.getElementById('finCPOverlay').classList.add('open');
 }
 function finCPOverlayClose(){ document.getElementById('finCPOverlay').classList.remove('open'); }
@@ -5720,12 +5799,12 @@ function finCPSalvar(){
   var valor=parseFloat((document.getElementById('finCPValor')||{}).value||'0');
   var vencRaw=(document.getElementById('finCPVenc')||{}).value||'';
   var forn=(document.getElementById('finCPForn')||{}).value||'';
-  var forma=(document.getElementById('finCPFormaPgto')||{}).value||'Banco';
+  var conta=(document.getElementById('finCPConta')||{}).value||'';
   var status=(document.getElementById('finCPStatus')||{}).value||'agendado';
   if(!desc||!valor||!vencRaw){showToast('Preencha descrição, valor e vencimento','warn');return;}
   var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
   var hoje=new Date();
-  FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,formaPgto:forma,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
+  FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,contaBancaria:conta,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
   finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
   showToast('Despesa registrada!','ok');
 }
@@ -8245,6 +8324,34 @@ function cfgSave(d) {
 var BANK_KEY = 'erp_bank_config';
 function bankLoad(){ try{return JSON.parse(localStorage.getItem(BANK_KEY)||'{}');}catch(e){return{};} }
 function bankSave(d){ localStorage.setItem(BANK_KEY,JSON.stringify(d)); }
+
+function mkCalc() {
+  var custo = parseFloat(document.getElementById('mkCalcCusto').value)||0;
+  var dga   = parseFloat(document.getElementById('mkCalcDGA').value)||0;
+  var com   = parseFloat(document.getElementById('mkCalcCOM').value)||0;
+  var imp   = parseFloat(document.getElementById('mkCalcIMP').value)||0;
+  var mld   = parseFloat(document.getElementById('mkCalcMLD').value)||0;
+  var total = dga + com + imp + mld;
+  var tot = document.getElementById('mkCalcTotal');
+  if(tot) tot.value = total.toFixed(2) + '%';
+  var res = document.getElementById('mkCalcResult');
+  if(!res) return;
+  if(!custo || total >= 100) { res.style.display='none'; return; }
+  res.style.display='block';
+  var venda  = custo / (1 - total/100);
+  var lucro  = venda * (mld/100);
+  var dgaVal = venda * (dga/100);
+  var comVal = venda * (com/100);
+  var impVal = venda * (imp/100);
+  var fmt = function(v){ return 'R$ '+v.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.'); };
+  document.getElementById('mkResumoCusto').textContent = fmt(custo);
+  document.getElementById('mkResumoVenda').textContent = fmt(venda);
+  document.getElementById('mkResumoLucro').textContent = fmt(lucro);
+  document.getElementById('mkDGAval').textContent  = fmt(dgaVal);
+  document.getElementById('mkCOMval').textContent  = fmt(comVal);
+  document.getElementById('mkIMPval').textContent  = fmt(impVal);
+  document.getElementById('mkMLDval').textContent  = fmt(lucro);
+}
 
 function cfgSalvarBanco(marca) {
   var p = marca==='vr'?'bankVR':'bankVT';
