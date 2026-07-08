@@ -81,7 +81,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .sb-brand-btn.inactive { background: rgba(255,255,255,.1); color: rgba(255,255,255,.5); }
 
 .sb-nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
-.sb-section { font-size: 10px; font-weight: 700; color: rgba(255,255,255,.35); text-transform: uppercase; letter-spacing: .6px; padding: 12px 8px 4px; }
+.sb-section {
+  font-size: 10px; font-weight: 700; color: rgba(255,255,255,.5);
+  text-transform: uppercase; letter-spacing: .6px;
+  padding: 10px 10px 4px; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  border-radius: 6px; margin: 2px 0; transition: .15s; user-select: none;
+}
+.sb-section:hover { background: rgba(255,255,255,.06); color: rgba(255,255,255,.8); }
+.sb-section .sb-arrow { font-size: 8px; opacity: .6; transition: transform .2s; }
+.sb-section.collapsed .sb-arrow { transform: rotate(-90deg); }
+.sb-group { overflow: hidden; transition: max-height .25s ease; }
+.sb-group.collapsed { max-height: 0 !important; }
 .sb-item {
   display: flex; align-items: center; gap: 9px;
   padding: 9px 10px; border-radius: 7px; cursor: pointer;
@@ -942,32 +953,43 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   </div>
 
   <div class="sb-nav">
-    <div class="sb-section">Principal</div>
-    <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ico">📊</span> Dashboard</div>
+    <div class="sb-section" onclick="sbToggle('principal')"><span>Principal</span><span class="sb-arrow">▼</span></div>
+    <div class="sb-group" id="sbG-principal">
+      <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ico">📊</span> Dashboard</div>
+    </div>
 
-    <div class="sb-section">Operação</div>
-    <div class="sb-item" onclick="nav('kanban',this)"><span class="ico">📋</span> Kanban OS <span class="sb-badge red" id="sbBadgeKanban"></span></div>
-    <div class="sb-item" onclick="nav('os-list',this)"><span class="ico">📄</span> Todas as OS</div>
-    <div class="sb-item" onclick="nav('estoque',this)"><span class="ico">📦</span> Estoque <span class="sb-badge red" id="sbBadgeEstoque" style="display:none"></span></div>
+    <div class="sb-section" onclick="sbToggle('operacao')"><span>Operação</span><span class="sb-arrow">▼</span></div>
+    <div class="sb-group" id="sbG-operacao">
+      <div class="sb-item" onclick="nav('kanban',this)"><span class="ico">📋</span> Kanban OS <span class="sb-badge red" id="sbBadgeKanban"></span></div>
+      <div class="sb-item" onclick="nav('os-list',this)"><span class="ico">📄</span> Todas as OS</div>
+      <div class="sb-item" onclick="nav('estoque',this)"><span class="ico">📦</span> Estoque <span class="sb-badge red" id="sbBadgeEstoque" style="display:none"></span></div>
+      <div class="sb-item" onclick="nav('fornecedores',this)"><span class="ico">🏭</span> Fornecedores</div>
+    </div>
 
-    <div class="sb-section">Comercial</div>
-    <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
-    <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
-    <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
-    <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
-    <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
+    <div class="sb-section" onclick="sbToggle('comercial')"><span>Comercial</span><span class="sb-arrow">▼</span></div>
+    <div class="sb-group" id="sbG-comercial">
+      <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
+      <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
+      <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
+      <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
+      <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
+    </div>
 
-    <div class="sb-section">Financeiro</div>
-    <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
-    <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
-    <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
-    <div class="sb-item" id="sbFinDRE"  onclick="navFin('dre',this)"><span class="ico">📋</span> DRE</div>
-    <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
+    <div class="sb-section" onclick="sbToggle('financeiro')"><span>Financeiro</span><span class="sb-arrow">▼</span></div>
+    <div class="sb-group" id="sbG-financeiro">
+      <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
+      <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
+      <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
+      <div class="sb-item" id="sbFinDRE"  onclick="navFin('dre',this)"><span class="ico">📋</span> DRE</div>
+      <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
+    </div>
 
-    <div class="sb-section">Admin</div>
-    <div class="sb-item" onclick="nav('config-orc',this)"><span class="ico">⚙️</span> Config. Orçamento</div>
-    <div class="sb-item" onclick="nav('config-usr',this)"><span class="ico">👥</span> Criação de Usuários</div>
-    <div class="sb-item" onclick="nav('seguranca',this)"><span class="ico">🔐</span> Segurança</div>
+    <div class="sb-section" onclick="sbToggle('admin')"><span>Admin</span><span class="sb-arrow">▼</span></div>
+    <div class="sb-group" id="sbG-admin">
+      <div class="sb-item" onclick="nav('config-orc',this)"><span class="ico">⚙️</span> Config. Orçamento</div>
+      <div class="sb-item" onclick="nav('config-usr',this)"><span class="ico">👥</span> Criação de Usuários</div>
+      <div class="sb-item" onclick="nav('seguranca',this)"><span class="ico">🔐</span> Segurança</div>
+    </div>
   </div>
 
   <div class="sb-footer" style="flex-direction:column;align-items:stretch;gap:8px">
@@ -3207,6 +3229,162 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   </div><!-- /content -->
 </div><!-- /main -->
 
+<!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
+<div id="pg-fornecedores" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="margin:0;font-size:18px;font-weight:800">🏭 Fornecedores</h2>
+      <p style="margin:4px 0 0;font-size:12px;color:var(--muted)">Cadastro, histórico de compras e contato rápido</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="fornSearch" type="text" placeholder="🔍 Buscar fornecedor..." oninput="fornRender()"
+        style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);min-width:180px">
+      <select id="fornCatFlt" onchange="fornRender()"
+        style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+        <option value="">Todas as categorias</option>
+        <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+        <option value="Mão de Obra">🔧 Mão de Obra</option>
+        <option value="Serviços">⚙️ Serviços</option>
+        <option value="Equipamentos">🔩 Equipamentos</option>
+        <option value="Embalagens">📦 Embalagens</option>
+        <option value="Outros">📌 Outros</option>
+      </select>
+      <button class="topbar-btn" onclick="fornNovoModal()">+ Novo Fornecedor</button>
+    </div>
+  </div>
+
+  <!-- KPIs fornecedores -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px" id="fornKpiRow">
+    <div class="fin-kpi" style="border-top:3px solid #7C3AED">
+      <div class="fin-kpi-icon" style="background:#EDE9FE">🏭</div>
+      <div class="fin-kpi-lbl">Total de Fornecedores</div>
+      <div class="fin-kpi-val" id="fornKpiTotal">0</div>
+    </div>
+    <div class="fin-kpi" style="border-top:3px solid #059669">
+      <div class="fin-kpi-icon" style="background:#D1FAE5">🛒</div>
+      <div class="fin-kpi-lbl">Total Comprado (histórico)</div>
+      <div class="fin-kpi-val" id="fornKpiComprado">R$ 0</div>
+    </div>
+    <div class="fin-kpi" style="border-top:3px solid #F59E0B">
+      <div class="fin-kpi-icon" style="background:#FEF3C7">📋</div>
+      <div class="fin-kpi-lbl">Compras Este Mês</div>
+      <div class="fin-kpi-val" id="fornKpiMes">R$ 0</div>
+    </div>
+  </div>
+
+  <!-- Grid de cards de fornecedores -->
+  <div id="fornGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px"></div>
+  <div id="fornEmpty" style="display:none;text-align:center;padding:60px 20px;color:var(--muted)">
+    <div style="font-size:48px;margin-bottom:12px">🏭</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:6px">Nenhum fornecedor cadastrado</div>
+    <div style="font-size:12px">Clique em "+ Novo Fornecedor" para adicionar</div>
+  </div>
+</div>
+
+<!-- MODAL: Novo Fornecedor -->
+<div class="gen-overlay" id="fornOverlay" onclick="if(event.target===this)fornCloseModal()">
+  <div class="gen-modal" style="width:520px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#4F46E5,#7C3AED);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff" id="fornModalTitle">🏭 Novo Fornecedor</div>
+      <button class="gen-close" onclick="fornCloseModal()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <input type="hidden" id="fornEditId">
+      <div class="fg2">
+        <div class="fg" style="grid-column:1/-1">
+          <label>Nome do Fornecedor *</label>
+          <input type="text" id="fornNome" placeholder="Ex: Geoplas, Sinteglas, ACTOS...">
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Categoria</label>
+          <select id="fornCat">
+            <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+            <option value="Mão de Obra">🔧 Mão de Obra</option>
+            <option value="Serviços">⚙️ Serviços</option>
+            <option value="Equipamentos">🔩 Equipamentos</option>
+            <option value="Embalagens">📦 Embalagens</option>
+            <option value="Outros">📌 Outros</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>CNPJ / CPF</label>
+          <input type="text" id="fornCNPJ" placeholder="00.000.000/0001-00">
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>WhatsApp</label>
+          <input type="tel" id="fornWA" placeholder="(62) 99999-9999">
+        </div>
+        <div class="fg">
+          <label>Telefone / E-mail</label>
+          <input type="text" id="fornTel" placeholder="(62) 3333-4444 ou email@">
+        </div>
+      </div>
+      <div class="fg">
+        <label>Observações / Produtos que fornece</label>
+        <textarea id="fornObs" rows="2" placeholder="Ex: Fornece acrílico transparente e colorido, prazo 2 dias..."
+          style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;resize:vertical;background:var(--bg);color:var(--text)"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="fornCloseModal()">Cancelar</button>
+        <button class="gen-submit" style="flex:2" onclick="fornSalvar()">💾 Salvar Fornecedor</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Histórico de Compras do Fornecedor -->
+<div class="gen-overlay" id="fornHistOverlay" onclick="if(event.target===this)fornHistClose()">
+  <div class="gen-modal" style="width:580px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#059669,#34D399);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff" id="fornHistTitle">📋 Histórico de Compras</div>
+      <button class="gen-close" onclick="fornHistClose()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <input type="hidden" id="fornHistId">
+      <!-- Form nova compra -->
+      <div style="background:var(--bg2);border-radius:10px;padding:14px;margin-bottom:16px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--brand-mid);margin-bottom:10px">+ Registrar Nova Compra</div>
+        <div class="fg2">
+          <div class="fg">
+            <label>Produto / Serviço</label>
+            <input type="text" id="fornHistProd" placeholder="Ex: Acrílico 3mm transparente 2mx1m">
+          </div>
+          <div class="fg">
+            <label>Valor (R$)</label>
+            <input type="number" id="fornHistValor" step="0.01" min="0" placeholder="0,00">
+          </div>
+        </div>
+        <div class="fg2">
+          <div class="fg">
+            <label>Data</label>
+            <input type="date" id="fornHistData">
+          </div>
+          <div class="fg">
+            <label>Nº NF / Pedido</label>
+            <input type="text" id="fornHistNF" placeholder="Ex: NF 00456">
+          </div>
+        </div>
+        <button class="gen-submit" style="margin-top:8px" onclick="fornHistAddCompra()">➕ Adicionar Compra</button>
+      </div>
+      <!-- Tabela histórico -->
+      <div style="max-height:280px;overflow-y:auto">
+        <table class="table" id="fornHistTable">
+          <thead><tr><th>Data</th><th>Produto/Serviço</th><th>NF</th><th>Valor</th><th></th></tr></thead>
+          <tbody id="fornHistBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--muted)" id="fornHistTotalLabel">Total: R$ 0</span>
+        <button class="topbar-btn" onclick="fornCriarCP()" id="fornBtnCP">📤 Lançar em Contas a Pagar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST CONTAINER -->
 <div id="toastContainer"></div>
 
@@ -3337,7 +3515,10 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       <div class="fg2">
         <div class="fg">
           <label>Fornecedor / Referência</label>
-          <input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú...">
+          <select id="finCPFornSel" onchange="finCPFornSelect()" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);margin-bottom:4px">
+            <option value="">— Selecionar fornecedor cadastrado —</option>
+          </select>
+          <input type="text" id="finCPForn" placeholder="Ou digite manualmente...">
         </div>
         <div class="fg">
           <label>Conta Bancária</label>
@@ -3511,9 +3692,262 @@ function navFin(tab, el) {
 }
 
 // Navigation
+
+// ════════════════════════════════════════════════════════════════════════
+// MÓDULO FORNECEDORES
+// ════════════════════════════════════════════════════════════════════════
+var FORN_KEY = 'erp_fornecedores';
+function fornLoad(){ try{ return JSON.parse(localStorage.getItem(FORN_KEY)||'[]'); }catch(e){ return []; } }
+function fornSaveAll(arr){ localStorage.setItem(FORN_KEY, JSON.stringify(arr)); }
+
+var FORN_CAT_COLOR = {
+  'Matéria-Prima':'#7C3AED','Mão de Obra':'#059669','Serviços':'#3B82F6',
+  'Equipamentos':'#F59E0B','Embalagens':'#10B981','Outros':'#6B7280'
+};
+var FORN_CAT_ICON = {
+  'Matéria-Prima':'🪵','Mão de Obra':'🔧','Serviços':'⚙️',
+  'Equipamentos':'🔩','Embalagens':'📦','Outros':'📌'
+};
+
+function fornRender() {
+  var list = fornLoad();
+  var q = ((document.getElementById('fornSearch')||{}).value||'').toLowerCase();
+  var catFlt = (document.getElementById('fornCatFlt')||{}).value||'';
+  var filtered = list.filter(function(f){
+    var qOk = !q || f.nome.toLowerCase().includes(q) || (f.obs||'').toLowerCase().includes(q);
+    var cOk = !catFlt || f.categoria===catFlt;
+    return qOk && cOk;
+  });
+
+  // KPIs
+  var totalComprado = list.reduce(function(s,f){ return s+(f.historico||[]).reduce(function(hs,h){return hs+h.valor;},0); },0);
+  var mesAtual = new Date().getMonth()+1;
+  var anoAtual = new Date().getFullYear();
+  var compMes = list.reduce(function(s,f){
+    return s+(f.historico||[]).filter(function(h){
+      if(!h.data) return false;
+      var d=new Date(h.data); return d.getMonth()+1===mesAtual&&d.getFullYear()===anoAtual;
+    }).reduce(function(hs,h){return hs+h.valor;},0);
+  },0);
+  var kT=document.getElementById('fornKpiTotal'); if(kT) kT.textContent=list.length;
+  var kC=document.getElementById('fornKpiComprado'); if(kC) kC.textContent=finFmt(totalComprado);
+  var kM=document.getElementById('fornKpiMes'); if(kM) kM.textContent=finFmt(compMes);
+
+  var grid=document.getElementById('fornGrid');
+  var empty=document.getElementById('fornEmpty');
+  if(!grid) return;
+  if(!filtered.length){ grid.innerHTML=''; if(empty) empty.style.display='block'; return; }
+  if(empty) empty.style.display='none';
+  grid.innerHTML=filtered.map(function(f){
+    var cor = FORN_CAT_COLOR[f.categoria]||'#6B7280';
+    var ico = FORN_CAT_ICON[f.categoria]||'📌';
+    var hist = f.historico||[];
+    var totalF = hist.reduce(function(s,h){return s+h.valor;},0);
+    var ultimaCompra = hist.length ? hist[hist.length-1] : null;
+    return '<div class="card" style="border-top:3px solid '+cor+';cursor:default">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">'
+        +'<div>'
+          +'<div style="font-size:15px;font-weight:800;color:var(--text)">'+f.nome+'</div>'
+          +'<span style="font-size:10px;font-weight:700;background:'+cor+'18;color:'+cor+';border:1px solid '+cor+'33;padding:2px 8px;border-radius:10px">'+ico+' '+f.categoria+'</span>'
+        +'</div>'
+        +'<div style="display:flex;gap:6px">'
+          +(f.whatsapp?'<button data-ph="'+f.whatsapp.replace(/\D/g,'')+'" onclick="window.open(decodeURIComponent(\'https%3A//wa.me/55\')+this.dataset.ph,\'_blank\')" style="background:#25D366;color:#fff;border:none;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:12px">💬</button>':'')
+          +'<button data-fid="'+f.id+'" onclick="fornEditar(this.dataset.fid)" style="background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px">✏️</button>'
+          +'<button data-fid2="'+f.id+'" onclick="if(confirm(\'Excluir '+f.nome+'?\'))fornExcluir(this.dataset.fid2)" style="background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px">🗑️</button>'
+        +'</div>'
+      +'</div>'
+      +(f.cnpj?'<div style="font-size:11px;color:var(--muted);margin-bottom:4px">📄 CNPJ: '+f.cnpj+'</div>':'')
+      +(f.telefone?'<div style="font-size:11px;color:var(--muted);margin-bottom:4px">📞 '+f.telefone+'</div>':'')
+      +(f.obs?'<div style="font-size:11px;color:var(--muted);margin-bottom:10px;font-style:italic">'+f.obs+'</div>':'')
+      +'<div style="border-top:1px solid var(--border);padding-top:10px;display:flex;justify-content:space-between;align-items:center">'
+        +'<div>'
+          +'<div style="font-size:10px;color:var(--muted)">Total comprado</div>'
+          +'<div style="font-size:15px;font-weight:800;color:#059669">'+finFmt(totalF)+'</div>'
+          +(ultimaCompra?'<div style="font-size:10px;color:var(--muted)">Última: '+ultimaCompra.data+'</div>':'')
+        +'</div>'
+        +'<button data-fid3="'+f.id+'" onclick="fornHistAbrir(this.dataset.fid3)" class="topbar-btn" style="font-size:11px">📋 Histórico ('+hist.length+')</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+}
+
+function fornNovoModal() {
+  ['fornEditId','fornNome','fornCNPJ','fornWA','fornTel','fornObs'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+  var t=document.getElementById('fornModalTitle'); if(t) t.textContent='🏭 Novo Fornecedor';
+  document.getElementById('fornOverlay').classList.add('open');
+}
+
+function fornEditar(id) {
+  var list=fornLoad(), f=list.find(function(x){return x.id===id;}); if(!f) return;
+  var set=function(elId,v){var el=document.getElementById(elId);if(el)el.value=v||'';};
+  set('fornEditId',f.id); set('fornNome',f.nome); set('fornCNPJ',f.cnpj);
+  set('fornWA',f.whatsapp); set('fornTel',f.telefone); set('fornObs',f.obs);
+  var cat=document.getElementById('fornCat'); if(cat&&f.categoria) cat.value=f.categoria;
+  var t=document.getElementById('fornModalTitle'); if(t) t.textContent='✏️ Editar Fornecedor';
+  document.getElementById('fornOverlay').classList.add('open');
+}
+
+function fornCloseModal(){ document.getElementById('fornOverlay').classList.remove('open'); }
+
+function fornSalvar() {
+  var nome=(document.getElementById('fornNome')||{}).value||'';
+  if(!nome.trim()){ showToast('Informe o nome do fornecedor','warn'); return; }
+  var editId=(document.getElementById('fornEditId')||{}).value||'';
+  var list=fornLoad();
+  var obj={
+    id: editId||'forn'+Date.now(),
+    nome: nome.trim(),
+    categoria: (document.getElementById('fornCat')||{}).value||'Outros',
+    cnpj: (document.getElementById('fornCNPJ')||{}).value||'',
+    whatsapp: (document.getElementById('fornWA')||{}).value||'',
+    telefone: (document.getElementById('fornTel')||{}).value||'',
+    obs: (document.getElementById('fornObs')||{}).value||'',
+    criado: new Date().toLocaleDateString('pt-BR')
+  };
+  if(editId) {
+    var idx=list.findIndex(function(x){return x.id===editId;});
+    if(idx>=0){ obj.historico=list[idx].historico||[]; list[idx]=obj; }
+  } else {
+    obj.historico=[];
+    list.unshift(obj);
+  }
+  fornSaveAll(list);
+  fornCloseModal();
+  fornRender();
+  showToast((editId?'Fornecedor atualizado':'Fornecedor cadastrado')+'!','ok');
+}
+
+function fornExcluir(id) {
+  var list=fornLoad().filter(function(x){return x.id!==id;});
+  fornSaveAll(list); fornRender();
+  showToast('Fornecedor removido','ok');
+}
+
+// ── Histórico de Compras ──────────────────────────────────────────────────────
+function fornHistAbrir(id) {
+  var list=fornLoad(), f=list.find(function(x){return x.id===id;}); if(!f) return;
+  var hid=document.getElementById('fornHistId'); if(hid) hid.value=id;
+  var tit=document.getElementById('fornHistTitle'); if(tit) tit.textContent='📋 '+f.nome+' — Histórico';
+  // Set today date
+  var dtEl=document.getElementById('fornHistData');
+  if(dtEl&&!dtEl.value){
+    var n=new Date(); dtEl.value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+  }
+  ['fornHistProd','fornHistValor','fornHistNF'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  fornHistRender(f);
+  document.getElementById('fornHistOverlay').classList.add('open');
+}
+function fornHistClose(){ document.getElementById('fornHistOverlay').classList.remove('open'); }
+
+function fornHistRender(f) {
+  var hist=(f&&f.historico)||[];
+  var tbody=document.getElementById('fornHistBody'); if(!tbody) return;
+  var total=hist.reduce(function(s,h){return s+h.valor;},0);
+  var lbl=document.getElementById('fornHistTotalLabel');
+  if(lbl) lbl.textContent='Total: '+finFmt(total)+' ('+hist.length+' compras)';
+  if(!hist.length){
+    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px">Nenhuma compra registrada</td></tr>';
+    return;
+  }
+  tbody.innerHTML=hist.slice().reverse().map(function(h,i){
+    var realIdx=hist.length-1-i;
+    return '<tr>'
+      +'<td style="color:var(--muted);font-size:11px">'+(h.data||'—')+'</td>'
+      +'<td style="font-weight:600">'+h.produto+'</td>'
+      +'<td style="color:var(--muted);font-size:11px">'+(h.nf||'—')+'</td>'
+      +'<td style="font-weight:700;color:#059669">'+finFmt(h.valor)+'</td>'
+      +'<td><button onclick="fornHistDel('+realIdx+')" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:13px">🗑️</button></td>'
+    +'</tr>';
+  }).join('');
+}
+
+function fornHistAddCompra() {
+  var id=(document.getElementById('fornHistId')||{}).value||'';
+  var prod=(document.getElementById('fornHistProd')||{}).value||'';
+  var val=parseFloat((document.getElementById('fornHistValor')||{}).value||'0');
+  var data=(document.getElementById('fornHistData')||{}).value||'';
+  var nf=(document.getElementById('fornHistNF')||{}).value||'';
+  if(!prod||!val){ showToast('Informe produto e valor','warn'); return; }
+  var dataBR=data?(function(d){var p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0];})(data):'';
+  var list=fornLoad(), idx=list.findIndex(function(x){return x.id===id;}); if(idx<0) return;
+  if(!list[idx].historico) list[idx].historico=[];
+  list[idx].historico.push({produto:prod,valor:val,data:dataBR,nf:nf,criado:new Date().toLocaleDateString('pt-BR')});
+  fornSaveAll(list);
+  fornHistRender(list[idx]);
+  fornRender();
+  document.getElementById('fornHistProd').value='';
+  document.getElementById('fornHistValor').value='';
+  document.getElementById('fornHistNF').value='';
+  showToast('Compra registrada!','ok');
+}
+
+function fornHistDel(idx) {
+  var id=(document.getElementById('fornHistId')||{}).value||'';
+  var list=fornLoad(), fi=list.findIndex(function(x){return x.id===id;}); if(fi<0) return;
+  list[fi].historico.splice(idx,1);
+  fornSaveAll(list);
+  fornHistRender(list[fi]);
+  fornRender();
+}
+
+function fornCriarCP() {
+  var id=(document.getElementById('fornHistId')||{}).value||'';
+  var list=fornLoad(), f=list.find(function(x){return x.id===id;}); if(!f) return;
+  fornHistClose();
+  // Pre-fill CP modal with this supplier
+  setTimeout(function(){
+    finCPNovoModal();
+    var descEl=document.getElementById('finCPDesc'); if(descEl) descEl.value='Compra — '+f.nome;
+    var fornEl=document.getElementById('finCPFornSel');
+    if(fornEl){
+      // Try to select this supplier
+      for(var i=0;i<fornEl.options.length;i++){
+        if(fornEl.options[i].value===id){ fornEl.selectedIndex=i; fornEl.dispatchEvent(new Event('change')); break; }
+      }
+    }
+  }, 200);
+}
+
+// ── Sidebar accordion toggle ──────────────────────────────────────────────────
+var _sbState = {};
+function sbToggle(key) {
+  _sbState[key] = !_sbState[key]; // true = collapsed
+  var grp = document.getElementById('sbG-'+key);
+  var sec = grp ? grp.previousElementSibling : null;
+  if(grp) {
+    if(_sbState[key]) {
+      grp.style.maxHeight = '0';
+      grp.classList.add('collapsed');
+    } else {
+      grp.style.maxHeight = grp.scrollHeight + 'px';
+      grp.classList.remove('collapsed');
+    }
+  }
+  if(sec) sec.classList.toggle('collapsed', !!_sbState[key]);
+  localStorage.setItem('erp_sb_state', JSON.stringify(_sbState));
+}
+function sbRestoreState() {
+  try { _sbState = JSON.parse(localStorage.getItem('erp_sb_state')||'{}'); } catch(e){_sbState={};}
+  ['principal','operacao','comercial','financeiro','admin'].forEach(function(k){
+    var grp = document.getElementById('sbG-'+k);
+    var sec = grp ? grp.previousElementSibling : null;
+    if(!grp) return;
+    if(_sbState[k]) {
+      grp.style.maxHeight = '0';
+      grp.classList.add('collapsed');
+      if(sec) sec.classList.add('collapsed');
+    } else {
+      grp.style.maxHeight = grp.scrollHeight + 200 + 'px';
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreState, 100); });
+
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','financeiro','relatorios','config-orc','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -3540,7 +3974,8 @@ function nav(page, el) {
     relatorios: '🖨️ Relatórios Financeiros',
     'config-orc': 'Configuração Orçamento',
     'config-usr': 'Criação de Usuários',
-    seguranca: '🔐 Segurança'
+    seguranca: '🔐 Segurança',
+    fornecedores: '🏭 Fornecedores'
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
   // Ao entrar no orçamento, sempre resetar para step 1
@@ -3557,6 +3992,7 @@ function nav(page, el) {
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
+  if (page === 'fornecedores') { setTimeout(function(){ fornRender(); }, 0); }
   if (page === 'crm')        { setTimeout(function(){ if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 800); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
@@ -5868,11 +6304,30 @@ function finCPPagar(id) {
 }
 function finCPDel(id){ FIN_CP=FIN_CP.filter(function(x){return x.id!==id;}); finCPRender(); finDashKPIs(); }
 
+function finCPFornSelect() {
+  var sel=document.getElementById('finCPFornSel');
+  var inp=document.getElementById('finCPForn');
+  if(!sel||!inp) return;
+  var id=sel.value;
+  if(!id){ inp.value=''; return; }
+  var list=fornLoad(), f=list.find(function(x){return x.id===id;});
+  if(f) inp.value=f.nome;
+}
+function finCPPopularForn() {
+  var sel=document.getElementById('finCPFornSel'); if(!sel) return;
+  var list=fornLoad();
+  var opts='<option value="">— Selecionar fornecedor cadastrado —</option>';
+  list.forEach(function(f){
+    opts+='<option value="'+f.id+'">'+FORN_CAT_ICON[f.categoria]||'📌'+' '+f.nome+'</option>';
+  });
+  sel.innerHTML=opts;
+}
 function finCPNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCPVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
   finPopularContas('finCPConta');
+  finCPPopularForn();
   document.getElementById('finCPOverlay').classList.add('open');
 }
 function finCPOverlayClose(){ document.getElementById('finCPOverlay').classList.remove('open'); }
