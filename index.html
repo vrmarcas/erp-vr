@@ -795,6 +795,18 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 /* DRE intro box */
 .fin-dre-intro{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;background:#F0F9FF;border:1px solid #BAE6FD;border-radius:10px;margin-bottom:16px;font-size:12px;color:#0369A1;line-height:1.5}
 .fin-dre-intro span{font-size:22px;flex-shrink:0}
+/* Custo vs Despesa badges */
+.fin-tipo-custo{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:800;text-transform:uppercase;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;margin-right:2px}
+.fin-tipo-despesa{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:800;text-transform:uppercase;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;margin-right:2px}
+/* Relatórios impressão */
+.rel-block{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px}
+.rel-header{font-size:13px;font-weight:800;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--border);color:var(--text)}
+@media print {
+  .sidebar,.topbar,.topbar-btn,button,.fin-tab-bar,.fin-brand-filter,.fin-kpi-grid,.fin-chart-row,#pg-financeiro .card:not(.rel-block){display:none!important}
+  #pg-relatorios{display:block!important}
+  .rel-block{border:1px solid #ccc;border-radius:0;box-shadow:none;margin-bottom:16pt}
+  body{background:#fff;color:#000}
+}
 </style>
 <!-- Firebase SDK (Compat — carregado antes dos scripts) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -891,19 +903,25 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   <div class="sb-nav">
     <div class="sb-section">Principal</div>
     <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ico">📊</span> Dashboard</div>
-    <div class="sb-item" onclick="nav('kanban',this)"><span class="ico">📋</span> Kanban OS <span class="sb-badge red">3</span></div>
+
+    <div class="sb-section">Operação</div>
+    <div class="sb-item" onclick="nav('kanban',this)"><span class="ico">📋</span> Kanban OS <span class="sb-badge red" id="sbBadgeKanban"></span></div>
     <div class="sb-item" onclick="nav('os-list',this)"><span class="ico">📄</span> Todas as OS</div>
+    <div class="sb-item" onclick="nav('estoque',this)"><span class="ico">📦</span> Estoque <span class="sb-badge red" id="sbBadgeEstoque" style="display:none"></span></div>
 
     <div class="sb-section">Comercial</div>
     <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
-    <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📋</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
-    <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Analítico Comercial</div>
+    <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
+    <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
     <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
     <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
 
-    <div class="sb-section">Operação</div>
-    <div class="sb-item" onclick="nav('estoque',this)"><span class="ico">📦</span> Estoque Placas <span class="sb-badge red">2</span></div>
-    <div class="sb-item" onclick="nav('financeiro',this)"><span class="ico">💳</span> Financeiro</div>
+    <div class="sb-section">Financeiro</div>
+    <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
+    <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
+    <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
+    <div class="sb-item" id="sbFinDRE"  onclick="navFin('dre',this)"><span class="ico">📋</span> DRE</div>
+    <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
 
     <div class="sb-section">Admin</div>
     <div class="sb-item" onclick="nav('config-orc',this)"><span class="ico">⚙️</span> Config. Orçamento</div>
@@ -2611,12 +2629,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               <select id="finCPCatFlt" onchange="finCPRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="">Todas as categorias</option>
-                <option value="Pessoal">Pessoal</option>
-                <option value="Operacional">Operacional</option>
-                <option value="Matéria-prima">Matéria-prima</option>
-                <option value="Impostos">Impostos</option>
-                <option value="Empréstimos">Empréstimos</option>
-                <option value="Outros">Outros</option>
+                <optgroup label="── CUSTOS (CMV)">
+                  <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+                  <option value="Mão de Obra Direta">🔧 Mão de Obra Direta</option>
+                </optgroup>
+                <optgroup label="── DESPESAS">
+                  <option value="Pessoal Admin">👥 Pessoal Admin</option>
+                  <option value="Operacional">⚙️ Operacional</option>
+                  <option value="Impostos">🏛️ Impostos</option>
+                  <option value="Empréstimos">🏦 Empréstimos</option>
+                  <option value="Outros">📌 Outros</option>
+                </optgroup>
               </select>
               <select id="finCPStatusFlt" onchange="finCPRender()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="">Todos os status</option>
@@ -2722,12 +2745,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
           <div class="fg2">
             <div class="fg"><label>Categoria</label>
               <select id="finCPCat">
-                <option value="Pessoal">Pessoal</option>
-                <option value="Operacional">Operacional</option>
-                <option value="Matéria-prima">Matéria-prima</option>
-                <option value="Impostos">Impostos</option>
-                <option value="Empréstimos">Empréstimos</option>
-                <option value="Outros">Outros</option>
+                <optgroup label="── CUSTO (CMV)">
+                  <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+                  <option value="Mão de Obra Direta">🔧 Mão de Obra Direta</option>
+                </optgroup>
+                <optgroup label="── DESPESA">
+                  <option value="Pessoal Admin">👥 Pessoal Admin</option>
+                  <option value="Operacional">⚙️ Operacional</option>
+                  <option value="Impostos">🏛️ Impostos</option>
+                  <option value="Empréstimos">🏦 Empréstimos</option>
+                  <option value="Outros">📌 Outros</option>
+                </optgroup>
               </select>
             </div>
             <div class="fg"><label>Marca</label>
@@ -2785,6 +2813,30 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         </table>
       </div>
     </div>
+
+    <!-- ==============================
+         RELATÓRIOS FINANCEIROS
+         ============================== -->
+    <div id="pg-relatorios" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h2 style="font-size:16px;font-weight:800;margin:0">🖨️ Relatórios Financeiros</h2>
+          <p style="font-size:11px;color:var(--muted);margin:2px 0 0">Selecione o mês e gere os relatórios para impressão ou exportação</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="relMes" onchange="relatoriosRender()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+            <option value="0">Acumulado Anual</option>
+            <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+            <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+            <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+            <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+          </select>
+          <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800" onclick="window.print()">🖨️ Imprimir</button>
+        </div>
+      </div>
+      <!-- Conteúdo gerado por relatoriosRender() -->
+      <div id="relConteudo"></div>
+    </div><!-- /pg-relatorios -->
 
     <!-- ==============================
          CONFIGURAÇÕES — Tabela de Preços
@@ -3194,10 +3246,21 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 </div>
 
 <script>
+// Navegar direto para sub-aba do Financeiro
+function navFin(tab, el) {
+  nav('financeiro', el);
+  // Após mostrar a página, ativar a aba correta
+  setTimeout(function(){ finTab(tab); }, 60);
+  // Atualizar título topbar por sub-aba
+  var subtitles = {dash:'Dashboard Financeiro', cr:'Contas a Receber', cp:'Contas a Pagar', dre:'DRE Gerencial'};
+  var titleEl = document.getElementById('topbarTitle');
+  if(titleEl && subtitles[tab]) titleEl.textContent = subtitles[tab];
+}
+
 // Navigation
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','financeiro','config-orc','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','financeiro','relatorios','config-orc','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -3217,10 +3280,11 @@ function nav(page, el) {
     dashboard: 'Dashboard', kanban: 'Kanban de OS',
     'os-list': 'Todas as OS', orcamento: 'Novo Orçamento',
     'orcamentos-enviados': 'Orçamentos Enviados',
-    comercial: 'Analítico Comercial',
+    comercial: 'Dashboard Comercial',
     crm: 'CRM',
-    clientes: 'Clientes', estoque: 'Estoque de Placas',
-    financeiro: 'Financeiro',
+    clientes: 'Clientes', estoque: 'Estoque',
+    financeiro: 'Dashboard Financeiro',
+    relatorios: '🖨️ Relatórios Financeiros',
     'config-orc': 'Configuração Orçamento',
     'config-usr': 'Criação de Usuários',
     seguranca: '🔐 Segurança'
@@ -3232,6 +3296,7 @@ function nav(page, el) {
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
+  if (page === 'relatorios') { setTimeout(function(){ relatoriosRender(); }, 0); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
@@ -4970,10 +5035,10 @@ var CLIENTES_DATA = [
 // ============================================================
 function syncSidebarBadges() {
   var kanbanCount=Object.values(KB_OS).filter(function(o){return o.status==='em_andamento'||o.status==='aguard_master';}).length;
-  var kbBadge=document.querySelector('.sb-item[onclick*="kanban"] .sb-badge');
-  if(kbBadge) kbBadge.textContent=kanbanCount||'';
+  var kbBadge=document.getElementById('sbBadgeKanban');
+  if(kbBadge){kbBadge.textContent=kanbanCount||'';kbBadge.style.display=kanbanCount?'':'none';}
   var estqCount=Object.values(STOCK).filter(function(s){return s.qty<s.min;}).length;
-  var stBadge=document.querySelector('.sb-item[onclick*="estoque"] .sb-badge');
+  var stBadge=document.getElementById('sbBadgeEstoque');
   if(stBadge){stBadge.textContent=estqCount||'';stBadge.style.display=estqCount?'':'none';}
 }
 
@@ -5374,8 +5439,40 @@ function finCPUpdateSummary() {
 }
 
 // ── Contas a Pagar Render ─────────────────────────────────────────────────────
-var FIN_CAT_ICONS = {'Pessoal':'👥','Operacional':'⚙️','Matéria-prima':'🪵','Impostos':'🏛️','Empréstimos':'🏦','Outros':'📌'};
-var FIN_CAT_COLORS = {'Pessoal':'#7C3AED','Operacional':'#3B82F6','Matéria-prima':'#F59E0B','Impostos':'#EF4444','Empréstimos':'#6B7280','Outros':'#10B981'};
+// ── CUSTO = diretamente ligado à produção | DESPESA = operacional/administrativo ──
+var FIN_CAT_ICONS = {
+  'Matéria-Prima':      '🪵',
+  'Mão de Obra Direta': '🔧',
+  'Pessoal Admin':      '👥',
+  'Operacional':        '⚙️',
+  'Impostos':           '🏛️',
+  'Empréstimos':        '🏦',
+  'Outros':             '📌'
+};
+var FIN_CAT_COLORS = {
+  'Matéria-Prima':      '#F59E0B',
+  'Mão de Obra Direta': '#EA580C',
+  'Pessoal Admin':      '#7C3AED',
+  'Operacional':        '#3B82F6',
+  'Impostos':           '#EF4444',
+  'Empréstimos':        '#6B7280',
+  'Outros':             '#10B981'
+};
+// Mapa de tipo: custo (CMV) ou despesa (operacional)
+var FIN_TIPO_MAP = {
+  'Matéria-Prima':      'custo',
+  'Mão de Obra Direta': 'custo',
+  'Pessoal Admin':      'despesa',
+  'Operacional':        'despesa',
+  'Impostos':           'despesa',
+  'Empréstimos':        'despesa',
+  'Outros':             'despesa'
+};
+// Compatibilidade com dados antigos (categoria anterior → nova)
+var FIN_CAT_ALIAS = {
+  'Matéria-prima':'Matéria-Prima', 'Pessoal':'Pessoal Admin'
+};
+function finNormCat(c){ return FIN_CAT_ALIAS[c]||c; }
 function finCPRender() {
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
@@ -5394,9 +5491,14 @@ function finCPRender() {
   tbody.innerHTML=list.map(function(r){
     var statusMapCP={pendente:'pendente',pago:'pago',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMapCP[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
-    var catC=FIN_CAT_COLORS[r.categoria]||'#6B7280';
-    var catIco=FIN_CAT_ICONS[r.categoria]||'📌';
-    var catBadge='<span class="fin-cat-badge" style="background:'+catC+'18;color:'+catC+';border:1px solid '+catC+'33">'+catIco+' '+r.categoria+'</span>';
+    var cat=finNormCat(r.categoria);
+    var tipo=FIN_TIPO_MAP[cat]||'despesa';
+    var catC=FIN_CAT_COLORS[cat]||'#6B7280';
+    var catIco=FIN_CAT_ICONS[cat]||'📌';
+    var tipoBadge=tipo==='custo'
+      ?'<span class="fin-tipo-custo">CMV</span>'
+      :'<span class="fin-tipo-despesa">Desp</span>';
+    var catBadge='<span class="fin-cat-badge" style="background:'+catC+'18;color:'+catC+';border:1px solid '+catC+'33">'+catIco+' '+cat+'</span>';
     var acoesStr='';
     if(r.status!=='pago'){
       acoesStr='<button onclick="finCPPagar(\''+r.id+'\')" class="fin-baixar-btn">✓ Baixar</button> ';
@@ -5405,8 +5507,8 @@ function finCPRender() {
     }
     acoesStr+='<button onclick="finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del">✕</button>';
     return '<tr>'
-      +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Despesa interna')+'</div></td>'
-      +'<td>'+catBadge+'</td>'
+      +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Lançamento interno')+'</div></td>'
+      +'<td>'+tipoBadge+' '+catBadge+'</td>'
       +'<td style="font-weight:800;color:#DC2626;font-size:13px">'+finFmt(r.valor)+'</td>'
       +'<td>'+r.vencimento+'</td>'
       +'<td>'+badge+'</td>'
@@ -5459,12 +5561,21 @@ function finDREBuild() {
   var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
   var impostos=receitaBruta*0.07;
   var receitaLiq=receitaBruta-impostos;
-  var cmv=cpFiltro.filter(function(c){return c.categoria==='Matéria-prima';}).reduce(function(s,c){return s+c.valor;},0);
+  // CUSTO = diretamente ligado à produção (CMV)
+  var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
+  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmv=cmvMat+cmvMod;
   var lucroBruto=receitaLiq-cmv;
-  var desp=cpFiltro.filter(function(c){return c.categoria!=='Matéria-prima';}).reduce(function(s,c){return s+c.valor;},0);
+  // DESPESA = operacional/administrativo
+  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
+  var desp=cpPessoal+cpOp+cpEmp+cpImp;
   var lucroLiq=lucroBruto-desp;
   var pct=function(v){return receitaBruta>0?' <span class="dre-pct">'+(v/receitaBruta*100).toFixed(1)+'%</span>':'';};
-  var secHd=function(t){return '<div class="dre-section-hd">'+t+'</div>';};
+  var secHd=function(t,sub){return '<div class="dre-section-hd">'+t+(sub?'<span style="font-size:9px;font-weight:400;margin-left:6px;opacity:.7">'+sub+'</span>':'')+'</div>';};
   var row=function(lbl,val,extra,indent){
     var cls='dre-row'+(extra?' '+extra:'')+(indent?' dre-row-indent':'');
     var sign=val>=0?'<span class="dre-val-pos">':'<span class="dre-val-neg">';
@@ -5472,10 +5583,6 @@ function finDREBuild() {
     var valHtml=isResult?sign+finFmt(val)+'</span>'+pct(val):finFmt(val)+pct(val);
     return '<div class="'+cls+'"><span>'+lbl+'</span><div>'+valHtml+'</div></div>';
   };
-  var cpPessoal=cpFiltro.filter(function(c){return c.categoria==='Pessoal';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpOp=cpFiltro.filter(function(c){return c.categoria==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpEmp=cpFiltro.filter(function(c){return c.categoria==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpImp=cpFiltro.filter(function(c){return c.categoria==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
   var recVR=txFiltro.filter(function(t){return t.marca==='vr';}).reduce(function(s,t){return s+t.valor;},0);
   var recVT=txFiltro.filter(function(t){return t.marca==='vit';}).reduce(function(s,t){return s+t.valor;},0);
 
@@ -5486,14 +5593,16 @@ function finDREBuild() {
     +row('(+) Receita Bruta de Vendas',receitaBruta,'dre-row-total')
     +row('(−) Impostos e Deduções (7%)',impostos,'',true)
     +row('(=) Receita Líquida',receitaLiq,'dre-row-total '+(receitaLiq>=0?'dre-row-result-pos':'dre-row-result-neg'))
-    +secHd('CUSTOS')
-    +row('(−) CMV — Matéria-prima consumida',cmv,'',true)
+    +secHd('CUSTOS DE PRODUÇÃO','(CMV — vinculados à produção)')
+    +row('(−) Matéria-Prima consumida',cmvMat,'',true)
+    +row('(−) Mão de Obra Direta',cmvMod,'',true)
+    +row('(=) CMV Total',cmv,'dre-row-total')
     +row('(=) Lucro Bruto',lucroBruto,'dre-row-total '+(lucroBruto>=0?'dre-row-result-pos':'dre-row-result-neg'))
-    +secHd('DESPESAS OPERACIONAIS')
-    +row('(−) Pessoal (salários + pró-labore)',cpPessoal,'',true)
-    +row('(−) Operacional (aluguel, energia, etc)',cpOp,'',true)
+    +secHd('DESPESAS OPERACIONAIS','(não vinculadas à produção)')
+    +row('(−) Pessoal Administrativo',cpPessoal,'',true)
+    +row('(−) Operacional (aluguel, energia, etc.)',cpOp,'',true)
     +row('(−) Empréstimos e Financiamentos',cpEmp,'',true)
-    +row('(−) Impostos sobre operação',cpImp,'',true)
+    +row('(−) Impostos e Tributos',cpImp,'',true)
     +row('(=) Total de Despesas Operacionais',desp,'dre-row-total')
     +secHd('RESULTADO')
     +row(lucroLiq>=0?'(=) 🟢 Lucro Líquido do Período':'(=) 🔴 Prejuízo do Período',lucroLiq,'dre-row-total '+(lucroLiq>=0?'dre-row-result-pos':'dre-row-result-neg'))
@@ -5526,6 +5635,103 @@ function finBaixaManual(marca) {
   FIN_TX.unshift({data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
   finRender(); finDashKPIs();
   showToast('Baixa de '+finFmt(v)+' registrada!','ok');
+}
+
+// ============================================================
+// RELATÓRIOS FINANCEIROS (página de impressão)
+// ============================================================
+function relatoriosRender() {
+  var el=document.getElementById('relConteudo'); if(!el) return;
+  var mesFlt=parseInt((document.getElementById('relMes')||{}).value||'0');
+  var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var periodoLabel=mesFlt===0?'Acumulado Anual':mesesNome[mesFlt]+' 2026';
+
+  var txFiltro=FIN_TX.filter(function(t){return t.status==='recebido'&&(mesFlt===0||(t.mes&&t.mes===mesFlt));});
+  var cpFiltro=FIN_CP.filter(function(c){return c.status==='pago'&&(mesFlt===0||(c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mesFlt));});
+  var crPend=FIN_CR.filter(function(r){return r.status==='pendente';});
+  var cpPend=FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';});
+
+  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
+  var impostos=receitaBruta*0.07;
+  var receitaLiq=receitaBruta-impostos;
+  var cpNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
+  var cmvMat=cpNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmvMod=cpNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmv=cmvMat+cmvMod;
+  var lucroBruto=receitaLiq-cmv;
+  var cpPessoal=cpNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpOp=cpNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpEmp=cpNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpImp=cpNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
+  var desp=cpPessoal+cpOp+cpEmp+cpImp;
+  var lucroLiq=lucroBruto-desp;
+  var totalReceber=crPend.reduce(function(s,r){return s+r.valor;},0);
+  var totalPagar=cpPend.reduce(function(s,r){return s+r.valor;},0);
+
+  var f=finFmt;
+  var pct=function(v){return receitaBruta>0?' ('+( v/receitaBruta*100).toFixed(1)+'%)':'';}
+
+  var dreRows=[
+    {lbl:'Receita Bruta de Vendas',      val:receitaBruta,bold:true,tipo:'receita'},
+    {lbl:'(−) Impostos e Deduções (7%)', val:-impostos,   bold:false,tipo:'dedução'},
+    {lbl:'Receita Líquida',              val:receitaLiq,  bold:true,tipo:'subtotal'},
+    {lbl:'─── CUSTOS DE PRODUÇÃO (CMV)───',val:null,      bold:false,tipo:'section'},
+    {lbl:'(−) Matéria-Prima',            val:-cmvMat,     bold:false,tipo:'custo'},
+    {lbl:'(−) Mão de Obra Direta',       val:-cmvMod,     bold:false,tipo:'custo'},
+    {lbl:'(=) CMV Total',                val:-cmv,        bold:true,tipo:'subtotal'},
+    {lbl:'(=) Lucro Bruto',              val:lucroBruto,  bold:true,tipo:lucroBruto>=0?'positivo':'negativo'},
+    {lbl:'─── DESPESAS OPERACIONAIS ───', val:null,        bold:false,tipo:'section'},
+    {lbl:'(−) Pessoal Administrativo',   val:-cpPessoal,  bold:false,tipo:'despesa'},
+    {lbl:'(−) Operacional',              val:-cpOp,       bold:false,tipo:'despesa'},
+    {lbl:'(−) Empréstimos',              val:-cpEmp,      bold:false,tipo:'despesa'},
+    {lbl:'(−) Impostos Operacionais',    val:-cpImp,      bold:false,tipo:'despesa'},
+    {lbl:'(=) Total Despesas',           val:-desp,       bold:true,tipo:'subtotal'},
+    {lbl:'LUCRO LÍQUIDO DO PERÍODO',     val:lucroLiq,    bold:true,tipo:lucroLiq>=0?'positivo':'negativo'}
+  ];
+
+  var dreHtml=dreRows.map(function(r){
+    if(r.tipo==='section') return '<tr style="background:#F8FAFC"><td colspan="2" style="padding:6px 14px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#94A3B8">'+r.lbl+'</td></tr>';
+    var bgMap={subtotal:'#F1F5F9',positivo:lucroLiq>=0?'#F0FDF4':'#FFF5F5',negativo:'#FFF5F5'};
+    var bg=bgMap[r.tipo]||'';
+    var fw=r.bold?'800':'400';
+    var clr=r.tipo==='positivo'?(r.val>=0?'#059669':'#DC2626'):r.tipo==='negativo'?'#DC2626':'inherit';
+    return '<tr style="background:'+bg+';border-bottom:1px solid #E2E8F0">'
+      +'<td style="padding:7px 14px;font-size:12px;font-weight:'+fw+'">'+r.lbl+'</td>'
+      +'<td style="padding:7px 14px;text-align:right;font-size:12px;font-weight:'+fw+';color:'+clr+'">'
+      +(r.val!==null?f(Math.abs(r.val))+pct(Math.abs(r.val)):'')
+      +'</td></tr>';
+  }).join('');
+
+  // Fluxo de caixa simplificado
+  var fcHtml=FIN_TX.filter(function(t){return mesFlt===0||t.mes===mesFlt;}).slice(0,15).map(function(t){
+    return '<tr style="border-bottom:1px solid #F1F5F9">'
+      +'<td style="padding:6px 12px;font-size:11px">'+t.data+'</td>'
+      +'<td style="padding:6px 12px;font-size:11px">'+t.cliente+'</td>'
+      +'<td style="padding:6px 12px;font-size:11px">'+(t.metodo||'—')+'</td>'
+      +'<td style="padding:6px 12px;font-size:11px;text-align:right;font-weight:700;color:#059669">'+f(t.valor)+'</td>'
+      +'</tr>';
+  }).join('');
+
+  el.innerHTML=
+    '<div class="rel-block" style="page-break-after:always">'
+    +'<div class="rel-header"><strong>VR Marcas / Vitre</strong> — DRE Gerencial &nbsp;|&nbsp; '+periodoLabel+'</div>'
+    +'<table style="width:100%;border-collapse:collapse;border:1px solid #E2E8F0;border-radius:8px;overflow:hidden">'
+    +'<thead><tr style="background:#1E293B"><th style="padding:10px 14px;text-align:left;color:#fff;font-size:11px">Linha</th><th style="padding:10px 14px;text-align:right;color:#fff;font-size:11px">Valor</th></tr></thead>'
+    +'<tbody>'+dreHtml+'</tbody>'
+    +'</table>'
+    +'</div>'
+
+    +'<div class="rel-block">'
+    +'<div class="rel-header">Fluxo de Caixa — Últimas Entradas &nbsp;|&nbsp; '+periodoLabel+'</div>'
+    +'<table style="width:100%;border-collapse:collapse;border:1px solid #E2E8F0;border-radius:8px;overflow:hidden">'
+    +'<thead><tr style="background:#1E293B"><th style="padding:8px 12px;text-align:left;color:#fff;font-size:11px">Data</th><th style="padding:8px 12px;text-align:left;color:#fff;font-size:11px">Cliente</th><th style="padding:8px 12px;text-align:left;color:#fff;font-size:11px">Método</th><th style="padding:8px 12px;text-align:right;color:#fff;font-size:11px">Valor</th></tr></thead>'
+    +'<tbody>'+fcHtml+'</tbody>'
+    +'</table>'
+    +'<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +'<div style="padding:14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#059669;margin-bottom:4px">A Receber (Pendente)</div><div style="font-size:20px;font-weight:900;color:#059669">'+f(totalReceber)+'</div></div>'
+    +'<div style="padding:14px;background:#FFF5F5;border:1px solid #FCA5A5;border-radius:8px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#DC2626;margin-bottom:4px">A Pagar (Pendente)</div><div style="font-size:20px;font-weight:900;color:#DC2626">'+f(totalPagar)+'</div></div>'
+    +'</div>'
+    +'</div>';
 }
 
 // ============================================================
@@ -7790,7 +7996,7 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
   }).join('');
 }
 
@@ -7833,12 +8039,17 @@ function usrNovoClose(){ var o=document.getElementById('usrOverlay'); if(o) o.st
 
 function usrSalvar() {
   var nome = (document.getElementById('usrNome')||{}).value||'';
+  var email = ((document.getElementById('usrEmail')||{}).value||'').trim().toLowerCase();
   var funcao = (document.getElementById('usrFuncao')||{}).value||'comercial';
   var senha = (document.getElementById('usrSenha')||{}).value||'';
   if(!nome.trim()){ showToast('Informe o nome do usuário','err'); return; }
+  if(!email){ showToast('Informe o e-mail de acesso','err'); return; }
   if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
   var users = usrLoadUsuarios();
-  users.push({ nome:nome.trim(), funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
+  if(users.find(function(u){ return u.email&&u.email===email; })){
+    showToast('E-mail já cadastrado','err'); return;
+  }
+  users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
   try{ localStorage.setItem(USR_KEY, JSON.stringify(users)); }catch(e){}
   showToast('Usuário "'+nome+'" criado!','ok');
   if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
@@ -7961,28 +8172,49 @@ function authUserChanged(){
   var p=document.getElementById('authPwd');   if(p){ p.value=''; p.focus(); }
 }
 
+// ── Stubs Firebase (formulário de recuperação de senha) ───────────────────────
+function fbResetSenha(){
+  var emailEl=document.getElementById('authEmail');
+  var email=(emailEl&&emailEl.value||'').trim();
+  if(!email){ 
+    var e=document.getElementById('authErr'); 
+    if(e) e.textContent='Informe o e-mail para redefinir a senha'; 
+    return; 
+  }
+  showToast('Entre em contato com o administrador do sistema para redefinir sua senha.','warn');
+}
+function fbReenviarVerificacao(){ showToast('Função não disponível nesta versão.','warn'); }
+function fbVoltarLogin(){
+  var v=document.getElementById('authVerifyForm'); if(v) v.style.display='none';
+  var f=document.getElementById('authLoginForm');  if(f) f.style.display='block';
+}
+
 // ── Login ─────────────────────────────────────────────────────────────────────
 function authLogin(){
   if(secCheckLockout()) return;
-  var selEl=document.getElementById('authUserSel');
-  var pwdEl=document.getElementById('authPwd');
-  var errEl=document.getElementById('authErr');
-  var key=(selEl&&selEl.value)||'';
-  var pwd=(pwdEl&&pwdEl.value)||'';
-  if(!key){ errEl.textContent='Selecione um usuário'; return; }
-  if(!pwd){ errEl.textContent='Informe a senha'; if(pwdEl) pwdEl.focus(); return; }
+  var emailEl=document.getElementById('authEmail');
+  var pwdEl  =document.getElementById('authPwd');
+  var errEl  =document.getElementById('authErr');
+  var email  =(emailEl&&emailEl.value||'').trim().toLowerCase();
+  var pwd    =(pwdEl&&pwdEl.value||'');
+  if(!email){ errEl.textContent='Informe seu e-mail'; if(emailEl) emailEl.focus(); return; }
+  if(!pwd)  { errEl.textContent='Informe a senha';   if(pwdEl)   pwdEl.focus();   return; }
 
   var ok=false, funcao='master', nome='Master';
-  if(key==='__master__'){
+  // Busca usuário por e-mail (novo) ou nome (retrocompat)
+  var users=usrLoadUsuarios();
+  var u=users.find(function(u){
+    if(u.email && u.email.toLowerCase()===email) return true;
+    if(u.nome  && u.nome.toLowerCase() ===email) return true;
+    return false;
+  });
+  if(u){
+    ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
+    funcao=u.funcao; nome=u.nome;
+  } else {
+    // Nenhum usuário encontrado → tenta conta master
     ok=(secHash(pwd)===secGetMasterHash());
     funcao='master'; nome='Master';
-  } else {
-    var users=usrLoadUsuarios();
-    var u=users.find(function(u){ return u.nome===key; });
-    if(u){
-      ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
-      funcao=u.funcao; nome=u.nome;
-    }
   }
 
   if(ok){
@@ -8821,274 +9053,4 @@ function _crmAdicionarBadgeCliente(leadId, clienteId, novo) {
         +(novo?'background:rgba(5,150,105,.15);color:#059669;border:1px solid #059669':'background:rgba(59,130,246,.15);color:#3B82F6;border:1px solid #3B82F6');
       badge.title = novo?'Novo cadastro criado':'Cadastro existente vinculado';
       badge.textContent = (novo?'👤 Cliente criado':'👤 Já cadastrado');
-      badge.setAttribute('onclick', "event.stopPropagation();nav('clientes',null);setTimeout(function(){cliOpenDetalhe('"+clienteId+"')},400)");
-      card.appendChild(badge);
-    }
-  });
-}
-
-// Ao abrir card do CRM: exibir link para cadastro se vinculado
-var _crmOpenCardOrig = (typeof crmOpenCard!=='undefined') ? crmOpenCard : null;
-if(_crmOpenCardOrig) {
-  crmOpenCard = function(id) {
-    _crmOpenCardOrig(id);
-    var lead = CRM_LEADS[id];
-    if(lead && lead.clienteId) {
-      // Adiciona botão no painel lateral do CRM se ainda não tiver
-      setTimeout(function(){
-        var painel = document.querySelector('.crm-card-detail-body') || document.querySelector('.crm-detail-body');
-        if(painel && !painel.querySelector('.crm-cli-link-btn')) {
-          var cli = CLIENTES_DATA.find(function(c){ return c.id===lead.clienteId; });
-          if(cli) {
-            var btn = document.createElement('div');
-            btn.className = 'crm-cli-link-btn';
-            btn.style.cssText = 'margin-top:10px;padding:8px 12px;background:rgba(5,150,105,.1);border:1px solid #059669;border-radius:8px;font-size:11px;cursor:pointer;color:#059669;font-weight:700;display:flex;align-items:center;gap:6px';
-            btn.innerHTML = '👤 Ver cadastro: '+cli.nome;
-            btn.setAttribute('onclick', "nav('clientes',null);setTimeout(function(){cliOpenDetalhe('"+cli.id+"')},400)");
-            painel.appendChild(btn);
-          }
-        }
-      }, 300);
-    }
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// FIREBASE — Autenticação + Sincronização Firestore
-// ════════════════════════════════════════════════════════════════════════════
-
-// Credenciais do projeto Firebase
-var _FB_CONFIG = {
-  apiKey: "AIzaSyASz1dnDw39NpIpU07cbcyR4kl2dOXCsVA",
-  authDomain: "erp-vrmarcas.firebaseapp.com",
-  projectId: "erp-vrmarcas",
-  storageBucket: "erp-vrmarcas.firebasestorage.app",
-  messagingSenderId: "273506088255",
-  appId: "1:273506088255:web:a9d06d52253161d2cf8f8a"
-};
-var _FB_MASTER = 'nannacarla0@gmail.com'; // master principal
-
-// ── Firebase inicializado ─────────────────────────────────────────────────────
-firebase.initializeApp(_FB_CONFIG);
-var _fbAuth = firebase.auth();
-var _fbDb   = firebase.firestore();
-var _fbCurrentUser   = null;
-var _fbSaveTimers    = {};
-var _fbUnsubscribers = [];
-var _fbPendingVerUser = null;
-var _fbSaveAllTimer  = null;
-var _FB_KEYS = ['os','clientes','crm','orcamentos','retalhos','stock','config'];
-
-// ── Listener de autenticação ───────────────────────────────────────────────────
-firebase.auth().onAuthStateChanged(function(user) {
-  var ov = document.getElementById('authOverlay');
-  if (user) {
-    _fbCurrentUser = user;
-    // Busca função/perfil do usuário no Firestore
-    _fbDb.collection('usuarios').doc(user.email).get().then(function(doc) {
-      var funcao = user.email === _FB_MASTER ? 'master' : 'vendedor';
-      if (doc.exists && doc.data().funcao) funcao = doc.data().funcao;
-      _currentSession = { user: user.email, funcao: funcao, loginTime: Date.now(), lastActivity: Date.now() };
-      secSetSession(_currentSession);
-      if (ov) ov.classList.remove('show');
-      if (typeof authApplySession === 'function') authApplySession();
-      if (typeof secStartInactivityTimer === 'function') secStartInactivityTimer();
-    }).catch(function() {
-      // Sem Firestore configurado, usa defaults
-      var funcao = user.email === _FB_MASTER ? 'master' : 'vendedor';
-      _currentSession = { user: user.email, funcao: funcao, loginTime: Date.now(), lastActivity: Date.now() };
-      secSetSession(_currentSession);
-      if (ov) ov.classList.remove('show');
-      if (typeof authApplySession === 'function') authApplySession();
-      if (typeof secStartInactivityTimer === 'function') secStartInactivityTimer();
-    });
-  } else {
-    _fbCurrentUser = null;
-    if (ov) ov.classList.add('show');
-    if (typeof _fbResetLoginForm === 'function') _fbResetLoginForm();
-  }
-});
-
-// ── Override authLogin ─────────────────────────────────────────────────────────
-authLogin = function() {
-  var emailEl = document.getElementById('authEmail');
-  var pwdEl   = document.getElementById('authPwd');
-  var errEl   = document.getElementById('authErr');
-  var btnEl   = document.getElementById('authBtn');
-  var email   = ((emailEl && emailEl.value) || '').trim().toLowerCase();
-  var pass    = (pwdEl && pwdEl.value) || '';
-
-  if (!email) { if (errEl) errEl.textContent = 'Informe o e-mail'; if (emailEl) emailEl.focus(); return; }
-  if (!pass)  { if (errEl) errEl.textContent = 'Informe a senha';  if (pwdEl) pwdEl.focus(); return; }
-
-  if (btnEl) { btnEl.textContent = 'Entrando…'; btnEl.disabled = true; }
-  if (errEl) errEl.textContent = '';
-
-  _fbAuth.signInWithEmailAndPassword(email, pass).catch(function(err) {
-    var msgs = {
-      'auth/user-not-found':       'E-mail não cadastrado',
-      'auth/wrong-password':       'Senha incorreta',
-      'auth/invalid-email':        'E-mail inválido',
-      'auth/too-many-requests':    'Muitas tentativas. Aguarde alguns minutos.',
-      'auth/invalid-credential':   'E-mail ou senha incorretos',
-      'auth/network-request-failed': 'Sem conexão com a internet'
-    };
-    if (errEl) errEl.textContent = '❌ ' + (msgs[err.code] || err.message);
-    if (btnEl) { btnEl.textContent = 'Entrar no Sistema'; btnEl.disabled = false; }
-  });
-  // onAuthStateChanged cuida do resto
-};
-
-// ── Override authLogout ────────────────────────────────────────────────────────
-authLogout = function() {
-  secAuditLog('logout', 'Logout Firebase — ' + (_fbCurrentUser ? _fbCurrentUser.email : '?'));
-  _fbUnsubscribers.forEach(function(u) { try { u(); } catch(e) {} });
-  _fbUnsubscribers = [];
-  _fbAuth.signOut().then(function() {
-    secClearSession();
-    _currentSession = null;
-    _fbCurrentUser  = null;
-    secStopInactivityTimer();
-    var lo = document.getElementById('lockOverlay'); if (lo) lo.classList.remove('show');
-    document.querySelectorAll('.sb-item').forEach(function(i) { i.style.display = ''; });
-    var ov = document.getElementById('authOverlay'); if (ov) ov.classList.add('show');
-    _fbResetLoginForm();
-  });
-};
-
-// ── Helpers de formulário ──────────────────────────────────────────────────────
-function _fbResetLoginForm() {
-  var emailEl = document.getElementById('authEmail');  if (emailEl) emailEl.value = '';
-  var pwdEl   = document.getElementById('authPwd');    if (pwdEl)   pwdEl.value   = '';
-  var errEl   = document.getElementById('authErr');    if (errEl)   errEl.textContent = '';
-  var warnEl  = document.getElementById('authWarn');   if (warnEl)  warnEl.textContent = '';
-  var btnEl   = document.getElementById('authBtn');
-  if (btnEl) { btnEl.textContent = 'Entrar no Sistema'; btnEl.disabled = false; }
-  var loginF = document.getElementById('authLoginForm');  if (loginF) loginF.style.display = '';
-  var verF   = document.getElementById('authVerifyForm'); if (verF)   verF.style.display   = 'none';
-}
-
-function _fbMostrarVerificacao(email) {
-  var loginF = document.getElementById('authLoginForm');  if (loginF) loginF.style.display = 'none';
-  var verF   = document.getElementById('authVerifyForm'); if (verF)   verF.style.display   = '';
-  var msgEl  = document.getElementById('authVerifyMsg');
-  if (msgEl) msgEl.textContent = 'Verifique sua caixa de entrada (' + email + ') e clique no link antes de entrar.';
-  var ov = document.getElementById('authOverlay'); if (ov) ov.classList.add('show');
-}
-
-function fbReenviarVerificacao() {
-  var user = _fbPendingVerUser || _fbAuth.currentUser;
-  if (!user) { showToast('Faça login primeiro', 'err'); return; }
-  user.sendEmailVerification().then(function() {
-    showToast('E-mail de verificação reenviado!', 'ok');
-  }).catch(function(e) { showToast('Erro: ' + e.message, 'err'); });
-}
-
-function fbVoltarLogin() {
-  _fbPendingVerUser = null;
-  _fbAuth.signOut();
-  _fbResetLoginForm();
-}
-
-function fbResetSenha() {
-  var emailEl = document.getElementById('authEmail');
-  var email   = ((emailEl && emailEl.value) || '').trim().toLowerCase();
-  if (!email) {
-    var e2 = prompt('Informe seu e-mail para redefinir a senha:');
-    if (!e2) return;
-    email = e2.trim().toLowerCase();
-  }
-  _fbAuth.sendPasswordResetEmail(email).then(function() {
-    showToast('Link de redefinição enviado para ' + email, 'ok');
-  }).catch(function(err) {
-    showToast('Erro: ' + (err.message || err.code), 'err');
-  });
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// FIRESTORE — Carga inicial e sincronização
-// ════════════════════════════════════════════════════════════════════════════
-
-function fbLoadAllData() {
-  return _fbDb.collection('erp').get().then(function(snap) {
-    snap.forEach(function(doc) {
-      _fbApplyDoc(doc.id, (doc.data() || {}).d);
-    });
-  }).catch(function(e) { console.warn('fbLoad err', e); });
-}
-
-function _fbApplyDoc(key, d) {
-  if (!d) return;
-  try {
-    if (key === 'os') {
-      Object.keys(KB_OS).forEach(function(k) { delete KB_OS[k]; });
-      Object.assign(KB_OS, d);
-    } else if (key === 'clientes') {
-      CLIENTES_DATA.length = 0;
-      if (Array.isArray(d)) d.forEach(function(c) { CLIENTES_DATA.push(c); });
-    } else if (key === 'crm') {
-      Object.keys(CRM_LEADS).forEach(function(k) { delete CRM_LEADS[k]; });
-      Object.assign(CRM_LEADS, d);
-    } else if (key === 'orcamentos') {
-      if (typeof orcSetEnviados === 'function' && Array.isArray(d)) orcSetEnviados(d);
-    } else if (key === 'retalhos') {
-      RETALHOS.length = 0;
-      if (Array.isArray(d)) d.forEach(function(r) { RETALHOS.push(r); });
-    } else if (key === 'stock') {
-      if (d.stock) Object.assign(STOCK, d.stock);
-      if (d.log && Array.isArray(d.log)) {
-        STOCK_LOG.length = 0;
-        d.log.forEach(function(l) { STOCK_LOG.push(l); });
-      }
-    } else if (key === 'config') {
-      if (d.matPrices)   localStorage.setItem('erp_mat_prices',   JSON.stringify(d.matPrices));
-      if (d.machPresets) localStorage.setItem('erp_mach_presets', JSON.stringify(d.machPresets));
-      if (d.produtos && Array.isArray(d.produtos)) {
-        ORC_PRODUTOS.length = 0;
-        d.produtos.forEach(function(p) { ORC_PRODUTOS.push(p); });
-        localStorage.setItem('erp_orc_produtos', JSON.stringify(ORC_PRODUTOS));
-      }
-    }
-  } catch(e) { console.warn('_fbApplyDoc err', key, e); }
-}
-
-// ── Salvar com debounce (2s) ───────────────────────────────────────────────────
-function fbSave(key) {
-  if (!_fbDb || !_fbCurrentUser) return;
-  clearTimeout(_fbSaveTimers[key]);
-  _fbSaveTimers[key] = setTimeout(function() { _fbDoSave(key); }, 2000);
-}
-
-function _fbDoSave(key) {
-  if (!_fbDb || !_fbCurrentUser) return;
-  var d;
-  try {
-    if      (key === 'os')         d = JSON.parse(JSON.stringify(KB_OS));
-    else if (key === 'clientes')   d = JSON.parse(JSON.stringify(CLIENTES_DATA));
-    else if (key === 'crm')        d = JSON.parse(JSON.stringify(CRM_LEADS));
-    else if (key === 'orcamentos') d = JSON.parse(JSON.stringify(orcGetEnviados()));
-    else if (key === 'retalhos')   d = JSON.parse(JSON.stringify(RETALHOS));
-    else if (key === 'stock')      d = { stock: JSON.parse(JSON.stringify(STOCK)), log: (STOCK_LOG || []).slice(0, 200) };
-    else if (key === 'config') {
-      d = {
-        matPrices:   (function() { try { return JSON.parse(localStorage.getItem('erp_mat_prices')  || '{}'); } catch(e) { return {}; } })(),
-        machPresets: (function() { try { return JSON.parse(localStorage.getItem('erp_mach_presets') || '[]'); } catch(e) { return []; } })(),
-        produtos:    ORC_PRODUTOS
-      };
-    }
-    if (d !== undefined) {
-      _fbDb.collection('erp').doc(key).set({ d: d, ts: Date.now(), by: _fbCurrentUser.email });
-    }
-  } catch(e) { console.warn('fbDoSave err', key, e); }
-}
-
-// Salvar tudo — debounced 3s, acionado pelo override de showToast
-function fbSaveAll() {
-  clearTimeout(_fbSaveAllTimer);
-  _fbSaveAllTimer = setTimeout(function() {
-    if (!_fbCurrentUser) return;
-    _FB_KEYS.forEach(function(k) { _fbDoSave(k); });
-  }, 3000);
-}
-
-// ── Li
+      badge.setAttribute('onclick', "e
