@@ -2534,29 +2534,42 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       <div id="finPgDash">
         <!-- KPI Cards -->
         <div class="fin-kpi-grid">
-          <div class="fin-kpi">
+          <!-- Card 1: Saldo Disponível Imediato (PIX + Dinheiro apenas) -->
+          <div class="fin-kpi" style="border-top:3px solid #059669">
             <div class="fin-kpi-icon" style="background:#D1FAE5">💰</div>
-            <div class="fin-kpi-lbl">Caixa Atual</div>
+            <div class="fin-kpi-lbl">Saldo Disponível Imediato</div>
             <div class="fin-kpi-val" id="finKpiCaixa">R$ 0</div>
-            <div class="fin-kpi-sub">Entradas − Saídas pagas</div>
+            <div class="fin-kpi-sub" style="border-top:1px solid var(--border);padding-top:6px;margin-top:6px">
+              Líquido em conta (Nubank / Mercado Pago)
+            </div>
           </div>
-          <div class="fin-kpi">
-            <div class="fin-kpi-icon" style="background:#DCFCE7">📥</div>
+          <!-- Card 2: A Receber + sub-indicador Cartão -->
+          <div class="fin-kpi" style="border-top:3px solid #7C3AED">
+            <div class="fin-kpi-icon" style="background:#EDE9FE">📥</div>
             <div class="fin-kpi-lbl">A Receber no Mês</div>
             <div class="fin-kpi-val" id="finKpiReceber">R$ 0</div>
             <div class="fin-kpi-sub" id="finKpiReceberSub">— pendentes</div>
+            <div id="finKpiCartaoComp" style="display:none;margin-top:6px;padding:5px 8px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
+              <span style="font-size:10px;font-weight:700;color:#1D4ED8">💳 A Compensar (Cartão):</span>
+              <span style="font-size:11px;font-weight:800;color:#1E40AF" id="finKpiCartaoVal"> R$ 0</span>
+            </div>
           </div>
-          <div class="fin-kpi">
+          <!-- Card 3: A Pagar + alerta vencidos -->
+          <div class="fin-kpi" style="border-top:3px solid #DC2626">
             <div class="fin-kpi-icon" style="background:#FEE2E2">📤</div>
             <div class="fin-kpi-lbl">A Pagar no Mês</div>
             <div class="fin-kpi-val" id="finKpiPagar">R$ 0</div>
             <div class="fin-kpi-sub" id="finKpiPagarSub">— pendentes</div>
+            <div id="finKpiVencBadge" style="display:none;margin-top:6px;padding:4px 8px;background:#FEF2F2;border-radius:8px;border:1px solid #FECACA">
+              <span style="font-size:10px;font-weight:700;color:#DC2626" id="finKpiVencTxt">⚠️ 0 contas vencidas</span>
+            </div>
           </div>
-          <div class="fin-kpi">
+          <!-- Card 4: Saldo Projetado -->
+          <div class="fin-kpi" style="border-top:3px solid #6366F1">
             <div class="fin-kpi-icon" style="background:#EDE9FE">🔮</div>
             <div class="fin-kpi-lbl">Saldo Projetado</div>
             <div class="fin-kpi-val" id="finKpiProjetado">R$ 0</div>
-            <div class="fin-kpi-sub">Caixa + Receber − Pagar</div>
+            <div class="fin-kpi-sub">Imediato + Receber − Pagar</div>
           </div>
         </div>
 
@@ -5442,7 +5455,6 @@ function finSetBrand(b) {
 
 function finTab(t) {
   _finActiveTab = t;
-  // Mapa explícito para evitar problemas com maiúsculas (CR, CP, DRE)
   var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', dre:'DRE'};
   ['dash','cr','cp','dre'].forEach(function(tab){
     var suffix = idSuffix[tab];
@@ -5451,7 +5463,16 @@ function finTab(t) {
     if(btn) btn.classList.toggle('on', tab===t);
     if(pg)  pg.style.display = (tab===t) ? 'block' : 'none';
   });
-  finRefreshAll();
+  // Renderização direcionada por aba para garantir dados visíveis
+  if(t==='dash') {
+    finDashKPIs(); finBarChartRender(); finDonutRender(); finRender();
+  } else if(t==='cr') {
+    finCRUpdateSummary(); finCRRender();
+  } else if(t==='cp') {
+    finCPUpdateSummary(); finCPRender();
+  } else if(t==='dre') {
+    finDREBuild();
+  }
 }
 
 function finRefreshAll() {
@@ -5492,22 +5513,59 @@ function finDashKPIs() {
   var mes = finMesAtual();
   var tx  = FIN_TX.filter(function(t){return t.mes===mes&&t.status==='recebido';});
   var cpPago=FIN_CP.filter(function(c){return c.status==='pago';});
-  var entradas = tx.reduce(function(s,t){return s+t.valor;},0);
-  var saidas   = cpPago.reduce(function(s,c){return s+c.valor;},0);
-  var caixa    = entradas - saidas;
+
+  // ── Card 1: Saldo Disponível Imediato (somente PIX + Dinheiro) ─────────
+  var metImediato = ['PIX','Dinheiro','pix','dinheiro'];
+  var saldoImediato = tx.filter(function(t){
+    return metImediato.some(function(m){ return (t.metodo||'').toLowerCase().indexOf(m.toLowerCase())>=0; });
+  }).reduce(function(s,t){return s+t.valor;},0)
+  - cpPago.reduce(function(s,c){return s+c.valor;},0);
+
+  // ── Card 2: A Receber + A Compensar (Cartão < 30 dias) ────────────────
   var crPend   = FIN_CR.filter(function(c){return c.status==='pendente';});
-  var cpPend   = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
   var totalReceber = crPend.reduce(function(s,c){return s+c.valor;},0);
-  var totalPagar   = cpPend.reduce(function(s,c){return s+c.valor;},0);
-  var projetado    = caixa + totalReceber - totalPagar;
+  var hoje = new Date();
+  var cartaoComp = crPend.filter(function(c){
+    return (c.metodo||'').toLowerCase().indexOf('cart')>=0;
+  }).reduce(function(s,c){return s+c.valor;},0);
+
+  // ── Card 3: A Pagar + Vencidos ────────────────────────────────────────
+  var cpPend = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
+  var totalPagar = cpPend.reduce(function(s,c){return s+c.valor;},0);
+  var vencidas = FIN_CP.filter(function(c){
+    if(c.status==='pago') return false;
+    if(!c.vencimento) return false;
+    var p=c.vencimento.split('/');
+    if(p.length<3) return false;
+    var dt=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));
+    return dt < hoje;
+  });
+
+  // ── Card 4: Projetado ─────────────────────────────────────────────────
+  var projetado = saldoImediato + totalReceber - totalPagar;
+
   function setEl(id,v,cls){var el=document.getElementById(id);if(el){el.textContent=typeof v==='string'?v:finFmt(v);if(cls)el.style.color=cls;}}
-  setEl('finKpiCaixa', caixa, caixa>=0?'#059669':'#DC2626');
+  setEl('finKpiCaixa', saldoImediato, saldoImediato>=0?'#059669':'#DC2626');
   setEl('finKpiReceber', totalReceber);
   var crSub=document.getElementById('finKpiReceberSub');
   if(crSub) crSub.textContent=crPend.length+' pendente'+(crPend.length!==1?'s':'');
+
+  // Sub-indicador Cartão a Compensar
+  var compBox=document.getElementById('finKpiCartaoComp');
+  var compVal=document.getElementById('finKpiCartaoVal');
+  if(compBox){ compBox.style.display = cartaoComp>0 ? 'block' : 'none'; }
+  if(compVal){ compVal.textContent = ' '+finFmt(cartaoComp); }
+
   setEl('finKpiPagar', totalPagar);
   var cpSub=document.getElementById('finKpiPagarSub');
   if(cpSub) cpSub.textContent=cpPend.length+' pendente'+(cpPend.length!==1?'s':'');
+
+  // Badge vencidas
+  var vencBadge=document.getElementById('finKpiVencBadge');
+  var vencTxt=document.getElementById('finKpiVencTxt');
+  if(vencBadge){ vencBadge.style.display = vencidas.length>0 ? 'block' : 'none'; }
+  if(vencTxt && vencidas.length){ vencTxt.textContent='⚠️ '+vencidas.length+' conta'+(vencidas.length!==1?'s':'')+' vencida'+(vencidas.length!==1?'s':''); }
+
   setEl('finKpiProjetado', projetado, projetado>=0?'#059669':'#DC2626');
 }
 
@@ -5521,16 +5579,24 @@ function finBarChartRender() {
   var totalSai=FIN_CP.filter(function(c){return c.status==='pago';}).reduce(function(s,c){return s+c.valor;},0)||1;
   var distE=[0.35,0.25,0.22,0.18], distS=[0.20,0.40,0.25,0.15];
   var maxVal=Math.max(totalEnt*0.35,totalSai*0.40)||1;
+  // Ponto de Equilíbrio: saídas totais / 4 semanas → %  do maxVal
+  var metaSemanal = (totalSai/4);
+  var metaPct = Math.min(Math.round(metaSemanal/maxVal*100),100);
   var html='';
   semanas.forEach(function(sem,i){
     var ent=totalEnt*distE[i], sai=totalSai*distS[i];
     var pctE=Math.round(ent/maxVal*100), pctS=Math.round(sai/maxVal*100);
-    html+='<div class="fin-bar-group">'
+    var acimaMeta = ent >= metaSemanal;
+    html+='<div class="fin-bar-group" style="position:relative">'
       +'<div class="fin-bar-week">'+sem+'</div>'
-      +'<div class="fin-bar-line">'
+      +'<div class="fin-bar-line" style="position:relative">'
         +'<span class="fin-bar-type">Entradas</span>'
-        +'<div class="fin-bar-outer"><div class="fin-bar-inner" style="width:'+pctE+'%;background:linear-gradient(90deg,#059669,#34D399)"></div></div>'
-        +'<span class="fin-bar-val">'+finFmt(ent)+'</span>'
+        +'<div class="fin-bar-outer" style="position:relative">'
+          +'<div class="fin-bar-inner" style="width:'+pctE+'%;background:linear-gradient(90deg,'+(acimaMeta?'#059669,#34D399':'#D97706,#FCD34D')+')"></div>'
+          // Linha pontilhada de equilíbrio
+          +'<div style="position:absolute;top:0;bottom:0;left:'+metaPct+'%;width:2px;background:repeating-linear-gradient(180deg,#6366F1 0,#6366F1 3px,transparent 3px,transparent 6px);opacity:.7;pointer-events:none" title="Ponto de Equilíbrio"></div>'
+        +'</div>'
+        +'<span class="fin-bar-val" style="color:'+(acimaMeta?'#059669':'#D97706')+'">'+finFmt(ent)+'</span>'
       +'</div>'
       +'<div class="fin-bar-line">'
         +'<span class="fin-bar-type">Saídas</span>'
@@ -5539,6 +5605,11 @@ function finBarChartRender() {
       +'</div>'
     +'</div>';
   });
+  // Legenda do Ponto de Equilíbrio
+  html+='<div style="display:flex;align-items:center;gap:5px;margin-top:8px;font-size:10px;color:#6366F1">'
+    +'<div style="width:18px;height:2px;background:repeating-linear-gradient(90deg,#6366F1 0,#6366F1 4px,transparent 4px,transparent 8px)"></div>'
+    +'<span>Ponto de Equilíbrio (Meta semanal: '+finFmt(metaSemanal)+')</span>'
+  +'</div>';
   el.innerHTML=html;
 }
 
@@ -5573,7 +5644,14 @@ function finDonutRender() {
     legHtml+='<div class="fin-donut-leg-row"><div class="fin-donut-dot" style="background:'+c.color+'"></div><span class="fin-donut-leg-lbl">'+k+'</span><span class="fin-donut-leg-pct">'+Math.round(pct*100)+'%</span></div>';
     offset+=pct;
   });
-  svg.innerHTML=paths+'<text x="'+cx+'" y="'+(cy+4)+'" text-anchor="middle" font-size="11" font-weight="700" fill="var(--text)">'+Math.round(total/1000)+'K</text>';
+  // Format total: if < 1000 show full, else show 99,9K or 1,2M
+  var totFmt;
+  if(total>=1000000) totFmt='R$'+( total/1000000).toFixed(1).replace('.',',')+'M';
+  else if(total>=1000) totFmt='R$'+(total/1000).toFixed(1).replace('.',',')+'K';
+  else totFmt='R$'+total.toFixed(0);
+  svg.innerHTML=paths
+    +'<text x="'+cx+'" y="'+(cy-5)+'" text-anchor="middle" font-size="8" fill="var(--muted)">Total</text>'
+    +'<text x="'+cx+'" y="'+(cy+7)+'" text-anchor="middle" font-size="10" font-weight="800" fill="var(--text)">'+totFmt+'</text>';
   leg.innerHTML=legHtml;
 }
 
@@ -5878,16 +5956,62 @@ function finSetPeriod_old(p) { /* legacy stub */ }
 function finRender() {
   var mes=finMesAtual();
   var tx=finFilterTX(FIN_TX);
-  function sum(marca,metodo){return tx.filter(function(t){return (t.marca===marca||marca==='all')&&(t.metodo===metodo||metodo==='all');}).reduce(function(s,t){return s+t.valor;},0);}
   var cntEl=document.getElementById('finTxCount');
   if(cntEl) cntEl.textContent='('+tx.length+' registros)';
   var tbody=document.getElementById('finTxBody');
   if(!tbody) return;
-  if(!tx.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
+  if(!tx.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
   var cM={PIX:'#059669',Cartão:'#7C3AED',Dinheiro:'#D97706'};
-  tbody.innerHTML=tx.slice(0,20).map(function(t){
-    return '<tr><td>'+t.data+'</td><td>'+t.cliente+'</td><td>#'+t.os+'</td><td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td><td style="font-weight:700;color:var(--ok)">'+finFmt(t.valor)+'</td><td style="color:'+(cM[t.metodo]||'#6B7280')+'">'+(t.metodo||'—')+'</td><td><span style="color:#059669;font-size:11px">✅ '+t.status+'</span></td></tr>';
+  var hoje=new Date(); hoje.setHours(0,0,0,0);
+  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.funcao==='master'||_currentSession.funcao==='Master'));
+  tbody.innerHTML=tx.slice(0,25).map(function(t){
+    var isCartao=(t.metodo||'').toLowerCase().indexOf('cart')>=0;
+    // Lógica de compensação: cartão dentro dos últimos 30 dias → A Compensar
+    var txDate=null;
+    if(t.data){
+      var p=t.data.split('/');
+      if(p.length===3) txDate=new Date(parseInt(p[2]||hoje.getFullYear()),parseInt(p[1])-1,parseInt(p[0]));
+    }
+    var diasPassados=txDate?Math.floor((hoje-txDate)/(1000*60*60*24)):999;
+    var aCompensar=isCartao&&diasPassados<=30&&t.status!=='antecipado';
+    // Status badge
+    var statusBadge;
+    if(aCompensar){
+      statusBadge='<span style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">💳 A Compensar</span>';
+    } else if(t.status==='antecipado'){
+      statusBadge='<span style="background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">⚡ Antecipado</span>';
+    } else {
+      statusBadge='<span style="background:#D1FAE5;color:#065F46;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">✅ Recebido</span>';
+    }
+    // Antecipar button (só Master, só A Compensar)
+    var antBtn='';
+    if(aCompensar&&isMaster){
+      antBtn=' <button data-os="'+String(t.os).replace(/"/g,'&quot;')+'" data-val="'+t.valor+'" onclick="finAntecipar(this.dataset.os,+this.dataset.val)" style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid #D97706;background:#FEF3C7;color:#92400E;cursor:pointer;font-weight:700" title="Antecipar recebimento (aplica taxa MP/Nu)">⚡ Antecipar</button>';
+    }
+    return '<tr>'
+      +'<td>'+t.data+'</td>'
+      +'<td>'+t.cliente+'</td>'
+      +'<td style="color:var(--muted)">#'+t.os+'</td>'
+      +'<td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td>'
+      +'<td style="font-weight:700;color:var(--ok)">'+finFmt(t.valor)+'</td>'
+      +'<td style="color:'+(cM[t.metodo]||'#6B7280')+';font-size:11px">'+(t.metodo||'—')+'</td>'
+      +'<td>'+statusBadge+antBtn+'</td>'
+      +'</tr>';
   }).join('');
+}
+// ── Antecipar recebimento de Cartão (simula taxa MP/Nubank ~3,49%) ────────────
+function finAntecipar(osRef, valor) {
+  var cfg = cfgLoad();
+  var taxa = (cfg&&cfg.financeiro&&cfg.financeiro.cartao) ? cfg.financeiro.cartao : 0.0349;
+  var taxaDisplay = (taxa*100).toFixed(2);
+  var msg='Antecipar R$ '+finFmt(valor)+'?\nTaxa: '+taxaDisplay+'%  →  Você receberá: '+finFmt(valor*(1-taxa));
+  if(!confirm(msg)) return;
+  var t = FIN_TX.find(function(x){return String(x.os)===String(osRef)&&x.status!=='antecipado';});
+  if(!t){ showToast('Transação não encontrada','err'); return; }
+  t.status='antecipado';
+  t.valor=parseFloat((t.valor*(1-taxa)).toFixed(2));
+  finRender(); finDashKPIs();
+  showToast('Antecipação de '+finFmt(t.valor)+' registrada (taxa '+taxaDisplay+'%)','ok');
 }
 
 function finBaixaManual(marca) {
