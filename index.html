@@ -3138,59 +3138,95 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
 
 <!-- MODAL: Nova Conta a Receber -->
-<!-- MODAL: Nova Conta a Receber -->
-<div id="finCROverlay" class="gen-overlay" onclick="if(event.target===this)finCROverlayClose()" style="z-index:600">
-  <div class="gen-modal" style="width:480px">
-    <div class="gen-modal-hdr"><span class="gen-modal-title">📥 Nova Conta a Receber</span><button class="gen-modal-close" onclick="finCROverlayClose()">✕</button></div>
-    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+<div class="gen-overlay" id="finCROverlay" onclick="if(event.target===this)finCROverlayClose()">
+  <div class="gen-modal">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#4F46E5,#7C3AED);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">📥 Nova Conta a Receber</div>
+      <button class="gen-close" onclick="finCROverlayClose()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
       <div class="fg2">
-        <div class="fg"><label>Cliente</label><input type="text" id="finCRCliente" placeholder="Nome do cliente"></div>
-        <div class="fg"><label>Marca / Canal</label>
+        <div class="fg">
+          <label>Cliente</label>
+          <input type="text" id="finCRCliente" placeholder="Nome do cliente ou empresa">
+        </div>
+        <div class="fg">
+          <label>Marca</label>
           <select id="finCRMarca">
-            <option value="vr">VR Marcas — Mercado Pago</option>
-            <option value="vitre">Vitre — Nubank</option>
+            <option value="vr">🟣 VR</option>
+            <option value="vitre">🌸 Vitre</option>
           </select>
         </div>
       </div>
-      <div class="fg"><label>Descrição</label><input type="text" id="finCRDesc" placeholder="Ex: Orçamento #045 — Painel Fachada"></div>
-      <div class="fg2">
-        <div class="fg"><label>Valor (R$)</label><input type="number" id="finCRValor" min="0" step="0.01" placeholder="0,00"></div>
-        <div class="fg"><label>Vencimento</label><input type="date" id="finCRVenc"></div>
+      <div class="fg">
+        <label>Conta Bancária</label>
+        <select id="finCRConta">
+          <option value="">— Selecione a conta —</option>
+          <option value="mp_vr">🟣 Mercado Pago — VR</option>
+          <option value="nu_vitre">🌸 Nubank — Vitre</option>
+          <option value="bb">🏦 Banco do Brasil</option>
+          <option value="itau">🏦 Itaú</option>
+          <option value="caixa">🏦 Caixa Econômica</option>
+          <option value="dinheiro">💵 Caixa / Dinheiro</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Descrição</label>
+        <input type="text" id="finCRDesc" placeholder="Ex: Orçamento #045 — Painel Fachada">
       </div>
       <div class="fg2">
-        <div class="fg"><label>Forma de Recebimento</label>
+        <div class="fg">
+          <label>Valor (R$)</label>
+          <input type="number" id="finCRValor" min="0" step="0.01" placeholder="0,00">
+        </div>
+        <div class="fg">
+          <label>Vencimento</label>
+          <input type="date" id="finCRVenc">
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Forma de Recebimento</label>
           <select id="finCRMetodo">
-            <option value="PIX">PIX</option>
-            <option value="Cartão">Cartão de Crédito</option>
-            <option value="Boleto">Boleto</option>
-            <option value="Dinheiro">Dinheiro</option>
-            <option value="Link">Link de Pagamento</option>
+            <option value="PIX">💸 PIX</option>
+            <option value="Boleto">📄 Boleto</option>
+            <option value="Cartão">💳 Cartão de Crédito</option>
+            <option value="Dinheiro">💵 Dinheiro</option>
+            <option value="Banco">🏦 Transferência Bancária</option>
+            <option value="Link">🔗 Link de Pagamento</option>
           </select>
         </div>
-        <div class="fg"><label>Status</label>
+        <div class="fg">
+          <label>Status</label>
           <select id="finCRStatus">
-            <option value="pendente">Pendente</option>
-            <option value="recebido">Recebido</option>
+            <option value="pendente">⏳ Pendente</option>
+            <option value="recebido">✅ Recebido</option>
           </select>
         </div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="topbar-btn ghost" style="flex:1" onclick="finCROverlayClose()">Cancelar</button>
-        <button class="topbar-btn" style="flex:2" onclick="finCRSalvar()">💾 Salvar</button>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="finCROverlayClose()">Cancelar</button>
+        <button class="gen-submit" style="flex:2" onclick="finCRSalvar()">💾 Salvar Conta</button>
       </div>
     </div>
   </div>
 </div>
 
 <!-- MODAL: Nova Conta a Pagar -->
-<!-- MODAL: Nova Conta a Pagar -->
-<div id="finCPOverlay" class="gen-overlay" onclick="if(event.target===this)finCPOverlayClose()" style="z-index:600">
-  <div class="gen-modal" style="width:500px">
-    <div class="gen-modal-hdr"><span class="gen-modal-title">📤 Nova Despesa</span><button class="gen-modal-close" onclick="finCPOverlayClose()">✕</button></div>
-    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
-      <div class="fg"><label>Descrição</label><input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho"></div>
+<div class="gen-overlay" id="finCPOverlay" onclick="if(event.target===this)finCPOverlayClose()">
+  <div class="gen-modal" style="width:520px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#DC2626,#EF4444);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">📤 Nova Despesa / Conta a Pagar</div>
+      <button class="gen-close" onclick="finCPOverlayClose()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div class="fg">
+        <label>Descrição</label>
+        <input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho">
+      </div>
       <div class="fg2">
-        <div class="fg"><label>Categoria</label>
+        <div class="fg">
+          <label>Categoria</label>
           <select id="finCPCat">
             <optgroup label="── CUSTO (CMV)">
               <option value="Matéria-Prima">🪵 Matéria-Prima</option>
@@ -3205,38 +3241,53 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             </optgroup>
           </select>
         </div>
-        <div class="fg"><label>Marca</label>
+        <div class="fg">
+          <label>Marca</label>
           <select id="finCPMarca">
-            <option value="vr">VR Marcas</option>
-            <option value="vitre">Vitre</option>
-            <option value="ambos">Ambas</option>
+            <option value="vr">🟣 VR</option>
+            <option value="vitre">🌸 Vitre</option>
+            <option value="ambos">🔀 Ambas</option>
           </select>
         </div>
       </div>
       <div class="fg2">
-        <div class="fg"><label>Valor (R$)</label><input type="number" id="finCPValor" min="0" step="0.01" placeholder="0,00"></div>
-        <div class="fg"><label>Vencimento</label><input type="date" id="finCPVenc"></div>
+        <div class="fg">
+          <label>Valor (R$)</label>
+          <input type="number" id="finCPValor" min="0" step="0.01" placeholder="0,00">
+        </div>
+        <div class="fg">
+          <label>Vencimento</label>
+          <input type="date" id="finCPVenc">
+        </div>
       </div>
       <div class="fg2">
-        <div class="fg"><label>Fornecedor</label><input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú..."></div>
-        <div class="fg"><label>Forma de Pagamento</label>
-          <select id="finCPFormaPgto">
-            <option value="Banco">Banco / TED / PIX</option>
-            <option value="Boleto">Boleto</option>
-            <option value="Dinheiro">Dinheiro</option>
-            <option value="Cartão PJ">Cartão PJ</option>
+        <div class="fg">
+          <label>Fornecedor / Referência</label>
+          <input type="text" id="finCPForn" placeholder="Ex: Geoplas, ENEL, Itaú...">
+        </div>
+        <div class="fg">
+          <label>Conta Bancária</label>
+          <select id="finCPConta">
+            <option value="">— Selecione a conta —</option>
+            <option value="mp_vr">🟣 Mercado Pago — VR</option>
+            <option value="nu_vitre">🌸 Nubank — Vitre</option>
+            <option value="bb">🏦 Banco do Brasil</option>
+            <option value="itau">🏦 Itaú</option>
+            <option value="caixa">🏦 Caixa Econômica</option>
+            <option value="dinheiro">💵 Caixa / Dinheiro</option>
           </select>
         </div>
       </div>
-      <div class="fg"><label>Status</label>
+      <div class="fg">
+        <label>Status</label>
         <select id="finCPStatus">
-          <option value="agendado">Agendado</option>
-          <option value="pago">Pago</option>
+          <option value="agendado">📅 Agendado</option>
+          <option value="pago">✅ Pago</option>
         </select>
       </div>
-      <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="topbar-btn ghost" style="flex:1" onclick="finCPOverlayClose()">Cancelar</button>
-        <button class="topbar-btn" style="flex:2" onclick="finCPSalvar()">💾 Salvar</button>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="finCPOverlayClose()">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#DC2626,#EF4444)" onclick="finCPSalvar()">💾 Registrar Despesa</button>
       </div>
     </div>
   </div>
@@ -5777,10 +5828,14 @@ function relTab(t, el) {
     if(btn) btn.classList.toggle('on', k.toLowerCase()===t);
     if(pg)  pg.style.display=(k.toLowerCase()===t)?'block':'none';
   });
-  if(t==='caixa')  relCaixaDiario();
-  if(t==='mensal') relMensal();
-  if(t==='dre')    relatoriosRender();
-  if(t==='contas') relContasPagas();
+  // pequeno delay para garantir que o DOM esteja pronto antes de popular
+  var _rt=t;
+  setTimeout(function(){
+    if(_rt==='caixa')  relCaixaDiario();
+    if(_rt==='mensal') relMensal();
+    if(_rt==='dre')    relatoriosRender();
+    if(_rt==='contas') relContasPagas();
+  }, 30);
 }
 
 // ── Helper: normaliza forma de pagamento ──────────────────────────────────────
@@ -5801,13 +5856,15 @@ function relMetodoBadge(m) {
 
 // ── CAIXA DIÁRIO ──────────────────────────────────────────────────────────────
 function relCaixaDiario() {
-  // Inicializar data = hoje se vazia
+  // Garantir que o elemento existe (proteção contra timing)
   var dtIn=document.getElementById('relCaixaData');
-  if(dtIn&&!dtIn.value){
+  if(!dtIn){ setTimeout(relCaixaDiario,40); return; }
+  // Auto-setar data de hoje se vazio
+  if(!dtIn.value){
     var now=new Date();
     dtIn.value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
   }
-  var dtVal=(dtIn&&dtIn.value)||'';
+  var dtVal=dtIn.value||'';
   var dtBR='';
   if(dtVal){
     var p=dtVal.split('-');
