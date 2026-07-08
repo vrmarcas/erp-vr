@@ -1340,6 +1340,28 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
           </div>
           <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta — Aguardando Master</button>
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px"><button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button><button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button></div>
+          <!-- ── ENVIAR PARA FORNECEDOR ── -->
+          <div id="kbFornSection" style="margin-top:14px;border-top:1.5px solid var(--border);padding-top:14px;display:none">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📤 Enviar para Fornecedor</div>
+            <select id="kbFornSel" onchange="kbFornOnSelect()"
+              style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);margin-bottom:10px">
+              <option value="">— Selecionar fornecedor —</option>
+            </select>
+            <div id="kbFornInfo" style="display:none;background:var(--bg2);border-radius:9px;padding:11px 13px;margin-bottom:10px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)" id="kbFornNome">—</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px" id="kbFornContato">—</div>
+              <div style="display:flex;gap:7px;margin-top:10px;flex-wrap:wrap">
+                <button id="kbFornWaBtn" onclick="kbEnviarFornWA()"
+                  style="flex:1;padding:8px 10px;background:#25D366;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+                  📱 WhatsApp
+                </button>
+                <button id="kbFornEmailBtn" onclick="kbEnviarFornEmail()"
+                  style="flex:1;padding:8px 10px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
+                  📧 E-mail
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1468,7 +1490,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <table class="item-table" id="orcItemTable">
                 <thead><tr>
                   <th>#</th><th style="min-width:110px">Produto</th><th>Qtd</th>
-                  <th style="min-width:100px">Material</th><th>Esp.</th>
+                  <th style="min-width:100px">Material</th><th>Prof.</th>
                   <th>Larg cm</th><th>Alt cm</th><th>Detalhes</th>
                   <th>Custo</th><th>Unit.</th><th>Total</th><th></th>
                 </tr></thead>
@@ -5188,10 +5210,203 @@ function kbOpen(id) {
     btn.textContent = '✓ Marcar como Pronta — Aguardando Master';
   }
 
+  // Fornecedor section — show only for finished/ready OS
+  var fornSec = document.getElementById('kbFornSection');
+  if(fornSec) {
+    var showForn = (os.status==='pronta'||os.status==='master'||os.status==='entregue');
+    fornSec.style.display = showForn ? '' : 'none';
+    if(showForn) {
+      kbFornPopular();
+      document.getElementById('kbFornInfo').style.display='none';
+      var fornSel = document.getElementById('kbFornSel');
+      if(fornSel) fornSel.value='';
+    }
+  }
+
+  // Show smart prazo suggestion
+  kbMostrarSugestao(os);
+
   document.getElementById('kbOsOverlay').classList.add('open');
 }
 
+// ── PRAZO MÉDIO DE PRODUÇÃO SUGERIDO ───────────────────────────────
+var _PRAZO_STEP_MIN = {
+  // Corte
+  'corte a laser':35, 'corte laser':35, 'corte':20, 'corte cnc':50, 'corte ps':25, 'corte metal':50, 'corte acrílico':25,
+  // Gravação
+  'gravação laser':45, 'gravação a laser':45, 'gravação logo':30,
+  // Polimento / Acabamento
+  'polimento':20, 'acabamento inox':30, 'acabamento':20, 'limpeza':10,
+  // Impressão
+  'uv':15, 'uv / impressão':20, 'impressão digital':15,
+  // Montagem
+  'montagem':40, 'montagem da caixa':35, 'montagem estrutura':50, 'montagem 10un':60,
+  // LED
+  'instalação led':40, 'led instalado':40, 'teste luminoso':15, 'teste':10,
+  // Dobra / Conformação
+  'dobra e conformação':45, 'dobra':30,
+  // Embalagem
+  'embalagem':10,
+  // Liberação
+  'liberação master':5,
+  // Default para steps não reconhecidos
+  '_default':20
+};
+
+function kbCalcPrazoSugerido(os) {
+  if(!os||!os.checks||!os.checks.length) return null;
+  var qty   = parseInt(os.qty)||1;
+  var steps = os.checks;
+
+  // Sum estimated minutes for each check step
+  var totalMin = 0;
+  steps.forEach(function(step) {
+    var key = step.toLowerCase().trim();
+    var min = _PRAZO_STEP_MIN[key];
+    if(!min) {
+      // partial match
+      var found = Object.keys(_PRAZO_STEP_MIN).find(function(k){return k!=='_default'&&key.indexOf(k)>=0;});
+      min = found ? _PRAZO_STEP_MIN[found] : _PRAZO_STEP_MIN['_default'];
+    }
+    totalMin += min;
+  });
+
+  // Scale by quantity (diminishing returns: sqrt scaling for >1 qty)
+  var scaledMin = qty <= 1 ? totalMin : totalMin + (totalMin * (Math.sqrt(qty) - 1) * 0.6);
+  // Round to nearest 30 min
+  scaledMin = Math.ceil(scaledMin / 30) * 30;
+
+  var horas = scaledMin / 60;
+  // Work day = 8h → convert to days
+  var dias  = Math.ceil(horas / 8);
+
+  return { min: scaledMin, horas: horas, dias: dias };
+}
+
+function kbMostrarSugestao(os) {
+  var box = document.getElementById('kbPrazoSugBox'); if(!box) return;
+  if(os.status==='entregue'||os.status==='cancelado'){ box.style.display='none'; return; }
+  var sug = kbCalcPrazoSugerido(os);
+  if(!sug){ box.style.display='none'; return; }
+
+  var horasStr = sug.horas % 1 === 0 ? sug.horas+'h' : sug.horas.toFixed(1)+'h';
+  var diasStr  = sug.dias===1 ? '1 dia útil' : sug.dias+' dias úteis';
+
+  // Build suggested delivery date
+  var hoje = new Date();
+  var entregaSug = new Date(hoje);
+  var diasCount = 0;
+  while(diasCount < sug.dias) {
+    entregaSug.setDate(entregaSug.getDate()+1);
+    var wd = entregaSug.getDay();
+    if(wd!==0&&wd!==6) diasCount++;
+  }
+  var yy = entregaSug.getFullYear();
+  var mm = String(entregaSug.getMonth()+1).padStart(2,'0');
+  var dd = String(entregaSug.getDate()).padStart(2,'0');
+  var dateVal = yy+'-'+mm+'-'+dd;
+  var dateFmt = dd+'/'+mm+'/'+yy;
+
+  box.style.display='';
+  box.innerHTML = '<div style="background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:9px;padding:11px 13px">'
+    +'<div style="font-size:11px;font-weight:700;color:#1E40AF;margin-bottom:6px">🤖 Sugestão de Prazo</div>'
+    +'<div style="font-size:12px;color:var(--text);line-height:1.6">'
+    +'Estimativa: <strong>'+horasStr+'</strong> de produção &nbsp;·&nbsp; <strong>'+diasStr+'</strong>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:3px">Data sugerida: <strong style="color:#1E40AF">'+dateFmt+'</strong></div>'
+    +'<button data-h="'+sug.horas+'" data-d="'+dateVal+'" onclick="kbAceitarSugestaoBtn(this)" '
+    +'style="margin-top:8px;width:100%;padding:7px;background:#1D4ED8;color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">'
+    +'✅ Aceitar sugestão</button>'
+    +'</div>';
+}
+
+function kbAceitarSugestaoBtn(btn) {
+  var horas   = parseFloat(btn.dataset.h)||0;
+  var dateVal = btn.dataset.d||'';
+  var tempEl  = document.getElementById('kbTempoProd');
+  var prazoEl = document.getElementById('kbPrazoEntrega');
+  if(tempEl)  tempEl.value  = horas % 1 === 0 ? String(horas) : horas.toFixed(1);
+  if(prazoEl) prazoEl.value = dateVal;
+  kbSalvarTempo();
+  kbSalvarPrazo();
+  var box = document.getElementById('kbPrazoSugBox');
+  if(box) box.style.display='none';
+  showToast('Prazo definido com base na sugestão!','ok');
+}
+
 function kbClose() { document.getElementById('kbOsOverlay').classList.remove('open'); _kbOsId = null; }
+
+// ── ENVIAR OS PARA FORNECEDOR ──────────────────────────────────────
+function kbFornPopular() {
+  var sel = document.getElementById('kbFornSel'); if(!sel) return;
+  var list = fornLoad();
+  var opts = '<option value="">— Selecionar fornecedor —</option>';
+  list.forEach(function(f){
+    var icon = (typeof FORN_CAT_ICON!=='undefined'&&FORN_CAT_ICON[f.categoria]) ? FORN_CAT_ICON[f.categoria] : '🏭';
+    opts += '<option value="'+f.id+'">'+icon+' '+f.nome+'</option>';
+  });
+  sel.innerHTML = opts;
+  document.getElementById('kbFornInfo').style.display='none';
+}
+
+function kbFornOnSelect() {
+  var id = (document.getElementById('kbFornSel')||{}).value;
+  var info = document.getElementById('kbFornInfo');
+  if(!id){ if(info) info.style.display='none'; return; }
+  var f = fornLoad().find(function(x){return x.id===id;});
+  if(!f) return;
+  var nomeEl = document.getElementById('kbFornNome');
+  var contEl = document.getElementById('kbFornContato');
+  if(nomeEl) nomeEl.textContent = f.nome + (f.categoria?' · '+f.categoria:'');
+  var contatos = [];
+  if(f.whatsapp) contatos.push('📱 '+f.whatsapp);
+  if(f.telefone) contatos.push('☎️ '+f.telefone);
+  if(f.email)    contatos.push('✉️ '+f.email);
+  if(contEl) contEl.textContent = contatos.join('  |  ') || 'Sem contato cadastrado';
+  var waBtn = document.getElementById('kbFornWaBtn');
+  var emBtn = document.getElementById('kbFornEmailBtn');
+  if(waBtn) waBtn.style.opacity = f.whatsapp ? '1':'0.4';
+  if(emBtn) emBtn.style.opacity = f.email    ? '1':'0.4';
+  if(info) info.style.display='';
+}
+
+function _kbFornOsMsgText() {
+  var os = KB_OS[_kbOsId]; if(!os) return '';
+  var link = os.fileLink||'';
+  var val  = os.valor ? (typeof os.valor==='number'?'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):String(os.valor)) : '';
+  var msg  = 'Ola! Segue o pedido de producao referente a OS #'+os.num;
+  if(os.titulo)   msg += ' - '+os.titulo;
+  msg += '.';
+  if(os.cliente)  msg += '\nCliente: '+os.cliente;
+  if(os.material) msg += '\nMaterial: '+os.material;
+  if(os.medidas)  msg += '\nMedidas: '+os.medidas;
+  if(os.qty)      msg += '\nQuantidade: '+os.qty+' un';
+  if(val)         msg += '\nValor: '+val;
+  if(os.entrega)  msg += '\nPrazo de entrega: '+os.entrega;
+  if(link)        msg += '\n\nArquivo / Arte: '+link;
+  msg += '\n\nAgradecemos a parceria!';
+  return msg;
+}
+function kbEnviarFornWA() {
+  var id = (document.getElementById('kbFornSel')||{}).value; if(!id) return;
+  var f = fornLoad().find(function(x){return x.id===id;});
+  if(!f||!f.whatsapp){ showToast('Fornecedor sem WhatsApp cadastrado','warn'); return; }
+  var phone = f.whatsapp.replace(/\D/g,'');
+  if(phone.length<=11) phone = '55'+phone;
+  var msg = _kbFornOsMsgText();
+  var url = 'https://wa.me/'+phone+'?text='+encodeURIComponent(msg);
+  window.open(url,'_blank');
+}
+
+function kbEnviarFornEmail() {
+  var id = (document.getElementById('kbFornSel')||{}).value; if(!id) return;
+  var f = fornLoad().find(function(x){return x.id===id;});
+  if(!f||!f.email){ showToast('Fornecedor sem e-mail cadastrado','warn'); return; }
+  var os = KB_OS[_kbOsId]; if(!os) return;
+  var subj = 'Pedido de Produção — OS #'+os.num+(os.cliente?' | '+os.cliente:'');
+  var body = _kbFornOsMsgText();
+  window.location.href = 'mailto:'+f.email+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body);
+}
 
 function kbSaveLink() {
   if(!_kbOsId) return;
