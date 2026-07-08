@@ -2734,9 +2734,9 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     </div>
 
     <!-- MODAL: Nova Conta a Receber -->
-    <div id="finCROverlay" class="overlay" style="display:none;z-index:600">
-      <div class="modal" style="max-width:480px">
-        <div class="modal-h"><span>📥 Nova Conta a Receber</span><button class="modal-close" onclick="finCROverlayClose()">✕</button></div>
+    <div id="finCROverlay" class="gen-overlay" onclick="if(event.target===this)finCROverlayClose()" style="z-index:600">
+      <div class="gen-modal" style="width:480px">
+        <div class="gen-modal-hdr"><span class="gen-modal-title">📥 Nova Conta a Receber</span><button class="gen-modal-close" onclick="finCROverlayClose()">✕</button></div>
         <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
           <div class="fg2">
             <div class="fg"><label>Cliente</label><input type="text" id="finCRCliente" placeholder="Nome do cliente"></div>
@@ -2778,9 +2778,9 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     </div>
 
     <!-- MODAL: Nova Conta a Pagar -->
-    <div id="finCPOverlay" class="overlay" style="display:none;z-index:600">
-      <div class="modal" style="max-width:500px">
-        <div class="modal-h"><span>📤 Nova Despesa</span><button class="modal-close" onclick="finCPOverlayClose()">✕</button></div>
+    <div id="finCPOverlay" class="gen-overlay" onclick="if(event.target===this)finCPOverlayClose()" style="z-index:600">
+      <div class="gen-modal" style="width:500px">
+        <div class="gen-modal-hdr"><span class="gen-modal-title">📤 Nova Despesa</span><button class="gen-modal-close" onclick="finCPOverlayClose()">✕</button></div>
         <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
           <div class="fg"><label>Descrição</label><input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho"></div>
           <div class="fg2">
@@ -5532,9 +5532,9 @@ function finCRNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+2).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCRVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
-  document.getElementById('finCROverlay').style.display='flex';
+  document.getElementById('finCROverlay').classList.add('open');
 }
-function finCROverlayClose(){ document.getElementById('finCROverlay').style.display='none'; }
+function finCROverlayClose(){ document.getElementById('finCROverlay').classList.remove('open'); }
 function finCRSalvar(){
   var cliente=(document.getElementById('finCRCliente')||{}).value||'';
   var desc=(document.getElementById('finCRDesc')||{}).value||'';
@@ -5654,9 +5654,9 @@ function finCPNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCPVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
-  document.getElementById('finCPOverlay').style.display='flex';
+  document.getElementById('finCPOverlay').classList.add('open');
 }
-function finCPOverlayClose(){ document.getElementById('finCPOverlay').style.display='none'; }
+function finCPOverlayClose(){ document.getElementById('finCPOverlay').classList.remove('open'); }
 function finCPSalvar(){
   var desc=(document.getElementById('finCPDesc')||{}).value||'';
   var cat=(document.getElementById('finCPCat')||{}).value||'Outros';
