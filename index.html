@@ -1423,12 +1423,21 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         <div class="card">
           <div class="card-h"><div class="card-h-left">👤 Identificação do Cliente</div><span class="badge bvr" id="orcBrandBadge">VR Marcas (PJ)</span></div>
           <div style="display:flex;flex-direction:column;gap:10px;">
-            <div class="fg">
-              <label>Tipo de Cliente</label>
-              <select onchange="orcTipoChange(this)">
-                <option value="pj">Pessoa Jurídica (PJ) → VR Marcas</option>
-                <option value="pf">Pessoa Física (PF) → Vitre</option>
-              </select>
+            <div class="fg-row">
+              <div class="fg">
+                <label>Empresa</label>
+                <select id="orcEmpresaSel" onchange="orcEmpresaChange()">
+                  <option value="vr">🟣 VR Marcas</option>
+                  <option value="vitre">🌸 Vitre</option>
+                </select>
+              </div>
+              <div class="fg">
+                <label>Tipo de Cliente</label>
+                <select id="orcTipoClienteSel" onchange="orcEmpresaChange()">
+                  <option value="pj">Pessoa Jurídica (PJ) — CNPJ</option>
+                  <option value="pf">Pessoa Física (PF) — CPF</option>
+                </select>
+              </div>
             </div>
             <div class="fg-row">
               <div class="fg"><label>Nome / Razão Social</label><input type="text" id="orcClientNome" placeholder="Ex: CLARO Telecom"></div>
@@ -4242,9 +4251,7 @@ function setBrand(brand) {
   }
 }
 
-function updateBrandFromQuote(sel) {
-  setBrand(sel.value === 'pf' ? 'vitre' : 'vr');
-}
+function updateBrandFromQuote(sel) { orcEmpresaChange(); }
 
 // ============================================================
 // PAINEL COMERCIAL — Motor de Precificação
@@ -4295,19 +4302,29 @@ function orcSyncStep3Result() {
   if(b3 && b) b3.innerHTML   = b.innerHTML;
 }
 
-function orcTipoChange(sel) {
-  const isPF = sel.value === 'pf';
-  setBrand(isPF ? 'vitre' : 'vr');
-  const dl = document.getElementById('orcDocLabel');
-  const dc = document.getElementById('orcClientDoc');
-  const bb = document.getElementById('orcBrandBadge');
+function orcEmpresaChange() {
+  var empSel  = document.getElementById('orcEmpresaSel');
+  var tipSel  = document.getElementById('orcTipoClienteSel');
+  var empresa = empSel  ? empSel.value  : 'vr';
+  var tipo    = tipSel  ? tipSel.value  : 'pj';
+  var isVitre = empresa === 'vitre';
+  var isPF    = tipo === 'pf';
+  setBrand(isVitre ? 'vitre' : 'vr');
+  var dl = document.getElementById('orcDocLabel');
+  var dc = document.getElementById('orcClientDoc');
+  var bb = document.getElementById('orcBrandBadge');
   if(dl) dl.textContent = isPF ? 'CPF' : 'CNPJ';
   if(dc) dc.placeholder = isPF ? '000.000.000-00' : '00.000.000/0001-00';
-  if(bb) { bb.textContent = isPF?'Vitre (PF)':'VR Marcas (PJ)'; bb.className='badge '+(isPF?'bvit':'bvr'); }
-  const pi = document.getElementById('orcPgtoInfo');
-  if(pi) pi.innerHTML = 'Gateway: <strong>'+(isPF?'Nubank PIX':'Mercado Pago')+'</strong>';
+  if(bb) {
+    var lbl = (isVitre ? 'Vitre' : 'VR Marcas') + ' (' + (isPF ? 'PF' : 'PJ') + ')';
+    bb.textContent = lbl;
+    bb.className = 'badge ' + (isVitre ? 'bvit' : 'bvr');
+  }
+  var pi = document.getElementById('orcPgtoInfo');
+  if(pi) pi.innerHTML = 'Gateway: <strong>' + (isVitre ? 'Nubank PIX' : 'Mercado Pago') + '</strong>';
   orcRecalc();
 }
+function orcTipoChange(sel) { orcEmpresaChange(); }
 
 function orcAddItem() {
   orcItemCount++;
