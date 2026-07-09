@@ -3158,39 +3158,65 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
         <!-- ── ABA 7: DADOS BANCÁRIOS ── -->
         <div id="cfgPg7" class="cfg-pg" style="display:none">
+          <!-- VR Marcas -->
           <div class="card" style="margin-bottom:16px">
-            <div class="card-h"><div class="card-h-left" style="color:#00C1DE">🏢 VR Marcas — Dados Bancários</div></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px">
-              <div class="fg"><label>Banco</label><input type="text" id="bankVRNome" placeholder="Ex: Itaú, Bradesco, Nubank..."></div>
-              <div class="fg"><label>Tipo de Conta</label><select id="bankVRTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="corrente">Conta Corrente</option><option value="poupanca">Conta Poupança</option><option value="pj">Conta PJ</option></select></div>
-              <div class="fg"><label>Agência</label><input type="text" id="bankVRAgencia" placeholder="Ex: 0001"></div>
-              <div class="fg"><label>Conta</label><input type="text" id="bankVRConta" placeholder="Ex: 12345-6"></div>
-              <div class="fg"><label>Titular</label><input type="text" id="bankVRTitular" placeholder="Nome ou razão social"></div>
-              <div class="fg"><label>CNPJ / CPF</label><input type="text" id="bankVRDoc" placeholder="00.000.000/0001-00"></div>
-              <div class="fg"><label>Chave PIX</label><input type="text" id="bankVRPix" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
-              <div class="fg"><label>Tipo da Chave PIX</label><select id="bankVRPixTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
+            <div class="card-h">
+              <div class="card-h-left" style="color:#00C1DE">🏢 VR Marcas — Contas Bancárias</div>
+              <button class="topbar-btn" style="padding:5px 13px;font-size:11px" onclick="bankAbrirForm('vr')">＋ Adicionar Conta</button>
             </div>
-            <div style="display:flex;gap:8px;margin-top:14px">
-            <button class="topbar-btn" style="flex:1" onclick="cfgSalvarBanco('vr')">💾 Salvar Banco VR Marcas</button>
-            <button class="topbar-btn" style="background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;padding:7px 14px" onclick="cfgLimparBanco('vr')" title="Remover conta bancária VR">🗑️ Remover</button>
+            <div id="bankListVR" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+            <!-- form inline VR -->
+            <div id="bankFormVR" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+              <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;text-transform:uppercase" id="bankFormTitleVR">Nova Conta</div>
+              <input type="hidden" id="bankEditIdVR">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div class="fg" style="margin:0"><label>Banco</label><input type="text" id="bankFNomeVR" placeholder="Ex: Itaú, Nubank..."></div>
+                <div class="fg" style="margin:0"><label>Tipo de Conta</label><select id="bankFTipoVR" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="corrente">Conta Corrente</option><option value="poupanca">Conta Poupança</option><option value="pj">Conta PJ</option></select></div>
+                <div class="fg" style="margin:0"><label>Agência</label><input type="text" id="bankFAgenciaVR" placeholder="Ex: 0001"></div>
+                <div class="fg" style="margin:0"><label>Conta</label><input type="text" id="bankFContaVR" placeholder="Ex: 12345-6"></div>
+                <div class="fg" style="margin:0"><label>Titular</label><input type="text" id="bankFTitularVR" placeholder="Nome ou razão social"></div>
+                <div class="fg" style="margin:0"><label>CNPJ / CPF</label><input type="text" id="bankFDocVR" placeholder="00.000.000/0001-00"></div>
+                <div class="fg" style="margin:0"><label>Chave PIX</label><input type="text" id="bankFPixVR" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
+                <div class="fg" style="margin:0"><label>Tipo da Chave PIX</label><select id="bankFPixTipoVR" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-top:10px;cursor:pointer">
+                <input type="checkbox" id="bankFPrincipalVR"> Marcar como conta principal
+              </label>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <button class="topbar-btn" style="flex:1" onclick="bankSalvarForm('vr')">💾 Salvar</button>
+                <button class="topbar-btn ghost" onclick="bankFecharForm('vr')">Cancelar</button>
+              </div>
+            </div>
           </div>
-          </div>
+          <!-- Vitre -->
           <div class="card">
-            <div class="card-h"><div class="card-h-left" style="color:#B85C28">🌿 Vitre — Dados Bancários</div></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px">
-              <div class="fg"><label>Banco</label><input type="text" id="bankVTNome" placeholder="Ex: Itaú, Bradesco, Nubank..."></div>
-              <div class="fg"><label>Tipo de Conta</label><select id="bankVTTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="corrente">Conta Corrente</option><option value="poupanca">Conta Poupança</option><option value="pj">Conta PJ</option></select></div>
-              <div class="fg"><label>Agência</label><input type="text" id="bankVTAgencia" placeholder="Ex: 0001"></div>
-              <div class="fg"><label>Conta</label><input type="text" id="bankVTConta" placeholder="Ex: 12345-6"></div>
-              <div class="fg"><label>Titular</label><input type="text" id="bankVTTitular" placeholder="Nome ou razão social"></div>
-              <div class="fg"><label>CNPJ / CPF</label><input type="text" id="bankVTDoc" placeholder="00.000.000/0001-00"></div>
-              <div class="fg"><label>Chave PIX</label><input type="text" id="bankVTPix" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
-              <div class="fg"><label>Tipo da Chave PIX</label><select id="bankVTPixTipo" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
+            <div class="card-h">
+              <div class="card-h-left" style="color:#B85C28">🌿 Vitre — Contas Bancárias</div>
+              <button class="topbar-btn" style="padding:5px 13px;font-size:11px;background:linear-gradient(135deg,#B85C28,#1D6B6B)" onclick="bankAbrirForm('vt')">＋ Adicionar Conta</button>
             </div>
-            <div style="display:flex;gap:8px;margin-top:14px">
-            <button class="topbar-btn" style="flex:1;background:linear-gradient(135deg,#B85C28,#1D6B6B)" onclick="cfgSalvarBanco('vt')">💾 Salvar Banco Vitre</button>
-            <button class="topbar-btn" style="background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;padding:7px 14px" onclick="cfgLimparBanco('vt')" title="Remover conta bancária Vitre">🗑️ Remover</button>
-          </div>
+            <div id="bankListVT" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+            <!-- form inline VT -->
+            <div id="bankFormVT" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:14px">
+              <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px;text-transform:uppercase" id="bankFormTitleVT">Nova Conta</div>
+              <input type="hidden" id="bankEditIdVT">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                <div class="fg" style="margin:0"><label>Banco</label><input type="text" id="bankFNomeVT" placeholder="Ex: Itaú, Nubank..."></div>
+                <div class="fg" style="margin:0"><label>Tipo de Conta</label><select id="bankFTipoVT" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="corrente">Conta Corrente</option><option value="poupanca">Conta Poupança</option><option value="pj">Conta PJ</option></select></div>
+                <div class="fg" style="margin:0"><label>Agência</label><input type="text" id="bankFAgenciaVT" placeholder="Ex: 0001"></div>
+                <div class="fg" style="margin:0"><label>Conta</label><input type="text" id="bankFContaVT" placeholder="Ex: 12345-6"></div>
+                <div class="fg" style="margin:0"><label>Titular</label><input type="text" id="bankFTitularVT" placeholder="Nome ou razão social"></div>
+                <div class="fg" style="margin:0"><label>CNPJ / CPF</label><input type="text" id="bankFDocVT" placeholder="00.000.000/0001-00"></div>
+                <div class="fg" style="margin:0"><label>Chave PIX</label><input type="text" id="bankFPixVT" placeholder="CPF, CNPJ, e-mail ou aleatória"></div>
+                <div class="fg" style="margin:0"><label>Tipo da Chave PIX</label><select id="bankFPixTipoVT" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="email">E-mail</option><option value="telefone">Telefone</option><option value="aleatoria">Chave Aleatória</option></select></div>
+              </div>
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-top:10px;cursor:pointer">
+                <input type="checkbox" id="bankFPrincipalVT"> Marcar como conta principal
+              </label>
+              <div style="display:flex;gap:8px;margin-top:12px">
+                <button class="topbar-btn" style="flex:1;background:linear-gradient(135deg,#B85C28,#1D6B6B)" onclick="bankSalvarForm('vt')">💾 Salvar</button>
+                <button class="topbar-btn ghost" onclick="bankFecharForm('vt')">Cancelar</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -3330,6 +3356,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       <option value="Embalagens">📦 Embalagens</option>
       <option value="Outros">📌 Outros</option>
     </select>
+    <button onclick="fornNovoModal()" class="topbar-btn" style="white-space:nowrap;padding:8px 16px;font-size:12px">＋ Novo Fornecedor</button>
   </div>
 
   <!-- Grid de cards de fornecedores -->
@@ -6586,21 +6613,24 @@ function finCRDel(id) {
 function finPopularContas(selectId) {
   var sel = document.getElementById(selectId);
   if(!sel) return;
-  var bd = bankLoad();
   var opts = '<option value="">— Selecione a conta —</option>';
-  if(bd.vr && bd.vr.nome) {
-    var label = bd.vr.nome;
-    if(bd.vr.conta) label += ' (' + bd.vr.conta + ')';
-    opts += '<option value="vr">🟣 ' + label + ' — VR</option>';
+  var vrList = bankListFor('vr');
+  var vtList = bankListFor('vt');
+  if(vrList.length) {
+    vrList.forEach(function(b, i){
+      var label = b.nome + (b.conta?' ('+b.conta+')':'') + (b.principal?' ⭐':'');
+      opts += '<option value="vr_'+b.id+'">🟣 '+label+' — VR</option>';
+    });
   } else {
-    opts += '<option value="mp_vr">🟣 Mercado Pago — VR</option>';
+    opts += '<option value="mp_vr">🟣 VR Marcas</option>';
   }
-  if(bd.vt && bd.vt.nome) {
-    var labelVt = bd.vt.nome;
-    if(bd.vt.conta) labelVt += ' (' + bd.vt.conta + ')';
-    opts += '<option value="vt">🌸 ' + labelVt + ' — Vitre</option>';
+  if(vtList.length) {
+    vtList.forEach(function(b, i){
+      var label = b.nome + (b.conta?' ('+b.conta+')':'') + (b.principal?' ⭐':'');
+      opts += '<option value="vt_'+b.id+'">🌿 '+label+' — Vitre</option>';
+    });
   } else {
-    opts += '<option value="nu_vitre">🌸 Nubank — Vitre</option>';
+    opts += '<option value="nu_vitre">🌿 Vitre</option>';
   }
   opts += '<option value="dinheiro">💵 Caixa / Dinheiro</option>';
   sel.innerHTML = opts;
@@ -9386,46 +9416,138 @@ function mkCalc() {
   document.getElementById('mkMLDval').textContent  = fmt(lucro);
 }
 
-function cfgSalvarBanco(marca) {
-  var p = marca==='vr'?'bankVR':'bankVT';
+// ── Banco: helpers ──────────────────────────────────────────────────────────
+function bankListFor(marca) {
   var d = bankLoad();
-  d[marca]={
-    nome:    (document.getElementById(p+'Nome')||{}).value||'',
-    tipo:    (document.getElementById(p+'Tipo')||{}).value||'corrente',
-    agencia: (document.getElementById(p+'Agencia')||{}).value||'',
-    conta:   (document.getElementById(p+'Conta')||{}).value||'',
-    titular: (document.getElementById(p+'Titular')||{}).value||'',
-    doc:     (document.getElementById(p+'Doc')||{}).value||'',
-    pix:     (document.getElementById(p+'Pix')||{}).value||'',
-    pixTipo: (document.getElementById(p+'PixTipo')||{}).value||'cpf'
+  var val = d[marca];
+  if(!val) return [];
+  // migração: formato antigo era objeto único
+  if(!Array.isArray(val)) { val = [Object.assign({id: 'legado_'+marca, principal:true}, val)]; }
+  return val;
+}
+function bankSaveList(marca, arr) {
+  var d = bankLoad();
+  d[marca] = arr;
+  bankSave(d);
+}
+function bankUid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function bankTipoLabel(t) {
+  return {corrente:'Conta Corrente',poupanca:'Conta Poupança',pj:'Conta PJ'}[t] || t;
+}
+function bankPixTipoLabel(t) {
+  return {cpf:'CPF',cnpj:'CNPJ',email:'E-mail',telefone:'Telefone',aleatoria:'Chave Aleatória'}[t] || t;
+}
+function bankRenderLista(marca) {
+  var suf = marca==='vr'?'VR':'VT';
+  var container = document.getElementById('bankList'+suf);
+  if(!container) return;
+  var lista = bankListFor(marca);
+  if(!lista.length) {
+    container.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:10px 0">Nenhuma conta cadastrada.</div>';
+    return;
+  }
+  container.innerHTML = lista.map(function(b, i) {
+    var badge = b.principal ? '<span style="font-size:9px;background:var(--brand-mid);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px">PRINCIPAL</span>' : '';
+    var pix = b.pix ? '<div style="font-size:10px;color:var(--muted)">PIX ('+bankPixTipoLabel(b.pixTipo)+'): <strong>'+b.pix+'</strong></div>' : '';
+    return '<div style="border:1px solid var(--border);border-radius:9px;padding:12px 14px;background:var(--bg2)">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+      + '<div>'
+      + '<div style="font-size:13px;font-weight:700">'+b.nome+badge+'</div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+bankTipoLabel(b.tipo)+' · Ag: '+b.agencia+' · Conta: '+b.conta+'</div>'
+      + (b.titular ? '<div style="font-size:10px;color:var(--muted)">Titular: '+b.titular+(b.doc?' · '+b.doc:'')+'</div>' : '')
+      + pix
+      + '</div>'
+      + '<div style="display:flex;gap:6px;flex-shrink:0">'
+      + (!b.principal ? '<button onclick="bankSetPrincipal(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer" title="Definir como principal">⭐</button>' : '')
+      + '<button onclick="bankEditar(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer">✏️</button>'
+      + '<button onclick="bankRemover(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid #FCA5A5;border-radius:6px;background:#FEE2E2;color:#DC2626;cursor:pointer">🗑️</button>'
+      + '</div></div></div>';
+  }).join('');
+}
+function bankAbrirForm(marca) {
+  var suf = marca==='vr'?'VR':'VT';
+  var formEl = document.getElementById('bankForm'+suf);
+  if(!formEl) return;
+  formEl.style.display = 'block';
+  document.getElementById('bankFormTitle'+suf).textContent = 'Nova Conta';
+  document.getElementById('bankEditId'+suf).value = '';
+  ['FNome','FAgencia','FConta','FTitular','FDoc','FPix'].forEach(function(k){ var el=document.getElementById('bank'+k+suf); if(el) el.value=''; });
+  var ft=document.getElementById('bankFTipo'+suf); if(ft) ft.value='corrente';
+  var fp=document.getElementById('bankFPixTipo'+suf); if(fp) fp.value='cpf';
+  var fc=document.getElementById('bankFPrincipal'+suf); if(fc) fc.checked=false;
+}
+function bankFecharForm(marca) {
+  var suf = marca==='vr'?'VR':'VT';
+  var formEl = document.getElementById('bankForm'+suf);
+  if(formEl) formEl.style.display = 'none';
+}
+function bankSalvarForm(marca) {
+  var suf = marca==='vr'?'VR':'VT';
+  var nome = (document.getElementById('bankFNome'+suf)||{}).value||'';
+  if(!nome.trim()) { showToast('Informe o nome do banco','warn'); return; }
+  var editId = (document.getElementById('bankEditId'+suf)||{}).value||'';
+  var lista = bankListFor(marca);
+  var isPrincipal = !!(document.getElementById('bankFPrincipal'+suf)||{}).checked;
+  if(isPrincipal) lista.forEach(function(b){ b.principal=false; });
+  var obj = {
+    id:        editId || bankUid(),
+    nome:      nome,
+    tipo:      (document.getElementById('bankFTipo'+suf)||{}).value||'corrente',
+    agencia:   (document.getElementById('bankFAgencia'+suf)||{}).value||'',
+    conta:     (document.getElementById('bankFConta'+suf)||{}).value||'',
+    titular:   (document.getElementById('bankFTitular'+suf)||{}).value||'',
+    doc:       (document.getElementById('bankFDoc'+suf)||{}).value||'',
+    pix:       (document.getElementById('bankFPix'+suf)||{}).value||'',
+    pixTipo:   (document.getElementById('bankFPixTipo'+suf)||{}).value||'cpf',
+    principal: isPrincipal
   };
-  bankSave(d);
-  showToast('Banco '+(marca==='vr'?'VR Marcas':'Vitre')+' salvo ✓','ok');
+  if(editId) {
+    var idx = lista.findIndex(function(b){ return b.id===editId; });
+    if(idx>=0) lista[idx]=obj; else lista.push(obj);
+  } else {
+    if(!lista.length) obj.principal=true; // primeira conta vira principal automaticamente
+    lista.push(obj);
+  }
+  bankSaveList(marca, lista);
+  bankFecharForm(marca);
+  bankRenderLista(marca);
+  showToast('Conta bancária salva ✓','ok');
 }
-function cfgLimparBanco(marca) {
-  var nome = marca==='vr' ? 'VR Marcas' : 'Vitre';
-  if(!confirm('Remover os dados bancários de ' + nome + '?')) return;
-  var d = bankLoad();
-  delete d[marca];
-  bankSave(d);
-  // Limpar campos na tela
-  var p = marca==='vr'?'bankVR':'bankVT';
-  ['Nome','Agencia','Conta','Titular','Doc','Pix'].forEach(function(k){
-    var el = document.getElementById(p+k); if(el) el.value='';
-  });
-  showToast('Conta bancária de '+nome+' removida','ok');
+function bankEditar(marca, id) {
+  var suf = marca==='vr'?'VR':'VT';
+  var lista = bankListFor(marca);
+  var b = lista.find(function(x){ return x.id===id; });
+  if(!b) return;
+  bankAbrirForm(marca);
+  document.getElementById('bankFormTitle'+suf).textContent = 'Editar Conta';
+  document.getElementById('bankEditId'+suf).value = b.id;
+  var map = {FNome:'nome',FAgencia:'agencia',FConta:'conta',FTitular:'titular',FDoc:'doc',FPix:'pix'};
+  Object.keys(map).forEach(function(k){ var el=document.getElementById('bank'+k+suf); if(el) el.value=b[map[k]]||''; });
+  var ft=document.getElementById('bankFTipo'+suf); if(ft) ft.value=b.tipo||'corrente';
+  var fp=document.getElementById('bankFPixTipo'+suf); if(fp) fp.value=b.pixTipo||'cpf';
+  var fc=document.getElementById('bankFPrincipal'+suf); if(fc) fc.checked=!!b.principal;
 }
-
+function bankRemover(marca, id) {
+  if(!confirm('Remover esta conta bancária?')) return;
+  var lista = bankListFor(marca).filter(function(b){ return b.id!==id; });
+  bankSaveList(marca, lista);
+  bankRenderLista(marca);
+  showToast('Conta removida','ok');
+}
+function bankSetPrincipal(marca, id) {
+  var lista = bankListFor(marca);
+  lista.forEach(function(b){ b.principal = (b.id===id); });
+  bankSaveList(marca, lista);
+  bankRenderLista(marca);
+  showToast('Conta principal atualizada ✓','ok');
+}
 function cfgCarregarBanco() {
-  var d = bankLoad();
-  ['vr','vt'].forEach(function(marca){
-    var b=d[marca]||{}, p=marca==='vr'?'bankVR':'bankVT';
-    var flds={Nome:'nome',Agencia:'agencia',Conta:'conta',Titular:'titular',Doc:'doc',Pix:'pix'};
-    Object.keys(flds).forEach(function(k){ var el=document.getElementById(p+k); if(el) el.value=b[flds[k]]||''; });
-    var te=document.getElementById(p+'Tipo'); if(te&&b.tipo) te.value=b.tipo;
-    var pe=document.getElementById(p+'PixTipo'); if(pe&&b.pixTipo) pe.value=b.pixTipo;
-  });
+  bankRenderLista('vr');
+  bankRenderLista('vt');
 }
+// mantidos por compatibilidade (não usados mais pela UI nova)
+function cfgSalvarBanco(marca) { bankSalvarForm(marca); }
+function cfgLimparBanco(marca) { bankRemover(marca, bankListFor(marca)[0]?.id||''); }
 
 function cfgTab(n) {
   if(n===5) { setTimeout(mkPopularFromConfig, 50); }
