@@ -3198,7 +3198,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="usrNovoOpen()">+ Novo Usuário</button>
           </div>
           <table class="table" id="usrTable">
-            <thead><tr><th>Nome</th><th>Função</th><th>Acesso</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Acesso</th><th>Status</th><th></th></tr></thead>
             <tbody id="usrBody"></tbody>
           </table>
         </div>
@@ -9890,7 +9890,19 @@ MODULOS.forEach(function(m){
   PERM_DEFAULT[m.id] = { master:true, comercial: ['dashboard','kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['dashboard','kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
-function usrLoadUsuarios(){ try{ return JSON.parse(localStorage.getItem(USR_KEY))||[]; }catch(e){ return []; } }
+function usrLoadUsuarios(){
+  try{
+    var arr=JSON.parse(localStorage.getItem(USR_KEY));
+    if(arr && arr.length) return arr;
+    // tenta recuperar do backup em erp_config
+    var cfg=JSON.parse(localStorage.getItem('erp_config')||'{}');
+    if(cfg._usuarios_bkp && cfg._usuarios_bkp.length){
+      localStorage.setItem(USR_KEY,JSON.stringify(cfg._usuarios_bkp));
+      return cfg._usuarios_bkp;
+    }
+    return arr||[];
+  }catch(e){ return []; }
+}
 function usrLoadPerms(){ try{ return JSON.parse(localStorage.getItem(PERM_KEY))||JSON.parse(JSON.stringify(PERM_DEFAULT)); }catch(e){ return JSON.parse(JSON.stringify(PERM_DEFAULT)); } }
 
 var FUNCAO_LABEL = { master:'👑 Master', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
@@ -9956,7 +9968,13 @@ function usrSalvar() {
     showToast('E-mail já cadastrado','err'); return;
   }
   users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
-  try{ localStorage.setItem(USR_KEY, JSON.stringify(users)); }catch(e){}
+  try{
+    localStorage.setItem(USR_KEY, JSON.stringify(users));
+    // backup dentro de erp_config para recuperação
+    var cfg2=JSON.parse(localStorage.getItem('erp_config')||'{}');
+    cfg2._usuarios_bkp=users;
+    localStorage.setItem('erp_config',JSON.stringify(cfg2));
+  }catch(e){ showToast('Erro ao salvar: '+e.message,'err'); return; }
   showToast('Usuário "'+nome+'" criado!','ok');
   if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
   usrNovoClose();
@@ -10544,16 +10562,26 @@ function crmAbrirPosVenda(id) {
   var saved = posvLoad()[id]||{};
   document.getElementById('pvClienteNome').textContent = d.nome||id;
   var cl = document.getElementById('pvCheckList');
-  if(cl) cl.innerHTML = _PV_CONTATOS.map(function(c){
+  var pvAllItems = _PV_CONTATOS.concat(saved._customLembretes||[]);
+  if(cl) cl.innerHTML = pvAllItems.map(function(c){
     var checked = saved[c.id]?'checked':'';
-    var today = new Date(); today.setDate(today.getDate()+c.dias);
+    var today = new Date(); today.setDate(today.getDate()+(c.dias||1));
     var sugDt = today.toISOString().split('T')[0];
     var dtVal = saved[c.id+'_dt']||sugDt;
-    return '<div style="display:flex;align-items:flex-start;gap:10px;background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--border)">'
+    var msgVal = saved[c.id+'_msg']||'';
+    var isCustom = !!c._custom;
+    return '<div style="background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid '+(isCustom?'#7C3AED':'var(--border)')+'">'
+      +'<div style="display:flex;align-items:flex-start;gap:10px">'
       +'<input type="checkbox" id="pvc_'+c.id+'" '+checked+' style="margin-top:2px;width:16px;height:16px;accent-color:#7C3AED;flex-shrink:0">'
-      +'<div style="flex:1"><div style="font-size:12px;font-weight:700">'+c.icon+' '+c.label+'</div>'
-      +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+c.sub+'</div></div>'
-      +'<input type="date" id="pvd_'+c.id+'" value="'+dtVal+'" style="font-size:11px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'
+      +'<div style="flex:1">'
+      +'<div style="font-size:12px;font-weight:700">'+c.icon+' '+c.label+(isCustom?' <span style="font-size:9px;background:#EDE9FE;color:#7C3AED;padding:1px 6px;border-radius:10px;font-weight:700">Personalizado</span>':'')+'</div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+c.sub+'</div>'
+      +'</div>'
+      +'<input type="date" id="pvd_'+c.id+'" value="'+dtVal+'" style="font-size:11px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">'
+      +'</div>'
+      +'<div style="margin-top:8px">'
+      +'<textarea id="pvm_'+c.id+'" rows="2" placeholder="✏️ Mensagem para enviar neste contato (opcional)..." style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--surface);color:var(--text);resize:none;font-family:inherit;box-sizing:border-box">'+msgVal+'</textarea>'
+      +'</div>'
       +'</div>';
   }).join('');
   var prod = d.intencao?d.intencao.produto:'';
@@ -10573,17 +10601,59 @@ function posVendaFechar(){
 function posVendaSalvar(){
   if(!_pvLeadId) return;
   var d=posvLoad(), entry={};
-  _PV_CONTATOS.forEach(function(c){
-    var cb=document.getElementById('pvc_'+c.id), dt=document.getElementById('pvd_'+c.id);
-    if(cb) entry[c.id]=cb.checked; if(dt) entry[c.id+'_dt']=dt.value;
+  var saved=d[_pvLeadId]||{};
+  var allItems=_PV_CONTATOS.concat(saved._customLembretes||[]);
+  allItems.forEach(function(c){
+    var cb=document.getElementById('pvc_'+c.id), dt=document.getElementById('pvd_'+c.id), msg=document.getElementById('pvm_'+c.id);
+    if(cb) entry[c.id]=cb.checked;
+    if(dt) entry[c.id+'_dt']=dt.value;
+    if(msg) entry[c.id+'_msg']=msg.value;
   });
+  // preservar lembretes customizados
+  entry._customLembretes=saved._customLembretes||[];
   var mc=document.getElementById('pvMsgCustom'); if(mc) entry.msg=mc.value;
   entry.cliente=(CRM_LEADS[_pvLeadId]||{}).nome||_pvLeadId;
   entry.savedAt=new Date().toISOString();
   d[_pvLeadId]=entry; posvSave(d);
   posVendaFechar();
-  var total=_PV_CONTATOS.filter(function(c){return entry[c.id];}).length;
+  var total=allItems.filter(function(c){return entry[c.id];}).length;
   showToast('Pós-venda: '+total+' contato'+(total!==1?'s':'')+' agendado'+(total!==1?'s':'')+'!','ok');
+}
+
+function pvNovoLembreteOpen(){
+  var o=document.getElementById('pvNovoLembreteOverlay');
+  if(o){ o.style.display='flex'; }
+}
+function pvNovoLembreteClose(){
+  var o=document.getElementById('pvNovoLembreteOverlay');
+  if(o){ o.style.display='none'; }
+  ['pvNlTitulo','pvNlSub','pvNlDias','pvNlMsg'].forEach(function(id){
+    var el=document.getElementById(id); if(el) el.value='';
+  });
+}
+function pvNovoLembreteSalvar(){
+  var titulo=(document.getElementById('pvNlTitulo')||{}).value||'';
+  var sub=(document.getElementById('pvNlSub')||{}).value||'';
+  var dias=parseInt((document.getElementById('pvNlDias')||{}).value||'1');
+  var msg=(document.getElementById('pvNlMsg')||{}).value||'';
+  if(!titulo.trim()){ showToast('Informe o título do lembrete','err'); return; }
+  if(isNaN(dias)||dias<1){ showToast('Informe quantos dias após o fechamento','err'); return; }
+  var newId='custom_'+Date.now();
+  var newItem={id:newId,label:titulo.trim(),sub:sub.trim()||'Lembrete personalizado',icon:'📌',dias:dias,_custom:true};
+  // salvar no entry do lead atual
+  if(_pvLeadId){
+    var d=posvLoad();
+    var entry=d[_pvLeadId]||{};
+    if(!entry._customLembretes) entry._customLembretes=[];
+    entry._customLembretes.push(newItem);
+    d[_pvLeadId]=entry; posvSave(d);
+    if(msg) entry[newId+'_msg']=msg;
+    posvSave(d);
+  }
+  pvNovoLembreteClose();
+  // Re-abrir pós-venda para mostrar novo lembrete
+  crmAbrirPosVenda(_pvLeadId);
+  showToast('Lembrete "'+titulo+'" criado!','ok');
 }
 
 // ============================================================
@@ -10632,7 +10702,7 @@ function crmCardHTML(lead) {
     fuBadge = '<div style="font-size:10px;color:'+drColor+';margin-top:5px;font-weight:700">📅 Follow-up: '+drStr+(diff===0?' (hoje)':diff===1?' (amanhã)':(diff<0?' ('+Math.abs(diff)+'d atrás)':''))+'</div>';
   }
 
-  return '<div class="crm-card" data-id="'+lead._id+'" style="border-color:'+(lead.cor||'#7C3AED')+';cursor:default">'
+  return '<div class="crm-card" data-id="'+lead._id+'" onclick="crmOpenCard(this.dataset.id)" style="border-color:'+(lead.cor||'#7C3AED')+';cursor:pointer">'
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin-bottom:6px">'
     +'<div style="font-size:13px;font-weight:800;color:var(--text);line-height:1.3">'+lead.nome+'</div>'
     +'<span style="font-size:16px;flex-shrink:0" title="'+lead.temp+'">'+tempIcon+'</span>'
@@ -10646,12 +10716,12 @@ function crmCardHTML(lead) {
     +'<div style="height:4px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:4px;background:'+scoreColor+';border-radius:2px;transition:width .4s"></div></div></div>' : '')
     +fuBadge
     +'<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">'
-    +(phone ? '<a href="'+waLink+'" target="_blank" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none;cursor:pointer">💬 WhatsApp</a>' : '')
-    +'<button data-cid="'+lead._id+'" onclick="crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Mensagem</button>'
-    +'<button data-cid="'+lead._id+'" onclick="crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Ver</button>'
+    +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none;cursor:pointer">💬 WhatsApp</a>' : '')
+    +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Msg</button>'
+    +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid #7C3AED;border-radius:6px;font-size:10px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️ Editar</button>'
     +'</div>'
     +'<div style="display:flex;gap:4px;margin-top:5px">'
-    +'<select data-cid="'+lead._id+'" onchange="crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    +'<select data-cid="'+lead._id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
     + CRM_FASES.map(function(f){ return '<option value="'+f.id+'"'+(lead.etapa===f.id?' selected':'')+'>'+f.label+'</option>'; }).join('')
     +'</select>'
     +'</div>'
@@ -10663,23 +10733,39 @@ function crmRenderKpi(marca) {
   var total = leads.length;
   var quentes = leads.filter(function(l){ return l.temp==='quente'; }).length;
   var fuVenc = leads.filter(function(l){ return l.followup_vencido || (l.horas_sem_resposta&&l.horas_sem_resposta>48); }).length;
-  var valPot = leads.reduce(function(s,l){
-    var v = parseFloat((l.valor_potencial||'0').replace(/[^\d,]/g,'').replace(',','.'));
-    return s + (isNaN(v)?0:v);
-  }, 0);
-  var valStr = valPot >= 1000 ? 'R$'+Math.round(valPot/1000)+'k' : 'R$'+Math.round(valPot);
+  var orcLeads = leads.filter(function(l){ return l.etapa==='orc_emitido'; });
+  var orcQtd = orcLeads.length;
+  // Cards parados: sem resposta >24h OU data_retorno vencida sem avanço
+  var hoje0 = new Date(); hoje0.setHours(0,0,0,0);
+  var parados = leads.filter(function(l){
+    if(l.horas_sem_resposta && l.horas_sem_resposta > 24) return true;
+    if(l.data_retorno) { var dr=new Date(l.data_retorno+'T00:00:00'); return dr<hoje0; }
+    return false;
+  }).length;
+  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var valTot = leads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
+  var valOrc = orcLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
+  function fmtK(v){ return v>=1000?'R$'+Math.round(v/1000)+'k':'R$'+Math.round(v); }
   var suf = marca==='vr' ? 'VR' : 'VT';
-  var c = marca==='vr' ? '#7C3AED' : '#BE185D';
+  var corMarca = marca==='vr' ? '#7C3AED' : '#BE185D';
   var kpiEl = document.getElementById('crmKpi'+suf);
   if(!kpiEl) return;
-  kpiEl.innerHTML = [
-    {v:total, l:'no pipeline', c:c},
-    {v:quentes, l:'leads quentes', c:'#DC2626'},
-    {v:fuVenc, l:'follow-up vencido', c:'#D97706'},
-    {v:valStr, l:'valor potencial', c:'#059669'}
-  ].map(function(k){
-    return '<div class="kpi"><div class="kpi-val" style="color:'+k.c+';font-size:20px">'+k.v+'</div><div class="kpi-lbl">'+k.l+'</div></div>';
-  }).join('');
+  var kpis = [
+    {v:total,        l:'Leads no Pipeline',        c:corMarca,  ico:'📋'},
+    {v:fmtK(valTot), l:'Valor Total Pipeline',     c:'#059669', ico:'💰'},
+    {v:orcQtd+'  '+fmtK(valOrc), l:'Orç. Emitidos · Valor', c:'#D97706', ico:'📄'},
+    {v:quentes,      l:'Leads Quentes',             c:'#DC2626', ico:'🔴'},
+    {v:fuVenc,       l:'Follow-up Vencido',         c:'#B45309', ico:'⏰'},
+    {v:parados,      l:'Cards Parados',             c:'#6B7280', ico:'⚠️'}
+  ];
+  kpiEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">'
+    + kpis.map(function(k){
+        return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px">'
+          +'<div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">'+k.ico+' '+k.l+'</div>'
+          +'<div style="font-size:18px;font-weight:900;color:'+k.c+';line-height:1.2">'+k.v+'</div>'
+          +'</div>';
+      }).join('')
+    +'</div>';
 
   // atualizar contagem nos tabs
   var countEl = document.getElementById('crm'+(suf==='VR'?'VR':'VT')+'count');
@@ -11248,12 +11334,46 @@ function _crmAdicionarBadgeCliente(leadId, clienteId, novo) {
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="gen-submit" style="flex:1" onclick="posVendaSalvar()">💾 Salvar Agenda de Pós-Venda</button>
+        <button class="topbar-btn ghost" style="font-size:11px" onclick="pvNovoLembreteOpen()">➕ Novo Lembrete</button>
+        <button class="gen-submit" style="flex:1" onclick="posVendaSalvar()">💾 Salvar Agenda</button>
         <button class="topbar-btn ghost" onclick="posVendaFechar()">Cancelar</button>
       </div>
     </div>
   </div>
 </div>
+
+<!-- OVERLAY: Novo Lembrete Personalizado -->
+<div id="pvNovoLembreteOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:14px;width:420px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.3)">
+    <div style="background:linear-gradient(135deg,#7C3AED,#5B21B6);border-radius:14px 14px 0 0;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
+      <span style="color:#fff;font-size:14px;font-weight:800">📌 Novo Lembrete Personalizado</span>
+      <button onclick="pvNovoLembreteClose()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:7px;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>
+    </div>
+    <div style="padding:18px 20px;display:flex;flex-direction:column;gap:11px">
+      <div class="fg">
+        <label>Título do Lembrete</label>
+        <input type="text" id="pvNlTitulo" placeholder="Ex: 6 meses — Verificação de uso" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
+      </div>
+      <div class="fg">
+        <label>Descrição / Objetivo</label>
+        <input type="text" id="pvNlSub" placeholder="Ex: Verificar se o produto ainda está sendo utilizado" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
+      </div>
+      <div class="fg">
+        <label>Dias após o fechamento</label>
+        <input type="number" id="pvNlDias" min="1" placeholder="Ex: 180" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
+      </div>
+      <div class="fg">
+        <label>Mensagem para enviar (opcional)</label>
+        <textarea id="pvNlMsg" rows="3" placeholder="Olá [nome]! Passando para saber como está sendo a experiência..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text);resize:none;font-family:inherit"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+        <button class="topbar-btn ghost" onclick="pvNovoLembreteClose()">Cancelar</button>
+        <button class="topbar-btn" onclick="pvNovoLembreteSalvar()">✅ Criar Lembrete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL CRM: Enviar mensagem -->
 <div class="crm-msg-overlay" id="crmMsgOverlay" onclick="if(event.target===this)crmMsgFechar()">
   <div class="crm-msg-modal">
