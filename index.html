@@ -3013,6 +3013,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="fg"><label>Taxa PIX / Mercado Pago (%)</label><input type="number" id="cfgPix" step="0.01" min="0" max="5" placeholder="Ex: 0.99"></div>
               <div class="fg"><label>Taxa Link de Pagamento (%)</label><input type="number" id="cfgLink" step="0.01" min="0" max="10" placeholder="Ex: 4.99"></div>
               <div class="fg"><label>Desconto Máximo Permitido (%)</label><input type="number" id="cfgDescMax" step="1" min="0" max="50" placeholder="Ex: 10"></div>
+              <div class="fg"><label>Impostos sobre Venda (%)</label><input type="number" id="cfgImpostos" step="0.1" min="0" max="50" placeholder="Ex: 7" oninput="cfgSalvarFin()"></div>
+              <div class="fg"><label>Comissão de Vendedores (%)</label><input type="number" id="cfgComissao" step="0.1" min="0" max="30" placeholder="Ex: 5" oninput="cfgSalvarFin()"></div>
             </div>
             <div style="text-align:right;margin-top:14px">
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
@@ -3021,7 +3023,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
           <!-- ── Calculadora de Markup ── -->
           <div class="card" style="margin-top:18px">
-            <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div></div>
+            <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div><button class="topbar-btn" style="font-size:11px" onclick="mkPopularFromConfig()">🔄 Puxar do ERP</button></div>
             <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Informe o custo e os fatores para calcular o preço de venda automaticamente.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div class="fg">
@@ -9214,6 +9216,29 @@ var BANK_KEY = 'erp_bank_config';
 function bankLoad(){ try{return JSON.parse(localStorage.getItem(BANK_KEY)||'{}');}catch(e){return{};} }
 function bankSave(d){ localStorage.setItem(BANK_KEY,JSON.stringify(d)); }
 
+function mkPopularFromConfig() {
+  var cfg = cfgLoad();
+  var fin = (cfg && cfg.financeiro) ? cfg.financeiro : {};
+  // DGA = overhead (custos fixos/gerais da empresa)
+  var dga = document.getElementById('mkCalcDGA');
+  if(dga && fin.overhead) dga.value = fin.overhead;
+  // Margem de Lucro = vrml
+  var mld = document.getElementById('mkCalcMLD');
+  if(mld && fin.vrml) mld.value = fin.vrml;
+  // Impostos — se tiver campo cfgImp salvo, usa; senão mantém
+  if(cfg && cfg.financeiro && cfg.financeiro.impostos) {
+    var imp = document.getElementById('mkCalcIMP');
+    if(imp) imp.value = cfg.financeiro.impostos;
+  }
+  // Comissão — se tiver salvo
+  if(cfg && cfg.financeiro && cfg.financeiro.comissao) {
+    var com = document.getElementById('mkCalcCOM');
+    if(com) com.value = cfg.financeiro.comissao;
+  }
+  mkCalc();
+  showToast('Calculadora preenchida com os parâmetros do ERP','ok');
+}
+
 function mkCalc() {
   var custo = parseFloat(document.getElementById('mkCalcCusto').value)||0;
   var dga   = parseFloat(document.getElementById('mkCalcDGA').value)||0;
@@ -9284,6 +9309,7 @@ function cfgCarregarBanco() {
 }
 
 function cfgTab(n) {
+  if(n===5) { setTimeout(mkPopularFromConfig, 50); }
   for(var i=1;i<=8;i++){
     var t=document.getElementById('cfgTab'+i), p=document.getElementById('cfgPg'+i);
     if(t) t.classList.toggle('on', i===n);
@@ -9303,7 +9329,7 @@ function cfgRenderTables() {
     if(el && f[k]!=null) el.value=f[k];
   });
   var fin = d.financeiro||{};
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
   // Markup
   var mk = d.markup||{};
