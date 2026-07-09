@@ -9475,9 +9475,9 @@ function bankRenderLista(marca) {
       + pix
       + '</div>'
       + '<div style="display:flex;gap:6px;flex-shrink:0">'
-      + (!b.principal ? '<button onclick="bankSetPrincipal(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer" title="Definir como principal">⭐</button>' : '')
-      + '<button onclick="bankEditar(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer">✏️</button>'
-      + '<button onclick="bankRemover(''+marca+'',''+b.id+'')" style="padding:4px 9px;font-size:10px;border:1px solid #FCA5A5;border-radius:6px;background:#FEE2E2;color:#DC2626;cursor:pointer">🗑️</button>'
+      + (!b.principal ? '<button data-bm="'+marca+'" data-bid="'+b.id+'" onclick="bankSetPrincipal(this.dataset.bm,this.dataset.bid)" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer" title="Definir como principal">⭐</button>' : '')
+      + '<button data-bm="'+marca+'" data-bid="'+b.id+'" onclick="bankEditar(this.dataset.bm,this.dataset.bid)" style="padding:4px 9px;font-size:10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer">✏️</button>'
+      + '<button data-bm="'+marca+'" data-bid="'+b.id+'" onclick="bankRemover(this.dataset.bm,this.dataset.bid)" style="padding:4px 9px;font-size:10px;border:1px solid #FCA5A5;border-radius:6px;background:#FEE2E2;color:#DC2626;cursor:pointer">🗑️</button>'
       + '</div></div></div>';
   }).join('');
 }
