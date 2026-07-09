@@ -5595,7 +5595,7 @@ function kbOpen(id) {
   var avisarBox = document.getElementById('kbAvisarClienteBox');
   var msgEl     = document.getElementById('kbAvisarMsg');
   if(avisarBox) {
-    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao === 'master';
+    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao !== 'producao';
     var osEhPronta = os.status === 'pronta' || os.status === 'master';
     if(isMaster && osEhPronta) {
       avisarBox.style.display = 'block';
@@ -5889,7 +5889,7 @@ function kbMarcarPronto() {
   var avisarBox = document.getElementById('kbAvisarClienteBox');
   var msgEl = document.getElementById('kbAvisarMsg');
   if(avisarBox) {
-    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao === 'master';
+    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao !== 'producao';
     if(isMaster) {
       avisarBox.style.display = 'block';
       if(msgEl && !msgEl.dataset.editado) {
