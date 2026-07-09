@@ -9386,6 +9386,16 @@ function orcImprimirOrcamentoPDF() {
   var vendedor= (document.getElementById('orcClientVendedor')||{}).value|| '—';
   var pgtoSel = document.getElementById('orcFormaPgto');
   var pgtoLabel = pgtoSel ? pgtoSel.options[pgtoSel.selectedIndex].text : 'A combinar';
+  var prazoDiasPDF = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
+  var prazoEntregaPDF = (document.getElementById('orcPrazoEntrega')||{}).value||'';
+  var prazoTxtPDF = (function(){
+    if(prazoDiasPDF > 0 && prazoEntregaPDF) {
+      var _pe = prazoEntregaPDF.split('-').reverse().join('/');
+      return prazoDiasPDF + ' dia'+(prazoDiasPDF!==1?'s úteis':' útil')+' de produção — entrega prevista: '+_pe;
+    } else if(prazoDiasPDF > 0) {
+      return prazoDiasPDF + ' dia'+(prazoDiasPDF!==1?'s úteis':' útil')+' após aprovação e comprovante de pagamento';
+    } else { return 'a combinar após aprovação e comprovante de pagamento'; }
+  })();
 
   // itens
   var itensRows = '';
@@ -9478,7 +9488,7 @@ function orcImprimirOrcamentoPDF() {
     +'<div class="div1"></div>'
     +'<div class="client-grid">'
     +'<div><div class="sec-lbl">Cliente</div><div class="cli-name">'+nome+'</div><div class="cli-info">'+(doc?'Doc.: '+doc+'<br>':'')+(tel&&tel!='—'?'📞 '+tel+'<br>':'')+(email&&email!='—'?'✉️ '+email+'<br>':'')+(cidade?'📍 '+cidade:'')+'</div></div>'
-    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> de 3 a 4 dias úteis após aprovação e comprovante de pagamento.</div></div>'
+    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
@@ -9538,7 +9548,7 @@ function orcImprimirOrcamentoPDF() {
     +'<div class="rainbow-bar"></div>'
     +'<div class="client-grid">'
     +'<div><div class="sec-lbl">Cliente</div><div class="cli-name">'+nome+'</div><div class="cli-info">'+(doc?'Doc.: '+doc+'<br>':'')+(tel&&tel!='—'?'📞 '+tel+'<br>':'')+(email&&email!='—'?'✉️ '+email+'<br>':'')+(cidade?'📍 '+cidade:'')+'</div></div>'
-    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> de 3 a 4 dias úteis após aprovação e comprovante de pagamento.</div></div>'
+    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
