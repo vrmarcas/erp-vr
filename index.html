@@ -2991,8 +2991,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="fg"><label>Taxa PIX / Mercado Pago (%)</label><input type="number" id="cfgPix" step="0.01" min="0" max="5" placeholder="Ex: 0.99"></div>
               <div class="fg"><label>Taxa Link de Pagamento (%)</label><input type="number" id="cfgLink" step="0.01" min="0" max="10" placeholder="Ex: 4.99"></div>
               <div class="fg"><label>Desconto Máximo Permitido (%)</label><input type="number" id="cfgDescMax" step="1" min="0" max="50" placeholder="Ex: 10"></div>
-              <div class="fg"><label>Impostos sobre Venda (%)</label><input type="number" id="cfgImpostos" step="0.1" min="0" max="50" placeholder="Ex: 7" oninput="cfgSalvarFin()"></div>
-              <div class="fg"><label>Comissão de Vendedores (%)</label><input type="number" id="cfgComissao" step="0.1" min="0" max="30" placeholder="Ex: 5" oninput="cfgSalvarFin()"></div>
+              <div class="fg"><label>Impostos sobre Venda (%)</label><input type="number" id="cfgImpostos" step="0.1" min="0" max="50" placeholder="Ex: 7" oninput="cfgSalvar()"></div>
+              <div class="fg"><label>Comissão de Vendedores (%)</label><input type="number" id="cfgComissao" step="0.1" min="0" max="30" placeholder="Ex: 5" oninput="cfgSalvar()"></div>
             </div>
             <div style="text-align:right;margin-top:14px">
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
@@ -5231,7 +5231,7 @@ function crmDispararFollowup(id) {
     callback_url: '/webhook/crm/followup-sent',
     timestamp: new Date().toISOString()
   };
-  console.log('🤖 Webhook N8N disparado:', JSON.stringify(payload, null, 2));
+
   crmCloseModal();
   setTimeout(() => showToast(`Webhook N8N disparado — mensagem de follow-up sendo gerada para ${d.nome.split(' ')[0]}`, 'ok'), 200);
 }
@@ -6274,7 +6274,7 @@ function comercialRender() {
   if(fnSub) fnSub.textContent = totalLeads+' lead'+(totalLeads!==1?'s':'')+' · taxa '+cvrPct+'%';
 
   // KPIs
-  function setEl(id,val){ var e=document.getElementById(id); if(e) e.textContent=val; }
+
   setEl('comCvrPct',    cvrPct+'%');
   setEl('comTotalLeads',totalLeads);
 
@@ -6339,6 +6339,8 @@ function comercialRender() {
 // ============================================================
 // DADOS BASE
 // ============================================================
+var STOCK_LOG = [];  // histórico de movimentações de estoque
+
 var STOCK = {
   ac3: {label:'Acrílico Cristal 3mm',  qty:42, min:10, max:50},
   ac5: {label:'Acrílico Cristal 5mm',  qty:18, min:10, max:50},
@@ -7725,21 +7727,61 @@ function stockUpdateDisplay(key) {
   if(qEl){var low=s.qty<s.min; qEl.textContent=low?s.qty+' ⚠':s.qty; qEl.style.color=low?'#DC2626':s.qty<s.max*0.3?'#D97706':'#059669';}
   if(pEl){var pct=Math.min(100,Math.round(s.qty/s.max*100)); var col=s.qty<s.min?'#DC2626':s.qty<s.max*0.3?'#D97706':'#059669'; pEl.style.width=pct+'%'; pEl.style.background=col;}
 }
-function stockRegistrarSaida() {
-  var page=document.getElementById('pg-estoque');
-  var sels=page?page.querySelectorAll('select'):[];
-  var matSel=sels.length>1?sels[1]:null;
-  var qInput=page?page.querySelector('input[type="number"]'):null;
-  var matMap={'Acrílico Cristal 3mm':'ac3','Acrílico Leitoso 5mm':'ac8','Acrílico Espelho 3mm':'ac10','PS Cristal 3mm':'ps3','Chapa Aço Inox 2mm':'mt2','ACM 3mm':'acm'};
-  var matKey=matSel?matMap[matSel.value]:null;
-  var qty=qInput?parseInt(qInput.value):0;
-  if(!matKey||!qty||qty<1){showToast('Selecione material e quantidade','warn');return;}
-  if(!STOCK[matKey]){showToast('Material não encontrado','err');return;}
-  if(STOCK[matKey].qty<qty){showToast('Estoque insuficiente ('+STOCK[matKey].qty+' disponíveis)','warn');return;}
-  STOCK[matKey].qty-=qty; stockUpdateDisplay(matKey);
-  if(qInput) qInput.value='';
-  showToast('Saída de '+qty+' un de '+STOCK[matKey].label+' registrada','ok'); syncSidebarBadges();
+
+function _stockLog(tipo, matKey, qty, os, obs) {
+  var s = STOCK[matKey];
+  var now = new Date();
+  var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  STOCK_LOG.unshift({
+    tipo: tipo,
+    matKey: matKey,
+    matLabel: s ? s.label : matKey,
+    qty: qty,
+    os: os || '',
+    obs: obs || '',
+    dt: dtStr
+  });
+  if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
+  stockRenderHistorico();
 }
+
+function stockRenderHistorico() {
+  var el = document.getElementById('stockHistBody');
+  if(!el) return;
+  var filtMat  = (document.getElementById('stockHistFiltMat')  || {}).value || '';
+  var filtTipo = (document.getElementById('stockHistFiltTipo') || {}).value || '';
+  var log = STOCK_LOG.filter(function(e) {
+    if(filtMat  && e.matKey !== filtMat)  return false;
+    if(filtTipo && e.tipo  !== filtTipo)  return false;
+    return true;
+  });
+  if(!log.length) {
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px 0">Nenhuma movimentação registrada ainda.</div>';
+    return;
+  }
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">'
+    + '<th style="text-align:left;padding:6px 8px">Data</th>'
+    + '<th style="text-align:left;padding:6px 8px">Tipo</th>'
+    + '<th style="text-align:left;padding:6px 8px">Material</th>'
+    + '<th style="text-align:center;padding:6px 8px">Qtd</th>'
+    + '<th style="text-align:left;padding:6px 8px">OS / Obs</th>'
+    + '</tr></thead><tbody>'
+    + log.map(function(e) {
+        var cor = e.tipo === 'entrada' ? '#059669' : '#DC2626';
+        var ico = e.tipo === 'entrada' ? '⬆️ Entrada' : '⬇️ Saída';
+        var detalhe = [e.os ? 'OS: ' + e.os : '', e.obs || ''].filter(Boolean).join(' | ') || '—';
+        return '<tr style="border-bottom:1px solid var(--border)">'
+          + '<td style="padding:5px 8px;color:var(--muted)">' + e.dt + '</td>'
+          + '<td style="padding:5px 8px;font-weight:700;color:' + cor + '">' + ico + '</td>'
+          + '<td style="padding:5px 8px">' + e.matLabel + '</td>'
+          + '<td style="padding:5px 8px;text-align:center;font-weight:700">' + e.qty + '</td>'
+          + '<td style="padding:5px 8px;color:var(--muted)">' + detalhe + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>';
+}
+// (versão antiga de stockRegistrarSaida removida — usa _stockFazSaida())
 
 // ============================================================
 // CLIENTES
