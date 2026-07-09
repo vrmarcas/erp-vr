@@ -993,6 +993,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <div class="sb-section" onclick="sbToggle('admin')"><span>Admin</span><span class="sb-arrow">▼</span></div>
     <div class="sb-group" id="sbG-admin">
       <div class="sb-item" onclick="nav('config-orc',this)"><span class="ico">⚙️</span> Config. Orçamento</div>
+      <div class="sb-item" onclick="nav('config-plan',this)"><span class="ico">📐</span> Produtos / Planif.</div>
       <div class="sb-item" onclick="nav('config-usr',this)"><span class="ico">👥</span> Criação de Usuários</div>
       <div class="sb-item" onclick="nav('seguranca',this)"><span class="ico">🔐</span> Segurança</div>
     </div>
@@ -3189,6 +3190,52 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <!-- ================================================
          PAGE: CRIAÇÃO DE USUÁRIOS
          ================================================ -->
+    <!-- ═══════════════════════════════════════════ PRODUTOS / PLANIFICAÇÃO ══ -->
+    <div id="pg-config-plan" style="display:none">
+      <div style="max-width:960px">
+
+        <!-- Cabeçalho -->
+        <div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#EDE9FE,#FDF2F8);border:1px solid #C4B5FD">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+            <div>
+              <div style="font-size:16px;font-weight:900;color:#5B21B6;margin-bottom:4px">📐 Produtos & Receitas de Planificação</div>
+              <div style="font-size:12px;color:#6D28D9;line-height:1.5">Cadastre seus produtos e defina como cada um deve ser planificado.<br>
+                As fórmulas usam <strong>L</strong> (largura), <strong>A</strong> (altura), <strong>P</strong> (profundidade) e <strong>e</strong> (espessura do material em cm).</div>
+            </div>
+            <button class="topbar-btn" onclick="planProdNovoOpen()" style="white-space:nowrap;flex-shrink:0">+ Novo Produto</button>
+          </div>
+          <!-- Legenda variáveis -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <span style="background:#fff;border:1px solid #C4B5FD;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#5B21B6">L = Largura externa</span>
+            <span style="background:#fff;border:1px solid #C4B5FD;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#5B21B6">A = Altura externa</span>
+            <span style="background:#fff;border:1px solid #C4B5FD;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#5B21B6">P = Profundidade</span>
+            <span style="background:#fff;border:1px solid #C4B5FD;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:#BE185D">e = Espessura (mm → cm)</span>
+          </div>
+        </div>
+
+        <!-- Meus Produtos (customizados) -->
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-h"><div class="card-h-left">📦 Meus Produtos Cadastrados</div><span id="planProdCount" style="font-size:11px;color:var(--muted)"></span></div>
+          <div id="planProdLista" style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+            <div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Nenhum produto cadastrado ainda. Clique em "+ Novo Produto" para começar.</div>
+          </div>
+        </div>
+
+        <!-- Produtos padrão (referência) -->
+        <div class="card">
+          <div class="card-h" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+            <div class="card-h-left">📋 Produtos Padrão (somente leitura)</div>
+            <span style="font-size:11px;color:var(--muted)">▾ Ver todos</span>
+          </div>
+          <div style="display:none">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Estes produtos já vêm programados no sistema. Você pode criar um produto com o mesmo nome para sobrescrever a receita.</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px" id="planProdBuiltin"></div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /pg-config-plan -->
+
     <div id="pg-config-usr" style="display:none">
       <div style="max-width:900px">
 
@@ -3227,6 +3274,88 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
       </div>
     </div><!-- /pg-config-usr -->
+
+    <!-- ══ OVERLAY: Novo/Editar Produto de Planificação ══ -->
+    <div class="gen-overlay" id="planProdOverlay" onclick="if(event.target===this)planProdFechar()">
+      <div class="gen-modal" style="width:700px;max-height:90vh;overflow-y:auto">
+        <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#5B21B6,#7C3AED);border-radius:16px 16px 0 0">
+          <div>
+            <div class="gen-modal-title" style="color:#fff" id="planProdModalTitle">📐 Novo Produto</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:2px">Defina as peças e fórmulas para planificação automática</div>
+          </div>
+          <button class="gen-close" onclick="planProdFechar()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+        </div>
+        <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+
+          <!-- Nome e tipo -->
+          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
+            <div class="fg"><label>Nome do Produto</label>
+              <input type="text" id="planProdNome" placeholder="Ex: Gaveta, Nicho, Display 3D..." style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);color:var(--text)">
+            </div>
+            <div class="fg" style="white-space:nowrap">
+              <label>Usa Profundidade?</label>
+              <div style="display:flex;align-items:center;gap:8px;padding:9px 0">
+                <input type="checkbox" id="planProdDim3d" style="width:16px;height:16px;accent-color:#7C3AED">
+                <span style="font-size:12px;color:var(--muted)">Sim (L × A × P)</span>
+              </div>
+            </div>
+          </div>
+          <div class="fg"><label>Descrição resumida das peças (aparece no orçamento)</label>
+            <input type="text" id="planProdDesc" placeholder="Ex: Frente, laterais, base e fundo" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          </div>
+
+          <!-- Pré-visualização com dimensões de exemplo -->
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">🔍 Pré-visualização (dimensões de teste)</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+              <label style="font-size:11px;color:var(--muted)">L:</label>
+              <input type="number" id="planPrevL" value="60" min="1" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()">
+              <label style="font-size:11px;color:var(--muted)">A:</label>
+              <input type="number" id="planPrevA" value="40" min="1" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()">
+              <label style="font-size:11px;color:var(--muted)">P:</label>
+              <input type="number" id="planPrevP" value="30" min="1" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()">
+              <label style="font-size:11px;color:var(--muted)">Esp (mm):</label>
+              <input type="number" id="planPrevE" value="3" min="1" style="width:55px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()">
+            </div>
+            <div id="planPrevResult" style="font-size:11px;color:var(--muted)">Adicione peças abaixo para ver a pré-visualização.</div>
+          </div>
+
+          <!-- Tabela de peças -->
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)">🔩 Peças do Produto</div>
+              <button class="topbar-btn" style="font-size:11px;padding:5px 12px" onclick="planProdAddPeca()">+ Adicionar Peça</button>
+            </div>
+            <!-- Dica de fórmulas -->
+            <div style="background:#EDE9FE;border-radius:7px;padding:8px 12px;font-size:10px;color:#5B21B6;margin-bottom:8px;line-height:1.6">
+              💡 <strong>Fórmulas:</strong> use <code>L</code>, <code>A</code>, <code>P</code>, <code>e</code> e operadores matemáticos.
+              Exemplos: <code>L - 2*e</code> · <code>(L - 2*e) / 2</code> · <code>A - e</code> · <code>P</code>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr style="background:var(--bg);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:50px">Qtd</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Nome da Peça</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Largura (fórmula)</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Altura (fórmula)</th>
+                    <th style="padding:7px 8px;border-bottom:1px solid var(--border);width:40px"></th>
+                  </tr>
+                </thead>
+                <tbody id="planProdPecasBody"></tbody>
+              </table>
+            </div>
+            <div id="planProdPecasEmpty" style="text-align:center;color:var(--muted);font-size:11px;padding:16px;display:none">Nenhuma peça adicionada ainda.</div>
+          </div>
+
+          <!-- Botões -->
+          <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--border)">
+            <button class="topbar-btn ghost" onclick="planProdFechar()">Cancelar</button>
+            <button class="topbar-btn" onclick="planProdSalvar()">💾 Salvar Produto</button>
+          </div>
+        </div>
+      </div>
+    </div><!-- /planProdOverlay -->
 
     <!-- Overlay Novo Usuário -->
     <div class="gen-overlay" id="usrOverlay" onclick="if(event.target===this)usrNovoClose()">
@@ -4037,7 +4166,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -4063,6 +4192,7 @@ function nav(page, el) {
     financeiro: 'Dashboard Financeiro',
     relatorios: '🖨️ Relatórios Financeiros',
     'config-orc': 'Configuração Orçamento',
+    'config-plan': 'Produtos & Planificação',
     'config-usr': 'Criação de Usuários',
     seguranca: '🔐 Segurança',
     fornecedores: '🏭 Fornecedores'
@@ -4076,6 +4206,7 @@ function nav(page, el) {
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
+  if (page === 'config-plan') { setTimeout(function(){ planProdRender(); }, 0); }
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
@@ -4340,8 +4471,48 @@ var PLAN_RECIPES = {
   },
 };
 // default recipe for products not listed above
+var PLAN_PROD_KEY = 'erp_plan_produtos';
+function planProdLoad(){ try{ return JSON.parse(localStorage.getItem(PLAN_PROD_KEY)||'[]'); }catch(e){ return []; } }
+function planProdSaveList(arr){ localStorage.setItem(PLAN_PROD_KEY, JSON.stringify(arr)); }
+
+function planEvalFormula(formula, L, A, P, e) {
+  if(!formula || formula==='') return 0;
+  try {
+    var expr = String(formula)
+      .replace(/\bL\b/g, '('+L+')')
+      .replace(/\bA\b/g, '('+A+')')
+      .replace(/\bP\b/g, '('+P+')')
+      .replace(/\be\b/g, '('+e+')');
+    // Segurança: só permite dígitos, operadores, parênteses e ponto
+    if(!/^[\d\s\+\-\*\/\.\(\)]+$/.test(expr)) return 0;
+    var result = Function('"use strict";return ('+expr+')')();
+    return Math.round(Math.max(0, result) * 100) / 100;
+  } catch(err) { return 0; }
+}
+
 function planGetRecipe(produto) {
+  // 1. Custom recipes from localStorage take priority
+  var customs = planProdLoad();
+  var custom = customs.find(function(p){ return p.nome === produto; });
+  if(custom) {
+    return {
+      dim3d: !!custom.dim3d,
+      desc: custom.desc || custom.nome,
+      pieces: function(L, A, P, e) {
+        return (custom.pecas||[]).map(function(peca) {
+          return {
+            qty: parseInt(peca.qty)||1,
+            nome: peca.nome||'Peça',
+            larg: planEvalFormula(peca.larg, L, A, P, e),
+            alt:  planEvalFormula(peca.alt,  L, A, P, e)
+          };
+        });
+      }
+    };
+  }
+  // 2. Built-in recipes
   if(PLAN_RECIPES[produto]) return PLAN_RECIPES[produto];
+  // 3. Fallback: peça plana
   return {
     dim3d:false, desc:'Peça plana',
     pieces:function(L,A,P,e){return[{qty:1,nome:produto,larg:L,alt:A}];}
@@ -10192,7 +10363,7 @@ function secApplyPerms(funcao){
     if(!m) return;
     var page=m[1];
     var mod=page;
-    if(page==='config-orc'||page==='config-usr'||page==='seguranca') mod='config';
+    if(page==='config-orc'||page==='config-plan'||page==='config-usr'||page==='seguranca') mod='config';
     if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
     if(page==='os-list') mod='os-list';
     var hasPerm=(perms[mod]&&perms[mod][funcao]);
@@ -11231,6 +11402,219 @@ function cfgResetProdutos() {
   _prodSave();
   cfgRenderProdutos();
   showToast('Lista restaurada para o padrão','ok');
+}
+
+// ════════════════════════════════════════════════════════════
+// PRODUTOS & PLANIFICAÇÃO — CRUD de receitas custom
+// ════════════════════════════════════════════════════════════
+var _planProdEditId = null;
+var _planProdPecas  = [];
+
+var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
+
+function planProdRender() {
+  var prods = planProdLoad();
+  var lista = document.getElementById('planProdLista');
+  var cnt   = document.getElementById('planProdCount');
+  if(cnt) cnt.textContent = prods.length ? prods.length+' produto'+(prods.length>1?'s cadastrados':'cadastrado') : '';
+
+  if(lista) {
+    if(!prods.length) {
+      lista.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Nenhum produto cadastrado ainda. Clique em "+ Novo Produto" para começar.</div>';
+    } else {
+      lista.innerHTML = prods.map(function(p) {
+        var pecasTxt = (p.pecas||[]).map(function(pc){ return (pc.qty>1?pc.qty+'× ':'')+pc.nome; }).join(', ');
+        return '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+          +'<div style="flex:1">'
+          +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+'</div>'
+          +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
+          +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
+          +'<div style="margin-top:4px"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span></div>'
+          +'</div>'
+          +'<div style="display:flex;gap:6px">'
+          +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
+          +'<button data-pid="'+p.id+'" onclick="planProdDel(this.dataset.pid)" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer">🗑</button>'
+          +'</div>'
+          +'</div>';
+      }).join('');
+    }
+  }
+
+  // Produtos padrão
+  var builtin = document.getElementById('planProdBuiltin');
+  if(builtin) {
+    builtin.innerHTML = PLAN_BUILTIN_NAMES.map(function(nome) {
+      var rec = PLAN_RECIPES[nome];
+      return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+        +'<div style="font-size:12px;font-weight:700;color:var(--text)">'+nome+'</div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:3px">'+rec.desc+'</div>'
+        +'<div style="margin-top:5px"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(rec.dim3d?'L × A × P':'L × A')+'</span></div>'
+        +'</div>';
+    }).join('');
+  }
+}
+
+function planProdNovoOpen() {
+  _planProdEditId = null;
+  _planProdPecas  = [];
+  document.getElementById('planProdModalTitle').textContent = '📐 Novo Produto';
+  document.getElementById('planProdNome').value  = '';
+  document.getElementById('planProdDesc').value  = '';
+  document.getElementById('planProdDim3d').checked = true;
+  planProdRenderPecas();
+  planProdPrevCalc();
+  document.getElementById('planProdOverlay').classList.add('open');
+}
+
+function planProdEditar(id) {
+  var prods = planProdLoad();
+  var p = prods.find(function(x){ return x.id===id; });
+  if(!p) return;
+  _planProdEditId = id;
+  _planProdPecas  = JSON.parse(JSON.stringify(p.pecas||[]));
+  document.getElementById('planProdModalTitle').textContent = '✏️ Editar: '+p.nome;
+  document.getElementById('planProdNome').value  = p.nome||'';
+  document.getElementById('planProdDesc').value  = p.desc||'';
+  document.getElementById('planProdDim3d').checked = !!p.dim3d;
+  planProdRenderPecas();
+  planProdPrevCalc();
+  document.getElementById('planProdOverlay').classList.add('open');
+}
+
+function planProdFechar() {
+  document.getElementById('planProdOverlay').classList.remove('open');
+  _planProdEditId = null; _planProdPecas = [];
+}
+
+function planProdAddPeca() {
+  _planProdPecas.push({ qty:'1', nome:'', larg:'L', alt:'A' });
+  planProdRenderPecas();
+  planProdPrevCalc();
+}
+
+function planProdRemovePeca(idx) {
+  _planProdPecas.splice(idx, 1);
+  planProdRenderPecas();
+  planProdPrevCalc();
+}
+
+function planProdReadPecas() {
+  _planProdPecas = [];
+  var tbody = document.getElementById('planProdPecasBody');
+  if(!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  rows.forEach(function(row, i) {
+    var qty  = row.querySelector('[data-field="qty"]');
+    var nome = row.querySelector('[data-field="nome"]');
+    var larg = row.querySelector('[data-field="larg"]');
+    var alt  = row.querySelector('[data-field="alt"]');
+    _planProdPecas.push({
+      qty:  qty  ? qty.value  : '1',
+      nome: nome ? nome.value : '',
+      larg: larg ? larg.value : 'L',
+      alt:  alt  ? alt.value  : 'A'
+    });
+  });
+}
+
+function planProdRenderPecas() {
+  var tbody = document.getElementById('planProdPecasBody');
+  var empty = document.getElementById('planProdPecasEmpty');
+  if(!tbody) return;
+  if(!_planProdPecas.length) {
+    tbody.innerHTML = '';
+    if(empty) empty.style.display='block';
+    return;
+  }
+  if(empty) empty.style.display='none';
+  tbody.innerHTML = _planProdPecas.map(function(peca, i) {
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:6px 8px"><input type="number" data-field="qty" value="'+cfgEsc(peca.qty)+'" min="1" style="width:45px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
+      +'<td style="padding:6px 8px"><input type="text" data-field="nome" value="'+cfgEsc(peca.nome)+'" placeholder="Ex: Lateral" style="width:100%;min-width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>'
+      +'<td style="padding:6px 8px"><input type="text" data-field="larg" value="'+cfgEsc(peca.larg)+'" placeholder="Ex: L - 2*e" style="width:100%;min-width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
+      +'<td style="padding:6px 8px"><input type="text" data-field="alt"  value="'+cfgEsc(peca.alt)+'"  placeholder="Ex: A - e"   style="width:100%;min-width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
+      +'<td style="padding:6px 8px;text-align:center"><button data-idx="'+i+'" onclick="planProdReadPecas();planProdRemovePeca(this.dataset.idx*1)" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:14px" title="Remover">✕</button></td>'
+      +'</tr>';
+  }).join('');
+}
+
+function planProdPrevCalc() {
+  planProdReadPecas();
+  var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
+  var A = parseFloat((document.getElementById('planPrevA')||{}).value)||40;
+  var P = parseFloat((document.getElementById('planPrevP')||{}).value)||30;
+  var espMm = parseFloat((document.getElementById('planPrevE')||{}).value)||3;
+  var e = espMm / 10;
+  var result = document.getElementById('planPrevResult');
+  if(!result) return;
+  if(!_planProdPecas.length) { result.innerHTML='<span style="color:var(--muted)">Adicione peças abaixo para ver a pré-visualização.</span>'; return; }
+  var areaTotal = 0;
+  var rows = _planProdPecas.map(function(peca) {
+    var qty  = parseInt(peca.qty)||1;
+    var nome = peca.nome||'—';
+    var larg = planEvalFormula(peca.larg, L, A, P, e);
+    var alt  = planEvalFormula(peca.alt,  L, A, P, e);
+    var area = qty * larg * alt / 10000; // cm² → m²
+    areaTotal += area;
+    return '<tr>'
+      +'<td style="padding:3px 8px;font-weight:700">'+qty+'×</td>'
+      +'<td style="padding:3px 8px">'+cfgEsc(nome)+'</td>'
+      +'<td style="padding:3px 8px;color:#5B21B6;font-family:monospace">'+larg.toFixed(1)+' cm</td>'
+      +'<td style="padding:3px 8px;color:#5B21B6;font-family:monospace">'+alt.toFixed(1)+' cm</td>'
+      +'<td style="padding:3px 8px;color:var(--muted);font-size:10px">'+area.toFixed(4)+' m²</td>'
+      +'</tr>';
+  }).join('');
+  result.innerHTML = '<table style="width:100%;font-size:11px;border-collapse:collapse">'
+    +'<thead><tr style="color:var(--muted);font-size:10px"><th style="text-align:left;padding:2px 8px">Qtd</th><th style="text-align:left;padding:2px 8px">Peça</th><th style="text-align:left;padding:2px 8px">Larg</th><th style="text-align:left;padding:2px 8px">Alt</th><th style="text-align:left;padding:2px 8px">Área</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'<tfoot><tr style="border-top:1px solid var(--border);font-weight:700;color:var(--ok)"><td colspan="4" style="padding:4px 8px">Área total de material</td><td style="padding:4px 8px">'+areaTotal.toFixed(4)+' m²</td></tr></tfoot>'
+    +'</table>';
+}
+
+function planProdSalvar() {
+  planProdReadPecas();
+  var nome = (document.getElementById('planProdNome')||{}).value||'';
+  if(!nome.trim()) { showToast('Informe o nome do produto','err'); return; }
+  if(!_planProdPecas.length) { showToast('Adicione pelo menos uma peça','err'); return; }
+  var hasBlankFormula = _planProdPecas.some(function(p){ return !p.larg.trim()||!p.alt.trim(); });
+  if(hasBlankFormula) { showToast('Preencha as fórmulas de largura e altura em todas as peças','err'); return; }
+
+  var prods = planProdLoad();
+  var prod = {
+    id:    _planProdEditId || 'pp_'+Date.now(),
+    nome:  nome.trim(),
+    desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
+    dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
+    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt}; })
+  };
+
+  if(_planProdEditId) {
+    var idx = prods.findIndex(function(x){ return x.id===_planProdEditId; });
+    if(idx>=0) prods[idx]=prod; else prods.push(prod);
+  } else {
+    prods.push(prod);
+  }
+  planProdSaveList(prods);
+
+  // Também adicionar à lista ORC_PRODUTOS se não estiver lá
+  if(ORC_PRODUTOS.indexOf(nome.trim())<0) {
+    ORC_PRODUTOS.push(nome.trim());
+    try{ localStorage.setItem(ORC_PROD_KEY, JSON.stringify(ORC_PRODUTOS)); }catch(ex){}
+  }
+
+  planProdFechar();
+  planProdRender();
+  showToast('Produto "'+nome.trim()+'" salvo! Já disponível nos orçamentos.','ok');
+}
+
+function planProdDel(id) {
+  var prods = planProdLoad();
+  var p = prods.find(function(x){ return x.id===id; });
+  if(!p) return;
+  prods = prods.filter(function(x){ return x.id!==id; });
+  planProdSaveList(prods);
+  planProdRender();
+  showToast('Produto "'+p.nome+'" removido','warn');
 }
 
 // ============================================================
