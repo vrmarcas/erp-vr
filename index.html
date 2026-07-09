@@ -2494,6 +2494,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         <button class="fin-tab-btn on" id="finTabBtnDash" onclick="finTab('dash')">📊 Dashboard</button>
         <button class="fin-tab-btn" id="finTabBtnCR" onclick="finTab('cr')">📥 Contas a Receber</button>
         <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
+        <button class="fin-tab-btn" id="finTabBtnCal" onclick="finTab('cal')">📅 Agenda de Pagamentos</button>
         <button class="fin-tab-btn" id="finTabBtnDRE" onclick="finTab('dre')">📋 DRE</button>
       </div>
 
@@ -2679,6 +2680,74 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       </div>
 
       <!-- ── ABA: DRE ── -->
+      <!-- ── ABA AGENDA DE PAGAMENTOS ── -->
+      <div id="finPgCal" style="display:none">
+
+        <!-- Linha topo: hoje + semana -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+
+          <!-- Hoje -->
+          <div class="card" style="border-left:4px solid #DC2626">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:800">⚡ Contas do Dia</div>
+              <span id="finCalHojeData" style="font-size:11px;color:var(--muted)"></span>
+            </div>
+            <div id="finCalHojeList" style="display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:12px;color:var(--muted);text-align:center;padding:12px">Carregando...</div>
+            </div>
+            <div id="finCalHojeTot" style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:13px;font-weight:800;display:flex;justify-content:space-between">
+              <span>Total do dia</span><span style="color:#DC2626">R$ 0,00</span>
+            </div>
+          </div>
+
+          <!-- Esta semana -->
+          <div class="card" style="border-left:4px solid #D97706">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:800">📆 Esta Semana</div>
+              <span id="finCalSemLabel" style="font-size:11px;color:var(--muted)"></span>
+            </div>
+            <div id="finCalSemList" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto">
+              <div style="font-size:12px;color:var(--muted);text-align:center;padding:12px">Carregando...</div>
+            </div>
+            <div id="finCalSemTot" style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:13px;font-weight:800;display:flex;justify-content:space-between">
+              <span>Total da semana</span><span style="color:#D97706">R$ 0,00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Calendário mensal -->
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <button onclick="finCalMes(-1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-size:16px">‹</button>
+            <div style="font-size:15px;font-weight:800" id="finCalMesLabel">—</div>
+            <button onclick="finCalMes(+1)" style="padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);cursor:pointer;font-size:16px">›</button>
+          </div>
+          <!-- Grid cabeçalho -->
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:6px">
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">DOM</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">SEG</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">TER</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">QUA</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">QUI</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">SEX</div>
+            <div style="text-align:center;font-size:10px;font-weight:700;color:var(--muted);padding:4px">SÁB</div>
+          </div>
+          <div id="finCalGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
+        </div>
+
+        <!-- Detalhe do dia clicado -->
+        <div id="finCalDiaDetalhe" style="display:none;margin-top:12px">
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div style="font-size:13px;font-weight:800" id="finCalDiaTitulo">—</div>
+              <button onclick="document.getElementById('finCalDiaDetalhe').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px">✕</button>
+            </div>
+            <div id="finCalDiaLista" style="display:flex;flex-direction:column;gap:8px"></div>
+          </div>
+        </div>
+
+      </div><!-- /finPgCal -->
+
       <div id="finPgDRE" style="display:none">
         <!-- Mini descrição do que é o DRE -->
         <div class="fin-dre-intro">
@@ -6223,21 +6292,22 @@ function finSetBrand(b) {
 
 function finTab(t) {
   _finActiveTab = t;
-  var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', dre:'DRE'};
-  ['dash','cr','cp','dre'].forEach(function(tab){
+  var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', cal:'Cal', dre:'DRE'};
+  ['dash','cr','cp','cal','dre'].forEach(function(tab){
     var suffix = idSuffix[tab];
     var btn = document.getElementById('finTabBtn'+suffix);
     var pg  = document.getElementById('finPg'+suffix);
     if(btn) btn.classList.toggle('on', tab===t);
     if(pg)  pg.style.display = (tab===t) ? 'block' : 'none';
   });
-  // Renderização direcionada por aba para garantir dados visíveis
   if(t==='dash') {
     finDashKPIs(); finBarChartRender(); finDonutRender(); finRender();
   } else if(t==='cr') {
     finCRUpdateSummary(); finCRRender();
   } else if(t==='cp') {
     finCPUpdateSummary(); finCPRender();
+  } else if(t==='cal') {
+    finCalRender();
   } else if(t==='dre') {
     finDREBuild();
   }
@@ -6616,6 +6686,167 @@ var FIN_CAT_ALIAS = {
   'Matéria-prima':'Matéria-Prima', 'Pessoal':'Pessoal Admin'
 };
 function finNormCat(c){ return FIN_CAT_ALIAS[c]||c; }
+// ============================================================
+// AGENDA DE PAGAMENTOS — Calendário mensal
+// ============================================================
+var _finCalAno  = new Date().getFullYear();
+var _finCalMes  = new Date().getMonth(); // 0-based
+
+function finCalParseDate(str) {
+  // aceita DD/MM/YYYY ou YYYY-MM-DD
+  if(!str) return null;
+  var p;
+  if(str.includes('/')) { p=str.split('/'); return new Date(+p[2],+p[1]-1,+p[0]); }
+  var d=new Date(str+'T00:00:00'); return isNaN(d)?null:d;
+}
+
+function finCalDayKey(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+function finCalCPPorDia() {
+  // mapa: 'YYYY-MM-DD' → [{...conta}]
+  var mapa = {};
+  FIN_CP.forEach(function(r){
+    var d = finCalParseDate(r.vencimento); if(!d) return;
+    var k = finCalDayKey(d);
+    if(!mapa[k]) mapa[k]=[];
+    mapa[k].push(r);
+  });
+  return mapa;
+}
+
+function finCalItemHTML(r, compact) {
+  var statusColor = {pago:'#059669',agendado:'#D97706',pendente:'#EF4444',vencido:'#DC2626'}[r.status]||'#6B7280';
+  var statusLabel = {pago:'✅ Pago',agendado:'📆 Agendado',pendente:'⏳ Pendente',vencido:'🔴 Vencido'}[r.status]||r.status;
+  if(compact) {
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;border-left:3px solid '+statusColor+'">'
+      +'<span style="font-size:11px;font-weight:700;color:var(--text)">'+r.descricao+'</span>'
+      +'<span style="font-size:12px;font-weight:800;color:'+statusColor+'">'+finFmt(r.valor)+'</span>'
+      +'</div>';
+  }
+  return '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:var(--bg2);border-radius:7px;border-left:4px solid '+statusColor+'">'
+    +'<div><div style="font-size:12px;font-weight:800">'+r.descricao+'</div>'
+    +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(r.fornecedor||r.categoria||'')+'</div>'
+    +'<span style="font-size:10px;color:'+statusColor+';font-weight:700">'+statusLabel+'</span></div>'
+    +'<div style="text-align:right"><div style="font-size:13px;font-weight:900;color:'+statusColor+'">'+finFmt(r.valor)+'</div>'
+    +(r.status!=='pago'?'<button data-rid="'+r.id+'" onclick="finCPPagar(this.dataset.rid);finCalRender()" style="margin-top:4px;padding:3px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Baixar</button>':'')
+    +'</div></div>';
+}
+
+function finCalRenderHoje(mapa) {
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var k = finCalDayKey(hoje);
+  var lista = (mapa[k]||[]).filter(function(r){ return _finBrand==='todas'||r.marca===_finBrand; });
+  var hojeEl = document.getElementById('finCalHojeList');
+  var totEl  = document.getElementById('finCalHojeTot');
+  var dataEl = document.getElementById('finCalHojeData');
+  if(dataEl) dataEl.textContent = hoje.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long'});
+  if(hojeEl) {
+    hojeEl.innerHTML = lista.length
+      ? lista.map(function(r){ return finCalItemHTML(r,false); }).join('')
+      : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">🎉 Nenhuma conta para hoje</div>';
+  }
+  var tot = lista.reduce(function(s,r){ return s+(r.status!=='pago'?r.valor:0); },0);
+  if(totEl) totEl.innerHTML = '<span>Total pendente hoje</span><span style="color:#DC2626;font-weight:900">'+finFmt(tot)+'</span>';
+}
+
+function finCalRenderSemana(mapa) {
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var dom = new Date(hoje); dom.setDate(dom.getDate()-dom.getDay());
+  var sab = new Date(dom); sab.setDate(sab.getDate()+6);
+  var semEl  = document.getElementById('finCalSemList');
+  var totEl  = document.getElementById('finCalSemTot');
+  var lblEl  = document.getElementById('finCalSemLabel');
+  if(lblEl) lblEl.textContent = dom.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' – '+sab.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  var rows = [];
+  var tot = 0;
+  for(var i=0;i<7;i++){
+    var d = new Date(dom); d.setDate(dom.getDate()+i);
+    var k = finCalDayKey(d);
+    var lista = (mapa[k]||[]).filter(function(r){ return _finBrand==='todas'||r.marca===_finBrand; });
+    if(lista.length){
+      rows.push('<div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">'
+        +d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+'</div>'
+        +lista.map(function(r){ tot+=(r.status!=='pago'?r.valor:0); return finCalItemHTML(r,true); }).join('')+'</div>');
+    }
+  }
+  if(semEl) semEl.innerHTML = rows.length ? rows.join('') : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Nenhuma conta esta semana</div>';
+  if(totEl) totEl.innerHTML = '<span>Total pendente semana</span><span style="color:#D97706;font-weight:900">'+finFmt(tot)+'</span>';
+}
+
+function finCalRenderGrid(mapa) {
+  var mesLabel = new Date(_finCalAno, _finCalMes, 1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+  var lbl = document.getElementById('finCalMesLabel');
+  if(lbl) lbl.textContent = mesLabel.charAt(0).toUpperCase()+mesLabel.slice(1);
+  var grid = document.getElementById('finCalGrid');
+  if(!grid) return;
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var primeiroDia = new Date(_finCalAno, _finCalMes, 1);
+  var diasNoMes   = new Date(_finCalAno, _finCalMes+1, 0).getDate();
+  var iniciaSem   = primeiroDia.getDay(); // 0=dom
+  var cells = [];
+  // células vazias antes do dia 1
+  for(var i=0;i<iniciaSem;i++) cells.push('<div></div>');
+  for(var dia=1;dia<=diasNoMes;dia++){
+    var d = new Date(_finCalAno, _finCalMes, dia);
+    var k = finCalDayKey(d);
+    var contas = (mapa[k]||[]).filter(function(r){ return _finBrand==='todas'||r.marca===_finBrand; });
+    var pendentes = contas.filter(function(r){ return r.status!=='pago'; });
+    var totalDia  = pendentes.reduce(function(s,r){ return s+r.valor; },0);
+    var isHoje    = (d.getTime()===hoje.getTime());
+    var isFim     = (d < hoje);
+    var temVenc   = pendentes.some(function(r){ return r.status==='vencido'||(d<hoje&&r.status!=='pago'); });
+    var bg = isHoje ? '#FEF3C7' : '';
+    var borderC = isHoje ? '#F59E0B' : (temVenc ? '#FCA5A5' : (contas.length ? '#BFDBFE' : 'var(--border)'));
+    var numColor = isHoje ? '#92400E' : (temVenc ? '#DC2626' : (contas.length ? '#1E40AF' : 'var(--muted)'));
+    cells.push('<div data-k="'+k+'" onclick="finCalDiaClick(this.dataset.k)" style="border:1.5px solid '+borderC+';border-radius:8px;padding:6px 4px;min-height:64px;cursor:'+(contas.length?'pointer':'default')+';background:'+bg+';transition:.15s" title="'+(contas.length?contas.length+' conta(s)':'')+'">'
+      +'<div style="font-size:12px;font-weight:800;color:'+numColor+';text-align:center">'+dia+(isHoje?'<div style="font-size:8px;font-weight:700;color:#D97706">HOJE</div>':'')+'</div>'
+      +(contas.length ? '<div style="margin-top:3px">'
+        +(totalDia>0 ? '<div style="font-size:9px;font-weight:800;color:'+(temVenc?'#DC2626':'#1E40AF')+';text-align:center">'+finFmt(totalDia)+'</div>' : '')
+        +'<div style="display:flex;justify-content:center;flex-wrap:wrap;gap:2px;margin-top:2px">'
+        +contas.slice(0,3).map(function(r){
+          var c={pago:'#059669',agendado:'#D97706',pendente:'#EF4444',vencido:'#DC2626'}[r.status]||'#6B7280';
+          return '<div style="width:6px;height:6px;border-radius:50%;background:'+c+'" title="'+r.descricao+'"></div>';
+        }).join('')+(contas.length>3?'<div style="font-size:8px;color:var(--muted)">+'+( contas.length-3)+'</div>':'')
+        +'</div></div>' : '')
+      +'</div>');
+  }
+  grid.innerHTML = cells.join('');
+}
+
+function finCalDiaClick(k) {
+  var mapa = finCalCPPorDia();
+  var contas = (mapa[k]||[]).filter(function(r){ return _finBrand==='todas'||r.marca===_finBrand; });
+  if(!contas.length) return;
+  var p = k.split('-');
+  var d = new Date(+p[0],+p[1]-1,+p[2]);
+  var titulo = d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  var detalheEl = document.getElementById('finCalDiaDetalhe');
+  var tituloEl  = document.getElementById('finCalDiaTitulo');
+  var listaEl   = document.getElementById('finCalDiaLista');
+  if(tituloEl) tituloEl.textContent = titulo.charAt(0).toUpperCase()+titulo.slice(1);
+  if(listaEl)  listaEl.innerHTML = contas.map(function(r){ return finCalItemHTML(r,false); }).join('');
+  if(detalheEl){ detalheEl.style.display='block'; detalheEl.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+}
+
+function finCalMes(delta) {
+  _finCalMes += delta;
+  if(_finCalMes > 11) { _finCalMes=0; _finCalAno++; }
+  if(_finCalMes < 0)  { _finCalMes=11; _finCalAno--; }
+  var mapa = finCalCPPorDia();
+  finCalRenderGrid(mapa);
+  document.getElementById('finCalDiaDetalhe').style.display='none';
+}
+
+function finCalRender() {
+  _finCalAno = new Date().getFullYear();
+  _finCalMes = new Date().getMonth();
+  var mapa = finCalCPPorDia();
+  finCalRenderHoje(mapa);
+  finCalRenderSemana(mapa);
+  finCalRenderGrid(mapa);
+}
+
+
 function finCPRender() {
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
@@ -10301,7 +10532,8 @@ var _PV_CONTATOS = [
   {id:'d3', label:'3 dias — Feedback inicial', sub:'Como está sendo a experiência com o produto?', icon:'⭐', dias:3  },
   {id:'m1', label:'1 mês depois',              sub:'Satisfação geral e possíveis ajustes',       icon:'📋', dias:30 },
   {id:'m2', label:'2 meses depois',             sub:'Novidades e produtos complementares',        icon:'🎯', dias:60 },
-  {id:'m3', label:'3 meses depois',             sub:'Oferta de reposição ou expansão',            icon:'🚀', dias:90 }
+  {id:'m3', label:'3 meses depois',             sub:'Oferta de reposição ou expansão',            icon:'🚀', dias:90 },
+  {id:'a1', label:'🎂 1 ano — Aniversário de cliente', sub:'Parabenize o cliente e ofereça condição especial de recompra', icon:'🎉', dias:365}
 ];
 var _PV_PRODUTOS = ['Display Acrílico PDV','Placa Decorativa','Letra Caixa','Banner PVC','Painel LED','Adesivo Jateado','Caixa Acrílica','Espelho Decorativo'];
 
