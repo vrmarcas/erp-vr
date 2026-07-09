@@ -1342,7 +1342,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px"><button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button><button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button></div>
           <!-- ── ENVIAR PARA FORNECEDOR ── -->
           <div id="kbFornSection" style="margin-top:14px;border-top:1.5px solid var(--border);padding-top:14px;display:none">
-            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📤 Enviar para Fornecedor</div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏭 Fornecedor desta OS</div>
             <select id="kbFornSel" onchange="kbFornOnSelect()"
               style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);margin-bottom:10px">
               <option value="">— Selecionar fornecedor —</option>
@@ -3248,11 +3248,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /main -->
-
-<!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
-<div id="pg-fornecedores" style="display:none">
+    <!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
+    <div id="pg-fornecedores" style="display:none">
 
   <!-- KPIs fornecedores -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px" id="fornKpiRow">
@@ -3300,8 +3297,12 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <button onclick="fornNovoModal()" style="padding:14px 32px;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(79,70,229,.4)">
       🏭 Cadastrar Primeiro Fornecedor
     </button>
-  </div>
-</div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
 <!-- MODAL: Novo Fornecedor -->
 <div class="gen-overlay" id="fornOverlay" onclick="if(event.target===this)fornCloseModal()">
   <div class="gen-modal" style="width:520px">
@@ -3739,9 +3740,9 @@ function fornSeedDemo() {
       email:'compras@geoplas.com.br', obs:'Fornecedor principal de acrílico. Pedido mínimo R$ 500.',
       criado:'01/01/2025',
       historico:[
-        {id:'h1',descricao:'Chapa acrílica 3mm cristal 2x3m',valor:450,data:'10/03/2025'},
-        {id:'h2',descricao:'Chapa acrílica 6mm fumê 1x2m',valor:320,data:'15/04/2025'},
-        {id:'h3',descricao:'Acrílico espelhado prata 2mm',valor:680,data:'02/06/2025'}
+        {id:'h1',produto:'Chapa acrílica 3mm cristal 2x3m',valor:450,data:'10/03/2025',nf:''},
+        {id:'h2',produto:'Chapa acrílica 6mm fumê 1x2m',valor:320,data:'15/04/2025',nf:''},
+        {id:'h3',produto:'Acrílico espelhado prata 2mm',valor:680,data:'02/06/2025',nf:''}
       ]
     },
     {
@@ -3750,8 +3751,8 @@ function fornSeedDemo() {
       email:'vendas@vallimdist.com.br', obs:'MDF e madeiras. Entrega em 3 dias úteis.',
       criado:'15/02/2025',
       historico:[
-        {id:'h4',descricao:'MDF 15mm 2,75x1,84m',valor:290,data:'20/03/2025'},
-        {id:'h5',descricao:'MDF cru 9mm fardo 10pçs',valor:510,data:'01/05/2025'}
+        {id:'h4',produto:'MDF 15mm 2,75x1,84m',valor:290,data:'20/03/2025',nf:''},
+        {id:'h5',produto:'MDF cru 9mm fardo 10pçs',valor:510,data:'01/05/2025',nf:''}
       ]
     },
     {
@@ -3760,7 +3761,7 @@ function fornSeedDemo() {
       email:'arte@centralclick.com.br', obs:'Impressão UV e recortes especiais.',
       criado:'10/03/2025',
       historico:[
-        {id:'h6',descricao:'Impressão UV fachada 1,2x0,6m',valor:185,data:'25/04/2025'}
+        {id:'h6',produto:'Impressão UV fachada 1,2x0,6m',valor:185,data:'25/04/2025',nf:''}
       ]
     }
   ];
@@ -5271,17 +5272,15 @@ function kbOpen(id) {
     btn.textContent = '✓ Marcar como Pronta — Aguardando Master';
   }
 
-  // Fornecedor section — show only for finished/ready OS
+  // Fornecedor section — disponível em qualquer status da OS
   var fornSec = document.getElementById('kbFornSection');
   if(fornSec) {
-    var showForn = (os.status==='pronta'||os.status==='master'||os.status==='entregue');
-    fornSec.style.display = showForn ? '' : 'none';
-    if(showForn) {
-      kbFornPopular();
-      document.getElementById('kbFornInfo').style.display='none';
-      var fornSel = document.getElementById('kbFornSel');
-      if(fornSel) fornSel.value='';
-    }
+    fornSec.style.display = '';
+    kbFornPopular();
+    var fornSel = document.getElementById('kbFornSel');
+    if(fornSel) fornSel.value = os.fornecedorId || '';
+    if(os.fornecedorId) { kbFornOnSelect(); }
+    else { document.getElementById('kbFornInfo').style.display='none'; }
   }
 
   // Show smart prazo suggestion
@@ -5413,6 +5412,8 @@ function kbFornPopular() {
 function kbFornOnSelect() {
   var id = (document.getElementById('kbFornSel')||{}).value;
   var info = document.getElementById('kbFornInfo');
+  // Persiste o fornecedor escolhido na própria OS
+  if(_kbOsId && KB_OS[_kbOsId]) KB_OS[_kbOsId].fornecedorId = id || '';
   if(!id){ if(info) info.style.display='none'; return; }
   var f = fornLoad().find(function(x){return x.id===id;});
   if(!f) return;
