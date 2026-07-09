@@ -1119,12 +1119,6 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         <div id="dAlerts"></div>
       </div>
 
-      <!-- Estoque detail -->
-      <div class="card" style="margin-bottom:0">
-        <div class="card-h"><div class="card-h-left">📦 Materiais em Estoque</div><span class="badge bdng" id="dEstqBadge">0 críticos</span></div>
-        <div id="dEstqItems" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:8px"></div>
-        <div id="dEstqSummary" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"></div>
-      </div>
     </div>
 
     <!-- ==============================
@@ -1342,7 +1336,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px"><button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button><button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button></div>
           <!-- ── ENVIAR PARA FORNECEDOR ── -->
           <div id="kbFornSection" style="margin-top:14px;border-top:1.5px solid var(--border);padding-top:14px;display:none">
-            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📤 Enviar para Fornecedor</div>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏭 Fornecedor desta OS</div>
             <select id="kbFornSel" onchange="kbFornOnSelect()"
               style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);margin-bottom:10px">
               <option value="">— Selecionar fornecedor —</option>
@@ -1802,6 +1796,31 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div style="font-size:10px;color:#059669;margin-top:6px">Aguardando confirmação do cliente...</div>
             </div>
 
+            <!-- NOTA FISCAL -->
+            <div style="margin-bottom:14px;border-top:1px solid var(--border);padding-top:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div>
+                  <div style="font-size:12px;font-weight:700;color:var(--text)">🧾 Emitir Nota Fiscal?</div>
+                  <div style="font-size:10px;color:var(--muted);margin-top:2px">Dados fiscais do cliente para emissão de NF</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:7px;cursor:pointer" onclick="document.getElementById('orcNFToggle').click()">
+                  <input type="checkbox" id="orcNFToggle" onchange="orcToggleNF()" style="display:none">
+                  <div id="orcNFTrack" style="width:38px;height:20px;border-radius:10px;background:#D1D5DB;position:relative;transition:.2s;pointer-events:none"><div id="orcNFThumb" style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;left:2px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div></div>
+                  <span id="orcNFLbl" style="font-size:11px;font-weight:700;color:var(--muted)">Não</span>
+                </div>
+              </div>
+              <div id="orcNFFields" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:9px;padding:12px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                  <div class="fg"><label>Nome / Razão Social</label><input type="text" id="nfNome" placeholder="João Silva ou Empresa LTDA" style="font-size:12px"></div>
+                  <div class="fg"><label>CPF / CNPJ</label><input type="text" id="nfDoc" placeholder="000.000.000-00" style="font-size:12px"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                  <div class="fg"><label>Inscrição Estadual</label><input type="text" id="nfIE" placeholder="Isento ou número da IE" style="font-size:12px"></div>
+                  <div class="fg"><label>CEP</label><input type="text" id="nfCEP" placeholder="00000-000" style="font-size:12px"></div>
+                </div>
+                <div class="fg"><label>Endereço completo</label><input type="text" id="nfEndereco" placeholder="Rua, número, bairro, cidade - UF" style="font-size:12px"></div>
+              </div>
+            </div>
             <button class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcSimPagamento()">
               ✓ Confirmar Recebimento
             </button>
@@ -2395,6 +2414,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
          ESTOQUE
          ============================== -->
     <div id="pg-estoque" style="display:none">
+      <!-- Panorama de Estoque -->
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-h">
+          <div class="card-h-left">📦 Panorama de Materiais em Estoque</div>
+          <span class="badge bdng" id="dEstqBadge">—</span>
+        </div>
+        <div id="dEstqItems" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:8px">
+          <div style="color:var(--muted);font-size:12px;padding:8px;grid-column:1/-1">Carregando panorama...</div>
+        </div>
+        <div id="dEstqSummary" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"></div>
+      </div>
       <div class="g2">
         <div class="card">
           <div class="card-h"><div class="card-h-left">📦 Estoque de Placas</div><button class="topbar-btn" onclick="stockOpenEntrada()">+ Entrada</button></div>
@@ -2942,7 +2972,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="cfgAddRow('matTable','mat')">+ Adicionar</button>
             </div>
             <table class="table" id="matTable">
-              <thead><tr><th>Material / Produto</th><th>Unidade</th><th>Custo (R$)</th><th>Obs.</th><th></th></tr></thead>
+              <thead><tr><th>Material / Produto</th><th>Unidade</th><th>Comp. (cm)</th><th>Larg. (cm)</th><th>Custo chapa (R$)</th><th>R$/m²</th><th>Obs.</th><th></th></tr></thead>
               <tbody id="matBody"></tbody>
             </table>
             <div style="text-align:right;margin-top:12px">
@@ -2950,26 +2980,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             </div>
           </div>
 
-          <!-- Preço de venda por material — dentro da aba Materiais -->
-          <div class="card" style="margin-top:14px">
-            <div class="card-h"><div class="card-h-left">💰 Custo do Material (R$/m²)</div></div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Custo de compra por m² de cada material. O sistema aplica overhead + markup para calcular o preço de venda automaticamente.</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px">
-              <div class="fg"><label>Acrílico 3mm</label><input type="number" id="cfgPrc_ac3"  min="0" step="1" placeholder="100"></div>
-              <div class="fg"><label>Acrílico 5mm</label><input type="number" id="cfgPrc_ac5"  min="0" step="1" placeholder="145"></div>
-              <div class="fg"><label>Acrílico 8mm</label><input type="number" id="cfgPrc_ac8"  min="0" step="1" placeholder="195"></div>
-              <div class="fg"><label>Acrílico 10mm</label><input type="number" id="cfgPrc_ac10" min="0" step="1" placeholder="240"></div>
-              <div class="fg"><label>PS Cristal 3mm</label><input type="number" id="cfgPrc_ps3"  min="0" step="1" placeholder="65"></div>
-              <div class="fg"><label>Metal/Inox 2mm</label><input type="number" id="cfgPrc_mt2"  min="0" step="1" placeholder="180"></div>
-            </div>
-            <div style="text-align:right;margin-top:12px">
-              <button class="topbar-btn" onclick="cfgSalvarMatPrecos()">💾 Salvar Preços de Material</button>
-            </div>
-          </div>
-        </div>
+          <!-- R$/m² calculado automaticamente na tabela de materiais acima -->
 
-        <!-- ── ABA 2: MÁQUINAS ── -->
-        <div id="cfgPg2" class="cfg-pg" style="display:none">
           <div class="card">
             <div class="card-h">
               <div class="card-h-left">⚙️ Custo de Máquinas</div>
@@ -3248,11 +3260,8 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /main -->
-
-<!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
-<div id="pg-fornecedores" style="display:none">
+    <!-- ═══════════════════════════════════════════════════ FORNECEDORES ══ -->
+    <div id="pg-fornecedores" style="display:none">
 
   <!-- KPIs fornecedores -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px" id="fornKpiRow">
@@ -3300,8 +3309,12 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <button onclick="fornNovoModal()" style="padding:14px 32px;background:linear-gradient(135deg,#4F46E5,#7C3AED);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(79,70,229,.4)">
       🏭 Cadastrar Primeiro Fornecedor
     </button>
-  </div>
-</div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
 <!-- MODAL: Novo Fornecedor -->
 <div class="gen-overlay" id="fornOverlay" onclick="if(event.target===this)fornCloseModal()">
   <div class="gen-modal" style="width:520px">
@@ -3718,7 +3731,7 @@ function navFin(tab, el) {
 // MÓDULO FORNECEDORES
 // ════════════════════════════════════════════════════════════════════════
 var FORN_KEY = 'erp_fornecedores';
-function fornLoad(){ try{ return JSON.parse(localStorage.getItem(FORN_KEY)||'[]'); }catch(e){ return []; } }
+function fornLoad(){ try{ var d=JSON.parse(localStorage.getItem(FORN_KEY)||'[]'); return Array.isArray(d)?d:[]; }catch(e){ return []; } }
 function fornSaveAll(arr){ localStorage.setItem(FORN_KEY, JSON.stringify(arr)); }
 
 var FORN_CAT_COLOR = {
@@ -3730,12 +3743,50 @@ var FORN_CAT_ICON = {
   'Equipamentos':'🔩','Embalagens':'📦','Outros':'📌'
 };
 
+function fornSeedDemo() {
+  if(fornLoad().length > 0) return;
+  var demo = [
+    {
+      id:'forn_demo1', nome:'Geoplas Acrílicos', categoria:'Matéria-Prima',
+      cnpj:'12.345.678/0001-90', whatsapp:'11987654321', telefone:'1133334444',
+      email:'compras@geoplas.com.br', obs:'Fornecedor principal de acrílico. Pedido mínimo R$ 500.',
+      criado:'01/01/2025',
+      historico:[
+        {id:'h1',produto:'Chapa acrílica 3mm cristal 2x3m',valor:450,data:'10/03/2025',nf:''},
+        {id:'h2',produto:'Chapa acrílica 6mm fumê 1x2m',valor:320,data:'15/04/2025',nf:''},
+        {id:'h3',produto:'Acrílico espelhado prata 2mm',valor:680,data:'02/06/2025',nf:''}
+      ]
+    },
+    {
+      id:'forn_demo2', nome:'Vallim Distribuidora', categoria:'Matéria-Prima',
+      cnpj:'23.456.789/0001-01', whatsapp:'11976543210', telefone:'1144445555',
+      email:'vendas@vallimdist.com.br', obs:'MDF e madeiras. Entrega em 3 dias úteis.',
+      criado:'15/02/2025',
+      historico:[
+        {id:'h4',produto:'MDF 15mm 2,75x1,84m',valor:290,data:'20/03/2025',nf:''},
+        {id:'h5',produto:'MDF cru 9mm fardo 10pçs',valor:510,data:'01/05/2025',nf:''}
+      ]
+    },
+    {
+      id:'forn_demo3', nome:'Central Click Impressão', categoria:'Serviços',
+      cnpj:'34.567.890/0001-12', whatsapp:'11965432109', telefone:'1155556666',
+      email:'arte@centralclick.com.br', obs:'Impressão UV e recortes especiais.',
+      criado:'10/03/2025',
+      historico:[
+        {id:'h6',produto:'Impressão UV fachada 1,2x0,6m',valor:185,data:'25/04/2025',nf:''}
+      ]
+    }
+  ];
+  fornSaveAll(demo);
+}
+
 function fornRender() {
-  var list = fornLoad();
+  var list = (fornLoad()||[]).filter(function(f){ return f && typeof f==='object'; });
   var q = ((document.getElementById('fornSearch')||{}).value||'').toLowerCase();
   var catFlt = (document.getElementById('fornCatFlt')||{}).value||'';
   var filtered = list.filter(function(f){
-    var qOk = !q || f.nome.toLowerCase().includes(q) || (f.obs||'').toLowerCase().includes(q) || (f.email||'').toLowerCase().includes(q);
+    var nome = f.nome||'';
+    var qOk = !q || nome.toLowerCase().includes(q) || (f.obs||'').toLowerCase().includes(q) || (f.email||'').toLowerCase().includes(q);
     var cOk = !catFlt || f.categoria===catFlt;
     return qOk && cOk;
   });
@@ -3783,7 +3834,7 @@ function fornRender() {
         +'</div>'
         +'<div style="display:flex;gap:5px;margin-left:8px">'
           +'<button onclick="fornEditar(\''+f.id+'\')" style="background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px" title="Editar">✏️</button>'
-          +'<button onclick="if(confirm(\'Excluir '+f.nome.replace(/'/g,'')+'?\'))fornExcluir(\''+f.id+'\')" style="background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px" title="Excluir">🗑️</button>'
+          +'<button onclick="if(confirm(\'Excluir '+(f.nome||'').replace(/'/g,'')+'?\'))fornExcluir(\''+f.id+'\')" style="background:#FEE2E2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px" title="Excluir">🗑️</button>'
         +'</div>'
       +'</div>'
 
@@ -3828,7 +3879,7 @@ function fornEditar(id) {
   var list=fornLoad(), f=list.find(function(x){return x.id===id;}); if(!f) return;
   var set=function(elId,v){var el=document.getElementById(elId);if(el)el.value=v||'';};
   set('fornEditId',f.id); set('fornNome',f.nome); set('fornCNPJ',f.cnpj);
-  set('fornWA',f.whatsapp); set('fornTel',f.telefone); set('fornObs',f.obs);
+  set('fornWA',f.whatsapp); set('fornTel',f.telefone); set('fornEmail',f.email); set('fornObs',f.obs);
   var cat=document.getElementById('fornCat'); if(cat&&f.categoria) cat.value=f.categoria;
   var t=document.getElementById('fornModalTitle'); if(t) t.textContent='✏️ Editar Fornecedor';
   document.getElementById('fornOverlay').classList.add('open');
@@ -4036,9 +4087,9 @@ function nav(page, el) {
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
-  if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); }, 0); }
+  if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
-  if (page === 'fornecedores') { setTimeout(function(){ fornSeedDemo(); fornRender(); }, 0); }
+  if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
   if (page === 'crm')        { setTimeout(function(){ if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 800); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
@@ -4569,15 +4620,10 @@ function orcRecalc() {
     const ul = document.getElementById('orcUnitLbl');
     if(ul) ul.textContent = qtyTotal>1 ? orcFmt(finalPrice/qtyTotal)+' / unidade' : '';
     const brk = document.getElementById('orcBreak');
-    if(brk && totalCost>0) brk.innerHTML = `
-      <div class="rb-row"><span class="rb-k">Materiais</span><span class="rb-v">${orcFmt(matTotal)}</span></div>
-      <div class="rb-row"><span class="rb-k">Máquinas</span><span class="rb-v">${orcFmt(maqTotal)}</span></div>
-      <div class="rb-row"><span class="rb-k">Consumíveis</span><span class="rb-v">${orcFmt(consTotal)}</span></div>
-      <div class="rb-row"><span class="rb-k">Mont+Desl</span><span class="rb-v">${orcFmt(mont+desl)}</span></div>
-      <div class="rb-row"><span class="rb-k">Custo Total</span><span class="rb-v">${orcFmt(totalCost)}</span></div>
-      ${descPct>0?`<div class="rb-row"><span class="rb-k">Desconto</span><span class="rb-v" style="color:#059669">-${(descPct*100).toFixed(0)}%</span></div>`:''}
-      <div class="rb-row"><span class="rb-k">TOTAL</span><span class="rb-v">${orcFmt(finalPrice)}</span></div>
-    `;
+    if(brk) brk.innerHTML = finalPrice>0 ? `
+      ${descPct>0?`<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">-${(descPct*100).toFixed(0)}%</span></div>`:''}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">${orcFmt(finalPrice)}</span></div>
+    ` : '';
   }
   // atualiza payload DB preview
   const dbp = document.getElementById('orcDbPreview');
@@ -4695,6 +4741,18 @@ function orcAtualizarIconePgto() {
   const gtwName = gtw === 0 ? 'Mercado Pago · VR Marcas' : 'Nubank PIX · Vitre';
   if (lblEl) lblEl.textContent = gtwName;
   if (pixBox) pixBox.style.display = metodo === 'pix' ? '' : 'none';
+}
+
+function orcToggleNF() {
+  var on = document.getElementById('orcNFToggle').checked;
+  var fields = document.getElementById('orcNFFields');
+  var track = document.getElementById('orcNFTrack');
+  var thumb = document.getElementById('orcNFThumb');
+  var lbl = document.getElementById('orcNFLbl');
+  if(fields) fields.style.display = on ? '' : 'none';
+  if(track) track.style.background = on ? '#059669' : '#D1D5DB';
+  if(thumb) thumb.style.left = on ? '20px' : '2px';
+  if(lbl) { lbl.textContent = on ? 'Sim' : 'Não'; lbl.style.color = on ? '#059669' : 'var(--muted)'; }
 }
 
 function orcSimPagamento() {
@@ -4849,6 +4907,7 @@ function crmOpenCard(id) {
     <button class="topbar-btn" style="font-size:11px" onclick="crmCloseModal();nav('orcamento',null)">💰 Criar Orçamento</button>
     <button class="topbar-btn ghost" style="font-size:11px" onclick="crmAvançarEtapa('${id}')">➡️ Avançar Etapa</button>
     <button class="topbar-btn ghost" style="font-size:11px" onclick="crmAbrirWhatsApp('${id}')">📱 WhatsApp</button>
+    <button class="topbar-btn" style="font-size:11px;background:#7C3AED" onclick="crmAbrirPosVenda('${id}')">📬 Pós-Venda</button>
     <button class="topbar-btn" style="font-size:11px;background:#DC2626" onclick="crmExcluirLead(_crmCurrentId)">🗑 Excluir</button>
   </div>`;
 
@@ -5234,17 +5293,15 @@ function kbOpen(id) {
     btn.textContent = '✓ Marcar como Pronta — Aguardando Master';
   }
 
-  // Fornecedor section — show only for finished/ready OS
+  // Fornecedor section — disponível em qualquer status da OS
   var fornSec = document.getElementById('kbFornSection');
   if(fornSec) {
-    var showForn = (os.status==='pronta'||os.status==='master'||os.status==='entregue');
-    fornSec.style.display = showForn ? '' : 'none';
-    if(showForn) {
-      kbFornPopular();
-      document.getElementById('kbFornInfo').style.display='none';
-      var fornSel = document.getElementById('kbFornSel');
-      if(fornSel) fornSel.value='';
-    }
+    fornSec.style.display = '';
+    kbFornPopular();
+    var fornSel = document.getElementById('kbFornSel');
+    if(fornSel) fornSel.value = os.fornecedorId || '';
+    if(os.fornecedorId) { kbFornOnSelect(); }
+    else { document.getElementById('kbFornInfo').style.display='none'; }
   }
 
   // Show smart prazo suggestion
@@ -5376,6 +5433,8 @@ function kbFornPopular() {
 function kbFornOnSelect() {
   var id = (document.getElementById('kbFornSel')||{}).value;
   var info = document.getElementById('kbFornInfo');
+  // Persiste o fornecedor escolhido na própria OS
+  if(_kbOsId && KB_OS[_kbOsId]) KB_OS[_kbOsId].fornecedorId = id || '';
   if(!id){ if(info) info.style.display='none'; return; }
   var f = fornLoad().find(function(x){return x.id===id;});
   if(!f) return;
@@ -7292,7 +7351,8 @@ var _lastOsId = null;
       parcelas:parcelas, linkPagto:linkUrl,
       clientDoc:docCliente, clientEmail:emailCliente, clientTel:telCliente,
       clientCidade:cidadeCliente, vendedor:vendedor, formaPgto:formaPgto,
-      dataOS:dia, itens:itens, totalGeral:c.finalPrice||0, obs:''
+      dataOS:dia, itens:itens, totalGeral:c.finalPrice||0, obs:'',
+      nf:(function(){ var t=document.getElementById('orcNFToggle'); if(!t||!t.checked) return null; return {precisa:true,nome:(document.getElementById('nfNome')||{}).value||'',doc:(document.getElementById('nfDoc')||{}).value||'',ie:(document.getElementById('nfIE')||{}).value||'',cep:(document.getElementById('nfCEP')||{}).value||'',endereco:(document.getElementById('nfEndereco')||{}).value||''}; })()
     };
     window._lastOsId = newId;
 
@@ -9255,7 +9315,39 @@ function cfgRenderTables() {
     (d.maodeobra||[]).forEach(function(r,i){ ob.insertAdjacentHTML('beforeend', cfgRowMob(i,r)); }); }
 }
 
-function cfgRowMat(i,r){ return '<tr id="matR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mat\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mat\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option><option'+(r.unidade==='ml'?' selected':'')+'>ml</option><option'+(r.unidade==='kg'?' selected':'')+'>kg</option><option'+(r.unidade==='m'?' selected':'')+'>m</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.custo+'" oninput="cfgCell(\'mat\','+i+',\'custo\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'mat\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'mat\','+i+')">✕</button></td></tr>'; }
+function cfgRowMat(i,r){
+  var comp=r.comp||0,larg=r.larg||0,custo=r.custo||0;
+  var area=comp*larg/10000;
+  var m2=(area>0&&custo>0)?(custo/area).toFixed(2):'';
+  return '<tr id="matR'+i+'">'
+    +'<td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mat\','+i+',\'nome\',this.value)"></td>'
+    +'<td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mat\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option><option'+(r.unidade==='ml'?' selected':'')+'>ml</option><option'+(r.unidade==='kg'?' selected':'')+'>kg</option><option'+(r.unidade==='m'?' selected':'')+'>m</option></select></td>'
+    +'<td><input type="number" step="1" min="0" style="border:none;background:transparent;width:60px;font-size:12px;text-align:right" placeholder="cm" value="'+(comp||'')+'" oninput="cfgCell(\'mat\','+i+',\'comp\',+this.value);cfgCalcM2('+i+')"></td>'
+    +'<td><input type="number" step="1" min="0" style="border:none;background:transparent;width:60px;font-size:12px;text-align:right" placeholder="cm" value="'+(larg||'')+'" oninput="cfgCell(\'mat\','+i+',\'larg\',+this.value);cfgCalcM2('+i+')"></td>'
+    +'<td><input type="number" step="0.01" min="0" style="border:none;background:transparent;width:75px;font-size:12px;text-align:right" value="'+(custo||'')+'" oninput="cfgCell(\'mat\','+i+',\'custo\',+this.value);cfgCalcM2('+i+')"></td>'
+    +'<td id="matM2_'+i+'" style="text-align:right;font-weight:700;font-size:11px;color:var(--brand-mid);white-space:nowrap">'+(m2?'R$'+m2+'/m²':'—')+'</td>'
+    +'<td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'mat\','+i+',\'obs\',this.value)"></td>'
+    +'<td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'mat\','+i+')">✕</button></td>'
+    +'</tr>';
+}
+function cfgCalcM2(i){
+  if(!_cfgData||!_cfgData.mat||!_cfgData.mat[i]) return;
+  var row=_cfgData.mat[i];
+  var comp=row.comp||0,larg=row.larg||0,custo=row.custo||0;
+  var area=comp*larg/10000;
+  var m2El=document.getElementById('matM2_'+i);
+  if(!m2El) return;
+  if(area>0&&custo>0){
+    var m2=(custo/area).toFixed(2);
+    m2El.textContent='R$'+m2+'/m²';
+    var prices=_matPricesGet();
+    var nome=(row.nome||'').toLowerCase().trim();
+    var keyMap={'acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico leitoso 5mm':'ac8','acrílico 10mm':'ac10','acrílico espelho 3mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2','acm 3mm':'acm'};
+    var k=keyMap[nome]; if(k){prices[k]=parseFloat(m2);localStorage.setItem(MAT_PRICE_KEY,JSON.stringify(prices));}
+  } else {
+    m2El.textContent='—';
+  }
+}
 function cfgRowMaq(i,r){ return '<tr id="maqR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'maq\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'maq\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='hora'?' selected':'')+'>hora</option><option'+(r.unidade==='un'?' selected':'')+'>un</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.custo+'" oninput="cfgCell(\'maq\','+i+',\'custo\',+this.value)"></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:70px;font-size:12px;text-align:right" value="'+(r.setup||0)+'" oninput="cfgCell(\'maq\','+i+',\'setup\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'maq\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'maq\','+i+')">✕</button></td></tr>'; }
 function cfgRowMob(i,r){ return '<tr id="mobR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mob\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mob\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='hora'?' selected':'')+'>hora</option><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.valor+'" oninput="cfgCell(\'mob\','+i+',\'valor\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'mob\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'mob\','+i+')">✕</button></td></tr>'; }
 
@@ -10010,6 +10102,72 @@ document.addEventListener('DOMContentLoaded', function() {
 </div>
 
 <script>
+
+// ============================================================
+// PÓS-VENDA CRM
+// ============================================================
+var POSV_KEY = 'erp_posvendas';
+function posvLoad(){ try{ return JSON.parse(localStorage.getItem(POSV_KEY)||'{}'); }catch(e){ return {}; } }
+function posvSave(d){ localStorage.setItem(POSV_KEY,JSON.stringify(d)); }
+var _pvLeadId = null;
+var _PV_CONTATOS = [
+  {id:'d1', label:'1 dia após fechamento',    sub:'Confirmar recebimento e entrega do produto', icon:'📦', dias:1  },
+  {id:'d3', label:'3 dias — Feedback inicial', sub:'Como está sendo a experiência com o produto?', icon:'⭐', dias:3  },
+  {id:'m1', label:'1 mês depois',              sub:'Satisfação geral e possíveis ajustes',       icon:'📋', dias:30 },
+  {id:'m2', label:'2 meses depois',             sub:'Novidades e produtos complementares',        icon:'🎯', dias:60 },
+  {id:'m3', label:'3 meses depois',             sub:'Oferta de reposição ou expansão',            icon:'🚀', dias:90 }
+];
+var _PV_PRODUTOS = ['Display Acrílico PDV','Placa Decorativa','Letra Caixa','Banner PVC','Painel LED','Adesivo Jateado','Caixa Acrílica','Espelho Decorativo'];
+
+function crmAbrirPosVenda(id) {
+  _pvLeadId = id;
+  crmCloseModal();
+  var d = CRM_LEADS[id]||{};
+  var saved = posvLoad()[id]||{};
+  document.getElementById('pvClienteNome').textContent = d.nome||id;
+  var cl = document.getElementById('pvCheckList');
+  if(cl) cl.innerHTML = _PV_CONTATOS.map(function(c){
+    var checked = saved[c.id]?'checked':'';
+    var today = new Date(); today.setDate(today.getDate()+c.dias);
+    var sugDt = today.toISOString().split('T')[0];
+    var dtVal = saved[c.id+'_dt']||sugDt;
+    return '<div style="display:flex;align-items:flex-start;gap:10px;background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--border)">'
+      +'<input type="checkbox" id="pvc_'+c.id+'" '+checked+' style="margin-top:2px;width:16px;height:16px;accent-color:#7C3AED;flex-shrink:0">'
+      +'<div style="flex:1"><div style="font-size:12px;font-weight:700">'+c.icon+' '+c.label+'</div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:1px">'+c.sub+'</div></div>'
+      +'<input type="date" id="pvd_'+c.id+'" value="'+dtVal+'" style="font-size:11px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'
+      +'</div>';
+  }).join('');
+  var prod = d.intencao?d.intencao.produto:'';
+  var sug = _PV_PRODUTOS.filter(function(p){return p.toLowerCase()!==(prod||'').toLowerCase();}).slice(0,5);
+  var ps = document.getElementById('pvProdutosSug');
+  if(ps) ps.innerHTML = sug.map(function(p){
+    return '<span style="background:#EDE9FE;color:#7C3AED;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer" data-p="'+p+'" onclick="var mc=document.getElementById(\'pvMsgCustom\');if(mc)mc.value+=(mc.value?\', \':\'\' )+this.dataset.p">'+p+'</span>';
+  }).join('');
+  var mc = document.getElementById('pvMsgCustom');
+  if(mc) mc.value = saved.msg||'';
+  document.getElementById('posVendaOverlay').classList.add('open');
+}
+function posVendaFechar(){
+  document.getElementById('posVendaOverlay').classList.remove('open');
+  _pvLeadId=null;
+}
+function posVendaSalvar(){
+  if(!_pvLeadId) return;
+  var d=posvLoad(), entry={};
+  _PV_CONTATOS.forEach(function(c){
+    var cb=document.getElementById('pvc_'+c.id), dt=document.getElementById('pvd_'+c.id);
+    if(cb) entry[c.id]=cb.checked; if(dt) entry[c.id+'_dt']=dt.value;
+  });
+  var mc=document.getElementById('pvMsgCustom'); if(mc) entry.msg=mc.value;
+  entry.cliente=(CRM_LEADS[_pvLeadId]||{}).nome||_pvLeadId;
+  entry.savedAt=new Date().toISOString();
+  d[_pvLeadId]=entry; posvSave(d);
+  posVendaFechar();
+  var total=_PV_CONTATOS.filter(function(c){return entry[c.id];}).length;
+  showToast('Pós-venda: '+total+' contato'+(total!==1?'s':'')+' agendado'+(total!==1?'s':'')+'!','ok');
+}
+
 // ============================================================
 // ITEM 3 — CRM: render pending orçamentos column
 // ============================================================
@@ -10129,7 +10287,8 @@ function planRenderManual() {
 function _planCalcAndMerge() {
   // run original planCalc (which populates tbody/tfoot/sumBox),
   // then append manual pieces to existing totals
-  planCalc();
+  if(!_planCalcOrig) return;
+  _planCalcOrig();
   var manualArea = 0, manualQty = 0;
   var tbody = document.getElementById('planPiecesBody');
   planManualPieces.forEach(function(p){
@@ -10450,4 +10609,38 @@ function _crmAdicionarBadgeCliente(leadId, clienteId, novo) {
         +(novo?'background:rgba(5,150,105,.15);color:#059669;border:1px solid #059669':'background:rgba(59,130,246,.15);color:#3B82F6;border:1px solid #3B82F6');
       badge.title = novo?'Novo cadastro criado':'Cadastro existente vinculado';
       badge.textContent = (novo?'👤 Cliente criado':'👤 Já cadastrado');
-      badge.setAttribute('onclick', "e
+      card.appendChild(badge);
+    }
+  });
+}
+</script>
+
+<!-- ══ PÓS-VENDA OVERLAY ══ -->
+<div class="gen-overlay" id="posVendaOverlay" onclick="if(event.target===this)posVendaFechar()">
+  <div class="gen-modal" style="width:560px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#7C3AED,#BE185D);border-radius:16px 16px 0 0">
+      <div>
+        <div class="gen-modal-title" style="color:#fff">📬 Pós-Venda</div>
+        <div id="pvClienteNome" style="font-size:11px;color:rgba(255,255,255,.75);margin-top:2px"></div>
+      </div>
+      <button class="gen-close" onclick="posVendaFechar()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Selecione os contatos de pós-venda que deseja agendar para este cliente:</div>
+      <div id="pvCheckList" style="display:flex;flex-direction:column;gap:8px"></div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">🛍️ Produtos Análogos para Oferecer</div>
+        <div id="pvProdutosSug" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <div class="fg"><label>Mensagem personalizada (opcional)</label>
+          <textarea id="pvMsgCustom" rows="2" placeholder="Ex: Aproveite nossa nova linha de displays para PDV!" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text);resize:none;font-family:inherit"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="gen-submit" style="flex:1" onclick="posVendaSalvar()">💾 Salvar Agenda de Pós-Venda</button>
+        <button class="topbar-btn ghost" onclick="posVendaFechar()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
