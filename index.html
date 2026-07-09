@@ -847,6 +847,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 @media(max-width:760px){.caixa-grid{grid-template-columns:1fr 1fr}}
 
 .rel-header{font-size:13px;font-weight:800;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid var(--border);color:var(--text)}
+@page{size:A4 portrait;margin:15mm 12mm}
 @media print {
   .sidebar,.topbar,.topbar-btn,.fin-tab-bar,.fin-brand-filter,.fin-kpi-grid,.fin-chart-row,.rel-tab-bar,
   #pg-financeiro .card:not(.rel-block){display:none!important}
@@ -1549,23 +1550,30 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 
             <!-- Parâmetros de Precificação -->
             <div class="card">
-              <div class="card-h"><div class="card-h-left">⚙️ Parâmetros de Precificação</div></div>
+              <div class="card-h">
+                <div class="card-h-left">⚙️ Parâmetros de Precificação</div>
+                <button onclick="nav('config-orc',null);cfgTab(3)" class="topbar-btn ghost" style="font-size:10px">⚙️ Editar em Config</button>
+              </div>
+              <!-- Overhead e Margem vêm do Config automaticamente -->
+              <div style="display:flex;gap:12px;margin-bottom:10px;background:var(--bg2);border-radius:8px;padding:10px 12px">
+                <div style="flex:1;text-align:center">
+                  <div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Overhead</div>
+                  <div style="font-size:16px;font-weight:800;color:var(--brand-mid)" id="orcOverheadInfo">—</div>
+                </div>
+                <div style="flex:1;text-align:center">
+                  <div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Margem</div>
+                  <div style="font-size:16px;font-weight:800;color:var(--brand-mid)" id="orcVrmlInfo">—</div>
+                </div>
+              </div>
               <div style="display:flex;flex-direction:column;gap:9px;">
                 <div class="fg-row">
-                  <div class="fg"><label>Overhead fixo (%)</label><input type="number" id="orcOverhead" value="41.16" step="0.01" oninput="orcRecalc()"></div>
-                  <div class="fg"><label>Margem VRML (%)</label><input type="number" id="orcVrml" value="20" step="0.5" oninput="orcRecalc()"></div>
                   <div class="fg"><label>Desconto (%)</label><input type="number" id="orcDesc" value="0" min="0" max="50" oninput="orcRecalc()"></div>
-                </div>
-                <div class="fg-row">
                   <div class="fg"><label>Montagem (R$)</label><input type="number" id="orcMontagem" value="0" min="0" oninput="orcRecalc()"></div>
                   <div class="fg"><label>Deslocamento (R$)</label><input type="number" id="orcDesl" value="0" min="0" oninput="orcRecalc()"></div>
                 </div>
                 <!-- hidden price inputs — loaded from Config → Materiais -->
                 <input type="hidden" id="op_ac3"  value="100"><input type="hidden" id="op_ac5"  value="145"><input type="hidden" id="op_ac8"  value="195"><input type="hidden" id="op_ac10" value="240"><input type="hidden" id="op_ps3"  value="65"><input type="hidden" id="op_mt2"  value="180">
-                              <div style="margin-top:10px">
-                <button onclick="orcRecalc()" style="width:100%;padding:9px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.3px">🔄 Aplicar e Recalcular</button>
-              </div>
-              <div style="font-size:11px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px;margin-top:4px">💡 Custo do material (base para preço de venda) definido em <button onclick="nav('config-orc',null);cfgTab(1)" style="background:none;border:none;color:var(--brand-mid);font-size:11px;font-weight:700;cursor:pointer;padding:0">Configurações → Materiais</button></div>
+                <div style="font-size:11px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px">💡 Custo do material definido em <button onclick="nav('config-orc',null);cfgTab(1)" style="background:none;border:none;color:var(--brand-mid);font-size:11px;font-weight:700;cursor:pointer;padding:0">Configurações → Materiais</button></div>
               </div>
             </div>
           </div>
@@ -1696,6 +1704,25 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
                 <button class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="orcSalvarOrcamento()">💾 Salvar Orçamento</button>
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:7px">Envie o orçamento antes de confirmar o pagamento</div>
+            </div>
+
+            <!-- Prazo de Produção -->
+            <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📅 Prazo de Produção</div>
+                <span id="orcPrazoSugeridoLabel" style="font-size:10px;color:var(--brand-mid);font-weight:700"></span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div class="fg" style="margin:0">
+                  <label style="font-size:10px">Dias úteis de produção</label>
+                  <input type="number" id="orcPrazoDias" min="1" max="90" placeholder="Ex: 3" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcCalcDataEntrega()">
+                </div>
+                <div class="fg" style="margin:0">
+                  <label style="font-size:10px">Data de entrega</label>
+                  <input type="date" id="orcPrazoEntrega" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcAtualizarPrazoDias()">
+                </div>
+              </div>
+              <div id="orcPrazoInfo" style="font-size:10px;color:var(--muted);margin-top:6px;background:var(--bg2);border-radius:6px;padding:6px 9px;display:none"></div>
             </div>
           </div>
 
@@ -4159,7 +4186,7 @@ function orcStep(n) {
     if(i<n) el.classList.add('done');
     if(i===n) el.classList.add('on');
   }
-  if (n===4) orcUpdateSummary();
+  if (n===4) { orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto, 100); }
   if (n===3) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==="function") orcLoadMatPrecos(); }
   if (n===5) { const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); } }
 }
@@ -4396,16 +4423,22 @@ function planAbrir(idx) {
   var pw = document.getElementById('planProfWrap');
   if(pw) pw.style.display = rec.dim3d ? '' : 'none';
 
-  // clear pieces
+  // clear pieces and restore saved manual pieces
   document.getElementById('planPiecesBody').innerHTML = '';
   document.getElementById('planPiecesFoot').innerHTML = '';
   document.getElementById('planSumBox').style.display = 'none';
   var btn = document.getElementById('planAplicarBtn'); if(btn) btn.disabled = true;
 
+  planManualPieces = [];
+  var rowEl = document.getElementById('oir_'+idx);
+  if(rowEl && rowEl.dataset.planPecas) {
+    try { planManualPieces = JSON.parse(rowEl.dataset.planPecas)||[]; } catch(e){}
+  }
+  planRenderManual();
+
   document.getElementById('planModal').style.display = 'flex';
 
-  // calc if dims already filled
-  if(lEl && lEl.value && aEl && aEl.value) planCalc();
+  if(savedLarg && savedAlt) planCalc();
 }
 
 function planFechar() {
@@ -4476,8 +4509,9 @@ function planCalc() {
   var custoMat = (totalArea/10000) * priceM2;
 
   // Selling price using the correct formula: venda = custo / (1 - overhead - vrml)
-  var _planOh  = (parseFloat((document.getElementById('orcOverhead')||{}).value)||41.16)/100;
-  var _planVr  = (parseFloat((document.getElementById('orcVrml')||{}).value)||20)/100;
+  var _cfgFin2=(function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  var _planOh=(_cfgFin2.overhead!=null?_cfgFin2.overhead:41.16)/100;
+  var _planVr=(_cfgFin2.vrml!=null?_cfgFin2.vrml:20)/100;
   var _planFac = 1 - _planOh - _planVr;  // e.g. 1 - 0.4116 - 0.20 = 0.3884
   var _planVenda = (_planFac > 0) ? custoMat / _planFac : 0;
   var _planMkPct = ((_planOh + _planVr) * 100).toFixed(1);
@@ -4515,15 +4549,25 @@ function planAplicar() {
   var totalQty  = parseInt(sumBox.dataset.totalQty)||0;
   if(totalArea<=0) { showToast('Calcule as dimensões primeiro','warn'); return; }
 
-  // store planArea + dims on row (so editing restores all values)
+  // store planArea + dims + peças adicionais no row
   var row = document.getElementById('oir_'+_planIdx);
   if(row) {
     row.dataset.planArea = totalArea;
     row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
+    row.dataset.planPecas = JSON.stringify(planManualPieces);
   }
 
+  // ocultar inputs larg/alt e mostrar badge de planificado
+  var lInput = document.getElementById('oi_larg_'+_planIdx);
+  var aInput = document.getElementById('oi_alt_'+_planIdx);
+  if(lInput) lInput.style.display='none';
+  if(aInput) aInput.style.display='none';
+  var lCell = lInput ? lInput.closest('td') : null;
+  var aCell = aInput ? aInput.closest('td') : null;
+  if(lCell && !lCell.querySelector('.plan-badge')) { var b=document.createElement('span'); b.className='plan-badge'; b.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; b.textContent='📐'; lCell.appendChild(b); }
+  if(aCell && !aCell.querySelector('.plan-badge')) { var b2=document.createElement('span'); b2.className='plan-badge'; b2.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; b2.textContent='📐'; aCell.appendChild(b2); }
   // show plan tag
   var tag = document.getElementById('oi_planTag_'+_planIdx);
   if(tag) {
@@ -4543,7 +4587,15 @@ function planAplicar() {
 
 function planLimpar(idx) {
   var row = document.getElementById('oir_'+idx);
-  if(row) delete row.dataset.planArea;
+  if(row) { delete row.dataset.planArea; delete row.dataset.planPecas; }
+  var lInput = document.getElementById('oi_larg_'+idx);
+  var aInput = document.getElementById('oi_alt_'+idx);
+  if(lInput) lInput.style.display='';
+  if(aInput) aInput.style.display='';
+  var lCell = lInput ? lInput.closest('td') : null;
+  var aCell = aInput ? aInput.closest('td') : null;
+  if(lCell) { var b=lCell.querySelector('.plan-badge'); if(b) b.remove(); }
+  if(aCell) { var b2=aCell.querySelector('.plan-badge'); if(b2) b2.remove(); }
   var tag = document.getElementById('oi_planTag_'+idx);
   if(tag) tag.classList.remove('show');
   var btn = document.getElementById('oi_planBtn_'+idx);
@@ -4558,10 +4610,18 @@ function orcFmt(v) { return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigit
 function orcSetV(id,v) { const el=document.getElementById(id); if(el) el.textContent='R$'+v.toFixed(2).replace('.',','); }
 
 function orcRecalc() {
-  const overhead = (parseFloat(document.getElementById('orcOverhead')?.value)||41.16) / 100;
-  const vrml     = (parseFloat(document.getElementById('orcVrml')?.value)||20) / 100;
+  // Lê overhead e vrml do Config salvo (não mais do Step 3)
+  var _cfgFin = (function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  const overhead = (_cfgFin.overhead!=null ? _cfgFin.overhead : 41.16) / 100;
+  const vrml     = (_cfgFin.vrml    !=null ? _cfgFin.vrml     : 20)    / 100;
   const descPct  = (parseFloat(document.getElementById('orcDesc')?.value)||0) / 100;
-  const factor   = 1 - (overhead + vrml);   // divisor = 0.3884 com padrões
+  const factor   = 1 - (overhead + vrml);
+
+  // Exibe overhead/vrml atuais no Step 3 (info somente leitura)
+  var ohInfo = document.getElementById('orcOverheadInfo');
+  if(ohInfo) ohInfo.textContent = (overhead*100).toFixed(2)+'%';
+  var vrInfo = document.getElementById('orcVrmlInfo');
+  if(vrInfo) vrInfo.textContent = (vrml*100).toFixed(2)+'%';
 
   // máquinas
   const laser  = (parseFloat(document.getElementById('om_laser')?.value)||0) * 0.10;
@@ -4574,32 +4634,27 @@ function orcRecalc() {
   orcSetV('ocv_laser',laser); orcSetV('ocv_dobra',dobra); orcSetV('ocv_pol',pol);
   orcSetV('ocv_uv',uv); orcSetV('ocv_lixa',lixa); orcSetV('ocv_tupia',tupia);
 
-  // itens
+  // PASS 1: coletar custo de material de cada item
+  var itemRows = [];
   let matTotal=0, areaTotal=0, qtyTotal=0;
-  document.querySelectorAll('#orcItemBody tr').forEach(row => {
+  document.querySelectorAll('#orcItemBody tr').forEach(function(row) {
     const idx = row.dataset.idx; if(!idx) return;
     const qty  = parseFloat(document.getElementById('oi_qty_'+idx)?.value)||1;
     const larg = parseFloat(document.getElementById('oi_larg_'+idx)?.value)||0;
     const alt  = parseFloat(document.getElementById('oi_alt_'+idx)?.value)||0;
     const matKey = document.getElementById('oi_mat_'+idx)?.value||'ac3';
-    const mat = ORC_MATS.find(m=>m.key===matKey)||ORC_MATS[0];
+    const mat = ORC_MATS.find(function(m){return m.key===matKey;})||ORC_MATS[0];
     const priceM2 = parseFloat(document.getElementById(mat.field)?.value)||100;
-    // Use planificação area if set, otherwise larg×alt
     const planArea = parseFloat(row.dataset.planArea)||0;
     const useArea  = planArea > 0 ? planArea : (larg*alt);
     const matCost = (useArea/10000) * priceM2 * qty;
     matTotal  += matCost;
     areaTotal += useArea*qty;
     qtyTotal  += qty;
-    if (matCost>0 && factor>0) {
-      const uc=matCost/qty, us=uc/factor, ts=matCost/factor;
-      const ec=document.getElementById('oi_custo_'+idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
-      const eu=document.getElementById('oi_unit_'+idx);  if(eu) eu.textContent='R$'+us.toFixed(2).replace('.',',');
-      const et=document.getElementById('oi_tot_'+idx);   if(et) et.textContent='R$'+ts.toFixed(2).replace('.',',');
-    }
+    itemRows.push({idx:idx, qty:qty, matCost:matCost});
   });
 
-  // consumíveis (base = área total em cm²)
+  // consumíveis
   const adhYes  = document.getElementById('oc_adh')?.value==='sim';
   const adhbYes = document.getElementById('oc_adhb')?.value==='sim';
   const imp     = parseFloat(document.getElementById('oc_imp')?.value)||0;
@@ -4613,34 +4668,52 @@ function orcRecalc() {
 
   const mont = parseFloat(document.getElementById('orcMontagem')?.value)||0;
   const desl = parseFloat(document.getElementById('orcDesl')?.value)||0;
+  const extras = maqTotal + consTotal + mont + desl;
+  const totalCost = matTotal + extras;
 
-  // ── FÓRMULA VERIFICADA DA PLANILHA ──────────────────────
-  // selling_price = total_cost / (1 - overhead - vrml)
-  const totalCost  = matTotal + maqTotal + consTotal + mont + desl;
+  // PASS 2: atualizar TOTAL de cada item com distribuição proporcional dos extras
+  itemRows.forEach(function(item) {
+    if(item.matCost > 0 && factor > 0) {
+      var frac = matTotal > 0 ? item.matCost / matTotal : 1;
+      var itemFullCost = item.matCost + extras * frac;
+      var uc = itemFullCost / item.qty;
+      var us = uc / factor;
+      var ts = itemFullCost / factor;
+      var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
+      var eu=document.getElementById('oi_unit_'+item.idx);  if(eu) eu.textContent='R$'+us.toFixed(2).replace('.',',');
+      var et=document.getElementById('oi_tot_'+item.idx);   if(et) et.textContent='R$'+ts.toFixed(2).replace('.',',');
+    }
+  });
+
+  // preço final
   let finalPrice = 0;
   if (factor>0 && totalCost>0) finalPrice = (totalCost/factor) * (1-descPct);
 
-  // atualiza card de resultado
+  // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
   if (tv) {
     tv.textContent = orcFmt(finalPrice);
     const ul = document.getElementById('orcUnitLbl');
     if(ul) ul.textContent = qtyTotal>1 ? orcFmt(finalPrice/qtyTotal)+' / unidade' : '';
     const brk = document.getElementById('orcBreak');
-    if(brk) brk.innerHTML = finalPrice>0 ? `
-      ${descPct>0?`<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">-${(descPct*100).toFixed(0)}%</span></div>`:''}
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">${orcFmt(finalPrice)}</span></div>
-    ` : '';
+    if(brk) {
+      if(finalPrice<=0){ brk.innerHTML=''; }
+      else {
+        var lines='';
+        if(extras>0){
+          lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal/factor*(1-descPct))+'</span></div>';
+          if(maqTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Máquinas</span><span>'+orcFmt(maqTotal/factor*(1-descPct))+'</span></div>';
+          if(consTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal/factor*(1-descPct))+'</span></div>';
+          if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
+          if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
+        }
+        if(descPct>0) lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">-'+(descPct*100).toFixed(0)+'%</span></div>';
+        lines += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
+        brk.innerHTML = lines;
+      }
+    }
   }
-  // atualiza payload DB preview
-  const dbp = document.getElementById('orcDbPreview');
-  if(dbp) {
-    const isvr = document.body.classList.contains('vitre');
-    dbp.textContent = JSON.stringify({
-      orcamento:{ marca:isvr?'vitre':'vr_marcas', valor_total:+finalPrice.toFixed(2), status:'aguardando_pagamento', status_pgto:'pendente', overhead_pct:(overhead*100).toFixed(2), vrml_pct:(vrml*100).toFixed(2), desconto_pct:(descPct*100).toFixed(1), criado_em:new Date().toISOString() },
-      transacao:{ gateway:isvr?'nubank':'mercadopago', status:'pendente' }
-    }, null, 2);
-  }
+  // payload interno
   window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, overhead, vrml };
 }
 
@@ -4694,6 +4767,52 @@ function orcGerarOS() {
   document.getElementById('orcModal').classList.add('open');
 }
 function orcCloseModal() { document.getElementById('orcModal').classList.remove('open'); }
+
+function orcCalcDataEntrega() {
+  var dias = parseInt(document.getElementById('orcPrazoDias')?.value)||0;
+  if(!dias) return;
+  var d = new Date(); var util=0;
+  while(util < dias) { d.setDate(d.getDate()+1); var dw=d.getDay(); if(dw!==0&&dw!==6) util++; }
+  var dt = document.getElementById('orcPrazoEntrega');
+  if(dt) dt.value = d.toISOString().split('T')[0];
+  orcAtualizarInfoPrazo();
+}
+function orcAtualizarPrazoDias() {
+  var dtEl = document.getElementById('orcPrazoEntrega');
+  if(!dtEl||!dtEl.value) return;
+  var hoje=new Date(); hoje.setHours(0,0,0,0);
+  var alvo=new Date(dtEl.value+'T00:00:00');
+  var util=0, cur=new Date(hoje);
+  while(cur < alvo) { cur.setDate(cur.getDate()+1); var dw=cur.getDay(); if(dw!==0&&dw!==6) util++; }
+  var pd=document.getElementById('orcPrazoDias'); if(pd) pd.value=util;
+  orcAtualizarInfoPrazo();
+}
+function orcAtualizarInfoPrazo() {
+  var dias=parseInt(document.getElementById('orcPrazoDias')?.value)||0;
+  var dtVal=(document.getElementById('orcPrazoEntrega')||{}).value||'';
+  var info=document.getElementById('orcPrazoInfo'); if(!info) return;
+  if(dias>0&&dtVal) {
+    var dtFmt=dtVal.split('-').reverse().join('/');
+    info.style.display='';
+    info.innerHTML='📅 Entrega: <strong>'+dtFmt+'</strong> ('+dias+' dia'+(dias!==1?'s úteis':' útil')+' de produção)';
+  } else { info.style.display='none'; }
+}
+function orcPreencherPrazoAuto() {
+  var prazoDiasEl=document.getElementById('orcPrazoDias');
+  if(!prazoDiasEl||prazoDiasEl.value) return;
+  var totalMins=0, nItems=0;
+  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
+    var idx=row.dataset.idx; if(!idx) return;
+    var qty=parseFloat(document.getElementById('oi_qty_'+idx)?.value)||1;
+    totalMins += 35*Math.ceil(Math.sqrt(qty)); nItems++;
+  });
+  if(!nItems) return;
+  var dias=Math.max(2,Math.ceil(totalMins/480));
+  prazoDiasEl.value=dias;
+  orcCalcDataEntrega();
+  var lbl=document.getElementById('orcPrazoSugeridoLabel');
+  if(lbl) lbl.textContent='Estimativa: '+dias+'d úteis';
+}
 
 
 // ============================================================
