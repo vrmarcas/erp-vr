@@ -681,6 +681,11 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .crm-card:hover .crm-sel-btn,.crm-card.crm-selected .crm-sel-btn{opacity:1}
 .crm-card.crm-selected{outline:2px solid #7C3AED;outline-offset:1px;background:rgba(124,58,237,.07)}
 .crm-card.crm-selected .crm-sel-btn{background:#7C3AED;border-color:#7C3AED;color:#fff;font-size:11px}
+.crm-msg-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:center;justify-content:center}
+.crm-msg-overlay.open{display:flex}
+.crm-msg-modal{background:var(--surface);border-radius:14px;padding:24px;width:480px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+.crm-msg-tpl-btn{padding:5px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:11px;cursor:pointer;transition:.15s}
+.crm-msg-tpl-btn.on{background:var(--brand-mid);color:#fff;border-color:var(--brand-mid)}
 .crm-bulk-bar{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1E1B4B;color:#fff;border-radius:12px;padding:10px 16px;display:none;align-items:center;gap:9px;z-index:9999;box-shadow:0 4px 24px rgba(0,0,0,.45);font-size:12px;font-weight:700;white-space:nowrap}
 .crm-bulk-bar.show{display:flex}
 .crm-bulk-select{padding:5px 8px;border-radius:6px;border:1px solid #4B5563;background:#2D3748;color:#fff;font-size:11px;cursor:pointer}
@@ -4009,7 +4014,7 @@ function nav(page, el) {
   if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
-  if (page === 'crm')        { setTimeout(function(){ if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 800); }
+  if (page === 'crm')        { setTimeout(function(){ crmRenderBoard('vr'); crmRenderBoard('vitre'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
 }
@@ -4971,6 +4976,7 @@ function crmSetBrand(b) {
   const isVR = b === 'vr';
   document.getElementById('crmBrandVR').style.display = isVR ? '' : 'none';
   document.getElementById('crmBrandVT').style.display = isVR ? 'none' : '';
+  if(isVR) crmRenderBoard('vr'); else crmRenderBoard('vitre');
   const tabVR = document.getElementById('crmTabVR');
   const tabVT = document.getElementById('crmTabVT');
   tabVR.style.borderBottomColor = isVR ? '#7C3AED' : 'transparent';
@@ -10349,6 +10355,200 @@ function posVendaSalvar(){
 }
 
 // ============================================================
+// CRM — BOARD DINÂMICO + MENSAGENS
+// ============================================================
+var CRM_FASES = [
+  { id:'ia_novo',     label:'🤖 IA / Novos',         cor:'#5B21B6' },
+  { id:'qualificando',label:'📞 Qualificando',        cor:'#1E40AF' },
+  { id:'orc_emitido', label:'💰 Orçamento Emitido',   cor:'#92400E' },
+  { id:'negociacao',  label:'🤝 Negociação',           cor:'#6D28D9' },
+  { id:'fechado',     label:'✅ Fechado',               cor:'#065F46' },
+  { id:'congelado',   label:'❄️ Congelado',             cor:'#1E3A5F' }
+];
+
+var CRM_TEMP_MAP = { quente:'🔴', morno:'🟡', frio:'🔵' };
+var CRM_ORIG_MAP = { ia:'🤖 IA', whatsapp:'💬 WhatsApp', instagram:'📸 Instagram', site:'🌐 Site', indicacao:'🤝 Indicação', email:'📧 E-mail', manual:'✏️ Manual' };
+
+function crmLeadsFor(marca) {
+  return Object.entries(CRM_LEADS)
+    .filter(function(e){ return e[1].marca === marca; })
+    .map(function(e){ return Object.assign({_id: e[0]}, e[1]); });
+}
+
+function crmFmtPhone(tel) {
+  if(!tel || tel === '—') return '';
+  return tel.replace(/\D/g,'');
+}
+
+function crmCardHTML(lead) {
+  var tempIcon = CRM_TEMP_MAP[lead.temp] || '⚪';
+  var score = lead.score || 0;
+  var scoreColor = score >= 70 ? '#059669' : score >= 40 ? '#D97706' : '#DC2626';
+  var fuVencido = lead.followup_vencido || (lead.horas_sem_resposta && lead.horas_sem_resposta > 48);
+  var phone = crmFmtPhone(lead.tel);
+  var waLink = phone ? 'https://wa.me/55'+phone : '#';
+
+  var fuBadge = '';
+  if(fuVencido) {
+    fuBadge = '<div style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:700;color:#DC2626;margin-top:5px">⚠️ Follow-up vencido — '+lead.horas_sem_resposta+'h sem resposta</div>';
+  } else if(lead.data_retorno) {
+    var dr = new Date(lead.data_retorno+'T00:00:00');
+    var hoje = new Date(); hoje.setHours(0,0,0,0);
+    var diff = Math.round((dr-hoje)/(1000*60*60*24));
+    var drStr = dr.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+    var drColor = diff <= 0 ? '#DC2626' : diff <= 2 ? '#D97706' : '#059669';
+    fuBadge = '<div style="font-size:10px;color:'+drColor+';margin-top:5px;font-weight:700">📅 Follow-up: '+drStr+(diff===0?' (hoje)':diff===1?' (amanhã)':(diff<0?' ('+Math.abs(diff)+'d atrás)':''))+'</div>';
+  }
+
+  return '<div class="crm-card" data-id="'+lead._id+'" style="border-color:'+(lead.cor||'#7C3AED')+';cursor:default">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin-bottom:6px">'
+    +'<div style="font-size:13px;font-weight:800;color:var(--text);line-height:1.3">'+lead.nome+'</div>'
+    +'<span style="font-size:16px;flex-shrink:0" title="'+lead.temp+'">'+tempIcon+'</span>'
+    +'</div>'
+    +(lead.sub ? '<div style="font-size:10px;color:var(--muted);margin-bottom:4px">'+lead.sub+'</div>' : '')
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin:5px 0">'
+    +'<span style="font-size:10px;color:var(--muted)">'+(CRM_ORIG_MAP[lead.origem]||lead.origem||'')+'</span>'
+    +'<span style="font-size:11px;font-weight:800;color:#059669">'+(lead.valor_potencial||'')+'</span>'
+    +'</div>'
+    +(score>0 ? '<div style="margin:4px 0 2px"><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:2px"><span>Score</span><span style="color:'+scoreColor+';font-weight:700">'+score+'</span></div>'
+    +'<div style="height:4px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:4px;background:'+scoreColor+';border-radius:2px;transition:width .4s"></div></div></div>' : '')
+    +fuBadge
+    +'<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">'
+    +(phone ? '<a href="'+waLink+'" target="_blank" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none;cursor:pointer">💬 WhatsApp</a>' : '')
+    +'<button data-cid="'+lead._id+'" onclick="crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Mensagem</button>'
+    +'<button data-cid="'+lead._id+'" onclick="crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✏️ Ver</button>'
+    +'</div>'
+    +'<div style="display:flex;gap:4px;margin-top:5px">'
+    +'<select data-cid="'+lead._id+'" onchange="crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    + CRM_FASES.map(function(f){ return '<option value="'+f.id+'"'+(lead.etapa===f.id?' selected':'')+'>'+f.label+'</option>'; }).join('')
+    +'</select>'
+    +'</div>'
+    +'</div>';
+}
+
+function crmRenderKpi(marca) {
+  var leads = crmLeadsFor(marca);
+  var total = leads.length;
+  var quentes = leads.filter(function(l){ return l.temp==='quente'; }).length;
+  var fuVenc = leads.filter(function(l){ return l.followup_vencido || (l.horas_sem_resposta&&l.horas_sem_resposta>48); }).length;
+  var valPot = leads.reduce(function(s,l){
+    var v = parseFloat((l.valor_potencial||'0').replace(/[^\d,]/g,'').replace(',','.'));
+    return s + (isNaN(v)?0:v);
+  }, 0);
+  var valStr = valPot >= 1000 ? 'R$'+Math.round(valPot/1000)+'k' : 'R$'+Math.round(valPot);
+  var suf = marca==='vr' ? 'VR' : 'VT';
+  var c = marca==='vr' ? '#7C3AED' : '#BE185D';
+  var kpiEl = document.getElementById('crmKpi'+suf);
+  if(!kpiEl) return;
+  kpiEl.innerHTML = [
+    {v:total, l:'no pipeline', c:c},
+    {v:quentes, l:'leads quentes', c:'#DC2626'},
+    {v:fuVenc, l:'follow-up vencido', c:'#D97706'},
+    {v:valStr, l:'valor potencial', c:'#059669'}
+  ].map(function(k){
+    return '<div class="kpi"><div class="kpi-val" style="color:'+k.c+';font-size:20px">'+k.v+'</div><div class="kpi-lbl">'+k.l+'</div></div>';
+  }).join('');
+
+  // atualizar contagem nos tabs
+  var countEl = document.getElementById('crm'+(suf==='VR'?'VR':'VT')+'count');
+  if(countEl) countEl.textContent = total;
+}
+
+function crmRenderBoard(marca) {
+  crmRenderKpi(marca);
+  var suf = marca==='vr' ? 'VR' : 'VT';
+  var boardEl = document.getElementById('crmBoard'+suf);
+  if(!boardEl) return;
+  var leads = crmLeadsFor(marca);
+  boardEl.innerHTML = CRM_FASES.map(function(fase){
+    var cards = leads.filter(function(l){ return l.etapa === fase.id; });
+    return '<div class="crm-col">'
+      +'<div class="crm-head" style="background:'+fase.cor+'">'+fase.label+' <span class="cc">'+cards.length+'</span></div>'
+      +'<div class="crm-body" style="min-height:120px">'
+      +(cards.length ? cards.map(crmCardHTML).join('') : '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">Nenhum lead aqui</div>')
+      +'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function crmMoverFase(id, novaFase) {
+  var lead = CRM_LEADS[id]; if(!lead) return;
+  lead.etapa = novaFase;
+  crmRenderBoard(lead.marca);
+  showToast('Lead movido para '+CRM_FASES.find(function(f){return f.id===novaFase;})?.label,'ok');
+}
+
+// ── Mensagens ─────────────────────────────────────────────────────────────────
+var CRM_MSG_TEMPLATES = {
+  followup:  { label:'🔄 Follow-up',    texto: 'Olá {nome}! Tudo bem? Estou entrando em contato para dar continuidade ao seu interesse em {produto}. Podemos conversar?' },
+  orcamento: { label:'💰 Orçamento',    texto: 'Olá {nome}! Seu orçamento de {valor} está disponível. Posso esclarecer alguma dúvida ou ajustar algo?' },
+  fechamento:{ label:'🤝 Fechamento',   texto: 'Olá {nome}! Verificando se conseguiu avaliar nossa proposta. Estamos prontos para iniciar sua produção assim que confirmar!' },
+  posvenda:  { label:'⭐ Pós-Venda',    texto: 'Olá {nome}! Como foi sua experiência com nosso produto? Sua satisfação é muito importante para nós. 😊' },
+  entrega:   { label:'📦 Entrega',      texto: 'Olá {nome}! Seu pedido está pronto e será entregue em breve. Qualquer dúvida estamos à disposição!' }
+};
+
+var _crmMsgId = null;
+
+function crmMsgAbrir(id) {
+  var lead = CRM_LEADS[id]; if(!lead) return;
+  _crmMsgId = id;
+  var overlay = document.getElementById('crmMsgOverlay');
+  if(!overlay) return;
+  document.getElementById('crmMsgNome').textContent = lead.nome;
+  document.getElementById('crmMsgTel').textContent = lead.tel || '—';
+  crmMsgSelecionarTemplate('followup');
+  overlay.classList.add('open');
+}
+
+function crmMsgSelecionarTemplate(tipo) {
+  var lead = CRM_LEADS[_crmMsgId]; if(!lead) return;
+  var tpl = CRM_MSG_TEMPLATES[tipo];
+  if(!tpl) return;
+  var txt = tpl.texto
+    .replace('{nome}', lead.nome)
+    .replace('{produto}', (lead.intencao&&lead.intencao.produto)||'nossos produtos')
+    .replace('{valor}', lead.valor_potencial||'o valor do orçamento');
+  document.getElementById('crmMsgTexto').value = txt;
+  // highlight selecionado
+  document.querySelectorAll('.crm-msg-tpl-btn').forEach(function(b){ b.classList.remove('on'); });
+  var btn = document.getElementById('crmMsgTpl_'+tipo);
+  if(btn) btn.classList.add('on');
+}
+
+function crmMsgEnviarWA() {
+  var lead = CRM_LEADS[_crmMsgId]; if(!lead) return;
+  var phone = crmFmtPhone(lead.tel);
+  var txt = (document.getElementById('crmMsgTexto')||{}).value||'';
+  if(!phone) { showToast('Sem número de telefone cadastrado','warn'); return; }
+  window.open('https://wa.me/55'+phone+'?text='+encodeURIComponent(txt), '_blank');
+  // registrar contato no histórico
+  if(!lead.historico) lead.historico = [];
+  var agora = new Date();
+  lead.historico.push({ data: agora.toLocaleDateString('pt-BR'), tipo:'mensagem', texto:'Mensagem enviada via WhatsApp: '+txt.substring(0,60)+'...' });
+  crmMsgFechar();
+  showToast('WhatsApp aberto ✓','ok');
+}
+
+function crmMsgAgendarFollowUp() {
+  var lead = CRM_LEADS[_crmMsgId]; if(!lead) return;
+  var dataEl = document.getElementById('crmMsgDataFollowUp');
+  if(!dataEl||!dataEl.value) { showToast('Informe a data do follow-up','warn'); return; }
+  lead.data_retorno = dataEl.value;
+  lead.followup_vencido = false;
+  var dr = new Date(dataEl.value+'T00:00:00');
+  showToast('Follow-up agendado para '+dr.toLocaleDateString('pt-BR'),'ok');
+  crmMsgFechar();
+  crmRenderBoard(lead.marca);
+}
+
+function crmMsgFechar() {
+  var overlay = document.getElementById('crmMsgOverlay');
+  if(overlay) overlay.classList.remove('open');
+  _crmMsgId = null;
+}
+
+
+// ============================================================
 // ITEM 3 — CRM: render pending orçamentos column
 // ============================================================
 function crmRenderOrcPend() {
@@ -10819,6 +11019,40 @@ function _crmAdicionarBadgeCliente(leadId, clienteId, novo) {
         <button class="gen-submit" style="flex:1" onclick="posVendaSalvar()">💾 Salvar Agenda de Pós-Venda</button>
         <button class="topbar-btn ghost" onclick="posVendaFechar()">Cancelar</button>
       </div>
+    </div>
+  </div>
+</div>
+<!-- MODAL CRM: Enviar mensagem -->
+<div class="crm-msg-overlay" id="crmMsgOverlay" onclick="if(event.target===this)crmMsgFechar()">
+  <div class="crm-msg-modal">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div style="font-size:15px;font-weight:800" id="crmMsgNome">—</div>
+        <div style="font-size:11px;color:var(--muted)" id="crmMsgTel">—</div>
+      </div>
+      <button onclick="crmMsgFechar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
+    </div>
+    <!-- Templates -->
+    <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Template de mensagem</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="crm-msg-tpl-btn on" id="crmMsgTpl_followup"  onclick="crmMsgSelecionarTemplate('followup')">🔄 Follow-up</button>
+      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_orcamento" onclick="crmMsgSelecionarTemplate('orcamento')">💰 Orçamento</button>
+      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_fechamento"onclick="crmMsgSelecionarTemplate('fechamento')">🤝 Fechamento</button>
+      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_posvenda"  onclick="crmMsgSelecionarTemplate('posvenda')">⭐ Pós-Venda</button>
+      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_entrega"   onclick="crmMsgSelecionarTemplate('entrega')">📦 Entrega</button>
+    </div>
+    <!-- Mensagem editável -->
+    <textarea id="crmMsgTexto" rows="5" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.6;box-sizing:border-box"></textarea>
+    <!-- Agendar follow-up -->
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);border-radius:8px">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap">📅 Agendar follow-up:</span>
+      <input type="date" id="crmMsgDataFollowUp" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">
+      <button onclick="crmMsgAgendarFollowUp()" style="padding:5px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Salvar</button>
+    </div>
+    <!-- Ações -->
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button onclick="crmMsgEnviarWA()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer">💬 Enviar pelo WhatsApp</button>
+      <button onclick="crmMsgFechar()" style="padding:11px 16px;border:1.5px solid var(--border);background:transparent;color:var(--muted);border-radius:9px;font-size:12px;cursor:pointer">Cancelar</button>
     </div>
   </div>
 </div>
