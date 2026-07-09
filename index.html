@@ -1875,8 +1875,26 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
                 <div class="fg"><label>Endereço completo</label><input type="text" id="nfEndereco" placeholder="Rua, número, bairro, cidade - UF" style="font-size:12px"></div>
               </div>
             </div>
+            <!-- RECIBO DE ENTRADA -->
+            <div style="margin-bottom:12px;border-top:1px solid var(--border);padding-top:12px">
+              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🧾 Recibo de Entrada / Sinal</div>
+              <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
+                <div class="fg" style="margin:0;flex:1">
+                  <label style="font-size:11px">Valor recebido como entrada (R$)</label>
+                  <input type="number" id="orcEntradaValor" step="0.01" min="0" placeholder="0,00" oninput="orcCalcEntradaResto()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)">
+                </div>
+                <div class="fg" style="margin:0;flex:1">
+                  <label style="font-size:11px">Restante na retirada</label>
+                  <div id="orcEntradaResto" style="padding:8px 10px;background:var(--bg2);border-radius:7px;font-size:13px;font-weight:700;color:#D97706">R$ —</div>
+                </div>
+              </div>
+              <button class="topbar-btn" style="width:100%;background:#D97706;font-size:12px;padding:9px;justify-content:center" onclick="orcGerarReciboEntrada()">
+                🖨️ Gerar Recibo de Entrada
+              </button>
+            </div>
+
             <button class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcSimPagamento()">
-              ✓ Confirmar Recebimento
+              ✓ Confirmar Pagamento Total e Gerar OS
             </button>
             <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px">Confirme após verificar o pagamento no app do banco</div>
           </div>
@@ -2044,6 +2062,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         <div class="echart">
           <div class="echart-h">📦 Produtos Mais Vendidos <span class="echart-sub" id="comProdSub">todas as OS</span></div>
           <div id="comTopProdutos" style="margin-top:10px;max-height:220px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <!-- CARD COMISSÕES -->
+      <div class="card" style="margin-top:14px">
+        <div class="card-h">
+          <div class="card-h-left">💰 Comissões por Vendedor</div>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="comissaoRender()">Atualizar</button>
+        </div>
+        <div id="comComissaoBody" style="margin-top:8px">
+          <div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Carregando...</div>
         </div>
       </div>
     </div>
@@ -2469,7 +2498,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <option value="entrada">Só Entradas</option>
               <option value="saida">Só Saídas</option>
             </select>
-            <button onclick="STOCK_LOG=[];stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
+            <button onclick="STOCK_LOG=[];try{localStorage.removeItem('erp_stock_log');}catch(e){}stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
           </div>
         </div>
         <div id="stockHistBody" style="margin-top:8px">
@@ -2799,6 +2828,35 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         </div>
       </div>
 
+
+      <!-- ── Relatório Fiscal ──────────────────────────────────── -->
+      <div id="relPgNF" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Mês</label>
+            <select id="relNFMes" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="">Todos</option>
+              <option value="/01/">Janeiro</option><option value="/02/">Fevereiro</option>
+              <option value="/03/">Março</option><option value="/04/">Abril</option>
+              <option value="/05/">Maio</option><option value="/06/">Junho</option>
+              <option value="/07/">Julho</option><option value="/08/">Agosto</option>
+              <option value="/09/">Setembro</option><option value="/10/">Outubro</option>
+              <option value="/11/">Novembro</option><option value="/12/">Dezembro</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Empresa</label>
+            <select id="relNFMarca" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="">Todas</option>
+              <option value="vr">VR Marcas</option>
+              <option value="vitre">Vitre</option>
+            </select>
+          </div>
+          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="relFiscalExportar()">📥 Exportar</button>
+        </div>
+        <div id="relNFBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Clique em Relatório Fiscal para carregar.</div></div>
+      </div>
+
     </div>
 
 
@@ -2838,6 +2896,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
         <button class="rel-tab-btn" id="relTabBtnMensal" onclick="relTab('mensal',this)">📅 Relatório Mensal</button>
         <button class="rel-tab-btn" id="relTabBtnDRE" onclick="relTab('dre',this)">📋 DRE</button>
         <button class="rel-tab-btn" id="relTabBtnContas" onclick="relTab('contas',this)">📌 Contas Pagas</button>
+        <button class="rel-tab-btn" id="relTabBtnNF" onclick="relTab('nf',this)">🧾 Relatório Fiscal</button>
         <div class="rel-tab-spacer"></div>
         <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="window.print()">🖨️ Imprimir</button>
       </div>
@@ -3723,6 +3782,28 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 </div>
 
 
+<!-- MINI-MODAL CONFIRMAR BAIXA COM DATA -->
+<div class="gen-overlay" id="finBaixaOverlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="gen-modal" style="width:380px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#059669,#10B981);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">✓ Confirmar Baixa</div>
+      <button class="gen-close" onclick="document.getElementById('finBaixaOverlay').classList.remove('open')" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div id="finBaixaLabel" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:14px;line-height:1.4"></div>
+      <div class="fg">
+        <label>Data do pagamento / recebimento</label>
+        <input type="date" id="finBaixaData">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button class="topbar-btn ghost" style="flex:1" onclick="document.getElementById('finBaixaOverlay').classList.remove('open')">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#059669,#10B981)" onclick="var ov=document.getElementById('finBaixaOverlay');var id=ov.dataset.id;var tipo=ov.dataset.tipo;var dt=document.getElementById('finBaixaData').value;if(!dt){showToast('Informe a data','warn');return;}ov.classList.remove('open');if(tipo==='cr')_finCRBaixaConfirmar(id,dt);else _finCPPagarConfirmar(id,dt);">✓ Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <!-- BUSCA GLOBAL -->
 <div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)searchClose()">
   <div class="search-box">
@@ -4269,6 +4350,16 @@ function updateBrandFromQuote(sel) { orcEmpresaChange(); }
 // Verificado: custo R$105,475 → venda R$271,5628 ✅
 // ============================================================
 
+// Prazo médio de produção por produto (dias úteis)
+var ORC_PRAZO_MEDIO = {
+  'Armário': 7, 'Caixa': 5, 'Display': 4, 'Expositor': 5,
+  'Galheteiro': 3, 'Medalha': 3, 'Organizador': 4, 'Placa': 2,
+  'Porta documento': 3, 'Porta folder': 3, 'Porta retrato': 2,
+  'Suporte': 3, 'Totem': 5, 'Urna': 4, 'Vitrine': 6,
+  'Baleiro tubo': 4, 'Bandeja': 3, 'Barreira de proteção': 5,
+  'Chaveiro': 2, 'Decoração': 4, 'Letra Caixa': 5
+};
+
 var ORC_PRODUTOS_DEFAULT = ['Armário','Baleiro tubo','Bandeja','Barreira de proteção','Caixa','Chaveiro','Decoração','Display','Expositor','Galheteiro','Medalha','Organizador','Placa','Porta documentos','Porta pasta','Porta tablet','Prateleira','Protetor biometria','Púlpito','Quadro decorativo','Suporte','Tabuleiro de damas','Totem','Troféu','Urna'];
 var ORC_PRODUTOS = (function(){ try{ var s=localStorage.getItem('erp_orc_produtos'); return s?JSON.parse(s):ORC_PRODUTOS_DEFAULT.slice(); }catch(e){ return ORC_PRODUTOS_DEFAULT.slice(); } })();
 const ORC_MATS = [
@@ -4344,7 +4435,7 @@ function orcAddItem() {
   const matOpts  = ORC_MATS.map(m=>`<option value="${m.key}">${m.label}</option>`).join('');
   tr.innerHTML = `
     <td style="text-align:center;font-weight:700;color:var(--muted);width:22px">${orcItemCount}</td>
-    <td><select id="oi_prod_${orcItemCount}">${prodOpts}</select></td>
+    <td><select id="oi_prod_${orcItemCount}" onchange="orcOnProdChange(this)">${prodOpts}</select></td>
     <td><input type="number" id="oi_qty_${orcItemCount}"  value="1" min="1" style="width:48px" oninput="orcRecalc()"></td>
     <td><select id="oi_mat_${orcItemCount}" onchange="orcRecalc()">${matOpts}</select></td>
     <td><input type="number" id="oi_esp_${orcItemCount}"  value="3" style="width:42px" oninput="orcRecalc()"></td>
@@ -4913,6 +5004,76 @@ function orcUpdateSummary() {
   if(pi) pi.innerHTML='Gateway: <strong>'+(isVt?'Nubank PIX':'Mercado Pago')+'</strong>';
 }
 
+function orcCalcEntradaResto() {
+  var c = window._orcCalc||{};
+  var total = c.finalPrice||0;
+  var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
+  var resto = Math.max(0, total - entrada);
+  var el = document.getElementById('orcEntradaResto');
+  if(el) el.textContent = 'R$ '+resto.toLocaleString('pt-BR',{minimumFractionDigits:2});
+}
+
+function orcGerarReciboEntrada() {
+  var c = window._orcCalc||{};
+  var total   = c.finalPrice||0;
+  var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
+  if(!total)  { showToast('Calcule o or\u00e7amento antes de gerar o recibo','warn'); return; }
+  if(!entrada){ showToast('Informe o valor pago como entrada','warn'); return; }
+  var resto   = Math.max(0, total - entrada);
+  var cliente = (document.getElementById('orcClientNome')||{}).value||'Cliente';
+  var isVt    = document.body.classList.contains('vitre');
+  var empresa = isVt ? 'Vitre' : 'VR Marcas';
+  var cor     = isVt ? '#BE185D' : '#7C3AED';
+  var hoje    = new Date().toLocaleDateString('pt-BR');
+  var vend    = (document.getElementById('orcClientVendedor')||{}).value||'—';
+  var fmtBR   = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}); };
+  var pct     = total>0 ? Math.round(entrada/total*100) : 0;
+  var numRec  = 'REC-'+Date.now().toString().slice(-6);
+  var itensList = [];
+  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
+    var ri = row.dataset.idx; if(!ri) return;
+    var prod = (document.getElementById('oi_prod_'+ri)||{}).value||'Produto';
+    var qty  = (document.getElementById('oi_qty_'+ri)||{}).value||'1';
+    itensList.push(qty+'x '+prod);
+  });
+  var itensStr = itensList.join(', ')||'Servi\u00e7o conforme or\u00e7amento';
+  var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo de Entrada</title>'
+    +'<style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:30px;color:#1a1a1a;max-width:620px;margin:0 auto}'
+    +'.hdr{background:'+cor+';color:#fff;padding:20px 24px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center}'
+    +'.hdr h1{margin:0;font-size:22px;font-weight:900}.hdr small{font-size:11px;opacity:.85}'
+    +'.body{border:2px solid '+cor+';border-top:none;padding:22px 24px;border-radius:0 0 12px 12px}'
+    +'.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px}'
+    +'.lbl{color:#666}.val{font-weight:700;text-align:right}'
+    +'.ok-box{background:#F0FDF4;border:2px solid #86EFAC;border-radius:10px;padding:16px;margin:14px 0;text-align:center}'
+    +'.ok-box .t1{font-size:11px;color:#059669;font-weight:700;text-transform:uppercase;margin-bottom:4px}'
+    +'.ok-box .t2{font-size:30px;font-weight:900;color:#059669}'
+    +'.warn-box{background:#FEF3C7;border:1.5px solid #FDE68A;border-radius:8px;padding:12px;text-align:center;margin-bottom:14px}'
+    +'.warn-box .r1{font-size:11px;color:#92400E;font-weight:700;text-transform:uppercase}'
+    +'.warn-box .r2{font-size:20px;font-weight:900;color:#D97706}'
+    +'.sig{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px}'
+    +'.sig div{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}'
+    +'.obs{font-size:11px;color:#555;background:#f9f9f9;border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.5}'
+    +'@media print{body{padding:8px}}</style></head><body>'
+    +'<div class="hdr"><div><h1>'+empresa+'</h1><small>COMPROVANTE DE ENTRADA / SINAL</small></div>'
+    +'<div style="text-align:right"><div style="font-size:18px;font-weight:900">N\u00ba '+numRec+'</div><small>'+hoje+'</small></div></div>'
+    +'<div class="body">'
+    +'<div class="row"><span class="lbl">Cliente</span><span class="val">'+cliente+'</span></div>'
+    +'<div class="row"><span class="lbl">Produto / Servi\u00e7o</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
+    +'<div class="row"><span class="lbl">Vendedor</span><span class="val">'+vend+'</span></div>'
+    +'<div class="row"><span class="lbl">Valor total do or\u00e7amento</span><span class="val">'+fmtBR(total)+'</span></div>'
+    +'<div class="row"><span class="lbl">Entrada ('+pct+'% do total)</span><span class="val" style="color:#059669">'+fmtBR(entrada)+'</span></div>'
+    +'<div class="ok-box"><div class="t1">\u2714 Valor Recebido como Entrada</div><div class="t2">'+fmtBR(entrada)+'</div></div>'
+    +'<div class="warn-box"><div class="r1">\u23f3 Saldo Restante a Pagar na Retirada</div><div class="r2">'+fmtBR(resto)+'</div></div>'
+    +'<div class="obs">Este comprovante confirma o recebimento de <strong>'+fmtBR(entrada)+'</strong> como sinal pelo servi\u00e7o descrito acima. O saldo de <strong>'+fmtBR(resto)+'</strong> dever\u00e1 ser quitado no momento da retirada / entrega.</div>'
+    +'<div class="sig"><div>'+empresa+'<br>Assinatura / Carimbo</div><div>'+cliente+'<br>Assinatura do Cliente</div></div>'
+    +'</div></body></html>';
+  var win = window.open('','_blank','width=700,height=900');
+  if(!win){ showToast('Popups bloqueados — permita popups para este arquivo','warn'); return; }
+  win.document.write(docHtml);
+  win.document.close();
+  setTimeout(function(){ win.print(); }, 400);
+}
+
 function orcGerarLink() {
   const c = window._orcCalc||{};
   const isVt = document.body.classList.contains('vitre');
@@ -4938,6 +5099,33 @@ function orcGerarOS() {
   document.getElementById('orcModal').classList.add('open');
 }
 function orcCloseModal() { document.getElementById('orcModal').classList.remove('open'); }
+
+function orcSugerirPrazo(prodNome) {
+  var dias = ORC_PRAZO_MEDIO[prodNome] || 0;
+  // também checar receitas customizadas
+  if(!dias) {
+    var custProds = planProdLoad();
+    var c = custProds.find(function(p){ return p.nome === prodNome; });
+    if(c && c.prazoDias) dias = parseInt(c.prazoDias)||0;
+  }
+  var lbl = document.getElementById('orcPrazoSugeridoLabel');
+  var inp = document.getElementById('orcPrazoDias');
+  if(!dias) {
+    if(lbl) lbl.textContent = '';
+    return;
+  }
+  if(lbl) lbl.textContent = '✨ Sugerido: '+dias+'d úteis';
+  // Preencher automaticamente se campo estiver vazio
+  if(inp && !inp.value) {
+    inp.value = dias;
+    orcCalcDataEntrega();
+  }
+}
+
+function orcOnProdChange(sel) {
+  var prodNome = sel ? sel.value : '';
+  if(prodNome) orcSugerirPrazo(prodNome);
+}
 
 function orcCalcDataEntrega() {
   var dias = parseInt(document.getElementById('orcPrazoDias')?.value)||0;
@@ -6339,7 +6527,7 @@ function comercialRender() {
 // ============================================================
 // DADOS BASE
 // ============================================================
-var STOCK_LOG = [];  // histórico de movimentações de estoque
+var STOCK_LOG = (function(){try{var s=localStorage.getItem('erp_stock_log');return s?JSON.parse(s):[];}catch(e){return [];}})();  // histórico de movimentações de estoque (persistido)
 
 var STOCK = {
   ac3: {label:'Acrílico Cristal 3mm',  qty:42, min:10, max:50},
@@ -6479,16 +6667,20 @@ var _finBrand  = 'todas';
 var _finActiveTab = 'dash';
 
 // Contas a Receber
-var FIN_CR = [
+var _FIN_CR_DEFAULT = [
   {id:'cr001',cliente:'CLARO — Display PDV',descricao:'Orçamento #045 — Display PS Cristal',valor:2480,vencimento:'10/07/2026',status:'pendente',marca:'vr',metodo:'PIX',osRef:'OS-045',dataCriacao:'08/07/2026',dataRecebimento:null},
   {id:'cr002',cliente:'OI Telecom',descricao:'Orçamento #044 — Painel Fachada',valor:8700,vencimento:'12/07/2026',status:'pendente',marca:'vr',metodo:'Boleto',osRef:'OS-044',dataCriacao:'06/07/2026',dataRecebimento:null},
   {id:'cr003',cliente:'Camila Rocha',descricao:'Orçamento #042 — Placa Casamento',valor:420,vencimento:'05/07/2026',status:'recebido',marca:'vitre',metodo:'PIX',osRef:'OS-042',dataCriacao:'03/07/2026',dataRecebimento:'05/07/2026'},
   {id:'cr004',cliente:'MEGA Varejo',descricao:'Orçamento #040 — Display Farmácia 50 un',valor:9500,vencimento:'20/07/2026',status:'pendente',marca:'vr',metodo:'Link',osRef:'',dataCriacao:'01/07/2026',dataRecebimento:null},
   {id:'cr005',cliente:'João Pedro',descricao:'Orçamento #038 — Letra Caixa',valor:380,vencimento:'02/07/2026',status:'vencido',marca:'vitre',metodo:'PIX',osRef:'',dataCriacao:'28/06/2026',dataRecebimento:null}
 ];
+var FIN_CR = (function(){
+  try{ var s=localStorage.getItem('erp_fin_cr'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
+  return _FIN_CR_DEFAULT.map(function(x){return Object.assign({},x);});
+})();
 
 // Contas a Pagar (baseado na planilha real de Jul/2026)
-var FIN_CP = [
+var _FIN_CP_DEFAULT = [
   {id:'cp001',descricao:'VIVO FIXO',categoria:'Operacional',valor:165.17,vencimento:'30/06/2026',status:'pago',marca:'vr',fornecedor:'Vivo',formaPgto:'Banco',dataCriacao:'01/07/2026',dataPagamento:'01/07/2026'},
   {id:'cp002',descricao:'VALLIM',categoria:'Matéria-prima',valor:634.50,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Vallim',formaPgto:'Banco',dataCriacao:'01/07/2026',dataPagamento:'02/07/2026'},
   {id:'cp003',descricao:'TARIFAS ITAÚ',categoria:'Operacional',valor:719.37,vencimento:'02/07/2026',status:'pago',marca:'vr',fornecedor:'Itaú',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'},
@@ -6518,6 +6710,13 @@ var FIN_CP = [
   {id:'cp027',descricao:'CDL',categoria:'Operacional',valor:82.72,vencimento:'25/07/2026',status:'agendado',marca:'vr',fornecedor:'CDL',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
   {id:'cp028',descricao:'ISABELLA — VITRE',categoria:'Pessoal',valor:745.28,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'}
 ];
+var FIN_CP = (function(){
+  try{ var s=localStorage.getItem('erp_fin_cp'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
+  return _FIN_CP_DEFAULT.map(function(x){return Object.assign({},x);});
+})();
+
+function _finSaveCR(){ try{ localStorage.setItem('erp_fin_cr', JSON.stringify(FIN_CR)); }catch(e){} }
+function _finSaveCP(){ try{ localStorage.setItem('erp_fin_cp', JSON.stringify(FIN_CP)); }catch(e){} }
 
 // ============================================================
 // FINANCEIRO — Funções Globais
@@ -6816,9 +7015,12 @@ function finCRRender() {
     var statusMap={pendente:'pendente',recebido:'recebido',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMap[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
     // Ações
-    var acoes=(r.status==='pendente'||r.status==='vencido')
-      ?'<button onclick="finCRBaixa(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button> ':
-      '';
+    var acoes='';
+    if(r.status==='pendente'||r.status==='vencido'){
+      acoes='<button onclick="finCRBaixa(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button> ';
+    } else if(r.status==='recebido'){
+      acoes='<button onclick="finCREstornar(\''+r.id+'\')" class="fin-tbl-btn" style="background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB">↩ Estornar</button> ';
+    }
     acoes+='<button onclick="if(confirm(\'Excluir esta conta a receber?\')) finCRDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
     return '<tr>'
       +'<td><strong>'+r.cliente+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
@@ -6834,16 +7036,36 @@ function finCRRender() {
 
 function finCRBaixa(id) {
   var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
-  var hoje=new Date();
-  r.status='recebido';
-  r.dataRecebimento=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-  FIN_TX.unshift({data:r.dataRecebimento,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:hoje.getDate()===hoje.getDate()?1:0,sem:1,mes:hoje.getMonth()+1});
+  var dtStr=new Date().toISOString().slice(0,10);
+  var ov=document.getElementById('finBaixaOverlay');
+  if(ov){
+    document.getElementById('finBaixaData').value=dtStr;
+    document.getElementById('finBaixaLabel').textContent='Confirmar recebimento: '+r.cliente+' — '+finFmt(r.valor);
+    ov.dataset.id=id; ov.dataset.tipo='cr'; ov.classList.add('open');
+  } else { _finCRBaixaConfirmar(id, dtStr); }
+}
+function _finCRBaixaConfirmar(id, dtISO) {
+  var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
+  var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
+  r.status='recebido'; r.dataRecebimento=dtBR;
+  var d=new Date(dtISO+'T12:00:00');
+  FIN_TX.unshift({data:dtBR,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:1,sem:1,mes:d.getMonth()+1});
+  _finSaveCR();
   finCRRender(); finDashKPIs(); finBarChartRender();
   showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
+}
+function finCREstornar(id) {
+  var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
+  if(!confirm('Desfazer recebimento de '+finFmt(r.valor)+'?')) return;
+  r.status='pendente'; r.dataRecebimento='';
+  _finSaveCR();
+  finCRRender(); finDashKPIs(); finBarChartRender();
+  showToast('Recebimento desfeito — conta voltou para pendente','info');
 }
 
 function finCRDel(id) {
   FIN_CR=FIN_CR.filter(function(x){return x.id!==id;});
+  _finSaveCR();
   finCRRender(); finDashKPIs();
 }
 
@@ -6894,6 +7116,7 @@ function finCRSalvar(){
   var id='cr'+Date.now();
   FIN_CR.unshift({id:id,cliente:cliente,descricao:desc,valor:valor,vencimento:venc,status:status,marca:marca,metodo:metodo,osRef:'',dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataRecebimento:status==='recebido'?venc:null});
   finCROverlayClose(); finCRRender(); finDashKPIs();
+  _finSaveCR();
   showToast('Conta a receber registrada!','ok');
 }
 
@@ -6983,7 +7206,11 @@ function finCalItemHTML(r, compact) {
     +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(r.fornecedor||r.categoria||'')+'</div>'
     +'<span style="font-size:10px;color:'+statusColor+';font-weight:700">'+statusLabel+'</span></div>'
     +'<div style="text-align:right"><div style="font-size:13px;font-weight:900;color:'+statusColor+'">'+finFmt(r.valor)+'</div>'
-    +(r.status!=='pago'?'<button data-rid="'+r.id+'" onclick="finCPPagar(this.dataset.rid);finCalRender()" style="margin-top:4px;padding:3px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Baixar</button>':'')
+    +(r.status!=='pago'
+  ?'<button data-rid="'+r.id+'" onclick="finCPPagar(this.dataset.rid);finCalRender()" '
+  +'style="margin-top:4px;padding:3px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Baixar</button>'
+  :'<button data-rid="'+r.id+'" onclick="finCPEstornar(this.dataset.rid);finCalRender()" '
+  +'style="margin-top:4px;padding:3px 8px;background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;border-radius:5px;font-size:10px;cursor:pointer">↩ Estornar</button>')
     +'</div></div>';
 }
 
@@ -7134,7 +7361,8 @@ function finCPRender() {
     if(r.status!=='pago'){
       acoesStr='<button onclick="finCPPagar(\''+r.id+'\')" class="fin-baixar-btn">✓ Baixar</button> ';
     } else {
-      acoesStr='<span style="font-size:10px;color:#059669;font-weight:700">✅ Pago em '+(r.dataPagamento||'—')+'</span> ';
+      acoesStr='<span style="font-size:10px;color:#059669;font-weight:700">✅ Pago em '+(r.dataPagamento||'—')+'</span> '
+        +'<button onclick="finCPEstornar(\''+r.id+'\')" class="fin-tbl-btn" style="background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;font-size:10px">↩</button> ';
     }
     acoesStr+='<button onclick="if(confirm(\'Excluir esta despesa?\')) finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
     return '<tr>'
@@ -7150,13 +7378,31 @@ function finCPRender() {
 
 function finCPPagar(id) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
-  var hoje=new Date();
-  r.status='pago';
-  r.dataPagamento=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-  finCPRender(); finDashKPIs(); finDonutRender();
-  showToast(r.descricao+' marcado como pago','ok');
+  var dtStr=new Date().toISOString().slice(0,10);
+  var ov=document.getElementById('finBaixaOverlay');
+  if(ov){
+    document.getElementById('finBaixaData').value=dtStr;
+    document.getElementById('finBaixaLabel').textContent='Confirmar pagamento: '+r.descricao+' — '+finFmt(r.valor);
+    ov.dataset.id=id; ov.dataset.tipo='cp'; ov.classList.add('open');
+  } else { _finCPPagarConfirmar(id, dtStr); }
 }
-function finCPDel(id){ FIN_CP=FIN_CP.filter(function(x){return x.id!==id;}); finCPRender(); finDashKPIs(); }
+function _finCPPagarConfirmar(id, dtISO) {
+  var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
+  r.status='pago'; r.dataPagamento=dtBR;
+  _finSaveCP();
+  finCPRender(); finDashKPIs(); finDonutRender();
+  showToast(r.descricao+' marcado como pago em '+dtBR,'ok');
+}
+function finCPEstornar(id) {
+  var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  if(!confirm('Desfazer pagamento de '+finFmt(r.valor)+'?')) return;
+  r.status='agendado'; r.dataPagamento='';
+  _finSaveCP();
+  finCPRender(); finDashKPIs(); finDonutRender();
+  showToast('Pagamento desfeito — conta voltou para agendada','info');
+}
+function finCPDel(id){ FIN_CP=FIN_CP.filter(function(x){return x.id!==id;}); _finSaveCP(); finCPRender(); finDashKPIs(); }
 
 function finCPFornSelect() {
   var sel=document.getElementById('finCPFornSel');
@@ -7199,6 +7445,7 @@ function finCPSalvar(){
   var hoje=new Date();
   FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,contaBancaria:conta,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
   finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
+  _finSaveCP();
   showToast('Despesa registrada!','ok');
 }
 
@@ -7340,7 +7587,7 @@ function finBaixaManual(marca) {
 
 // ── Navegação entre abas de relatório ─────────────────────────────────────────
 function relTab(t, el) {
-  ['Caixa','Mensal','DRE','Contas'].forEach(function(k){
+  ['Caixa','Mensal','DRE','Contas','NF'].forEach(function(k){
     var btn=document.getElementById('relTabBtn'+k);
     var pg =document.getElementById('relPg'+k);
     if(btn) btn.classList.toggle('on', k.toLowerCase()===t);
@@ -7353,7 +7600,70 @@ function relTab(t, el) {
     if(_rt==='mensal') relMensal();
     if(_rt==='dre')    relatoriosRender();
     if(_rt==='contas') relContasPagas();
+    if(_rt==='nf')     relFiscalRender();
   }, 30);
+}
+
+// ── Relatório Fiscal (NF) ──────────────────────────────────────────────────────
+function relFiscalRender() {
+  var el = document.getElementById('relNFBody'); if(!el) return;
+  var mesFiltro  = (document.getElementById('relNFMes')||{}).value||'';
+  var mrcFiltro  = (document.getElementById('relNFMarca')||{}).value||'';
+  var orcs = orcGetEnviados().filter(function(o) {
+    if(!o.nfSolicitada) return false;
+    if(mrcFiltro && (o.marca||'vr') !== mrcFiltro) return false;
+    if(mesFiltro && o.dataSalvo && o.dataSalvo.indexOf(mesFiltro) < 0) return false;
+    return true;
+  });
+  var totalNF = orcs.reduce(function(s,o){ return s+(o.valorFinal||o.valorBase||0); }, 0);
+  if(!orcs.length){
+    el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhum or\u00e7amento com nota fiscal solicitada no per\u00edodo.</div>';
+    return;
+  }
+  var rows = orcs.map(function(o){
+    var marca = o.marca==='vitre' ? '🌸 Vitre' : '🟣 VR Marcas';
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:6px 8px">'+o.id+'</td>'
+      +'<td style="padding:6px 8px">'+o.dataSalvo+'</td>'
+      +'<td style="padding:6px 8px"><strong>'+o.cliente+'</strong>'
+        +(o.nf&&o.nf.cnpjCpf?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+o.nf.cnpjCpf+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px">'+marca+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+(o.valorFinal||o.valorBase||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
+      +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+((o.nf&&o.nf.email)||'—')+'</td>'
+      +'</tr>';
+  }).join('');
+  el.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'
+    +orcs.length+' NF(s) solicitada(s) &mdash; Total: <strong style="color:#059669">R$ '
+    +totalNF.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="color:var(--muted);border-bottom:2px solid var(--border)">'
+    +'<th style="text-align:left;padding:6px 8px">Or\u00e7amento</th>'
+    +'<th style="text-align:left;padding:6px 8px">Data</th>'
+    +'<th style="text-align:left;padding:6px 8px">Cliente</th>'
+    +'<th style="text-align:left;padding:6px 8px">Empresa</th>'
+    +'<th style="text-align:left;padding:6px 8px">Valor NF</th>'
+    +'<th style="text-align:left;padding:6px 8px">E-mail</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+function relFiscalExportar() {
+  var orcs = orcGetEnviados().filter(function(o){ return !!o.nfSolicitada; });
+  if(!orcs.length){ showToast('Nenhum item com NF solicitada','warn'); return; }
+  var linhas = ['Or\u00e7amento\tData\tCliente\tCNPJ/CPF\tEmpresa\tValor'];
+  orcs.forEach(function(o){
+    linhas.push([
+      o.id, o.dataSalvo, o.cliente,
+      (o.nf&&o.nf.cnpjCpf)||'—',
+      o.marca==='vitre'?'Vitre':'VR Marcas',
+      (o.valorFinal||o.valorBase||0).toFixed(2).replace('.',',')
+    ].join('\t'));
+  });
+  var blob = new Blob([linhas.join('\n')], {type:'text/plain;charset=utf-8'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'relatorio_fiscal_'+new Date().toISOString().slice(0,10)+'.txt';
+  a.click();
+  showToast('Exportado — abra no Excel (separado por tabulação)','ok');
 }
 
 // ── Helper: normaliza forma de pagamento ──────────────────────────────────────
@@ -7742,6 +8052,7 @@ function _stockLog(tipo, matKey, qty, os, obs) {
     dt: dtStr
   });
   if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
+  try{ localStorage.setItem('erp_stock_log', JSON.stringify(STOCK_LOG)); }catch(e){}
   stockRenderHistorico();
 }
 
@@ -7914,6 +8225,39 @@ var _lastOsId = null;
     // Registra financeiro
     FIN_TX.unshift({data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:c.finalPrice||0,metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
     finRender();
+
+    // ── Auto-cria Contas a Receber vinculado à OS ──────────────────
+    (function(){
+      var totalOS = c.finalPrice||0;
+      if(!totalOS) return;
+      var simMetodoVal = (document.getElementById('orcSimMetodo')||{}).value||'pix';
+      // Para pagamento 50/50: CR = 50% restante com status pendente
+      // Para outros: CR = total com status recebido
+      var is5050 = simMetodoVal === '50_50';
+      var crValor = is5050 ? totalOS * 0.5 : totalOS;
+      var crStatus = is5050 ? 'pendente' : 'recebido';
+      var crDesc = 'OS #0'+n + (is5050 ? ' — 50% restante na retirada' : '');
+      // Vencimento: prazo de entrega ou hoje
+      var vencIso = (window._orcPrazoEntrega&&window._orcPrazoEntrega.trim()) ? window._orcPrazoEntrega : hoje.toISOString().slice(0,10);
+      var vencParts = vencIso.split('-');
+      var vencBR = vencParts[2]+'/'+vencParts[1]+'/'+vencParts[0];
+      var crId = 'cr'+Date.now();
+      FIN_CR.unshift({
+        id: crId,
+        cliente: nomeCliente,
+        descricao: crDesc,
+        valor: crValor,
+        vencimento: vencBR,
+        status: crStatus,
+        marca: marca,
+        metodo: metodo,
+        osRef: 'OS #0'+n,
+        dataCriacao: dia+'/'+hoje.getFullYear(),
+        dataRecebimento: crStatus==='recebido' ? dia+'/'+hoje.getFullYear() : null
+      });
+      _finSaveCR();
+    })();
+    // ──────────────────────────────────────────────────────────────
 
     // Baixa estoque
     if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');}
@@ -8247,10 +8591,34 @@ document.addEventListener('keydown', e => {
 // ============================================================
 // BANCO DE RETALHOS
 // ============================================================
-var RETALHOS = [
-  {mat:'ac3', label:'Acrílico Cristal 3mm',  dims:'60×40', qty:1, data:'30/06'},
-  {mat:'ac8', label:'Acrílico Leitoso 5mm',  dims:'45×30', qty:1, data:'29/06'}
-];
+var RETALHOS = (function(){
+  try{ var s=localStorage.getItem('erp_retalhos'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
+  return [
+    {mat:'ac3',label:'Acrílico Cristal 3mm', dims:'60×40',qty:1,data:'30/06',codigo:'AC3-001'},
+    {mat:'ac8',label:'Acrílico Leitoso 5mm', dims:'45×30',qty:1,data:'29/06',codigo:'ACL-001'}
+  ];
+})();
+
+// Mapa de prefixos de código por material
+var RETALHO_PREFIXO = {
+  ac3:'AC3', ac5:'AC5', ac8:'ACL', ac10:'ACE',
+  ps3:'PS3', mt2:'INX', acm:'ACM'
+};
+
+function retalhoSalvar() {
+  try{ localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); }catch(e){}
+}
+
+function retalhoGerarCodigo(mat) {
+  var prefix = RETALHO_PREFIXO[mat] || mat.toUpperCase().slice(0,3);
+  // Encontrar próximo número para este prefixo
+  var usados = RETALHOS
+    .map(function(r){ return r.codigo||''; })
+    .filter(function(c){ return c.indexOf(prefix+'-')===0; })
+    .map(function(c){ return parseInt(c.split('-')[1])||0; });
+  var prox = usados.length ? Math.max.apply(null,usados)+1 : 1;
+  return prefix+'-'+String(prox).padStart(3,'0');
+}
 
 function retalhoRender() {
   var el=document.getElementById('retalhoTabela'), cnt=document.getElementById('retalhoCount');
@@ -8258,10 +8626,17 @@ function retalhoRender() {
   if(cnt) cnt.textContent=lista.length+' peça'+(lista.length!==1?'s':'')+' disponível'+(lista.length!==1?'is':'');
   if(!el) return;
   if(!lista.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0">Nenhum retalho disponível.</div>';return;}
-  el.innerHTML='<table class="retalho-table"><thead><tr><th>Material</th><th>Dimensões (cm)</th><th>Qtd</th><th>Obs</th><th>Entrada</th><th></th></tr></thead><tbody>'+
+  el.innerHTML='<table class="retalho-table"><thead><tr><th>Código</th><th>Material</th><th>Dimensões (cm)</th><th>Qtd</th><th>Obs</th><th>Entrada</th><th></th></tr></thead><tbody>'+
     lista.map(function(r,i){
-      return '<tr><td>✂️ '+r.label+'</td><td><strong>'+r.dims+'</strong> cm</td><td>'+r.qty+'</td><td style="color:var(--muted);font-size:10px">'+(r.obs||'—')+'</td><td style="color:var(--muted)">'+r.data+'</td>'
-            +'<td><button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+i+')">✅ Usar · saída registrada</button></td></tr>';
+      var cod = r.codigo || '—';
+      return '<tr>'
+        +'<td><span style="font-family:monospace;font-weight:800;color:var(--brand-mid);font-size:12px;background:var(--bg2);padding:2px 7px;border-radius:5px;border:1px solid var(--border)">'+cod+'</span></td>'
+        +'<td>✂️ '+r.label+'</td>'
+        +'<td><strong>'+r.dims+'</strong> cm</td>'
+        +'<td>'+r.qty+'</td>'
+        +'<td style="color:var(--muted);font-size:10px">'+(r.obs||'—')+'</td>'
+        +'<td style="color:var(--muted)">'+r.data+'</td>'
+        +'<td><button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+i+')">✅ Usar</button></td></tr>';
     }).join('')+'</tbody></table>';
 }
 
@@ -8269,15 +8644,18 @@ function retalhoAdicionar(mat, dims) {
   if(!dims||!dims.trim()) return;
   var label=STOCK[mat]?STOCK[mat].label:mat;
   var hoje=new Date(), d=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d});
+  var cod = retalhoGerarCodigo(mat);
+  RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d,codigo:cod});
+  retalhoSalvar();
   retalhoRender();
-  showToast('Retalho '+label+' ('+dims+' cm) adicionado!','ok');
+  showToast('Retalho '+label+' ('+dims+' cm) — Cód: '+cod+' adicionado!','ok');
 }
 
 function retalhoRemover(idx) {
   if(!RETALHOS[idx]) return;
   RETALHOS[idx].qty--;
   if(RETALHOS[idx].qty<=0) RETALHOS.splice(idx,1);
+  retalhoSalvar();
   retalhoRender();
   showToast('Retalho marcado como utilizado','info');
 }
@@ -8307,13 +8685,15 @@ function retalhoAdicionarManual() {
   var label = STOCK[mat] ? STOCK[mat].label : mat;
   var hoje  = new Date();
   var d     = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs});
+  var cod   = retalhoGerarCodigo(mat);
+  RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:cod});
+  retalhoSalvar();
   retalhoRender();
   // Reset form
   var dEl = document.getElementById('retalhoFormDims'); if(dEl) dEl.value = '';
   var oEl = document.getElementById('retalhoFormObs');  if(oEl) oEl.value = '';
   document.getElementById('retalhoFormWrap').style.display = 'none';
-  showToast('Retalho de '+label+' ('+dims+' cm) adicionado!', 'ok');
+  showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+cod, 'ok');
 }
 
 function stockSaidaToggleRetalho() {
