@@ -1552,17 +1552,20 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="card-h"><div class="card-h-left">⚙️ Parâmetros de Precificação</div></div>
               <div style="display:flex;flex-direction:column;gap:9px;">
                 <div class="fg-row">
-                  <div class="fg"><label>Overhead fixo (%)</label><input type="number" id="orcOverhead" value="41.16" step="0.01" oninput="orcRecalc()" onkeyup="orcRecalc()"></div>
-                  <div class="fg"><label>Margem VRML (%)</label><input type="number" id="orcVrml" value="20" step="0.5" oninput="orcRecalc()" onkeyup="orcRecalc()"></div>
-                  <div class="fg"><label>Desconto (%)</label><input type="number" id="orcDesc" value="0" min="0" max="50" oninput="orcRecalc()" onkeyup="orcRecalc()"></div>
+                  <div class="fg"><label>Overhead fixo (%)</label><input type="number" id="orcOverhead" value="41.16" step="0.01" oninput="orcRecalc()"></div>
+                  <div class="fg"><label>Margem VRML (%)</label><input type="number" id="orcVrml" value="20" step="0.5" oninput="orcRecalc()"></div>
+                  <div class="fg"><label>Desconto (%)</label><input type="number" id="orcDesc" value="0" min="0" max="50" oninput="orcRecalc()"></div>
                 </div>
                 <div class="fg-row">
-                  <div class="fg"><label>Montagem (R$)</label><input type="number" id="orcMontagem" value="0" min="0" oninput="orcRecalc()" onkeyup="orcRecalc()"></div>
-                  <div class="fg"><label>Deslocamento (R$)</label><input type="number" id="orcDesl" value="0" min="0" oninput="orcRecalc()" onkeyup="orcRecalc()"></div>
+                  <div class="fg"><label>Montagem (R$)</label><input type="number" id="orcMontagem" value="0" min="0" oninput="orcRecalc()"></div>
+                  <div class="fg"><label>Deslocamento (R$)</label><input type="number" id="orcDesl" value="0" min="0" oninput="orcRecalc()"></div>
                 </div>
                 <!-- hidden price inputs — loaded from Config → Materiais -->
                 <input type="hidden" id="op_ac3"  value="100"><input type="hidden" id="op_ac5"  value="145"><input type="hidden" id="op_ac8"  value="195"><input type="hidden" id="op_ac10" value="240"><input type="hidden" id="op_ps3"  value="65"><input type="hidden" id="op_mt2"  value="180">
-                <div style="font-size:11px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px;margin-top:4px">💡 Custo do material (base para preço de venda) definido em <button onclick="nav('config-orc',null);cfgTab(1)" style="background:none;border:none;color:var(--brand-mid);font-size:11px;font-weight:700;cursor:pointer;padding:0">Configurações → Materiais</button></div>
+                              <div style="margin-top:10px">
+                <button onclick="orcRecalc()" style="width:100%;padding:9px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.3px">🔄 Aplicar e Recalcular</button>
+              </div>
+              <div style="font-size:11px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px;margin-top:4px">💡 Custo do material (base para preço de venda) definido em <button onclick="nav('config-orc',null);cfgTab(1)" style="background:none;border:none;color:var(--brand-mid);font-size:11px;font-weight:700;cursor:pointer;padding:0">Configurações → Materiais</button></div>
               </div>
             </div>
           </div>
@@ -1749,7 +1752,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             <div style="text-align:center;padding:10px 0 18px">
               <div style="font-size:40px;margin-bottom:8px" id="orcPgtoIcon">💳</div>
               <div style="font-size:17px;font-weight:900;color:var(--text)" id="orcPgtoTitulo">Confirmação de Pagamento</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:4px" id="orcPgtoGatewayLbl">Mercado Pago · VR Marcas</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px" id="orcPgtoGatewayLbl">Mercado Pago · VR</div>
             </div>
 
             <div style="background:var(--bg);border-radius:10px;padding:14px 16px;margin-bottom:14px">
@@ -1770,7 +1773,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <div class="fg">
                 <label>Gateway</label>
                 <select id="orcSimGtw" onchange="orcAtualizarIconePgto()">
-                  <option>Mercado Pago (VR Marcas)</option>
+                  <option>Mercado Pago (VR)</option>
                   <option>Nubank PIX (Vitre)</option>
                 </select>
               </div>
@@ -4181,7 +4184,7 @@ function orcTipoChange(sel) {
   if(dc) dc.placeholder = isPF ? '000.000.000-00' : '00.000.000/0001-00';
   if(bb) { bb.textContent = isPF?'Vitre (PF)':'VR Marcas (PJ)'; bb.className='badge '+(isPF?'bvit':'bvr'); }
   const pi = document.getElementById('orcPgtoInfo');
-  if(pi) pi.innerHTML = 'Gateway: <strong>'+(isPF?'Nubank PIX (Vitre)':'Mercado Pago (VR Marcas)')+'</strong>';
+  if(pi) pi.innerHTML = 'Gateway: <strong>'+(isPF?'Nubank PIX':'Mercado Pago')+'</strong>';
   orcRecalc();
 }
 
@@ -4645,7 +4648,7 @@ function orcUpdateSummary() {
   if(rb) { rb.textContent=isVt?'Vitre':'VR Marcas'; rb.className='badge '+(isVt?'bvit':'bvr'); }
   const setT = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   setT('orcRsmCliente', document.getElementById('orcClientNome')?.value||'(não preenchido)');
-  setT('orcRsmMarca', isVt?'Vitre / Nubank PIX':'VR Marcas / Mercado Pago');
+  setT('orcRsmMarca', isVt?'Vitre':'VR Marcas');
   setT('orcRsmItens', rows+' item(s)');
   setT('orcRsmCusto', orcFmt(c.totalCost||0));
   setT('orcRsmMarkup', (((c.overhead||0.4116)+(c.vrml||0.2))*100).toFixed(2)+'%');
@@ -4659,7 +4662,7 @@ function orcUpdateSummary() {
   var cbOn = document.getElementById('orcDescCondToggle')?.checked;
   if (cbOn) setTimeout(orcDescCondPreview, 0);
   const pi = document.getElementById('orcPgtoInfo');
-  if(pi) pi.innerHTML='Gateway: <strong>'+(isVt?'Nubank PIX (Vitre)':'Mercado Pago (VR Marcas)')+'</strong>';
+  if(pi) pi.innerHTML='Gateway: <strong>'+(isVt?'Nubank PIX':'Mercado Pago')+'</strong>';
 }
 
 function orcGerarLink() {
@@ -4738,7 +4741,7 @@ function orcAtualizarIconePgto() {
   const pixBox = document.getElementById('orcPgtoPixBox');
   const icons  = { pix:'⚡', cartao:'💳', dinheiro:'💵' };
   if (iconEl) iconEl.textContent = icons[metodo] || '💳';
-  const gtwName = gtw === 0 ? 'Mercado Pago · VR Marcas' : 'Nubank PIX · Vitre';
+  const gtwName = gtw === 0 ? 'Mercado Pago · VR' : 'Nubank PIX · Vitre';
   if (lblEl) lblEl.textContent = gtwName;
   if (pixBox) pixBox.style.display = metodo === 'pix' ? '' : 'none';
 }
