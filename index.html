@@ -1339,7 +1339,16 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
             </div>
             <div style="font-size:10px;color:var(--muted);margin-top:3px">Google Drive, Dropbox, WeTransfer, OneDrive...</div>
           </div>
-          <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta — Aguardando Master</button>
+          <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
+          <!-- Bloco Avisar Cliente — só visível para Master quando OS está pronta -->
+          <div id="kbAvisarClienteBox" style="display:none;margin-top:10px;background:#F0FDF4;border:2px solid #86EFAC;border-radius:10px;padding:14px">
+            <div style="font-size:12px;font-weight:800;color:#065F46;margin-bottom:6px">📱 Avisar Cliente — OS Pronta</div>
+            <div style="font-size:11px;color:#047857;margin-bottom:8px">Edite a mensagem e envie via WhatsApp. Somente o administrador vê esta área.</div>
+            <textarea id="kbAvisarMsg" rows="6" style="width:100%;padding:8px 10px;border:1.5px solid #86EFAC;border-radius:7px;font-size:12px;background:#fff;color:#1F2937;resize:vertical;font-family:inherit;box-sizing:border-box"></textarea>
+            <button onclick="kbEnviarMsgCliente()" style="width:100%;margin-top:8px;padding:10px;background:#25D366;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+              💬 Enviar via WhatsApp
+            </button>
+          </div>
           <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px"><button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button><button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button></div>
           <!-- ── ENVIAR PARA FORNECEDOR ── -->
           <div id="kbFornSection" style="margin-top:14px;border-top:1.5px solid var(--border);padding-top:14px;display:none">
@@ -1381,7 +1390,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
               <option value="iniciada">Iniciada</option>
               <option value="producao">Em produção</option>
               <option value="pronta">Pronta</option>
-              <option value="master">Aguard. Master</option>
+
               <option value="entregue">Entregue</option>
             </select>
             <select id="osFilterMarca" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
@@ -5573,13 +5582,42 @@ function kbOpen(id) {
     }
   }
 
-  const btn = document.getElementById('kbProntoBtn');
-  if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') {
+  var btn = document.getElementById('kbProntoBtn');
+  var isPronta = os.status === 'pronta' || os.status === 'master' || os.status === 'entregue';
+  if (isPronta) {
     btn.className = 'kb-pronto-btn done';
-    btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS já marcada como Pronta';
+    btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS Pronta';
   } else {
     btn.className = 'kb-pronto-btn';
-    btn.textContent = '✓ Marcar como Pronta — Aguardando Master';
+    btn.textContent = '✓ Marcar como Pronta';
+  }
+  // Bloco Avisar Cliente — só para master quando pronta
+  var avisarBox = document.getElementById('kbAvisarClienteBox');
+  var msgEl     = document.getElementById('kbAvisarMsg');
+  if(avisarBox) {
+    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao === 'master';
+    var osEhPronta = os.status === 'pronta' || os.status === 'master';
+    if(isMaster && osEhPronta) {
+      avisarBox.style.display = 'block';
+      if(msgEl) {
+        var pNome = (os.cliente||'Cliente').split(' ')[0];
+        var linhas = [
+          'Olá ' + pNome + '! 😊',
+          '',
+          'Passamos para informar que o seu pedido está *pronto para retirada*! 🎉',
+          '',
+          '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||''),
+          '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : ''),
+          (os.qty > 1 ? '🔢 Quantidade: ' + os.qty : ''),
+          '',
+          'Estaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏'
+        ].filter(function(l,i,a){ return !(l==='' && a[i-1]===''); }); // remove duplas linhas vazias
+        if(!msgEl.dataset.editado) msgEl.value = linhas.join('\n');
+      }
+    } else {
+      avisarBox.style.display = 'none';
+      if(msgEl) { msgEl.value = ''; delete msgEl.dataset.editado; }
+    }
   }
 
   // Fornecedor section — disponível em qualquer status da OS
@@ -5827,29 +5865,56 @@ function kbToggle(i) {
 }
 
 function kbMarcarPronto() {
-  const os = KB_OS[_kbOsId]; if (!os) return;
+  var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
-  os.status = 'master'; os.pronto = true; os.prog = 100;
-  os._ck = os.checks.map(() => true);
+  os.status = 'pronta'; os.pronto = true; os.prog = 100;
+  os._ck = os.checks.map(function(){ return true; });
 
-  const stag = document.getElementById('kstag-' + _kbOsId);
-  if (stag) { stag.className = 'stag sm'; stag.textContent = '🔐 aguard. master'; }
-  const prog = document.getElementById('kprog-' + _kbOsId);
+  var stag = document.getElementById('kstag-' + _kbOsId);
+  if (stag) { stag.className = 'stag sr'; stag.textContent = 'Pronta ✅'; }
+  var prog = document.getElementById('kprog-' + _kbOsId);
   if (prog) { prog.style.width = '100%'; prog.style.background = '#059669'; }
 
-  document.getElementById('kbOsStag').className = 'stag sm';
-  document.getElementById('kbOsStag').textContent = '🔐 aguard. master';
-  const btn = document.getElementById('kbProntoBtn');
+  document.getElementById('kbOsStag').className = 'stag sr';
+  document.getElementById('kbOsStag').textContent = 'Pronta ✅';
+  var btn = document.getElementById('kbProntoBtn');
   btn.className = 'kb-pronto-btn done';
-  btn.textContent = '✓ OS marcada como Pronta — Aguardando Master';
+  btn.textContent = '✓ OS Pronta';
 
-  document.getElementById('kbChecklist').innerHTML = os.checks.map((item, i) => `
-    <label class="kb-check-item done"><input type="checkbox" checked><span>${item}</span></label>
-  `).join('');
+  document.getElementById('kbChecklist').innerHTML = os.checks.map(function(item,i){
+    return '<label class="kb-check-item done"><input type="checkbox" checked><span>'+item+'</span></label>';
+  }).join('');
+
+  // Mostrar bloco Avisar Cliente para Master
+  var avisarBox = document.getElementById('kbAvisarClienteBox');
+  var msgEl = document.getElementById('kbAvisarMsg');
+  if(avisarBox) {
+    var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao === 'master';
+    if(isMaster) {
+      avisarBox.style.display = 'block';
+      if(msgEl && !msgEl.dataset.editado) {
+        var pNome = (os.cliente||'Cliente').split(' ')[0];
+        msgEl.value = 'Olá ' + pNome + '! 😊\n\nPassamos para informar que o seu pedido está *pronto para retirada*! 🎉\n\n' + '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||'') + '\n' + '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : '') + '\n' + (os.qty > 1 ? '🔢 Quantidade: ' + os.qty + '\n' : '') + '\nEstaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏';
+      }
+    }
+  }
 
   renderOsTable(); syncSidebarBadges();
-  if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta/Aguard. Master');
-  setTimeout(() => showToast('OS #'+os.num+' marcada como Pronta — Aguardando liberação do Master', 'ok'), 150);
+  if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta');
+  setTimeout(function(){ showToast('OS #'+os.num+' marcada como Pronta! 🎉', 'ok'); }, 150);
+}
+
+function kbEnviarMsgCliente() {
+  var os = KB_OS[_kbOsId]; if(!os) return;
+  var tel = (os.clientTel||'').replace(/\D/g,'');
+  if(!tel) { showToast('Telefone do cliente não cadastrado nesta OS','warn'); return; }
+  var msgEl = document.getElementById('kbAvisarMsg');
+  var msg = msgEl ? msgEl.value : '';
+  if(!msg.trim()) { showToast('Escreva a mensagem antes de enviar','warn'); return; }
+  if(msgEl) msgEl.dataset.editado = '1';
+  window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(msg),'_blank');
+  if(typeof secAuditLog==='function') secAuditLog('aviso_cliente','Msg OS pronta → '+os.cliente+' OS #'+(os.num||os.id));
+  showToast('Abrindo WhatsApp para '+os.cliente,'ok');
 }
 
 
@@ -5930,7 +5995,7 @@ function dashRender() {
   if(dkTicketBar) { dkTicketBar.style.width = Math.min(Math.round(tkGeral/1000*10),100)+'%'; }
 
   // ── KPI 3: Gargalos Master ───────────────────────────────────────────────
-  var gargalos = osList.filter(function(o){ return o.status==='master'||o.status==='aguard_master'; });
+  var gargalos = [];  // Status master foi removido do fluxo
   var dkGarg = document.getElementById('dkGarg');
   var dkGargSub = document.getElementById('dkGargSub');
   var dkGargBar = document.getElementById('dkGargBar');
