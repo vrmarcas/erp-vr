@@ -865,6 +865,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .caixa-saldo-pos{color:#059669!important}
   .caixa-saldo-neg{color:#DC2626!important}
 }
+@keyframes painelPulse{0%,100%{opacity:1}50%{opacity:.3}}
 </style>
 <!-- Firebase SDK (Compat — carregado antes dos scripts) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -962,6 +963,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <div class="sb-section" onclick="sbToggle('principal')"><span>Principal</span><span class="sb-arrow">▼</span></div>
     <div class="sb-group" id="sbG-principal">
       <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ico">📊</span> Dashboard</div>
+      <div class="sb-item" onclick="nav('painel',this)"><span class="ico">📺</span> Painel Executivo</div>
     </div>
 
     <div class="sb-section" onclick="sbToggle('operacao')"><span>Operação</span><span class="sb-arrow">▼</span></div>
@@ -2882,6 +2884,69 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
     <!-- ==============================
          RELATÓRIOS FINANCEIROS
          ============================== -->
+    <!-- ═══════════════════════════════════════════════════════
+         PAINEL EXECUTIVO AO VIVO
+         ═══════════════════════════════════════════════════════ -->
+    <div id="pg-painel" style="display:none">
+      <div id="painelRoot" style="background:var(--bg);min-height:80vh">
+        <!-- topbar de controle -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:800;color:var(--text)">
+            <span id="painelLiveDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4ADE80;margin-right:6px;animation:painelPulse 2s infinite"></span>
+            Atualiza automaticamente
+          </div>
+          <span id="painelLastUpd" style="font-size:11px;color:var(--muted)"></span>
+          <button onclick="painelRender()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">↻ Atualizar agora</button>
+          <button onclick="painelToggleFullscreen()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer" id="painelFsBtn">⛶ Tela cheia</button>
+          <div style="display:flex;gap:6px">
+            <button onclick="painelSetBrand('all')"   id="pnlAll" style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--brand-mid);color:#fff;cursor:pointer;font-weight:700">🌐 Todas</button>
+            <button onclick="painelSetBrand('vr')"    id="pnlVR"  style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-weight:700">🟣 VR</button>
+            <button onclick="painelSetBrand('vitre')" id="pnlVT"  style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-weight:700">🌸 Vitre</button>
+          </div>
+        </div>
+        <!-- KPIs -->
+        <div id="painelKPIs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px"></div>
+        <!-- Alertas -->
+        <div id="painelAlerts" style="display:none;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:12px;font-weight:700;color:#92400E"></div>
+        <!-- Grid principal -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <!-- CR -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;font-weight:800">💰 Contas a Receber</span>
+              <span id="painelCRTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+            </div>
+            <div id="painelCRBody" style="padding:14px 16px"></div>
+          </div>
+          <!-- OS -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
+              <span style="font-size:13px;font-weight:800">🏭 Ordens de Serviço</span>
+              <span id="painelOSTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+            </div>
+            <div id="painelOSBody" style="padding:14px 16px"></div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+          <!-- Orçamentos -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📋 Orçamentos do Mês</span></div>
+            <div id="painelOrcBody" style="padding:14px 16px"></div>
+          </div>
+          <!-- Estoque -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📦 Estoque</span></div>
+            <div id="painelStockBody" style="padding:14px 16px"></div>
+          </div>
+          <!-- Comissões -->
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">🏆 Comissões</span></div>
+            <div id="painelComBody" style="padding:14px 16px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="pg-relatorios" style="display:none">
       <!-- Cabeçalho -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -4265,7 +4330,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','painel'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -4294,6 +4359,7 @@ function nav(page, el) {
     'config-plan': 'Produtos & Planificação',
     'config-usr': 'Criação de Usuários',
     seguranca: '🔐 Segurança',
+    painel: '📺 Painel Executivo',
     fornecedores: '🏭 Fornecedores'
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
@@ -4312,6 +4378,7 @@ function nav(page, el) {
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
+  if (page === 'painel')     { setTimeout(function(){ painelRender(); painelStartTimer(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
   if (page === 'crm')        { setTimeout(function(){ crmRenderBoard('vr'); crmRenderBoard('vitre'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
   // Log sensitive navigation
@@ -12209,6 +12276,214 @@ function _crmAdicionarBadgeCliente(leadId, clienteId, novo) {
     }
   });
 }
+
+// ============================================================
+// PAINEL EXECUTIVO AO VIVO
+// ============================================================
+var _painelBrand = 'all';
+var _painelTimer = null;
+
+function painelSetBrand(b) {
+  _painelBrand = b;
+  ['all','vr','vitre'].forEach(function(x){
+    var id = {all:'pnlAll',vr:'pnlVR',vitre:'pnlVT'}[x];
+    var el = document.getElementById(id);
+    if(!el) return;
+    el.style.background = (x===b) ? 'var(--brand-mid)' : 'var(--bg2)';
+    el.style.color = (x===b) ? '#fff' : 'var(--text)';
+  });
+  painelRender();
+}
+
+function painelMatchBrand(marca) {
+  if(_painelBrand==='all') return true;
+  var m=(marca||'').toLowerCase();
+  if(_painelBrand==='vr')    return m==='vr'||m==='vr marcas';
+  if(_painelBrand==='vitre') return m==='vitre'||m==='vit'||m==='vt';
+  return true;
+}
+
+function painelFmt(v) {
+  return 'R$ '+Number(v||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+
+function painelStartTimer() {
+  if(_painelTimer) clearInterval(_painelTimer);
+  _painelTimer = setInterval(function(){
+    var pg = document.getElementById('pg-painel');
+    if(pg && pg.style.display !== 'none') painelRender();
+    else { clearInterval(_painelTimer); _painelTimer=null; }
+  }, 30000);
+}
+
+function painelToggleFullscreen() {
+  var root = document.getElementById('painelRoot');
+  var btn = document.getElementById('painelFsBtn');
+  if(!document.fullscreenElement) {
+    (root.requestFullscreen||root.webkitRequestFullscreen||function(){}).call(root);
+    if(btn) btn.textContent = '✕ Sair da tela cheia';
+  } else {
+    (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);
+    if(btn) btn.textContent = '⛶ Tela cheia';
+  }
+}
+
+function painelRender() {
+  var now = new Date();
+  var upd = document.getElementById('painelLastUpd');
+  if(upd) upd.textContent = 'Atualizado: '+now.toLocaleTimeString('pt-BR');
+
+  // ── Dados brutos ──
+  var cr = (typeof FIN_CR !== 'undefined' ? FIN_CR : []).filter(function(r){ return painelMatchBrand(r.marca); });
+  var cp = (typeof FIN_CP !== 'undefined' ? FIN_CP : []).filter(function(r){ return painelMatchBrand(r.marca); });
+  var orcs = orcGetEnviados().filter(function(o){ return painelMatchBrand(o.marca||o.brand); });
+  var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
+  if(_painelBrand!=='all') osArr = osArr.filter(function(o){ return painelMatchBrand(o.mk); });
+
+  // ── Cálculos ──
+  var crPend = cr.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var crRec  = cr.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
+  var crVenc = cr.filter(function(r){return r.status==='vencido';});
+  var cpPend = cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var mesAtual = now.getMonth()+1;
+  var orcMes = orcs.filter(function(o){ return o.data&&o.data.indexOf('/'+mesAtual+'/')!==-1||o.dataEnvio&&o.dataEnvio.indexOf('/'+mesAtual+'/')!==-1; });
+  var orcMesVal = orcMes.reduce(function(s,o){return s+(parseFloat(o.total||o.valor)||0);},0);
+  var osEmProd = osArr.filter(function(o){return o.status==='em_producao'||o.status==='iniciada';}).length;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var osAtras = osArr.filter(function(o){
+    if(o.pronto) return false;
+    if(!o.prazo) return false;
+    var d2 = new Date((o.prazo.indexOf('/')!==-1?o.prazo.split('/').reverse().join('-'):o.prazo)+'T00:00:00');
+    return d2 < today;
+  });
+
+  // ── Alertas ──
+  var alerts = [];
+  if(crVenc.length) alerts.push('⚠️ '+crVenc.length+' conta(s) a receber vencida(s)');
+  if(osAtras.length) alerts.push('⚠️ '+osAtras.length+' OS atrasada(s)');
+  var alertEl = document.getElementById('painelAlerts');
+  if(alertEl) {
+    if(alerts.length){ alertEl.style.display=''; alertEl.innerHTML=alerts.join(' &nbsp;&middot;&nbsp; '); }
+    else alertEl.style.display='none';
+  }
+
+  // ── KPIs ──
+  var kpis = [
+    {icon:'💰',lbl:'CR Pendente',  val:painelFmt(crPend), sub:cr.filter(function(r){return r.status==='pendente';}).length+' conta(s)', ac:'#7C3AED', warn:crVenc.length>0},
+    {icon:'✅',lbl:'Recebido',      val:painelFmt(crRec),  sub:'total liquidado',      ac:'#059669', warn:false},
+    {icon:'📤',lbl:'CP a Pagar',   val:painelFmt(cpPend), sub:cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).length+' conta(s)', ac:'#D97706', warn:false},
+    {icon:'🏭',lbl:'OS em Aberto', val:String(osArr.length), sub:osEmProd+' em produção', ac:'#BE185D', warn:osAtras.length>0},
+    {icon:'📋',lbl:'Orçamentos/Mês',val:String(orcMes.length), sub:painelFmt(orcMesVal), ac:'#2563EB', warn:false},
+    {icon:'✂️',lbl:'Retalhos',      val:String((typeof RETALHOS!=='undefined'?RETALHOS:[] ).filter(function(r){return r.qty>0;}).length), sub:'disponíveis', ac:'#0891B2', warn:false}
+  ];
+  var kpiEl = document.getElementById('painelKPIs');
+  if(kpiEl) kpiEl.innerHTML = kpis.map(function(k){
+    return '<div style="background:var(--card);border:1.5px solid '+(k.warn?'#EF4444':'var(--border)')+';border-top:3px solid '+k.ac+';border-radius:12px;padding:16px 18px;position:relative">'
+      +'<div style="font-size:20px;margin-bottom:6px">'+k.icon+'</div>'
+      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:3px">'+k.lbl+'</div>'
+      +'<div style="font-size:22px;font-weight:900;color:var(--text);line-height:1">'+k.val+'</div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+k.sub+'</div>'
+      +(k.warn?'<div style="position:absolute;top:10px;right:10px;font-size:16px">⚠️</div>':'')
+      +'</div>';
+  }).join('');
+
+  // ── CR ──
+  var crEl = document.getElementById('painelCRBody');
+  var crTEl = document.getElementById('painelCRTotal');
+  if(crTEl) crTEl.textContent = cr.length+' lançamento(s)';
+  var crRows = cr.slice(0,5);
+  if(crEl) crEl.innerHTML = crRows.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<thead><tr><th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Cliente</th>'
+      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Valor</th>'
+      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Status</th></tr></thead><tbody>'
+      + crRows.map(function(r){
+          var sc={recebido:'#D1FAE5;color:#065F46',pendente:'#FEF3C7;color:#92400E',vencido:'#FEE2E2;color:#991B1B'}[r.status]||'#F3F4F6;color:#374151';
+          var sl={recebido:'Recebido',pendente:'Pendente',vencido:'Vencido'}[r.status]||r.status;
+          return '<tr><td style="padding:8px;border-bottom:1px solid var(--border)"><strong>'+r.cliente+'</strong>'+(r.osRef?'<div style="font-size:10px;color:var(--muted)">'+r.osRef+'</div>':'')+'</td>'
+            +'<td style="padding:8px;border-bottom:1px solid var(--border);font-weight:800;white-space:nowrap">'+painelFmt(r.valor)+'</td>'
+            +'<td style="padding:8px;border-bottom:1px solid var(--border)"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+sc+'">'+sl+'</span></td></tr>';
+        }).join('')+'</tbody></table>'
+    : '<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma conta.</div>';
+
+  // ── OS ──
+  var osEl = document.getElementById('painelOSBody');
+  var osTEl = document.getElementById('painelOSTotal');
+  if(osTEl) osTEl.textContent = osArr.length+' ordem(ns)';
+  var statusCfg = {iniciada:{lbl:'Iniciada',col:'#EDE9FE',bc:'#7C3AED'},em_producao:{lbl:'Em Produção',col:'#FEF3C7',bc:'#D97706'},pronto:{lbl:'Pronto',col:'#D1FAE5',bc:'#059669'}};
+  if(osEl) osEl.innerHTML = Object.keys(statusCfg).map(function(k){
+    var cnt = osArr.filter(function(o){return o.status===k;}).length;
+    var sc = statusCfg[k];
+    var items = osArr.filter(function(o){return o.status===k;}).slice(0,2);
+    return '<div style="margin-bottom:10px">'
+      +'<div style="background:'+sc.col+';color:'+sc.bc+';font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px 7px 0 0">'+sc.lbl+' ('+cnt+')</div>'
+      +'<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 7px 7px;padding:6px 10px">'
+      +(items.length?items.map(function(o){
+          return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">'
+            +'<strong>'+o.titulo+'</strong>'
+            +(o.prazo?'<span style="color:var(--muted);font-size:10px"> · '+o.prazo+'</span>':'')
+            +'</div>';
+        }).join(''):'<div style="font-size:11px;color:var(--muted)">Vazio</div>')
+      +'</div></div>';
+  }).join('');
+
+  // ── Orçamentos do mês ──
+  var orcEl = document.getElementById('painelOrcBody');
+  if(orcEl) {
+    var orcPend2 = orcs.filter(function(o){return !o.status||o.status==='aguardando';}).length;
+    var orcAprov = orcs.filter(function(o){return o.status==='aprovado';}).length;
+    orcEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
+      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcMes.length+'</div><div style="font-size:10px;color:var(--muted)">este mês</div></div>'
+      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:#059669">'+painelFmt(orcMesVal)+'</div><div style="font-size:10px;color:var(--muted)">valor total</div></div>'
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+orcPend2+' aguardando · '+orcAprov+' aprovado(s)</div>';
+  }
+
+  // ── Estoque ──
+  var stEl = document.getElementById('painelStockBody');
+  if(stEl && typeof STOCK!=='undefined') {
+    stEl.innerHTML = Object.keys(STOCK).map(function(k){
+      var s=STOCK[k];
+      var pct=Math.min(100,Math.round((s.qty/(s.max||50))*100));
+      var low=s.qty<=(s.min||5);
+      var col=low?'#EF4444':s.qty<(s.max||50)*0.4?'#F59E0B':'#10B981';
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+        +'<div style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+s.label.replace('Acrílico','Acr.').replace('Cristal','Crist.')+'</div>'
+        +'<div style="width:80px;height:6px;background:var(--bg);border-radius:4px;overflow:hidden">'
+        +'<div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+        +'<div style="font-size:11px;font-weight:700;color:'+col+';min-width:24px;text-align:right">'+s.qty+'</div>'
+        +(low?'<span style="font-size:10px">⚠️</span>':'')
+        +'</div>';
+    }).join('');
+  } else if(stEl) {
+    stEl.innerHTML = '<div style="font-size:12px;color:var(--muted)">Dados de estoque carregando...</div>';
+  }
+
+  // ── Comissões ──
+  var comEl = document.getElementById('painelComBody');
+  var comMap = {};
+  orcs.forEach(function(o){
+    var v=o.vendedor||'—'; var c=parseFloat(o.comissao)||0;
+    if(!comMap[v]) comMap[v]={nome:v,total:0,count:0};
+    comMap[v].total+=c; comMap[v].count++;
+  });
+  var comList=Object.values(comMap).sort(function(a,b){return b.total-a.total;});
+  var maxCom=comList.length?comList[0].total:1;
+  var paleta=['#7C3AED','#059669','#D97706','#2563EB','#BE185D'];
+  if(comEl) comEl.innerHTML = comList.length
+    ? comList.map(function(c,i){
+        var pct=maxCom?Math.round((c.total/maxCom)*100):0;
+        var col=paleta[i%paleta.length];
+        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+          +'<div style="width:28px;height:28px;border-radius:50%;background:'+col+';color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0)+'</div>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+c.nome+'</div><div style="font-size:10px;color:var(--muted)">'+c.count+' orç.</div></div>'
+          +'<div style="flex:2;height:6px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+          +'<div style="font-size:12px;font-weight:900;color:#059669;white-space:nowrap">'+painelFmt(c.total)+'</div>'
+          +'</div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--muted)">Salve orçamentos com vendedor para ver as comissões.</div>';
+}
+
 </script>
 
 <!-- ══ PÓS-VENDA OVERLAY ══ -->
