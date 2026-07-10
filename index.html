@@ -890,65 +890,75 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 }
 /* ── Mobile side panel ── */
 #mobileSidePanel {
-  display: none;
-  position: fixed; top: 0; left: 0; bottom: 0; width: 82vw; max-width: 300px; z-index: 400;
+  display: none; /* JS controls show/hide */
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 82vw; max-width: 290px;
+  z-index: 9999;
   background: #1e1b3a;
-  transform: translateX(-100%); transition: transform .28s cubic-bezier(.4,0,.2,1);
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
-  box-shadow: 4px 0 30px rgba(0,0,0,.35);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transform: translateX(-100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  overflow-x: hidden; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-shadow: 6px 0 32px rgba(0,0,0,.45);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+#mobileOverlayBg {
+  display: none;
+  position: fixed; inset: 0; z-index: 9998;
+  background: rgba(0,0,0,.55);
   pointer-events: none;
 }
-#mobileSidePanel.open { transform: translateX(0); pointer-events: auto; }
-#mobileOverlayBg { pointer-events: none; }
-#mobileOverlayBg.open { pointer-events: auto; }
+#mobileOverlayBg[style*="block"] { pointer-events: auto; }
 /* Panel header */
 .msp-header {
-  padding: 20px 20px 14px;
-  border-bottom: 1px solid rgba(255,255,255,.1);
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.12);
   display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
 }
-.msp-logo { color:#fff; font-weight:800; font-size:15px; }
+.msp-logo { color:#fff; font-weight:800; font-size:15px; letter-spacing:-.3px; }
 .msp-close {
-  background:none; border:none; color:rgba(255,255,255,.5);
-  font-size:20px; cursor:pointer; padding:4px 6px; line-height:1;
+  background: rgba(255,255,255,.1); border:none; color:#fff;
+  font-size:18px; cursor:pointer; padding:5px 9px; line-height:1;
+  border-radius:8px; -webkit-tap-highlight-color:transparent;
 }
 /* Panel user info */
 .msp-user {
-  padding: 12px 20px 14px;
+  padding: 12px 16px 14px;
   border-bottom: 1px solid rgba(255,255,255,.08);
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-shrink:0;
 }
 .msp-avatar {
-  width:34px; height:34px; border-radius:50%;
+  width:36px; height:36px; border-radius:50%;
   background:var(--brand-mid); color:#fff;
-  font-weight:800; font-size:14px;
+  font-weight:800; font-size:15px;
   display:flex; align-items:center; justify-content:center; flex-shrink:0;
 }
-.msp-uname { color:#fff; font-size:13px; font-weight:700; }
-.msp-urole { color:rgba(255,255,255,.4); font-size:10px; margin-top:1px; }
+.msp-uname { color:#fff; font-size:14px; font-weight:700; }
+.msp-urole { color:rgba(255,255,255,.45); font-size:11px; margin-top:2px; }
 /* Sections & items */
 .msp-section {
-  font-size:9px; font-weight:800; color:rgba(255,255,255,.3);
+  font-size:9px; font-weight:800; color:rgba(255,255,255,.35);
   text-transform:uppercase; letter-spacing:.8px;
-  padding: 14px 20px 5px;
+  padding: 14px 16px 4px; flex-shrink:0;
 }
 .mdrw-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 13px 20px; color: rgba(255,255,255,.75); font-size: 14px;
-  cursor: pointer; transition: .12s; border-bottom: 1px solid rgba(255,255,255,.04);
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; color: rgba(255,255,255,.8); font-size: 15px;
+  cursor: pointer; transition: background .1s;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0; box-sizing: border-box; width: 100%;
 }
-.mdrw-item:active, .mdrw-item.on { background: rgba(255,255,255,.1); color: #fff; }
-.mdrw-item.on { border-left: 3px solid var(--brand-mid); padding-left: 17px; }
+.mdrw-item:active { background: rgba(255,255,255,.15); }
+.mdrw-item.on { background: rgba(255,255,255,.1); color:#fff; border-left:3px solid var(--brand-mid); padding-left:13px; }
 .mdrw-ico { font-size: 18px; width: 26px; text-align: center; }
 .mdrw-section {
   font-size: 10px; font-weight: 700; color: rgba(255,255,255,.3);
   text-transform: uppercase; letter-spacing: .6px; padding: 12px 20px 4px;
 }
-#mobileOverlayBg {
-  display: none; position: fixed; inset: 0; z-index: 390; background: rgba(0,0,0,.55);
-}
-#mobileOverlayBg.open { display: block; }
+/* overlay CSS defined above */
 /* Legacy — hide bottom nav entirely */
 #mobileBottomNav { display: none !important; }
 #mobileDrawer    { display: none !important; }
@@ -956,7 +966,6 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 @media (max-width: 768px) {
   .sidebar { display: none !important; }
   #mobileMenuBtn { display: flex !important; align-items: center; }
-  #mobileSidePanel { display: block; }
   .main { left: 0 !important; }
   .content { padding: 10px 10px 24px; overflow-y: scroll; -webkit-overflow-scrolling: touch; }
   .topbar { padding: 0 12px; height: 52px; min-height: 52px; gap: 8px; }
@@ -13952,89 +13961,115 @@ function painelRender() {
 </div>
 
 <script>
-// ── Mobile Side Panel ─────────────────────────────────────────────────────────
+// ── Mobile Side Panel ────────────────────────────────────────────────────────
 function mobilePanelOpen() {
+  var panel = document.getElementById('mobileSidePanel');
+  var overlay = document.getElementById('mobileOverlayBg');
+  if(!panel) return;
   // Sync user info
   if(typeof _currentSession !== 'undefined' && _currentSession) {
-    var n = _currentSession.user||'Usuário';
+    var n = _currentSession.user || 'Usuário';
     var av = document.getElementById('mspAvatar'); if(av) av.textContent = n[0].toUpperCase();
     var nm = document.getElementById('mspName');   if(nm) nm.textContent = n;
-    var rl = document.getElementById('mspRole');   if(rl) rl.textContent = (typeof FUNCAO_LABEL!=='undefined' ? FUNCAO_LABEL[_currentSession.funcao]||_currentSession.funcao : _currentSession.funcao)||'';
+    var rl = document.getElementById('mspRole');
+    if(rl) {
+      var lbl = (typeof FUNCAO_LABEL !== 'undefined' ? FUNCAO_LABEL[_currentSession.funcao] : null) || _currentSession.funcao || '';
+      rl.textContent = lbl;
+    }
   }
   // Sync badges
-  var kb = document.getElementById('mspBadgeKanban');
   var sbKb = document.getElementById('sbBadgeKanban');
-  if(kb && sbKb) { kb.textContent=sbKb.textContent; kb.style.display=sbKb.style.display; }
-  var es = document.getElementById('mspBadgeEstoque');
+  var mspKb = document.getElementById('mspBadgeKanban');
+  if(sbKb && mspKb) { mspKb.textContent = sbKb.textContent; mspKb.style.display = sbKb.style.display; }
   var sbEs = document.getElementById('sbBadgeEstoque');
-  if(es && sbEs) { es.textContent=sbEs.textContent; es.style.display=sbEs.style.display; }
-  // Highlight active item
-  var cur = document.getElementById('topbarTitle');
-  document.querySelectorAll('#mobileSidePanel .mdrw-item').forEach(function(el){ el.classList.remove('on'); });
-  document.getElementById('mobileSidePanel').classList.add('open');
-  document.getElementById('mobileOverlayBg').classList.add('open');
+  var mspEs = document.getElementById('mspBadgeEstoque');
+  if(sbEs && mspEs) { mspEs.textContent = sbEs.textContent; mspEs.style.display = sbEs.style.display; }
+  // Show panel
+  panel.style.display = 'flex';
+  panel.style.flexDirection = 'column';
+  requestAnimationFrame(function(){
+    panel.style.transform = 'translateX(0)';
+    panel.style.pointerEvents = 'auto';
+  });
+  if(overlay) { overlay.style.display = 'block'; }
   document.body.style.overflow = 'hidden';
+  document.body.style.position = 'fixed';
+  document.body.style.width = '100%';
 }
 
 function mobilePanelClose() {
-  document.getElementById('mobileSidePanel').classList.remove('open');
-  document.getElementById('mobileOverlayBg').classList.remove('open');
+  var panel = document.getElementById('mobileSidePanel');
+  var overlay = document.getElementById('mobileOverlayBg');
+  if(panel) {
+    panel.style.transform = 'translateX(-100%)';
+    panel.style.pointerEvents = 'none';
+    setTimeout(function(){ panel.style.display = 'none'; }, 300);
+  }
+  if(overlay) { overlay.style.display = 'none'; }
   document.body.style.overflow = '';
+  document.body.style.position = '';
+  document.body.style.width = '';
 }
 
 function mobilePanelNav(page) {
   mobilePanelClose();
-  // Highlight item
-  document.querySelectorAll('#mobileSidePanel .mdrw-item').forEach(function(el){ el.classList.remove('on'); });
-  var item = document.getElementById('mspItem-'+page);
-  if(item) item.classList.add('on');
-  // Find matching sb-item and call nav()
-  var sbEl = null;
-  document.querySelectorAll('.sb-item').forEach(function(el){
-    if((el.getAttribute('onclick')||'').indexOf("'"+page+"'") >= 0) sbEl = el;
-  });
-  if(sbEl) nav(page, sbEl); else nav(page, null);
+  setTimeout(function(){
+    var sbEl = null;
+    document.querySelectorAll('.sb-item').forEach(function(el){
+      if((el.getAttribute('onclick') || '').indexOf("'" + page + "'") >= 0) sbEl = el;
+    });
+    if(typeof nav === 'function') {
+      if(sbEl) nav(page, sbEl); else nav(page, null);
+    }
+  }, 50);
 }
 
-// Apply permissions to mobile side panel items
-(function(){
-  var _origSecApplyPerms = typeof secApplyPerms !== 'undefined' ? secApplyPerms : null;
-  var _mspApply = function(funcao) {
-    if(funcao==='master'||funcao==='admin') return;
-    var HARD_DENY = {
-      comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
-      producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'orcamento':1,'orcamentos-enviados':1,'comercial':1,'crm':1,'clientes':1},
-      financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1}
-    };
-    var denied = HARD_DENY[funcao]||{};
-    var pages = ['dashboard','painel','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
-    var secMap = {'config-orc':'config','config-plan':'config','config-usr':'config','seguranca':'config','orcamentos-enviados':'orcamento','comercial':'orcamento','relatorios':'financeiro'};
-    // Section visibility tracking
-    var secVis = {};
-    pages.forEach(function(page){
-      var item = document.getElementById('mspItem-'+page);
-      if(!item) return;
-      var hide = !!denied[page];
-      if(!hide) {
-        var mod = secMap[page]||page;
-        var perms = typeof usrLoadPerms==='function' ? usrLoadPerms() : {};
-        var def = typeof PERM_DEFAULT!=='undefined' ? PERM_DEFAULT[mod] : null;
-        if(!def || def[funcao]===false || def[funcao]===undefined) hide=true;
-        else if(!perms[mod] || !perms[mod][funcao]) hide=true;
-      }
-      item.style.display = hide ? 'none' : '';
-      // Track which section label to show
-      var secName = page==='dashboard'||page==='painel'?'principal':page==='kanban'||page==='os-list'||page==='estoque'||page==='fornecedores'?'operacao':page==='orcamento'||page==='orcamentos-enviados'||page==='comercial'||page==='crm'||page==='clientes'?'comercial':page==='financeiro'||page==='relatorios'?'financeiro':'config';
-      if(!hide) secVis[secName]=true;
-    });
-    // Hide section labels with no visible items
-    ['principal','operacao','comercial','financeiro','config'].forEach(function(s){
-      var el = document.getElementById('mspSec-'+s);
-      if(el) el.style.display = secVis[s] ? '' : 'none';
-    });
+// Apply permissions to side panel items
+function mspApplyPerms(funcao) {
+  if(funcao === 'master' || funcao === 'admin') return;
+  var HARD_DENY = {
+    comercial: {dashboard:1,financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1,estoque:1},
+    producao:  {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1,orcamento:1,'orcamentos-enviados':1,comercial:1,crm:1,clientes:1},
+    financeiro:{config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1}
   };
-  // Hook into authApplySession
-  var _orig = window.authApplySession;
+  var denied = HARD_DENY[funcao] || {};
+  var modMap = {'config-orc':'config','config-plan':'config','config-usr':'config','seguranca':'config','orcamentos-enviados':'orcamento','comercial':'orcamento','relatorios':'financeiro'};
+  var pages = ['dashboard','painel','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+  var secVisible = {};
+  var secMap2 = {dashboard:'principal',painel:'principal',kanban:'operacao','os-list':'operacao',estoque:'operacao',fornecedores:'operacao',orcamento:'comercial','orcamentos-enviados':'comercial',comercial:'comercial',crm:'comercial',clientes:'comercial',financeiro:'financeiro',relatorios:'financeiro','config-orc':'config','config-plan':'config','config-usr':'config',seguranca:'config'};
+  pages.forEach(function(page) {
+    var item = document.getElementById('mspItem-' + page);
+    if(!item) return;
+    var hide = !!denied[page];
+    if(!hide) {
+      var mod = modMap[page] || page;
+      var def = (typeof PERM_DEFAULT !== 'undefined') ? PERM_DEFAULT[mod] : null;
+      if(!def || def[funcao] === false || def[funcao] === undefined) hide = true;
+      else {
+        var perms = (typeof usrLoadPerms === 'function') ? usrLoadPerms() : {};
+        if(!perms[mod] || !perms[mod][funcao]) hide = true;
+      }
+    }
+    item.style.display = hide ? 'none' : '';
+    if(!hide) secVisible[secMap2[page] || 'config'] = true;
+  });
+  ['principal','operacao','comercial','financeiro','config'].forEach(function(sec){
+    var lbl = document.getElementById('mspSec-' + sec);
+    if(lbl) lbl.style.display = secVisible[sec] ? '' : 'none';
+  });
+}
+
+// Hook: call mspApplyPerms
+(function(){
+  var _origAuth = window.authApplySession;
   window.authApplySession = function(){
-    if(_orig) _orig.apply(this, arguments);
-    if(typeof _currentSession 
+    if(_origAuth) _origAuth.apply(this, arguments);
+    var sess = (typeof _currentSession !== 'undefined') ? _currentSession : null;
+    if(sess && sess.funcao) {
+      mspApplyPerms(sess.funcao);
+    }
+  };
+})();
+</script>
+</body>
+</html>
