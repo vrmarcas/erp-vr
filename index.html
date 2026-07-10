@@ -961,8 +961,9 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .content { padding: 10px 10px 24px; overflow-y: scroll; -webkit-overflow-scrolling: touch; }
   .topbar { padding: 0 12px; height: 52px; min-height: 52px; gap: 8px; }
   .topbar-title { font-size: 14px; }
-  /* Hide topbar buttons — tudo fica no painel lateral */
-  .topbar-btn, .topbar-pill, #cloudIndicator, .dot-live { display: none !important; }
+  /* Topbar mobile: só ☰ e título */
+  .topbar-btn, .topbar-pill, .dot-live,
+  #cloudIndicator, #cloudDot, #cloudTxt { display: none !important; }
   .card { padding: 11px; margin-bottom: 10px; }
   .card-h { flex-wrap: wrap; gap: 6px; }
 
@@ -14036,4 +14037,4 @@ function mobilePanelNav(page) {
   var _orig = window.authApplySession;
   window.authApplySession = function(){
     if(_orig) _orig.apply(this, arguments);
-    if(typeof _currentSession !== '
+    if(typeof _currentSession 
