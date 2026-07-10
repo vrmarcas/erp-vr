@@ -1418,6 +1418,17 @@ firebase.auth().signInAnonymously().then(function(){
               </div>
             </div>
           </div>
+          <!-- Planificação da OS -->
+          <div id="kbPlanImgBox" style="display:none;margin-bottom:10px">
+            <div class="section-lbl">📐 Planificação</div>
+            <div style="margin-top:6px">
+              <img id="kbPlanImgEl" src="" alt="Planificação" style="width:100%;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="kbPlanImgFull()" title="Clique para ampliar">
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <button onclick="kbPlanImgFull()" style="flex:1;padding:6px;font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text)">🔍 Ampliar</button>
+                <button onclick="kbPlanImgDownload()" style="flex:1;padding:6px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">📥 Baixar PNG</button>
+              </div>
+            </div>
+          </div>
           <!-- Link do Arquivo -->
           <div style="margin-bottom:10px">
             <div class="section-lbl">🔗 Link do Arquivo</div>
@@ -4942,6 +4953,7 @@ function planCalc() {
   }));
 
   if(btn) btn.disabled = false;
+  setTimeout(planDrawCanvas, 0);
 }
 
 function planAplicar() {
@@ -4959,6 +4971,7 @@ function planAplicar() {
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
     row.dataset.planPecas = JSON.stringify(planManualPieces);
+    var _pSumBox=document.getElementById('planSumBox'); if(_pSumBox&&_pSumBox.dataset.planImg) row.dataset.planImg=_pSumBox.dataset.planImg;
   }
 
   // ocultar inputs larg/alt e mostrar badge de planificado
@@ -5893,6 +5906,9 @@ function kbOpen(id) {
   // File link
   var linkInput = document.getElementById('kbFileLinkInput');
   if(linkInput) linkInput.value = os.fileLink || '';
+  // Planificação visual
+  var kbPlanBox=document.getElementById('kbPlanImgBox'); var kbPlanEl=document.getElementById('kbPlanImgEl');
+  if(kbPlanBox&&kbPlanEl){ if(os.planImg){ kbPlanEl.src=os.planImg; kbPlanBox.style.display=''; } else kbPlanBox.style.display='none'; }
   // tempo produção + prazo editável
   var kbTEl = document.getElementById('kbTempoProd');
   var kbPEl = document.getElementById('kbPrazoEntrega');
@@ -6197,6 +6213,36 @@ function kbOpenLink() {
   if(!url) { showToast('Cole um link antes de abrir','warn'); return; }
   if(!/^https?:\/\//i.test(url)) url = 'https://' + url;
   window.open(url, '_blank');
+}
+
+function kbPlanImgFull() {
+  var os = _kbOsId ? KB_OS[_kbOsId] : null;
+  if (!os || !os.planImg) return;
+  var titulo = (os.titulo || 'OS #'+os.num).replace(/[<>"]/g,'');
+  var w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write('<html><head><title>Planificao — '+titulo+'</title>'
+    +'<style>body{margin:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;padding:20px;box-sizing:border-box}'
+    +'h3{color:#e2e8f0;margin-bottom:14px;font-size:15px;text-align:center}'
+    +'img{max-width:96vw;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.7)}'
+    +'a{color:#93C5FD;margin-top:18px;font-size:13px;text-decoration:none;background:#1e3a5f;padding:8px 20px;border-radius:8px}'
+    +'</style></head><body>'
+    +'<h3>📐 Planificação — '+titulo+'</h3>'
+    +'<img src="'+os.planImg+'">'
+    +'<a href="'+os.planImg+'" download="Planificacao_'+titulo.replace(/\s+/g,'_')+'.png">📥 Baixar PNG</a>'
+    +'</body></html>');
+  w.document.close();
+}
+
+function kbPlanImgDownload() {
+  var os = _kbOsId ? KB_OS[_kbOsId] : null;
+  if (!os || !os.planImg) { showToast('Nenhuma planificação nesta OS','warn'); return; }
+  var titulo = (os.titulo || 'OS_'+os.num).replace(/[^a-zA-Z0-9À-ú ]/g,'').trim();
+  var a = document.createElement('a');
+  a.href = os.planImg;
+  a.download = 'Planificacao_' + titulo.replace(/\s+/g,'_') + '.png';
+  a.click();
+  showToast('PNG baixado com sucesso 📥','ok');
 }
 
 function kbToggle(i) {
@@ -8374,7 +8420,7 @@ var _lastOsId = null;
       var totTxt=totEl?totEl.textContent.replace(/[^\d,\.]/g,''):'0';
       var unitVal=parseFloat(unitTxt.replace(',','.'))||0;
       var totVal=parseFloat(totTxt.replace(',','.'))||0;
-      itens.push({cod:'P'+String(idx).padStart(2,'0'), prod:prod, descricao:descricao, qty:qty, unit:unitVal, total:totVal});
+      itens.push({cod:'P'+String(idx).padStart(2,'0'), prod:prod, descricao:descricao, qty:qty, unit:unitVal, total:totVal, planImg:(row.dataset.planImg||null)});
     });
 
     // Registra financeiro
@@ -8447,6 +8493,7 @@ var _lastOsId = null;
       clientDoc:docCliente, clientEmail:emailCliente, clientTel:telCliente,
       clientCidade:cidadeCliente, vendedor:vendedor, formaPgto:formaPgto,
       dataOS:dia, itens:itens, totalGeral:c.finalPrice||0, obs:'',
+      planImg:(function(){ var _rows=document.querySelectorAll('#orcItemBody tr'); for(var _ri=0;_ri<_rows.length;_ri++){ if(_rows[_ri].dataset.planImg) return _rows[_ri].dataset.planImg; } return null; })(),
       nf:(function(){ var t=document.getElementById('orcNFToggle'); if(!t||!t.checked) return null; return {precisa:true,nome:(document.getElementById('nfNome')||{}).value||'',doc:(document.getElementById('nfDoc')||{}).value||'',ie:(document.getElementById('nfIE')||{}).value||'',cep:(document.getElementById('nfCEP')||{}).value||'',endereco:(document.getElementById('nfEndereco')||{}).value||''}; })()
     };
     window._lastOsId = newId;
@@ -11365,6 +11412,15 @@ document.addEventListener('DOMContentLoaded', function() {
       <div style="font-size:13px;color:var(--brand-mid);font-weight:800;margin-top:2px" id="planSumVenda">—</div>
       <div style="font-size:10px;color:var(--muted);font-style:italic" id="planSumFormula">—</div>
     </div>
+    <!-- Layout Visual da Planificação -->
+    <div id="planLayoutBox" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🗂️ Layout Visual na Chapa (200×100 cm)</div>
+        <button id="planBtnExport" onclick="planExportPNG()" style="background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer">📥 Baixar PNG</button>
+      </div>
+      <canvas id="planCanvas" style="width:100%;border-radius:8px;border:1px solid var(--border);background:#f8f9fa;display:block"></canvas>
+      <div id="planLayoutLegenda" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:14px">
       <button id="planAplicarBtn" onclick="planAplicar()" disabled
         style="flex:1;padding:10px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;opacity:.5">
@@ -11866,7 +11922,105 @@ function _planCalcAndMerge() {
   if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL geral</td>'
     +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+newQty+' peças</td>'
     +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td></tr>';
+  setTimeout(planDrawCanvas, 0);
 }
+
+// ── Visualização do layout de corte ─────────────────────────────────
+function planDrawCanvas() {
+  var canvas = document.getElementById('planCanvas');
+  var layoutBox = document.getElementById('planLayoutBox');
+  var legenda = document.getElementById('planLayoutLegenda');
+  if (!canvas) return;
+  var allPieces = [];
+  var sumBox = document.getElementById('planSumBox');
+  if (sumBox && sumBox.dataset.pcs) {
+    try {
+      var pcs = JSON.parse(sumBox.dataset.pcs);
+      pcs.forEach(function(p) {
+        for (var i = 0; i < p.qty; i++) {
+          allPieces.push({nome: p.nome, larg: p.larg, alt: p.alt, manual: false});
+        }
+      });
+    } catch(e) {}
+  }
+  planManualPieces.forEach(function(p) {
+    if (p.larg > 0 && p.alt > 0) {
+      for (var i = 0; i < (p.qty||1); i++) {
+        allPieces.push({nome: (p.nome||'Manual'), larg: p.larg, alt: p.alt, manual: true});
+      }
+    }
+  });
+  if (!allPieces.length) { if(layoutBox) layoutBox.style.display='none'; return; }
+  if (layoutBox) layoutBox.style.display = '';
+  var SHEET_W = 200, SHEET_H = 100, SCALE = 2.8, PAD = 18;
+  var canvW = Math.round(SHEET_W * SCALE) + PAD * 2;
+  var canvH = Math.round(SHEET_H * SCALE) + PAD * 2;
+  canvas.width = canvW; canvas.height = canvH;
+  canvas.style.maxWidth = '100%';
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e8eaed'; ctx.fillRect(0, 0, canvW, canvH);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(PAD, PAD, SHEET_W*SCALE, SHEET_H*SCALE);
+  ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(PAD, PAD, SHEET_W*SCALE, SHEET_H*SCALE);
+  ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+  for (var gx=20; gx<SHEET_W; gx+=20) { ctx.beginPath(); ctx.moveTo(PAD+gx*SCALE,PAD); ctx.lineTo(PAD+gx*SCALE,PAD+SHEET_H*SCALE); ctx.stroke(); }
+  for (var gy=20; gy<SHEET_H; gy+=20) { ctx.beginPath(); ctx.moveTo(PAD,PAD+gy*SCALE); ctx.lineTo(PAD+SHEET_W*SCALE,PAD+gy*SCALE); ctx.stroke(); }
+  ctx.fillStyle='#888'; ctx.font='bold 9px sans-serif';
+  ctx.fillText('Chapa 200\xd7100 cm', PAD+4, PAD-5);
+  ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
+  [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), PAD-5); });
+  var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#C4B5FD','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
+  var colorMap={}, colorIdx=0;
+  allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
+  var sorted = allPieces.slice().sort(function(a,b){ return (b.alt-a.alt)||(b.larg-a.larg); });
+  var curX=0, curY=0, rowH=0, overflow=false;
+  sorted.forEach(function(p) {
+    if (curX+p.larg > SHEET_W+0.01) { curY+=rowH; curX=0; rowH=0; }
+    if (curY+p.alt > SHEET_H+0.01) { overflow=true; }
+    if (!overflow) {
+      var px=PAD+curX*SCALE, py=PAD+curY*SCALE, pw=p.larg*SCALE, ph=p.alt*SCALE;
+      ctx.shadowColor='rgba(0,0,0,0.15)'; ctx.shadowBlur=3; ctx.shadowOffsetX=1; ctx.shadowOffsetY=1;
+      ctx.fillStyle = p.manual ? '#FCD34D' : colorMap[p.nome];
+      ctx.globalAlpha=0.82; ctx.fillRect(px+1,py+1,pw-2,ph-2);
+      ctx.globalAlpha=1; ctx.shadowBlur=0; ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
+      ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=1; ctx.strokeRect(px+1,py+1,pw-2,ph-2);
+      if (pw>22 && ph>14) {
+        ctx.fillStyle='#111';
+        ctx.font='bold '+Math.max(7,Math.min(10,ph/3))+'px sans-serif';
+        ctx.textAlign='center';
+        var lbl=p.nome.length>14?p.nome.slice(0,13)+'…':p.nome;
+        ctx.fillText(lbl, px+pw/2, py+ph/2-(ph>28?4:0));
+        if(ph>24){ ctx.font='7px sans-serif'; ctx.fillStyle='#333'; ctx.fillText(p.larg.toFixed(0)+'\xd7'+p.alt.toFixed(0)+' cm', px+pw/2, py+ph/2+8); }
+        ctx.textAlign='left';
+      }
+    }
+    curX+=p.larg; if(p.alt>rowH) rowH=p.alt;
+  });
+  if (overflow) {
+    ctx.fillStyle='rgba(239,68,68,0.12)'; ctx.fillRect(PAD,PAD,SHEET_W*SCALE,SHEET_H*SCALE);
+    ctx.fillStyle='#DC2626'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('⚠️  Pecas excedem 1 chapa — necessario mais de 1 chapa', PAD+SHEET_W*SCALE/2, PAD+SHEET_H*SCALE/2);
+    ctx.textAlign='left';
+  }
+  if (legenda) {
+    var lg='';
+    Object.keys(colorMap).forEach(function(nome){ lg+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--bg2);padding:2px 8px;border-radius:10px;border:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+colorMap[nome]+';flex-shrink:0"></span>'+nome+'</span>'; });
+    if(planManualPieces.length) lg+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--bg2);padding:2px 8px;border-radius:10px;border:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FCD34D;flex-shrink:0"></span>Pecas manuais</span>';
+    legenda.innerHTML=lg;
+  }
+  if(sumBox) sumBox.dataset.planImg = canvas.toDataURL('image/png');
+}
+
+function planExportPNG() {
+  var sumBox = document.getElementById('planSumBox');
+  var dataURL = sumBox ? sumBox.dataset.planImg : null;
+  if (!dataURL) { showToast('Calcule as dimensoes antes de exportar','warn'); return; }
+  var titulo = ((document.getElementById('planModalTitle')||{}).textContent||'Planificacao').replace(/[^a-zA-Z0-9À-ɏ ]/g,'').trim();
+  var a = document.createElement('a');
+  a.href = dataURL; a.download = 'Planificacao_' + titulo.replace(/\s+/g,'_') + '.png'; a.click();
+  showToast('PNG exportado com sucesso 📥','ok');
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 // Wrap planCalc to also merge manual pieces if any exist
 var _planCalcOrig = (typeof planCalc !== 'undefined') ? planCalc : null;
