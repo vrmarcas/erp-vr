@@ -4169,7 +4169,7 @@ firebase.auth().signInAnonymously().then(function(){
       <div id="kbProdChapaBox">
         <div class="fg">
           <label>Material / Cor</label>
-          <select id="kbProdMatSel" onchange="kbProdCheckStock()">
+          <select id="kbProdMatSel" onchange="kbProdCheckStock()" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
             <option value="">— Selecionar —</option>
           </select>
         </div>
@@ -6607,8 +6607,9 @@ function _kbOpenProdOverlay(os) {
   if (obsEl) obsEl.value = (_kbProdEditMode && os.matProd) ? (os.matProd.obs||'') : '';
   // Set tipo buttons
   kbProdSetTipo(_kbProdTipo);
-  // Clear stock info
+  // Check stock / retalhos on open if material already selected
   var si = document.getElementById('kbProdStockInfo'); if (si) si.style.display = 'none';
+  if (matSel && matSel.value) setTimeout(kbProdCheckStock, 50);
   document.getElementById('kbProdOverlay').classList.add('open');
 }
 
@@ -6640,18 +6641,38 @@ function kbProdCheckStock() {
   if (!si) return;
   if (!matKey || !STOCK[matKey]) { si.style.display='none'; return; }
   var s = STOCK[matKey];
-  var chapasInteiras = Math.ceil(qty); // chapas que serão retiradas do estoque
+  var chapasInteiras = Math.ceil(qty);
   var ok = s.qty >= chapasInteiras;
-  var sobra = chapasInteiras - qty; // fração que sobra (ex: 0.5 de uma chapa de 1)
-  si.style.display = '';
-  si.style.background = ok ? '#F0FDF4' : '#FEF2F2';
-  si.style.color = ok ? '#065F46' : '#991B1B';
-  si.style.border = '1px solid ' + (ok ? '#86EFAC' : '#FECACA');
+  var sobra = +(chapasInteiras - qty).toFixed(4);
+
+  // Verificar retalhos disponíveis deste material
+  var rList = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){
+    return r.qty > 0 && (r.mat === matKey || (r.label && STOCK[matKey] && r.label.indexOf(STOCK[matKey].label.split(' ')[0]) >= 0));
+  });
+
+  var html = '';
+  // Alerta de retalhos disponíveis — em destaque no topo
+  if (rList.length > 0) {
+    html += '<div style="background:#EDE9FE;border:1px solid #C4B5FD;border-radius:6px;padding:7px 10px;margin-bottom:6px;cursor:pointer" onclick="kbProdSetTipo(&quot;retalho&quot;)">'
+      + '<span style="font-weight:700;color:#5B21B6">✂️ Atenção: você tem ' + rList.length + ' retalho(s) deste material disponível!</span>'
+      + '<div style="font-size:10px;color:#7C3AED;margin-top:2px">' + rList.map(function(r){ return r.dims + ' cm'; }).join(' · ') + '</div>'
+      + '<div style="font-size:10px;color:#7C3AED;margin-top:1px">Clique aqui para usar um retalho em vez de abrir chapa nova.</div>'
+      + '</div>';
+  }
+
+  // Info de estoque
+  var col = ok ? '#065F46' : '#991B1B';
+  var bg  = ok ? '#F0FDF4' : '#FEF2F2';
+  var brd = ok ? '#86EFAC' : '#FECACA';
   var msg = ok
-    ? '✅ Estoque: ' + s.qty + ' chapas disponíveis. Serão retiradas ' + chapasInteiras + '. Restará ' + (s.qty - chapasInteiras) + '.'
-    : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapas.';
-  if (ok && sobra > 0.01) msg += ' Sobra de ' + sobra.toFixed(2) + ' chapa → será salva como retalho.';
-  si.textContent = msg;
+    ? '✅ Estoque: ' + s.qty + ' chapas. Serão retiradas ' + chapasInteiras + '. Restarão ' + (s.qty - chapasInteiras) + '.'
+    : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapa(s).';
+  if (ok && sobra > 0.01) msg += ' Sobra de ' + sobra.toFixed(2) + ' → salva como retalho.';
+
+  html += '<div style="background:'+bg+';border:1px solid '+brd+';border-radius:6px;padding:7px 10px;color:'+col+';font-size:12px">'+msg+'</div>';
+
+  si.innerHTML = html;
+  si.style.display = '';
 }
 
 function kbConfirmarProd() {
