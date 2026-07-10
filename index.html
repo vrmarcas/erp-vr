@@ -1419,13 +1419,22 @@ firebase.auth().signInAnonymously().then(function(){
             </div>
           </div>
           <!-- Planificação da OS -->
-          <div id="kbPlanImgBox" style="display:none;margin-bottom:10px">
+          <div id="kbPlanImgBox" style="margin-bottom:10px">
             <div class="section-lbl">📐 Planificação</div>
-            <div style="margin-top:6px">
+            <!-- Estado: sem imagem -->
+            <div id="kbPlanEmpty" style="margin-top:6px;border:2px dashed var(--border);border-radius:8px;padding:16px;text-align:center;cursor:pointer" onclick="document.getElementById('kbPlanFileInput').click()">
+              <div style="font-size:20px;margin-bottom:4px">📎</div>
+              <div style="font-size:12px;font-weight:700;color:var(--text)">Anexar planificação</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">Clique para selecionar PNG, JPG ou PDF</div>
+              <input type="file" id="kbPlanFileInput" accept="image/*,application/pdf" style="display:none" onchange="kbPlanAnexar(this)">
+            </div>
+            <!-- Estado: com imagem -->
+            <div id="kbPlanPreview" style="display:none;margin-top:6px">
               <img id="kbPlanImgEl" src="" alt="Planificação" style="width:100%;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="kbPlanImgFull()" title="Clique para ampliar">
               <div style="display:flex;gap:6px;margin-top:6px">
                 <button onclick="kbPlanImgFull()" style="flex:1;padding:6px;font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;cursor:pointer;color:var(--text)">🔍 Ampliar</button>
                 <button onclick="kbPlanImgDownload()" style="flex:1;padding:6px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">📥 Baixar PNG</button>
+                <button onclick="kbPlanRemover()" style="padding:6px 10px;font-size:11px;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;cursor:pointer">🗑</button>
               </div>
             </div>
           </div>
@@ -5911,8 +5920,21 @@ function kbOpen(id) {
   var linkInput = document.getElementById('kbFileLinkInput');
   if(linkInput) linkInput.value = os.fileLink || '';
   // Planificação visual
-  var kbPlanBox=document.getElementById('kbPlanImgBox'); var kbPlanEl=document.getElementById('kbPlanImgEl');
-  if(kbPlanBox&&kbPlanEl){ if(os.planImg){ kbPlanEl.src=os.planImg; kbPlanBox.style.display=''; } else kbPlanBox.style.display='none'; }
+  // Planificação — mostrar preview ou área de upload
+  (function(){
+    var planImg = os.planImg || localStorage.getItem('erp_plan_'+id) || null;
+    var emptyEl   = document.getElementById('kbPlanEmpty');
+    var previewEl = document.getElementById('kbPlanPreview');
+    var imgEl     = document.getElementById('kbPlanImgEl');
+    if (planImg && imgEl) {
+      imgEl.src = planImg;
+      if(emptyEl)   emptyEl.style.display   = 'none';
+      if(previewEl) previewEl.style.display  = '';
+    } else {
+      if(emptyEl)   emptyEl.style.display   = '';
+      if(previewEl) previewEl.style.display  = 'none';
+    }
+  })();
   // tempo produção + prazo editável
   var kbTEl = document.getElementById('kbTempoProd');
   var kbPEl = document.getElementById('kbPrazoEntrega');
@@ -6221,7 +6243,10 @@ function kbOpenLink() {
 
 function kbPlanImgFull() {
   var os = _kbOsId ? KB_OS[_kbOsId] : null;
-  if (!os || !os.planImg) return;
+  var planImg = (os&&os.planImg) || (_kbOsId&&localStorage.getItem('erp_plan_'+_kbOsId)) || null;
+  if (!planImg) return;
+  os = os || {}; os.planImg = planImg;
+  if (!os) return;
   var titulo = (os.titulo || 'OS #'+os.num).replace(/[<>"]/g,'');
   var w = window.open('', '_blank');
   if (!w) return;
@@ -6240,13 +6265,51 @@ function kbPlanImgFull() {
 
 function kbPlanImgDownload() {
   var os = _kbOsId ? KB_OS[_kbOsId] : null;
-  if (!os || !os.planImg) { showToast('Nenhuma planificação nesta OS','warn'); return; }
-  var titulo = (os.titulo || 'OS_'+os.num).replace(/[^a-zA-Z0-9À-ú ]/g,'').trim();
+  var planImg = (os&&os.planImg) || (_kbOsId&&localStorage.getItem('erp_plan_'+_kbOsId)) || null;
+  if (!planImg) { showToast('Nenhuma planificação nesta OS','warn'); return; }
+  var titulo = os ? (os.titulo||'OS_'+os.num).replace(/[^a-zA-Z0-9À-ú ]/g,'').trim() : 'Planificacao';
   var a = document.createElement('a');
-  a.href = os.planImg;
+  a.href = planImg;
   a.download = 'Planificacao_' + titulo.replace(/\s+/g,'_') + '.png';
   a.click();
-  showToast('PNG baixado com sucesso 📥','ok');
+  showToast('PNG baixado 📥','ok');
+}
+
+function kbPlanAnexar(input) {
+  var file = input.files[0]; if(!file) return;
+  var os = _kbOsId ? KB_OS[_kbOsId] : null; if(!os) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var dataURL = e.target.result;
+    os.planImg = dataURL;
+    try { localStorage.setItem('erp_plan_'+_kbOsId, dataURL); } catch(ex) {}
+    if(typeof _cloudSave==='function') {
+      var kbCopy={};
+      Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
+      _cloudSave('kb_os', kbCopy);
+    }
+    var imgEl = document.getElementById('kbPlanImgEl');
+    if(imgEl) imgEl.src = dataURL;
+    var emptyEl = document.getElementById('kbPlanEmpty');
+    var prevEl  = document.getElementById('kbPlanPreview');
+    if(emptyEl) emptyEl.style.display = 'none';
+    if(prevEl)  prevEl.style.display  = '';
+    showToast('Arquivo anexado à OS ✅','ok');
+  };
+  reader.readAsDataURL(file);
+}
+
+function kbPlanRemover() {
+  var os = _kbOsId ? KB_OS[_kbOsId] : null; if(!os) return;
+  if(!confirm('Remover a planificação desta OS?')) return;
+  os.planImg = null;
+  try { localStorage.removeItem('erp_plan_'+_kbOsId); } catch(ex) {}
+  var imgEl   = document.getElementById('kbPlanImgEl');   if(imgEl) imgEl.src='';
+  var emptyEl = document.getElementById('kbPlanEmpty');
+  var prevEl  = document.getElementById('kbPlanPreview');
+  if(emptyEl) emptyEl.style.display = '';
+  if(prevEl)  prevEl.style.display  = 'none';
+  showToast('Planificação removida','warn');
 }
 
 function kbToggle(i) {
