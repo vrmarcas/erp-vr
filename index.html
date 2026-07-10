@@ -1937,7 +1937,14 @@ firebase.auth().signInAnonymously().then(function(){
               </div>
             </div>
             <div class="fg-row">
-              <div class="fg"><label>Nome / Razão Social</label><input type="text" id="orcClientNome" placeholder="Ex: CLARO Telecom"></div>
+              <div class="fg" style="position:relative">
+                <label>Nome / Razão Social</label>
+                <input type="text" id="orcClientNome" placeholder="Ex: CLARO Telecom"
+                  oninput="orcClienteAutocomplete(this.value)"
+                  onblur="setTimeout(function(){var d=document.getElementById('orcCliDropdown');if(d)d.style.display='none';},180)"
+                  autocomplete="off">
+                <div id="orcCliDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:999;background:var(--surface);border:1.5px solid var(--brand-mid);border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:220px;overflow-y:auto"></div>
+              </div>
               <div class="fg" style="max-width:150px"><label id="orcDocLabel">CNPJ</label><input type="text" id="orcClientDoc" placeholder="00.000.000/0001-00"></div>
             </div>
             <div class="fg-row">
@@ -10960,9 +10967,100 @@ function orcSalvarOrcamento() {
   orcSetEnviados(lista);
   orcAtualizarBadgeEnviados();
   orcLinkClienteOrcamento(orc);
+  // Auto-cadastra cliente se ainda não existir
+  orcAutoSalvarCliente(orc);
   if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
   showToast('Orçamento #'+num+' salvo! Veja em "Orçamentos Enviados".','ok');
 }
+
+// ── Autocomplete de cliente no orçamento ──────────────────────────────────
+function orcClienteAutocomplete(q) {
+  var drop = document.getElementById('orcCliDropdown');
+  if(!drop) return;
+  q = (q||'').trim().toLowerCase();
+  if(q.length < 1) { drop.style.display='none'; return; }
+  var matches = CLIENTES_DATA.filter(function(c){
+    return (c.nome||'').toLowerCase().includes(q) ||
+           (c.tel||'').replace(/\D/g,'').includes(q.replace(/\D/g,'')) ||
+           (c.doc||'').replace(/\D/g,'').includes(q.replace(/\D/g,''));
+  }).slice(0, 8);
+  if(!matches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(function(c){
+    var badge = c.marca==='vr'
+      ? '<span style="font-size:9px;background:#EDE9FE;color:#5B21B6;border-radius:6px;padding:1px 5px;font-weight:700">VR</span>'
+      : '<span style="font-size:9px;background:#FCE7F3;color:#9D174D;border-radius:6px;padding:1px 5px;font-weight:700">VT</span>';
+    var sub = [c.tipo, c.cidade, c.tel].filter(Boolean).join(' · ');
+    return '<div onclick="orcClienteSelecionar(''+encodeURIComponent(JSON.stringify({nome:c.nome,doc:c.doc||'',email:c.email||'',tel:c.tel||'',cidade:c.cidade||'',marca:c.marca||'vr',tipo:c.tipo||'PJ'}))+'')" '
+      + 'style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;transition:background .1s" '
+      + 'onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''">'
+      + '<div style="width:30px;height:30px;border-radius:50%;background:var(--brand-light);color:var(--brand-mid);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0).toUpperCase()+'</div>'
+      + '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--text)">'+c.nome+' '+badge+'</div>'
+      + '<div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>'
+      + '</div>';
+  }).join('');
+  drop.style.display = 'block';
+}
+
+function orcClienteSelecionar(encoded) {
+  try {
+    var c = JSON.parse(decodeURIComponent(encoded));
+    var set = function(id, val){ var el=document.getElementById(id); if(el) el.value=val||''; };
+    set('orcClientNome',  c.nome);
+    set('orcClientDoc',   c.doc);
+    set('orcClientEmail', c.email);
+    set('orcClientTel',   c.tel);
+    set('orcClientCidade',c.cidade);
+    // Ajusta empresa selector
+    var emp = document.getElementById('orcEmpresaSel');
+    if(emp && c.marca) { emp.value = c.marca; orcEmpresaChange(); }
+    // Ajusta tipo
+    var tipo = document.getElementById('orcTipoClienteSel');
+    if(tipo && c.tipo) { tipo.value = c.tipo==='PJ'?'pj':'pf'; orcEmpresaChange(); }
+    // Fecha dropdown
+    var drop=document.getElementById('orcCliDropdown');
+    if(drop) drop.style.display='none';
+    // Atualiza resumo
+    if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
+    showToast('✅ Dados de '+c.nome+' preenchidos automaticamente!','ok');
+  } catch(e) { console.warn('orcClienteSelecionar error',e); }
+}
+
+// ── Auto-salva cliente no cadastro ao enviar orçamento ─────────────────────
+function orcAutoSalvarCliente(orc) {
+  var nome = (orc.cliente||'').trim();
+  if(!nome || nome==='(não informado)' || nome==='Cliente') return;
+  var existe = CLIENTES_DATA.find(function(c){
+    return (c.nome||'').toLowerCase().trim() === nome.toLowerCase();
+  });
+  if(existe) {
+    // Atualiza dados se tiver campos vazios
+    if(!existe.tel && orc.tel) existe.tel = orc.tel;
+    if(!existe.email && orc.email) existe.email = orc.email;
+    return;
+  }
+  // Cria novo cliente a partir dos dados do orçamento
+  var doc  = (document.getElementById('orcClientDoc')||{}).value||'';
+  var cid  = (document.getElementById('orcClientCidade')||{}).value||'—';
+  var tipo = (document.getElementById('orcTipoClienteSel')||{}).value||'pj';
+  var marca= orc.marca||'vr';
+  var dia  = new Date().toLocaleDateString('pt-BR');
+  CLIENTES_DATA.unshift({
+    id: 'c'+Date.now(),
+    nome: nome,
+    doc: doc,
+    tipo: tipo==='pj'?'PJ':'PF',
+    cidade: cid,
+    marca: marca,
+    ultimoPedido: dia,
+    tel: orc.tel||'',
+    email: orc.email||'',
+    os: [],
+    orcamentos: [{id:orc.id,num:orc.num,data:orc.dataSalvo,valor:orc.valorFinal,produto:orc.produto}]
+  });
+  if(typeof renderClientes==='function') renderClientes();
+  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+}
+
 
 function orcLinkClienteOrcamento(orc) {
   var cli = CLIENTES_DATA.find(function(c){
