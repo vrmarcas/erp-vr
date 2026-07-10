@@ -871,6 +871,93 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+// ═══════════════════════════════════════════════════
+// FIREBASE — SYNC EM NUVEM (erp-vrmarcas)
+// ═══════════════════════════════════════════════════
+var firebaseConfig = {
+  apiKey: "AIzaSyASz1dnDw39NpIpU07cbcyR4kl2dOXCsVA",
+  authDomain: "erp-vrmarcas.firebaseapp.com",
+  projectId: "erp-vrmarcas",
+  storageBucket: "erp-vrmarcas.firebasestorage.app",
+  messagingSenderId: "273506088255",
+  appId: "1:273506088255:web:a9d06d52253161d2cf8f8a"
+};
+if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+var _db = firebase.firestore();
+var _COL = "erp_vr"; // coleção Firestore
+var _cloudReady = false;
+
+// Salvar documento no Firestore
+function _cloudSave(key, data) {
+  if(!_db) return;
+  try {
+    _db.collection(_COL).doc(key).set({ data: JSON.stringify(data), ts: Date.now() })
+      .catch(function(e){ console.warn("[Cloud] Erro ao salvar "+key+":", e); });
+  } catch(e) { console.warn("[Cloud] _cloudSave falhou:", e); }
+}
+
+// Carregar documento do Firestore
+function _cloudLoad(key, cb) {
+  if(!_db) { cb(null); return; }
+  _db.collection(_COL).doc(key).get().then(function(doc) {
+    if(doc.exists && doc.data() && doc.data().data) {
+      try { cb(JSON.parse(doc.data().data)); return; } catch(e){}
+    }
+    cb(null);
+  }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); cb(null); });
+}
+
+// Listener em tempo real
+function _cloudWatch(key, callback) {
+  if(!_db) return;
+  return _db.collection(_COL).doc(key).onSnapshot(function(doc) {
+    if(doc.exists && doc.data() && doc.data().data) {
+      try { callback(JSON.parse(doc.data().data)); } catch(e){}
+    }
+  }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); });
+}
+
+// Carregar todos os dados da nuvem ao iniciar
+function _cloudLoadAll() {
+  var loaded = 0, total = 7;
+  function done() {
+    loaded++;
+    if(loaded < total) return;
+    _cloudReady = true;
+    // UI refresh
+    try{ finRefreshAll(); }catch(e){}
+    try{ retalhoRender(); }catch(e){}
+    try{ stockRenderHistorico(); }catch(e){}
+    try{ renderClientes(); }catch(e){}
+    try{ orcEnviadosRender(); }catch(e){}
+    if(typeof showToast==="function") showToast("☁️ Dados sincronizados com a nuvem!", "ok");
+    var cd=document.getElementById("cloudDot"), ct=document.getElementById("cloudTxt");
+    if(cd){ cd.style.background="#4ADE80"; cd.style.animation="painelPulse 3s infinite"; }
+    if(ct){ ct.textContent="nuvem ativa"; ct.style.color="#059669"; }
+    // Listeners em tempo real
+    _cloudWatch("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; try{finCRRender();finDashKPIs();}catch(e){} } });
+    _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
+    _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
+    _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
+    _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } });
+    _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
+  }
+  _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
+  _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
+  _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
+  _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
+  _cloudLoad("stock", function(d){ if(d){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } done(); });
+  _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } done(); });
+  _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
+}
+
+// Iniciar após login anônimo
+firebase.auth().signInAnonymously().then(function(){
+  setTimeout(_cloudLoadAll, 800);
+}).catch(function(e){ console.warn("[Cloud] Auth falhou:", e); });
+</script>
 </head>
 <body>
 
@@ -1031,6 +1118,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   <div class="topbar">
     <div class="topbar-title" id="topbarTitle">Dashboard</div>
     <span class="dot-live" title="Atualização em tempo real"></span>
+    <span id="cloudIndicator" style="font-size:10px;display:flex;align-items:center;gap:4px;margin-left:4px"><span id="cloudDot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#9CA3AF"></span><span id="cloudTxt" style="color:#9CA3AF">conectando...</span></span>
     <button class="topbar-btn ghost" style="font-size:11px" onclick="searchOpen()">🔍 Buscar &nbsp;<kbd style="font-size:9px;opacity:.6;background:var(--border);border-radius:3px;padding:1px 4px">⌘K</kbd></button>
     <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;border:none" onclick="nav('orcamento', null)">+ Novo Orçamento</button>
     <button class="topbar-btn" onclick="nav('kanban', null)">Ver Kanban</button>
@@ -6782,8 +6870,8 @@ var FIN_CP = (function(){
   return _FIN_CP_DEFAULT.map(function(x){return Object.assign({},x);});
 })();
 
-function _finSaveCR(){ try{ localStorage.setItem('erp_fin_cr', JSON.stringify(FIN_CR)); }catch(e){} }
-function _finSaveCP(){ try{ localStorage.setItem('erp_fin_cp', JSON.stringify(FIN_CP)); }catch(e){} }
+function _finSaveCR(){ try{ localStorage.setItem('erp_fin_cr', JSON.stringify(FIN_CR)); }catch(e){} _cloudSave('fin_cr', FIN_CR); }
+function _finSaveCP(){ try{ localStorage.setItem('erp_fin_cp', JSON.stringify(FIN_CP)); }catch(e){} _cloudSave('fin_cp', FIN_CP); }
 
 // ============================================================
 // FINANCEIRO — Funções Globais
@@ -8674,6 +8762,7 @@ var RETALHO_PREFIXO = {
 
 function retalhoSalvar() {
   try{ localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); }catch(e){}
+  _cloudSave('retalhos', RETALHOS);
 }
 
 function retalhoGerarCodigo(mat) {
