@@ -4563,12 +4563,12 @@ var ORC_PRAZO_MEDIO = {
 var ORC_PRODUTOS_DEFAULT = ['Armário','Baleiro tubo','Bandeja','Barreira de proteção','Caixa','Chaveiro','Decoração','Display','Expositor','Galheteiro','Medalha','Organizador','Placa','Porta documentos','Porta pasta','Porta tablet','Prateleira','Protetor biometria','Púlpito','Quadro decorativo','Suporte','Tabuleiro de damas','Totem','Troféu','Urna'];
 var ORC_PRODUTOS = (function(){ try{ var s=localStorage.getItem('erp_orc_produtos'); return s?JSON.parse(s):ORC_PRODUTOS_DEFAULT.slice(); }catch(e){ return ORC_PRODUTOS_DEFAULT.slice(); } })();
 const ORC_MATS = [
-  { key:'ac3',  label:'Acrílico Cristal 3mm',  field:'op_ac3'  },
-  { key:'ac5',  label:'Acrílico Cristal 5mm',  field:'op_ac5'  },
-  { key:'ac8',  label:'Acrílico Leitoso 8mm',  field:'op_ac8'  },
-  { key:'ac10', label:'Acrílico Espelho 10mm', field:'op_ac10' },
-  { key:'ps3',  label:'PS Cristal 3mm',         field:'op_ps3'  },
-  { key:'mt2',  label:'Metal/Inox 2mm',         field:'op_mt2'  },
+  { key:'ac3',  label:'Acrílico Cristal 3mm',  field:'op_ac3',  esp:3  },
+  { key:'ac5',  label:'Acrílico Cristal 5mm',  field:'op_ac5',  esp:5  },
+  { key:'ac8',  label:'Acrílico Leitoso 8mm',  field:'op_ac8',  esp:8  },
+  { key:'ac10', label:'Acrílico Espelho 10mm', field:'op_ac10', esp:10 },
+  { key:'ps3',  label:'PS Cristal 3mm',         field:'op_ps3',  esp:3  },
+  { key:'mt2',  label:'Metal/Inox 2mm',         field:'op_mt2',  esp:2  },
 ];
 let orcItemCount = 0;
 
@@ -4637,7 +4637,7 @@ function orcAddItem() {
     <td style="text-align:center;font-weight:700;color:var(--muted);width:22px">${orcItemCount}</td>
     <td><select id="oi_prod_${orcItemCount}" onchange="orcOnProdChange(this)">${prodOpts}</select></td>
     <td><input type="number" id="oi_qty_${orcItemCount}"  value="1" min="1" style="width:48px" oninput="orcRecalc()"></td>
-    <td><select id="oi_mat_${orcItemCount}" onchange="orcRecalc()">${matOpts}</select></td>
+    <td><select id="oi_mat_${orcItemCount}" onchange="orcMatChanged(${orcItemCount})">${matOpts}</select></td>
     <td><input type="number" id="oi_esp_${orcItemCount}"  value="3" style="width:42px" oninput="orcRecalc()"></td>
     <td><input type="number" id="oi_larg_${orcItemCount}" placeholder="cm" style="width:56px" oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
     <td><input type="number" id="oi_alt_${orcItemCount}"  placeholder="cm" style="width:56px" oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
@@ -4893,6 +4893,17 @@ function planFechar() {
   _planIdx = null;
 }
 
+function orcMatChanged(idx) {
+  var sel = document.getElementById('oi_mat_'+idx);
+  if (!sel) return;
+  var mObj = ORC_MATS.find(function(m){ return m.key===sel.value; });
+  if (mObj && mObj.esp) {
+    var espEl = document.getElementById('oi_esp_'+idx);
+    if (espEl) espEl.value = mObj.esp;
+  }
+  orcRecalc();
+}
+
 function planCalc() {
   if(_planIdx===null) return;
   var prodEl  = document.getElementById('oi_prod_'+_planIdx);
@@ -4904,7 +4915,8 @@ function planCalc() {
   var L = parseFloat(document.getElementById('planLarg')?.value)||0;
   var A = parseFloat(document.getElementById('planAlt')?.value)||0;
   var P = parseFloat(document.getElementById('planProf')?.value)||0;
-  var espMm = parseFloat(espEl ? espEl.value : 3)||3;
+  var mObjPlan = ORC_MATS.find(function(m){ return m.key===(matEl?matEl.value:'ac3'); });
+  var espMm = (mObjPlan && mObjPlan.esp) ? mObjPlan.esp : (parseFloat(espEl ? espEl.value : 3)||3);
   var e = espMm / 10; // convert mm → cm
 
   var tbody = document.getElementById('planPiecesBody');
@@ -10894,7 +10906,7 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
   }).join('');
 }
 
@@ -10930,6 +10942,24 @@ function usrSalvarPerms() {
   try{ localStorage.setItem(PERM_KEY, JSON.stringify(perms)); }catch(e){}
   showToast('Permissões salvas!','ok');
   usrRender();
+}
+
+function usrRedefinirSenha(idx) {
+  var users = usrLoadUsuarios();
+  var u = users[idx]; if(!u) return;
+  var novaSenha = prompt('Nova senha para "' + u.nome + '" (mínimo 4 caracteres):');
+  if(novaSenha === null) return; // cancelou
+  novaSenha = novaSenha.trim();
+  if(novaSenha.length < 4) { showToast('Senha muito curta — mínimo 4 caracteres','err'); return; }
+  users[idx].senha = novaSenha;
+  try{
+    localStorage.setItem(USR_KEY, JSON.stringify(users));
+    var cfg2=JSON.parse(localStorage.getItem('erp_config')||'{}');
+    cfg2._usuarios_bkp=users;
+    localStorage.setItem('erp_config',JSON.stringify(cfg2));
+  }catch(e){ showToast('Erro ao salvar','err'); return; }
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
+  showToast('Senha de "' + u.nome + '" redefinida!', 'ok');
 }
 
 function usrNovoOpen(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='flex'; }
@@ -11123,7 +11153,8 @@ function authLogin(){
     return false;
   });
   if(u){
-    ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
+    var pwdT = pwd.trim();
+    ok=(u.senha===pwd)||(u.senha===pwdT)||(secHash(pwd)===u.senha)||(secHash(pwdT)===u.senha);
     funcao=u.funcao; nome=u.nome;
   } else {
     // Nenhum usuário encontrado → tenta conta master
@@ -11152,7 +11183,7 @@ function authLogin(){
       secCheckLockout();
     } else {
       secSetLockout(lo);
-      errEl.textContent='❌ Usuário ou senha incorretos';
+      errEl.textContent='❌ E-mail ou senha incorretos — verifique se está usando o e-mail cadastrado';
       var warnEl=document.getElementById('authWarn'); if(warnEl) warnEl.textContent='⚠ '+lo.count+'/3 tentativas';
       if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
     }
@@ -12034,59 +12065,93 @@ function planDrawCanvas() {
   var layoutBox = document.getElementById('planLayoutBox');
   var legenda = document.getElementById('planLayoutLegenda');
   if (!canvas) return;
+
+  // ── Coletar peças ──────────────────────────────────────────────
   var allPieces = [];
   var sumBox = document.getElementById('planSumBox');
   if (sumBox && sumBox.dataset.pcs) {
     try {
-      var pcs = JSON.parse(sumBox.dataset.pcs);
-      pcs.forEach(function(p) {
-        for (var i = 0; i < p.qty; i++) {
-          allPieces.push({nome: p.nome, larg: p.larg, alt: p.alt, manual: false});
-        }
+      JSON.parse(sumBox.dataset.pcs).forEach(function(p) {
+        for (var i = 0; i < p.qty; i++)
+          allPieces.push({nome:p.nome, larg:p.larg, alt:p.alt, manual:false});
       });
     } catch(e) {}
   }
   planManualPieces.forEach(function(p) {
-    if (p.larg > 0 && p.alt > 0) {
-      for (var i = 0; i < (p.qty||1); i++) {
-        allPieces.push({nome: (p.nome||'Manual'), larg: p.larg, alt: p.alt, manual: true});
-      }
-    }
+    if (p.larg > 0 && p.alt > 0)
+      for (var i = 0; i < (p.qty||1); i++)
+        allPieces.push({nome:(p.nome||'Manual'), larg:p.larg, alt:p.alt, manual:true});
   });
   if (!allPieces.length) { if(layoutBox) layoutBox.style.display='none'; return; }
   if (layoutBox) layoutBox.style.display = '';
-  var SHEET_W = 200, SHEET_H = 100, SCALE = 2.8, PAD = 18;
+
+  // ── Configurações ───────────────────────────────────────────────
+  var SHEET_W=200, SHEET_H=100, SCALE=2.8, PAD=18, GAP=24;
+  var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#C4B5FD','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
+  var colorMap={}, colorIdx=0;
+  allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
+
+  // ── Packing multi-chapa ─────────────────────────────────────────
+  var sorted = allPieces.slice().sort(function(a,b){ return (b.alt-a.alt)||(b.larg-a.larg); });
+  var chapas = []; // array de arrays de {p, x, y}
+  var curChapa = [], curX=0, curY=0, rowH=0;
+
+  sorted.forEach(function(p) {
+    if (curX + p.larg > SHEET_W + 0.01) { curY += rowH; curX = 0; rowH = 0; }
+    if (curY + p.alt > SHEET_H + 0.01) {
+      // nova chapa
+      chapas.push(curChapa); curChapa = [];
+      curX = 0; curY = 0; rowH = 0;
+    }
+    curChapa.push({p:p, x:curX, y:curY});
+    curX += p.larg;
+    if (p.alt > rowH) rowH = p.alt;
+  });
+  if (curChapa.length) chapas.push(curChapa);
+
+  var numChapas = chapas.length;
   var canvW = Math.round(SHEET_W * SCALE) + PAD * 2;
-  var canvH = Math.round(SHEET_H * SCALE) + PAD * 2;
+  var canvH = PAD + numChapas * (Math.round(SHEET_H*SCALE) + GAP + 14) + PAD;
+
   canvas.width = canvW; canvas.height = canvH;
   canvas.style.maxWidth = '100%';
   var ctx = canvas.getContext('2d');
   ctx.fillStyle = '#e8eaed'; ctx.fillRect(0, 0, canvW, canvH);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(PAD, PAD, SHEET_W*SCALE, SHEET_H*SCALE);
-  ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(PAD, PAD, SHEET_W*SCALE, SHEET_H*SCALE);
-  ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
-  for (var gx=20; gx<SHEET_W; gx+=20) { ctx.beginPath(); ctx.moveTo(PAD+gx*SCALE,PAD); ctx.lineTo(PAD+gx*SCALE,PAD+SHEET_H*SCALE); ctx.stroke(); }
-  for (var gy=20; gy<SHEET_H; gy+=20) { ctx.beginPath(); ctx.moveTo(PAD,PAD+gy*SCALE); ctx.lineTo(PAD+SHEET_W*SCALE,PAD+gy*SCALE); ctx.stroke(); }
-  ctx.fillStyle='#888'; ctx.font='bold 9px sans-serif';
-  ctx.fillText('Chapa 200\xd7100 cm', PAD+4, PAD-5);
-  ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
-  [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), PAD-5); });
-  var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#C4B5FD','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
-  var colorMap={}, colorIdx=0;
-  allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
-  var sorted = allPieces.slice().sort(function(a,b){ return (b.alt-a.alt)||(b.larg-a.larg); });
-  var curX=0, curY=0, rowH=0, overflow=false;
-  sorted.forEach(function(p) {
-    if (curX+p.larg > SHEET_W+0.01) { curY+=rowH; curX=0; rowH=0; }
-    if (curY+p.alt > SHEET_H+0.01) { overflow=true; }
-    if (!overflow) {
-      var px=PAD+curX*SCALE, py=PAD+curY*SCALE, pw=p.larg*SCALE, ph=p.alt*SCALE;
+
+  // ── Desenhar cada chapa ─────────────────────────────────────────
+  function drawSheet(sheetIdx, pieces) {
+    var offY = PAD + sheetIdx * (Math.round(SHEET_H*SCALE) + GAP + 14);
+
+    // Fundo da chapa
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(PAD, offY, SHEET_W*SCALE, SHEET_H*SCALE);
+    ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(PAD, offY, SHEET_W*SCALE, SHEET_H*SCALE);
+
+    // Grade
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+    for (var gx=20; gx<SHEET_W; gx+=20) {
+      ctx.beginPath(); ctx.moveTo(PAD+gx*SCALE, offY); ctx.lineTo(PAD+gx*SCALE, offY+SHEET_H*SCALE); ctx.stroke();
+    }
+    for (var gy=20; gy<SHEET_H; gy+=20) {
+      ctx.beginPath(); ctx.moveTo(PAD, offY+gy*SCALE); ctx.lineTo(PAD+SHEET_W*SCALE, offY+gy*SCALE); ctx.stroke();
+    }
+
+    // Label da chapa
+    ctx.fillStyle = numChapas > 1 ? '#5B21B6' : '#888';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('Chapa ' + (sheetIdx+1) + (numChapas>1?' de '+numChapas:'') + ' — 200\xd7100 cm', PAD+4, offY-5);
+    ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
+    [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), offY-5+(numChapas>1?0:0)); });
+
+    // Peças
+    pieces.forEach(function(item) {
+      var p=item.p, px=PAD+item.x*SCALE, py=offY+item.y*SCALE, pw=p.larg*SCALE, ph=p.alt*SCALE;
       ctx.shadowColor='rgba(0,0,0,0.15)'; ctx.shadowBlur=3; ctx.shadowOffsetX=1; ctx.shadowOffsetY=1;
       ctx.fillStyle = p.manual ? '#FCD34D' : colorMap[p.nome];
-      ctx.globalAlpha=0.82; ctx.fillRect(px+1,py+1,pw-2,ph-2);
+      ctx.globalAlpha=0.85; ctx.fillRect(px+1,py+1,pw-2,ph-2);
       ctx.globalAlpha=1; ctx.shadowBlur=0; ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
-      ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=1; ctx.strokeRect(px+1,py+1,pw-2,ph-2);
+      ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=1; ctx.strokeRect(px+1,py+1,pw-2,ph-2);
       if (pw>22 && ph>14) {
         ctx.fillStyle='#111';
         ctx.font='bold '+Math.max(7,Math.min(10,ph/3))+'px sans-serif';
@@ -12096,20 +12161,24 @@ function planDrawCanvas() {
         if(ph>24){ ctx.font='7px sans-serif'; ctx.fillStyle='#333'; ctx.fillText(p.larg.toFixed(0)+'\xd7'+p.alt.toFixed(0)+' cm', px+pw/2, py+ph/2+8); }
         ctx.textAlign='left';
       }
-    }
-    curX+=p.larg; if(p.alt>rowH) rowH=p.alt;
-  });
-  if (overflow) {
-    ctx.fillStyle='rgba(239,68,68,0.12)'; ctx.fillRect(PAD,PAD,SHEET_W*SCALE,SHEET_H*SCALE);
-    ctx.fillStyle='#DC2626'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('⚠️  Pecas excedem 1 chapa — necessario mais de 1 chapa', PAD+SHEET_W*SCALE/2, PAD+SHEET_H*SCALE/2);
+    });
+  }
+
+  chapas.forEach(function(pieces, i){ drawSheet(i, pieces); });
+
+  // ── Aviso de múltiplas chapas ────────────────────────────────────
+  if (numChapas > 1) {
+    ctx.fillStyle='#7C3AED'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('⚠️ Distribu\xeddo em ' + numChapas + ' chapas de 200\xd7100 cm', canvW/2, canvH-6);
     ctx.textAlign='left';
   }
+
+  // ── Legenda ──────────────────────────────────────────────────────
   if (legenda) {
     var lg='';
     Object.keys(colorMap).forEach(function(nome){ lg+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--bg2);padding:2px 8px;border-radius:10px;border:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+colorMap[nome]+';flex-shrink:0"></span>'+nome+'</span>'; });
-    if(planManualPieces.length) lg+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--bg2);padding:2px 8px;border-radius:10px;border:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FCD34D;flex-shrink:0"></span>Pecas manuais</span>';
-    legenda.innerHTML=lg;
+    if(planManualPieces.filter(function(p){return p.larg>0&&p.alt>0;}).length) lg+='<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--bg2);padding:2px 8px;border-radius:10px;border:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#FCD34D;flex-shrink:0"></span>Peças manuais</span>';
+    legenda.innerHTML = lg;
   }
   if(sumBox) sumBox.dataset.planImg = canvas.toDataURL('image/png');
 }
