@@ -920,7 +920,7 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 7;
+  var loaded = 0, total = 8;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -943,6 +943,16 @@ function _cloudLoadAll() {
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
+    _cloudWatch("erp_usuarios", function(d){
+      if(d&&d.length){
+        var local=usrLoadUsuarios();
+        var merged=d.slice();
+        local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
+        try{ localStorage.setItem('erp_usuarios',JSON.stringify(merged)); }catch(e){}
+        try{ usrRender(); }catch(e){}
+        var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
+      }
+    });
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
@@ -951,6 +961,17 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ if(d){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
+  _cloudLoad("erp_usuarios", function(d){
+    if(d&&d.length){
+      // Mesclar: usuários da nuvem têm prioridade, mas preserva locais únicos
+      var local=usrLoadUsuarios();
+      var merged=d.slice();
+      local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
+      try{ localStorage.setItem('erp_usuarios',JSON.stringify(merged)); }catch(e){}
+      var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
+    }
+    done();
+  });
 }
 
 // Iniciar após login anônimo
@@ -983,10 +1004,14 @@ firebase.auth().signInAnonymously().then(function(){
           autocomplete="email">
       </div>
       <div class="auth-field">
-        <label>Senha</label>
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          Senha
+          <button type="button" onclick="var p=document.getElementById('authPwd');p.type=p.type==='password'?'text':'password';this.textContent=p.type==='password'?'👁 mostrar':'🔒 ocultar'" style="background:none;border:none;color:#9CA3AF;font-size:10px;cursor:pointer;padding:0">👁 mostrar</button>
+        </label>
         <input type="password" id="authPwd" placeholder="••••••••"
           onkeydown="if(event.key==='Enter')authLogin()" autocomplete="current-password">
       </div>
+      <div id="authSyncWarn" style="display:none;font-size:10px;color:#F59E0B;text-align:center;margin-bottom:6px;padding:5px 8px;background:rgba(245,158,11,.1);border-radius:6px">⏳ Sincronizando usuários da nuvem...</div>
       <div class="auth-err" id="authErr"></div>
       <div class="auth-warn" id="authWarn"></div>
       <button class="auth-btn" id="authBtn" onclick="authLogin()">Entrar no Sistema</button>
@@ -10932,6 +10957,11 @@ function usrSalvar() {
   }catch(e){ showToast('Erro ao salvar: '+e.message,'err'); return; }
   showToast('Usuário "'+nome+'" criado!','ok');
   if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
+  // Sincronizar usuários com a nuvem (sem senhas em texto puro — armazena hash)
+  if(typeof _cloudSave==='function' && _cloudReady){
+    var usersCloud = users.map(function(u){ return Object.assign({},u); });
+    _cloudSave('erp_usuarios', usersCloud);
+  }
   usrNovoClose();
   usrRender();
 }
@@ -10941,6 +10971,7 @@ function usrDel(idx) {
   var nome = users[idx]?users[idx].nome:'';
   users.splice(idx,1);
   try{ localStorage.setItem(USR_KEY, JSON.stringify(users)); }catch(e){}
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
   showToast('Usuário "'+nome+'" removido','warn');
   if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário removido: '+nome);
   usrRender();
@@ -11071,6 +11102,10 @@ function fbVoltarLogin(){
 // ── Login ─────────────────────────────────────────────────────────────────────
 function authLogin(){
   if(secCheckLockout()) return;
+  // Se Firebase ainda carregando e não há usuários locais, avisar
+  if(!_cloudReady && !usrLoadUsuarios().length){
+    var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='';
+  }
   var emailEl=document.getElementById('authEmail');
   var pwdEl  =document.getElementById('authPwd');
   var errEl  =document.getElementById('authErr');
