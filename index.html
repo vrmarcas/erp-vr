@@ -4890,20 +4890,24 @@ function planCalc() {
   var pieces = rec.pieces(L, A, P, e);
   var totalArea = 0, totalQty = 0;
 
-  pieces.forEach(function(pc) {
-    var lpc = Math.round(pc.larg*100)/100;
-    var apc = Math.round(pc.alt*100)/100;
-    var areaPc = lpc * apc * pc.qty;
+  // Inicializar array editável (preserva edições anteriores se recalcular)
+  _planEditPieces = pieces.map(function(pc) {
+    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100};
+  });
+
+  _planEditPieces.forEach(function(pc, pci) {
+    var areaPc = pc.larg * pc.alt * pc.qty;
     totalArea += areaPc;
     totalQty  += pc.qty;
+    var inp = 'style="width:52px;padding:2px 5px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg);color:var(--text);text-align:center"';
     var tr = document.createElement('tr');
+    tr.setAttribute('data-plan-auto','1');
     tr.innerHTML =
-      '<td><strong>' + pc.nome + '</strong></td>' +
-      '<td style="text-align:center">' + pc.qty + '×</td>' +
-      '<td class="area-td">' + lpc.toFixed(1) + '</td>' +
-      '<td class="area-td">' + apc.toFixed(1) + '</td>' +
-      '<td class="area-td" style="color:var(--brand-mid);font-weight:700">' +
-        (areaPc/10000).toFixed(4) + '</td>';
+      '<td><strong style="font-size:11px">' + pc.nome + '</strong></td>' +
+      '<td style="text-align:center"><input type="number" '+inp+' value="'+pc.qty+'" min="1" step="1" data-planf="qty" data-pci="'+pci+'" oninput="_planEditField(this)">×</td>' +
+      '<td class="area-td"><input type="number" '+inp+' value="'+pc.larg.toFixed(1)+'" min="0" step="0.1" data-planf="larg" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
+      '<td class="area-td"><input type="number" '+inp+' value="'+pc.alt.toFixed(1)+'" min="0" step="0.1" data-planf="alt" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
+      '<td class="area-td" id="planEditArea_'+pci+'" style="color:var(--brand-mid);font-weight:700">'+(areaPc/10000).toFixed(4)+'</td>';
     tbody.appendChild(tr);
   });
 
@@ -11382,6 +11386,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <input type="number" id="planProf" placeholder="ex: 30" oninput="planCalc()" min="0" step="0.1">
       </div>
     </div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-style:italic">✏️ As dimensões abaixo são editáveis — ajuste diretamente se precisar corrigir alguma peça.</div>
     <table class="plan-ptable">
       <thead><tr>
         <th>Peça</th><th style="text-align:center">Qtd</th>
@@ -12019,6 +12024,68 @@ function planExportPNG() {
   var a = document.createElement('a');
   a.href = dataURL; a.download = 'Planificacao_' + titulo.replace(/\s+/g,'_') + '.png'; a.click();
   showToast('PNG exportado com sucesso 📥','ok');
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+// ── Edição de peças auto-geradas ────────────────────────────────────
+var _planEditPieces = [];
+
+function _planEditField(input) {
+  var field = input.dataset.planf;
+  var pci   = parseInt(input.dataset.pci);
+  var val   = field === 'qty' ? (parseInt(input.value)||1) : (parseFloat(input.value)||0);
+  if (!_planEditPieces[pci]) return;
+  _planEditPieces[pci][field] = val;
+  // Atualizar célula de área da linha
+  var p = _planEditPieces[pci];
+  var aEl = document.getElementById('planEditArea_'+pci);
+  if (aEl) aEl.textContent = ((p.larg*p.alt*p.qty)/10000).toFixed(4);
+  _planRecompute();
+}
+
+function _planRecompute() {
+  var totalArea = 0, totalQty = 0;
+  _planEditPieces.forEach(function(p) {
+    totalArea += p.larg * p.alt * p.qty;
+    totalQty  += p.qty;
+  });
+  planManualPieces.forEach(function(p) {
+    if (p.larg>0 && p.alt>0) { totalArea += p.larg*p.alt*(p.qty||1); totalQty += (p.qty||1); }
+  });
+
+  var tfoot = document.getElementById('planPiecesFoot');
+  if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL</td>'
+    +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+totalQty+' peças</td>'
+    +'<td class="area-td" style="font-size:15px">'+(totalArea/10000).toFixed(4)+'</td></tr>';
+
+  var sumBox = document.getElementById('planSumBox');
+  if (!sumBox) return;
+  var matEl2 = _planIdx!==null ? document.getElementById('oi_mat_'+_planIdx) : null;
+  var matKey2= matEl2 ? matEl2.value : 'ac3';
+  var mObj2  = ORC_MATS.find(function(m){return m.key===matKey2;});
+  var priceM2= mObj2 ? (parseFloat(document.getElementById(mObj2.field)?.value)||100) : 100;
+  var custoMat2 = (totalArea/10000) * priceM2;
+  var _cfg2=(function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  var oh2=(_cfg2.overhead!=null?_cfg2.overhead:41.16)/100;
+  var vr2=(_cfg2.vrml!=null?_cfg2.vrml:20)/100;
+  var fac2=1-oh2-vr2; var venda2=fac2>0?custoMat2/fac2:0;
+  var mk2=((oh2+vr2)*100).toFixed(1);
+  var prop2=totalArea>0?(totalArea/20000*100).toFixed(1):'—';
+
+  var saEl=document.getElementById('planSumArea');     if(saEl) saEl.textContent=(totalArea/10000).toFixed(4)+' m²  ('+Math.round(totalArea)+' cm²)';
+  var spEl=document.getElementById('planSumPecas');    if(spEl) spEl.textContent=totalQty+' peças';
+  var prEl=document.getElementById('planSumProporcao');if(prEl) prEl.textContent='📄 Proporção da chapa usada: '+prop2+'%  ('+Math.round(totalArea)+' de 20000 cm²)';
+  var scEl=document.getElementById('planSumCusto');    if(scEl) scEl.textContent='💵 Custo do material ≈ R$ '+custoMat2.toFixed(2).replace('.',',');
+  var svEl=document.getElementById('planSumVenda');    if(svEl) svEl.textContent='💰 Preço de venda ≈ R$ '+venda2.toFixed(2).replace('.',',');
+  var sfEl=document.getElementById('planSumFormula');  if(sfEl) sfEl.textContent='Fórmula: R$'+custoMat2.toFixed(2)+' ÷ (1 − '+mk2+'%) = R$'+venda2.toFixed(2);
+
+  sumBox.dataset.totalArea = totalArea;
+  sumBox.dataset.totalQty  = totalQty;
+  sumBox.dataset.pcs = JSON.stringify(_planEditPieces);
+  sumBox.style.display='flex';
+  var btn2=document.getElementById('planAplicarBtn');
+  if(btn2){btn2.disabled=false;btn2.style.opacity='1';}
+  setTimeout(planDrawCanvas, 0);
 }
 // ────────────────────────────────────────────────────────────────────────────
 
