@@ -497,6 +497,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .kb-check-item:hover{background:#EDEBF8}
 .kb-check-item input[type=checkbox]{width:16px;height:16px;accent-color:var(--brand-mid);cursor:pointer;flex-shrink:0}
 .kb-check-item.done span{text-decoration:line-through;color:var(--muted)}
+.kb-check-del{margin-left:auto;padding:2px 6px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;border-radius:4px;opacity:0;transition:.1s;flex-shrink:0}
+.kb-check-item:hover .kb-check-del{opacity:1}
+/* OS Tabs */
+.kb-os-tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:12px}
+.kb-os-tab{padding:7px 14px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;border:none;background:none;border-bottom:2.5px solid transparent;margin-bottom:-2px;transition:.15s}
+.kb-os-tab.active{color:var(--brand-mid);border-bottom-color:var(--brand-mid)}
+/* Add checklist input */
+.kb-check-add{display:flex;gap:6px;margin-top:8px}
+.kb-check-add input{flex:1;padding:7px 10px;border:1.5px dashed var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)}
+.kb-check-add input:focus{outline:none;border-color:var(--brand-mid)}
+.kb-check-add button{padding:7px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer}
 .kb-pronto-btn{width:100%;padding:12px;background:#059669;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:7px}
 .kb-pronto-btn:hover{background:#047857}
 .kb-pronto-btn.done{background:#6B7280;cursor:default}
@@ -1629,13 +1640,20 @@ firebase.auth().signInAnonymously().then(function(){
         </div>
         <div class="kb-os-body">
           <div class="kb-os-grid" id="kbGrid"></div>
+          <!-- Tabs -->
+          <div class="kb-os-tabs">
+            <button class="kb-os-tab active" id="kbTabBtnProd" onclick="kbSwitchTab('prod')">📋 Produção</button>
+            <button class="kb-os-tab" id="kbTabBtnObs" onclick="kbSwitchTab('obs')">📝 Observações</button>
+          </div>
+          <!-- Tab: Produção -->
+          <div id="kbTabProd">
           <div>
             <div class="section-lbl">Checklist de Produção</div>
             <div class="kb-checklist" id="kbChecklist"></div>
-          </div>
-          <div id="kbObsWrap" style="display:none">
-            <div class="section-lbl">Observações</div>
-            <div id="kbObsTxt" style="background:var(--bg);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--text);line-height:1.6"></div>
+            <div class="kb-check-add">
+              <input type="text" id="kbCheckNewInput" placeholder="Novo item no checklist..." onkeydown="if(event.key==='Enter')kbCheckAddItem()">
+              <button onclick="kbCheckAddItem()">➕ Adicionar</button>
+            </div>
           </div>
           <!-- Sugestão de Prazo Inteligente -->
           <div id="kbPrazoSugBox" style="margin-bottom:12px;display:none"></div>
@@ -1733,6 +1751,13 @@ firebase.auth().signInAnonymously().then(function(){
                 </button>
               </div>
             </div>
+          </div>
+          </div><!-- /kbTabProd -->
+          <!-- Tab: Observações -->
+          <div id="kbTabObs" style="display:none">
+            <div class="section-lbl">📝 Observações da OS</div>
+            <textarea id="kbObsTextarea" rows="8" placeholder="Registre observações, anotações ou informações importantes sobre esta OS..." style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:13px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.65;font-family:inherit;box-sizing:border-box" oninput="kbSalvarObs()" onblur="kbSalvarObs()"></textarea>
+            <div style="font-size:10px;color:var(--muted);margin-top:5px;text-align:right" id="kbObsSavedLbl"></div>
           </div>
         </div>
       </div>
@@ -6259,16 +6284,17 @@ function kbOpen(id) {
   `;
 
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
-  document.getElementById('kbChecklist').innerHTML = os.checks.map((item, i) => `
-    <label class="kb-check-item${os._ck[i]?' done':''}" id="kbci-${i}" onclick="kbToggle(${i})">
-      <input type="checkbox" ${os._ck[i]?'checked':''} onclick="event.stopPropagation();kbToggle(${i})">
-      <span>${item}</span>
-    </label>
-  `).join('');
-
-  const obsW = document.getElementById('kbObsWrap');
-  if (os.obs) { obsW.style.display=''; document.getElementById('kbObsTxt').textContent = os.obs; }
-  else obsW.style.display = 'none';
+  kbRenderChecklist(os);
+  // Reset tabs to Produção
+  kbSwitchTab('prod');
+  // Populate obs textarea
+  var obsTA = document.getElementById('kbObsTextarea');
+  if (obsTA) { obsTA.value = os.obs || ''; }
+  var obsLbl = document.getElementById('kbObsSavedLbl');
+  if (obsLbl) obsLbl.textContent = '';
+  // Clear checklist new item input
+  var ckInput = document.getElementById('kbCheckNewInput');
+  if (ckInput) ckInput.value = '';
 
   // File link
   var linkInput = document.getElementById('kbFileLinkInput');
@@ -6682,10 +6708,85 @@ function kbPlanRemover() {
   showToast('Planificação removida','warn');
 }
 
+// ── KB_OS cloud save helper ───────────────────────────────────────────────────
+function kbSaveKbos() {
+  if(typeof _cloudSave==='function') {
+    var kbCopy={};
+    Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
+    _cloudSave('kb_os', kbCopy);
+  }
+}
+// ── OS Tabs ───────────────────────────────────────────────────────────────────
+function kbSwitchTab(tab) {
+  var tabProd = document.getElementById('kbTabProd');
+  var tabObs  = document.getElementById('kbTabObs');
+  var btnProd = document.getElementById('kbTabBtnProd');
+  var btnObs  = document.getElementById('kbTabBtnObs');
+  if (!tabProd || !tabObs) return;
+  if (tab === 'obs') {
+    tabProd.style.display = 'none'; tabObs.style.display = '';
+    if(btnProd) btnProd.classList.remove('active');
+    if(btnObs)  btnObs.classList.add('active');
+    var obsTA = document.getElementById('kbObsTextarea');
+    if(obsTA) setTimeout(function(){ obsTA.focus(); }, 80);
+  } else {
+    tabProd.style.display = ''; tabObs.style.display = 'none';
+    if(btnProd) btnProd.classList.add('active');
+    if(btnObs)  btnObs.classList.remove('active');
+  }
+}
+
+// ── Checklist render + add/delete ────────────────────────────────────────────
+function kbRenderChecklist(os) {
+  if (!os) return;
+  document.getElementById('kbChecklist').innerHTML = (os.checks||[]).map(function(item, i) {
+    var done = os._ck && os._ck[i];
+    return '<label class="kb-check-item'+(done?' done':'')+'" id="kbci-'+i+'" onclick="kbToggle('+i+')">'
+      + '<input type="checkbox"'+(done?' checked':'')+' onclick="event.stopPropagation();kbToggle('+i+')">'
+      + '<span>'+item+'</span>'
+      + '<button class="kb-check-del" onclick="event.stopPropagation();kbCheckDeleteItem('+i+')" title="Remover item">✕</button>'
+      + '</label>';
+  }).join('');
+}
+
+function kbCheckAddItem() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  var input = document.getElementById('kbCheckNewInput');
+  var txt = (input ? input.value : '').trim();
+  if (!txt) return;
+  os.checks = os.checks || [];
+  os._ck    = os._ck    || [];
+  os.checks.push(txt);
+  os._ck.push(false);
+  if (input) input.value = '';
+  kbRenderChecklist(os);
+  kbSaveKbos();
+}
+
+function kbCheckDeleteItem(i) {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  os.checks.splice(i, 1);
+  if (os._ck) os._ck.splice(i, 1);
+  kbRenderChecklist(os);
+  kbSaveKbos();
+}
+
+// ── Observação ────────────────────────────────────────────────────────────────
+var _kbObsTimer = null;
+function kbSalvarObs() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  var ta = document.getElementById('kbObsTextarea'); if (!ta) return;
+  os.obs = ta.value;
+  kbSaveKbos();
+  var lbl = document.getElementById('kbObsSavedLbl');
+  if (lbl) { lbl.textContent = '✓ Salvo'; clearTimeout(_kbObsTimer); _kbObsTimer = setTimeout(function(){ lbl.textContent=''; }, 2000); }
+}
+
 function kbToggle(i) {
   const os = KB_OS[_kbOsId]; if (!os) return;
   os._ck[i] = !os._ck[i];
   const item = document.getElementById('kbci-' + i);
+  if (!item) return;
   item.classList.toggle('done', os._ck[i]);
   item.querySelector('input').checked = os._ck[i];
 }
@@ -6913,9 +7014,7 @@ function kbMarcarPronto() {
   btn.className = 'kb-pronto-btn done';
   btn.textContent = '✓ OS Pronta';
 
-  document.getElementById('kbChecklist').innerHTML = os.checks.map(function(item,i){
-    return '<label class="kb-check-item done"><input type="checkbox" checked><span>'+item+'</span></label>';
-  }).join('');
+  kbRenderChecklist(os);
 
   // Mostrar bloco Avisar Cliente para Master
   var avisarBox = document.getElementById('kbAvisarClienteBox');
@@ -11881,6 +11980,23 @@ function authApplySession(){
 function secApplyPerms(funcao){
   if(funcao==='master'||funcao==='admin') return;
   var perms=usrLoadPerms();
+  // Hard deny per role — cannot be overridden by saved permissions
+  var HARD_DENY = {
+    comercial: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
+    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1},
+    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1}
+  };
+  var denied = HARD_DENY[funcao]||{};
+  function getPermForMod(mod, page){
+    // Hard deny takes priority
+    if(denied[page]||denied[mod]) return false;
+    // Then check PERM_DEFAULT as ceiling
+    var def = PERM_DEFAULT[mod];
+    if(def && def[funcao]===false) return false;
+    if(!def || def[funcao]===undefined) return false;
+    // Finally stored perm
+    return !!(perms[mod]&&perms[mod][funcao]);
+  }
   function applyToItem(item, pageExtractor){
     var m=(item.getAttribute('onclick')||'').match(pageExtractor);
     if(!m) return;
@@ -11890,9 +12006,8 @@ function secApplyPerms(funcao){
     if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
     if(page==='os-list') mod='os-list';
     if(page==='relatorios') mod='financeiro';
-    var hasPerm=(perms[mod]&&perms[mod][funcao]);
+    var hasPerm=getPermForMod(mod, page);
     item.style.display=hasPerm?'':'none';
-    // also hide preceding section label in mobile drawer if all items hidden
   }
   // Desktop sidebar
   document.querySelectorAll('.sb-item[onclick]').forEach(function(item){
@@ -11920,10 +12035,9 @@ function secApplyPerms(funcao){
   var mbnMap = {'mbn-dashboard':'dashboard','mbn-kanban':'kanban','mbn-orcamento':'orcamento','mbn-estoque':'estoque'};
   Object.keys(mbnMap).forEach(function(btnId){
     var page=mbnMap[btnId];
-    var mod=page==='orcamento'?'orcamento':page;
-    var hasPerm=(perms[mod]&&perms[mod][funcao]);
+    var mod=page;
     var el=document.getElementById(btnId);
-    if(el) el.style.display=hasPerm?'':'none';
+    if(el) el.style.display=getPermForMod(mod,page)?'':'none';
   });
 }
 
@@ -13753,118 +13867,4 @@ function painelRender() {
     <!-- Mensagem editável -->
     <textarea id="crmMsgTexto" rows="5" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.6;box-sizing:border-box"></textarea>
     <!-- Agendar follow-up -->
-    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);border-radius:8px">
-      <span style="font-size:11px;color:var(--muted);white-space:nowrap">📅 Agendar follow-up:</span>
-      <input type="date" id="crmMsgDataFollowUp" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">
-      <button onclick="crmMsgAgendarFollowUp()" style="padding:5px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Salvar</button>
-    </div>
-    <!-- Ações -->
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button onclick="crmMsgEnviarWA()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer">💬 Enviar pelo WhatsApp</button>
-      <button onclick="crmMsgFechar()" style="padding:11px 16px;border:1.5px solid var(--border);background:transparent;color:var(--muted);border-radius:9px;font-size:12px;cursor:pointer">Cancelar</button>
-    </div>
-  </div>
-</div>
-<!-- ══ MOBILE BOTTOM NAV ══ -->
-<div id="mobileOverlayBg" onclick="mobileDrawerClose()"></div>
-<div id="mobileBottomNav">
-  <div class="mbn-items">
-    <div class="mbn-item on" id="mbn-dashboard" onclick="mobileNav('dashboard','mbn-dashboard')">
-      <div class="mbn-ico">📊</div><span>Início</span>
-    </div>
-    <div class="mbn-item" id="mbn-kanban" onclick="mobileNav('kanban','mbn-kanban')">
-      <div class="mbn-ico">📋</div><span>Kanban</span>
-      <span class="mbn-badge" id="mbnBadgeKanban" style="display:none"></span>
-    </div>
-    <div class="mbn-item" id="mbn-orcamento" onclick="mobileNav('orcamento','mbn-orcamento')">
-      <div class="mbn-ico">💰</div><span>Orçar</span>
-    </div>
-    <div class="mbn-item" id="mbn-estoque" onclick="mobileNav('estoque','mbn-estoque')">
-      <div class="mbn-ico">📦</div><span>Estoque</span>
-      <span class="mbn-badge" id="mbnBadgeEstoque" style="display:none"></span>
-    </div>
-    <div class="mbn-item" id="mbn-mais" onclick="mobileDrawerToggle()">
-      <div class="mbn-ico">☰</div><span>Mais</span>
-    </div>
-  </div>
-</div>
-
-<!-- ══ MOBILE DRAWER (Mais) ══ -->
-<div id="mobileDrawer">
-  <div class="mdrw-handle"></div>
-  <div class="mdrw-section">Produção</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
-  <div class="mdrw-section">Comercial</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
-  <div class="mdrw-section">Financeiro</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
-  <div class="mdrw-section">Configurações</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('config-usr')"><span class="mdrw-ico">👥</span> Usuários</div>
-  <div class="mdrw-item" onclick="mobileNavDrawer('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
-  <div style="height:16px"></div>
-</div>
-
-<script>
-// ── MOBILE NAV ─────────────────────────────────────────────
-var _mbnCurrent = 'mbn-dashboard';
-var _mbnPageMap = {
-  'mbn-dashboard':'dashboard','mbn-kanban':'kanban',
-  'mbn-orcamento':'orcamento','mbn-estoque':'estoque'
-};
-
-function mobileNav(page, btnId) {
-  // Update bottom nav highlight
-  document.querySelectorAll('.mbn-item').forEach(function(el){ el.classList.remove('on'); });
-  var btn = document.getElementById(btnId);
-  if(btn) btn.classList.add('on');
-  _mbnCurrent = btnId;
-  // Use existing nav() function
-  var sidebarEl = null;
-  document.querySelectorAll('.sb-item').forEach(function(el){
-    if(el.getAttribute('onclick') && el.getAttribute('onclick').indexOf("'"+page+"'")>=0) sidebarEl=el;
-  });
-  if(sidebarEl) { nav(page, sidebarEl); }
-  else { nav(page, null); }
-}
-
-function mobileNavDrawer(page) {
-  mobileDrawerClose();
-  // Highlight "Mais" button
-  document.querySelectorAll('.mbn-item').forEach(function(el){ el.classList.remove('on'); });
-  var maisBtn = document.getElementById('mbn-mais');
-  if(maisBtn) maisBtn.classList.add('on');
-  _mbnCurrent = 'mbn-mais';
-  var sidebarEl = null;
-  document.querySelectorAll('.sb-item').forEach(function(el){
-    if(el.getAttribute('onclick') && el.getAttribute('onclick').indexOf("'"+page+"'")>=0) sidebarEl=el;
-  });
-  if(sidebarEl) { nav(page, sidebarEl); }
-  else { nav(page, null); }
-}
-
-function mobileDrawerToggle() {
-  var d = document.getElementById('mobileDrawer');
-  var bg = document.getElementById('mobileOverlayBg');
-  if(!d) return;
-  if(d.classList.contains('open')) { mobileDrawerClose(); }
-  else { d.classList.add('open'); if(bg) bg.classList.add('open'); }
-}
-
-function mobileDrawerClose() {
-  var d = document.getElementById('mobileDrawer');
-  var bg = document.getElementById('mobileOverlayBg');
-  if(d) d.classList.remove('open');
-  if(bg) bg.classList.remove('open');
-}
-
-// Sync badges from sidebar to bottom nav
-function syncMobileBadges() {
-  var kbSide = document.getElementById('sbBadgeKanban');
-  var kbMob  = docume
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);
