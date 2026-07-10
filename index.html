@@ -920,7 +920,7 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 8;
+  var loaded = 0, total = 9;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -953,6 +953,16 @@ function _cloudLoadAll() {
         var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
       }
     });
+    _cloudWatch("erp_config", function(d){
+      if(d && typeof d==='object'){
+        try{ localStorage.setItem(CFG_KEY, JSON.stringify(d)); }catch(e){}
+        _cfgData = d;
+        // Se a aba de config estiver visível, re-renderizar
+        var pg=document.getElementById('cfgPg1');
+        if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
+        if(typeof showToast==='function') showToast('⚙️ Configurações atualizadas pela nuvem', 'ok');
+      }
+    });
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
@@ -969,6 +979,16 @@ function _cloudLoadAll() {
       local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
       try{ localStorage.setItem('erp_usuarios',JSON.stringify(merged)); }catch(e){}
       var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
+    }
+    done();
+  });
+  _cloudLoad("erp_config", function(d){
+    if(d && typeof d==='object'){
+      // Mesclar: nuvem tem prioridade, mas preserva chaves locais ausentes
+      var local = cfgLoad();
+      var merged = Object.assign({}, local, d);
+      try{ localStorage.setItem(CFG_KEY, JSON.stringify(merged)); }catch(e){}
+      _cfgData = merged;
     }
     done();
   });
@@ -10496,6 +10516,7 @@ function cfgLoad() {
 }
 function cfgSave(d) {
   try { localStorage.setItem(CFG_KEY, JSON.stringify(d)); } catch(e){}
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_config', d);
 }
 
 var BANK_KEY = 'erp_bank_config';
