@@ -10974,57 +10974,62 @@ function orcSalvarOrcamento() {
 }
 
 // ── Autocomplete de cliente no orçamento ──────────────────────────────────
+var _orcCliMatches = [];
+
 function orcClienteAutocomplete(q) {
   var drop = document.getElementById('orcCliDropdown');
   if(!drop) return;
   q = (q||'').trim().toLowerCase();
-  if(q.length < 1) { drop.style.display='none'; return; }
-  var matches = CLIENTES_DATA.filter(function(c){
+  if(q.length < 1) { drop.style.display='none'; _orcCliMatches=[]; return; }
+  var qd = q.replace(/\D/g,'');
+  _orcCliMatches = CLIENTES_DATA.filter(function(c){
     return (c.nome||'').toLowerCase().includes(q) ||
-           (c.tel||'').replace(/\D/g,'').includes(q.replace(/\D/g,'')) ||
-           (c.doc||'').replace(/\D/g,'').includes(q.replace(/\D/g,''));
+           (qd.length>=4 && (c.tel||'').replace(/\D/g,'').includes(qd)) ||
+           (qd.length>=4 && (c.doc||'').replace(/\D/g,'').includes(qd));
   }).slice(0, 8);
-  if(!matches.length) { drop.style.display='none'; return; }
-  drop.innerHTML = matches.map(function(c){
-    var badge = c.marca==='vr'
-      ? '<span style="font-size:9px;background:#EDE9FE;color:#5B21B6;border-radius:6px;padding:1px 5px;font-weight:700">VR</span>'
-      : '<span style="font-size:9px;background:#FCE7F3;color:#9D174D;border-radius:6px;padding:1px 5px;font-weight:700">VT</span>';
+  if(!_orcCliMatches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = '';
+  _orcCliMatches.forEach(function(c, idx) {
+    var isVR = c.marca==='vr';
+    var row = document.createElement('div');
+    row.style.cssText = 'padding:9px 13px;cursor:pointer;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px';
+    row.addEventListener('mouseover', function(){ row.style.background='#f3f4f6'; });
+    row.addEventListener('mouseout',  function(){ row.style.background=''; });
+    row.addEventListener('mousedown', function(e){ e.preventDefault(); orcClienteSelecionar(idx); });
+    var av = document.createElement('div');
+    av.style.cssText = 'width:30px;height:30px;border-radius:50%;background:#ede9fe;color:#5b21b6;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+    av.textContent = (c.nome||'?').charAt(0).toUpperCase();
+    var info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+    var badge = '<span style="font-size:9px;background:' + (isVR?'#ede9fe':'#fce7f3') + ';color:' + (isVR?'#5b21b6':'#9d174d') + ';border-radius:6px;padding:1px 5px;font-weight:700">' + (isVR?'VR':'VT') + '</span>';
     var sub = [c.tipo, c.cidade, c.tel].filter(Boolean).join(' · ');
-    return '<div onclick="orcClienteSelecionar(''+encodeURIComponent(JSON.stringify({nome:c.nome,doc:c.doc||'',email:c.email||'',tel:c.tel||'',cidade:c.cidade||'',marca:c.marca||'vr',tipo:c.tipo||'PJ'}))+'')" '
-      + 'style="padding:9px 13px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;transition:background .1s" '
-      + 'onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''">'
-      + '<div style="width:30px;height:30px;border-radius:50%;background:var(--brand-light);color:var(--brand-mid);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0).toUpperCase()+'</div>'
-      + '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--text)">'+c.nome+' '+badge+'</div>'
-      + '<div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>'
-      + '</div>';
-  }).join('');
+    info.innerHTML = '<div style="font-size:13px;font-weight:700">' + c.nome + ' ' + badge + '</div>'
+      + '<div style="font-size:10px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + sub + '</div>';
+    row.appendChild(av);
+    row.appendChild(info);
+    drop.appendChild(row);
+  });
   drop.style.display = 'block';
 }
 
-function orcClienteSelecionar(encoded) {
-  try {
-    var c = JSON.parse(decodeURIComponent(encoded));
-    var set = function(id, val){ var el=document.getElementById(id); if(el) el.value=val||''; };
-    set('orcClientNome',  c.nome);
-    set('orcClientDoc',   c.doc);
-    set('orcClientEmail', c.email);
-    set('orcClientTel',   c.tel);
-    set('orcClientCidade',c.cidade);
-    // Ajusta empresa selector
-    var emp = document.getElementById('orcEmpresaSel');
-    if(emp && c.marca) { emp.value = c.marca; orcEmpresaChange(); }
-    // Ajusta tipo
-    var tipo = document.getElementById('orcTipoClienteSel');
-    if(tipo && c.tipo) { tipo.value = c.tipo==='PJ'?'pj':'pf'; orcEmpresaChange(); }
-    // Fecha dropdown
-    var drop=document.getElementById('orcCliDropdown');
-    if(drop) drop.style.display='none';
-    // Atualiza resumo
-    if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
-    showToast('✅ Dados de '+c.nome+' preenchidos automaticamente!','ok');
-  } catch(e) { console.warn('orcClienteSelecionar error',e); }
+function orcClienteSelecionar(idx) {
+  var c = _orcCliMatches[idx];
+  if(!c) return;
+  var set = function(id, val){ var el=document.getElementById(id); if(el) el.value=val||''; };
+  set('orcClientNome',   c.nome);
+  set('orcClientDoc',    c.doc||'');
+  set('orcClientEmail',  c.email||'');
+  set('orcClientTel',    c.tel||'');
+  set('orcClientCidade', c.cidade||'');
+  var emp = document.getElementById('orcEmpresaSel');
+  if(emp && c.marca) { emp.value = c.marca; orcEmpresaChange(); }
+  var tipo = document.getElementById('orcTipoClienteSel');
+  if(tipo && c.tipo) { tipo.value = c.tipo==='PJ' ? 'pj' : 'pf'; orcEmpresaChange(); }
+  var drop = document.getElementById('orcCliDropdown');
+  if(drop) drop.style.display='none';
+  if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
+  showToast('Dados de ' + c.nome + ' preenchidos automaticamente!','ok');
 }
-
 // ── Auto-salva cliente no cadastro ao enviar orçamento ─────────────────────
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
