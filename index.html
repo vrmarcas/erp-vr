@@ -1685,8 +1685,8 @@ firebase.auth().signInAnonymously().then(function(){
               <table class="item-table" id="orcItemTable">
                 <thead><tr>
                   <th>#</th><th style="min-width:110px">Produto</th><th>Qtd</th>
-                  <th style="min-width:100px">Material</th><th>Prof.</th>
-                  <th>Larg cm</th><th>Alt cm</th><th>Detalhes</th>
+                  <th style="min-width:100px">Material</th>
+                  <th>Detalhes</th>
                   <th>Custo</th><th>Unit.</th><th>Total</th><th></th>
                 </tr></thead>
                 <tbody id="orcItemBody"></tbody>
@@ -4689,9 +4689,9 @@ function orcAddItem() {
     <td><select id="oi_prod_${orcItemCount}" onchange="orcOnProdChange(this)">${prodOpts}</select></td>
     <td><input type="number" id="oi_qty_${orcItemCount}"  value="1" min="1" style="width:48px" oninput="orcRecalc()"></td>
     <td><select id="oi_mat_${orcItemCount}" onchange="orcMatChanged(${orcItemCount})">${matOpts}</select></td>
-    <td><input type="number" id="oi_esp_${orcItemCount}"  value="3" style="width:42px" oninput="orcRecalc()"></td>
-    <td><input type="number" id="oi_larg_${orcItemCount}" placeholder="cm" style="width:56px" oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
-    <td><input type="number" id="oi_alt_${orcItemCount}"  placeholder="cm" style="width:56px" oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
+    <td style="display:none"><input type="number" id="oi_esp_${orcItemCount}"  value="3" oninput="orcRecalc()"></td>
+    <td style="display:none"><input type="number" id="oi_larg_${orcItemCount}" oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
+    <td style="display:none"><input type="number" id="oi_alt_${orcItemCount}"  oninput="orcRecalc();orcCheckRetalho(${orcItemCount})"></td>
     <td><input type="text"   id="oi_det_${orcItemCount}"  placeholder="polido..." style="min-width:60px"></td>
     <td style="font-size:11px;font-weight:700;color:var(--muted);text-align:right;white-space:nowrap" id="oi_custo_${orcItemCount}">—</td>
     <td style="font-size:11px;font-weight:700;color:var(--brand-mid);text-align:right;white-space:nowrap" id="oi_unit_${orcItemCount}">—</td>
