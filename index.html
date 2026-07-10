@@ -1024,9 +1024,23 @@ function _cloudLoadAll() {
   });
   _cloudLoad("erp_config", function(d){
     if(d && typeof d==='object'){
-      // Mesclar: nuvem tem prioridade, mas preserva chaves locais ausentes
       var local = cfgLoad();
       var merged = Object.assign({}, local, d);
+      // Deep merge: materiais — preservar comp/larg/custo/esp do local se cloud não tem
+      if(Array.isArray(d.materiais) && Array.isArray(local.materiais)) {
+        merged.materiais = d.materiais.map(function(cm){
+          var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
+          return lm ? Object.assign({}, lm, cm) : cm;
+        });
+        local.materiais.forEach(function(lm){
+          if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
+        });
+      }
+      // Recalcular rsm2 para todos
+      (merged.materiais||[]).forEach(function(r){
+        var area=(r.comp||0)*(r.larg||0)/10000;
+        if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
+      });
       try{ localStorage.setItem(CFG_KEY, JSON.stringify(merged)); }catch(e){}
       _cfgData = merged;
     }
@@ -3242,7 +3256,7 @@ firebase.auth().signInAnonymously().then(function(){
               <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="cfgAddRow('matTable','mat')">+ Adicionar</button>
             </div>
             <table class="table" id="matTable">
-              <thead><tr><th>Material / Produto</th><th>Unidade</th><th>Comp. (cm)</th><th>Larg. (cm)</th><th>Custo chapa (R$)</th><th>R$/m²</th><th>Obs.</th><th></th></tr></thead>
+              <thead><tr><th>Material / Produto</th><th>Unidade</th><th style="white-space:nowrap">Esp. (mm)</th><th>Comp. (cm)</th><th>Larg. (cm)</th><th>Custo chapa (R$)</th><th>R$/m²</th><th>Obs.</th><th></th></tr></thead>
               <tbody id="matBody"></tbody>
             </table>
             <div style="text-align:right;margin-top:12px">
@@ -4095,7 +4109,7 @@ firebase.auth().signInAnonymously().then(function(){
 <div class="gen-overlay" id="stockNovoItemOverlay" onclick="if(event.target===this)stockCloseNovoItem()">
   <div class="gen-modal">
     <div class="gen-modal-hdr">
-      <div class="gen-modal-title">➕ Novo Material no Estoque</div>
+      <div class="gen-modal-title" id="stockNovoItemTitle">➕ Novo Material no Estoque</div>
       <button class="gen-close" onclick="stockCloseNovoItem()">✕</button>
     </div>
     <div class="gen-modal-body">
@@ -4127,7 +4141,7 @@ firebase.auth().signInAnonymously().then(function(){
         <label>Máximo (capacidade)</label>
         <input type="number" id="sniMax" placeholder="Ex: 50" min="1">
       </div>
-      <button class="gen-submit" onclick="stockSalvarNovoItem()">✅ Adicionar ao Estoque</button>
+      <button class="gen-submit" id="stockNovoItemBtn" onclick="stockSalvarNovoItem()">✅ Adicionar ao Estoque</button>
     </div>
   </div>
 </div>
@@ -4161,7 +4175,8 @@ firebase.auth().signInAnonymously().then(function(){
         </div>
         <div class="fg" style="margin-top:10px">
           <label>Quantidade de chapas</label>
-          <input type="number" id="kbProdQty" value="1" min="1" step="1" oninput="kbProdCheckStock()">
+          <input type="number" id="kbProdQty" value="1" min="0.1" step="0.25" oninput="kbProdCheckStock()">
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">Use 0,5 para meia chapa, 0,25 para um quarto etc. Sobras viram retalho automaticamente.</div>
         </div>
         <div id="kbProdStockInfo" style="margin-top:8px;font-size:12px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px;display:none"></div>
       </div>
@@ -6620,19 +6635,23 @@ function kbProdSetTipo(tipo) {
 
 function kbProdCheckStock() {
   var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
-  var qty    = parseInt((document.getElementById('kbProdQty')||{}).value)||1;
+  var qty    = parseFloat((document.getElementById('kbProdQty')||{}).value)||1;
   var si     = document.getElementById('kbProdStockInfo');
   if (!si) return;
   if (!matKey || !STOCK[matKey]) { si.style.display='none'; return; }
   var s = STOCK[matKey];
-  var ok = s.qty >= qty;
+  var chapasInteiras = Math.ceil(qty); // chapas que serão retiradas do estoque
+  var ok = s.qty >= chapasInteiras;
+  var sobra = chapasInteiras - qty; // fração que sobra (ex: 0.5 de uma chapa de 1)
   si.style.display = '';
   si.style.background = ok ? '#F0FDF4' : '#FEF2F2';
   si.style.color = ok ? '#065F46' : '#991B1B';
   si.style.border = '1px solid ' + (ok ? '#86EFAC' : '#FECACA');
-  si.textContent = ok
-    ? '✅ Estoque disponível: ' + s.qty + ' chapas. Restarão ' + (s.qty - qty) + ' após a baixa.'
-    : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapas disponíveis.';
+  var msg = ok
+    ? '✅ Estoque: ' + s.qty + ' chapas disponíveis. Serão retiradas ' + chapasInteiras + '. Restará ' + (s.qty - chapasInteiras) + '.'
+    : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapas.';
+  if (ok && sobra > 0.01) msg += ' Sobra de ' + sobra.toFixed(2) + ' chapa → será salva como retalho.';
+  si.textContent = msg;
 }
 
 function kbConfirmarProd() {
@@ -6654,26 +6673,33 @@ function kbConfirmarProd() {
     os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
   } else {
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
-    var qty    = parseInt((document.getElementById('kbProdQty')||{}).value)||1;
+    var qty    = parseFloat((document.getElementById('kbProdQty')||{}).value)||1;
+    var chapasRetirar = Math.ceil(qty); // chapas inteiras a retirar do estoque
+    var sobra = +(chapasRetirar - qty).toFixed(4); // fração que sobra
     if (!matKey) { showToast('Selecione o material', 'warn'); return; }
     if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
-    if (STOCK[matKey].qty < qty) { showToast('Estoque insuficiente (' + STOCK[matKey].qty + ' disponíveis)', 'warn'); return; }
+    if (STOCK[matKey].qty < chapasRetirar) { showToast('Estoque insuficiente (' + STOCK[matKey].qty + ' chapas disponíveis)', 'warn'); return; }
     // Se editando, restaurar baixa anterior
     if (_kbProdEditMode && os.matProd && !os.matProd.isRetalho && os.matProd.matKey) {
       var prevKey = os.matProd.matKey;
-      var prevQty = os.matProd.qty || 1;
+      var prevChapas = os.matProd.chapasRetiradas || os.matProd.qty || 1;
       if (STOCK[prevKey]) {
-        STOCK[prevKey].qty += prevQty;
+        STOCK[prevKey].qty += prevChapas;
         stockUpdateDisplay(prevKey);
-        _stockLog('entrada', prevKey, prevQty, os.num, 'Correção — material trocado na OS');
+        _stockLog('entrada', prevKey, prevChapas, os.num, 'Correção — material trocado na OS');
       }
     }
-    // Fazer baixa
-    STOCK[matKey].qty -= qty;
+    // Fazer baixa (chapas inteiras)
+    STOCK[matKey].qty -= chapasRetirar;
     stockUpdateDisplay(matKey);
     stockSaveData();
-    _stockLog('saida', matKey, qty, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:''));
-    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' — ' + STOCK[matKey].cor : ''), qty: qty, isRetalho: false, obs: obs };
+    _stockLog('saida', matKey, chapasRetirar, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''));
+    // Sobra → adicionar como retalho automaticamente
+    if (sobra > 0.01 && typeof retalhoAdicionar === 'function') {
+      var _matLabel = STOCK[matKey].label + (STOCK[matKey].cor?' — '+STOCK[matKey].cor:'');
+      retalhoAdicionar(matKey, 'sobra ' + sobra.toFixed(2) + ' chapa — OS #' + (os.num||os.id));
+    }
+    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' — ' + STOCK[matKey].cor : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
   }
 
   // Se não estava em produção ainda, mudar status
@@ -6694,7 +6720,15 @@ function kbConfirmarProd() {
   var mq = document.getElementById('kbMatProdQtyLabel');
   if (mb) mb.style.display = '';
   if (ml) ml.textContent = os.matProd.label;
-  if (mq) mq.textContent = os.matProd.isRetalho ? '✂️ Usando retalho' : os.matProd.qty + ' chapa(s)' + (obs?' · '+obs:'');
+  if (mq) {
+    if (os.matProd.isRetalho) {
+      mq.textContent = '✂️ Usando retalho';
+    } else {
+      var _qtylabel = os.matProd.qty === 1 ? '1 chapa' : os.matProd.qty + ' chapas';
+      if (os.matProd.qty < 1 || os.matProd.qty !== Math.floor(os.matProd.qty)) _qtylabel = os.matProd.qty + ' chapa(s)';
+      mq.textContent = _qtylabel + (obs?' · '+obs:'');
+    }
+  }
 
   kbCloseProd();
   renderOsTable();
@@ -8705,7 +8739,8 @@ function stockRenderItems() {
       + '</div>'
       + '<div class="stock-qty" style="color:' + col + '" id="sqty-' + key + '">' + (low ? s.qty + ' ⚠' : s.qty) + '</div>'
       + '<div class="stock-prog"><div class="prog"><div class="prog-fill" id="sprog-' + key + '" style="width:' + pct + '%;background:' + col + '"></div></div></div>'
-      + '<button onclick="stockExcluirItem(&quot;' + key + '&quot;)" title="Remover material" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0 4px;margin-left:4px">🗑</button>'
+      + '<button onclick="stockEditarItem(&quot;' + key + '&quot;)" title="Editar" style="background:none;border:none;cursor:pointer;color:var(--brand-mid);font-size:13px;padding:0 4px">✏️</button>'
+      + '<button onclick="stockExcluirItem(&quot;' + key + '&quot;)" title="Remover" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0 4px">🗑</button>'
       + '</div>';
   }).join('');
   // Rebuild material selects
@@ -8734,13 +8769,28 @@ function stockExcluirItem(key) {
   showToast('Material removido do estoque', 'info');
 }
 
+var _stockEditKey = null; // chave sendo editada (null = novo)
+
 function stockOpenNovoItem() {
+  _stockEditKey = null;
   ['sniNome','sniCor','sniEsp','sniMin','sniObs'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   var qEl=document.getElementById('sniQty'); if(qEl) qEl.value='0';
   var mxEl=document.getElementById('sniMax'); if(mxEl) mxEl.value='50';
+  var tEl=document.getElementById('stockNovoItemTitle'); if(tEl) tEl.textContent='➕ Novo Material no Estoque';
+  var bEl=document.getElementById('stockNovoItemBtn'); if(bEl) bEl.textContent='✅ Adicionar ao Estoque';
   document.getElementById('stockNovoItemOverlay').classList.add('open');
 }
-function stockCloseNovoItem() { document.getElementById('stockNovoItemOverlay').classList.remove('open'); }
+function stockEditarItem(key) {
+  var s = STOCK[key]; if(!s) return;
+  _stockEditKey = key;
+  var f = function(id, val){ var el=document.getElementById(id); if(el) el.value=val!==undefined&&val!==null?val:''; };
+  f('sniNome', s.label); f('sniCor', s.cor||''); f('sniEsp', s.esp||'');
+  f('sniQty', s.qty||0); f('sniMin', s.min||5); f('sniMax', s.max||50);
+  var tEl=document.getElementById('stockNovoItemTitle'); if(tEl) tEl.textContent='✏️ Editar Material';
+  var bEl=document.getElementById('stockNovoItemBtn'); if(bEl) bEl.textContent='💾 Salvar Alterações';
+  document.getElementById('stockNovoItemOverlay').classList.add('open');
+}
+function stockCloseNovoItem() { document.getElementById('stockNovoItemOverlay').classList.remove('open'); _stockEditKey = null; }
 function stockSalvarNovoItem() {
   var nome = (document.getElementById('sniNome')||{}).value||'';
   var cor  = (document.getElementById('sniCor') ||{}).value||'';
@@ -8749,16 +8799,21 @@ function stockSalvarNovoItem() {
   var min  = parseInt((document.getElementById('sniMin')||{}).value)||5;
   var max  = parseInt((document.getElementById('sniMax')||{}).value)||50;
   if (!nome.trim()) { showToast('Informe o nome do material', 'warn'); return; }
-  // Gerar chave única
-  var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
-  var key = baseKey;
-  var n = 1;
-  while (STOCK[key]) { key = baseKey + '_' + (n++); }
-  STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
+  if (_stockEditKey) {
+    // Editar item existente — preservar a chave
+    STOCK[_stockEditKey] = Object.assign(STOCK[_stockEditKey]||{}, { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max });
+    showToast('Material atualizado!', 'ok');
+  } else {
+    // Novo item — gerar chave única
+    var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
+    var key = baseKey; var n = 1;
+    while (STOCK[key]) { key = baseKey + '_' + (n++); }
+    STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
+    showToast('Material "' + nome + '" adicionado ao estoque!', 'ok');
+  }
   stockSaveData();
   stockRenderItems();
   stockCloseNovoItem();
-  showToast('Material "' + nome + '" adicionado ao estoque!', 'ok');
   syncSidebarBadges();
 }
 
@@ -11161,7 +11216,9 @@ function cfgRenderTables() {
   Object.keys(mkIds).forEach(function(k){ var el=document.getElementById(mkIds[k]); if(el&&mk[k]!=null) el.value=mk[k]; });
   // Materiais
   var mb=document.getElementById('matBody'); if(mb){ mb.innerHTML='';
-    (d.materiais||[]).forEach(function(r,i){ mb.insertAdjacentHTML('beforeend', cfgRowMat(i,r)); }); }
+    (d.materiais||[]).forEach(function(r,i){ mb.insertAdjacentHTML('beforeend', cfgRowMat(i,r)); });
+    (d.materiais||[]).forEach(function(r,i){ cfgCalcM2(i); });
+  }
   // Máquinas
   var qb=document.getElementById('maqBody'); if(qb){ qb.innerHTML='';
     (d.maquinas||[]).forEach(function(r,i){ qb.insertAdjacentHTML('beforeend', cfgRowMaq(i,r)); }); }
