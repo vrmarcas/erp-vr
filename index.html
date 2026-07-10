@@ -10728,6 +10728,8 @@ function cfgRowMat(i,r){
   var comp=r.comp||0,larg=r.larg||0,custo=r.custo||0;
   var area=comp*larg/10000;
   var m2=(area>0&&custo>0)?(custo/area).toFixed(2):'';
+  // Sincronizar preço no mapa global também
+  if(m2){var prices=_matPricesGet();var nome=(r.nome||'').toLowerCase().trim();var keyMap={'acrílico 2mm':'ac2','acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico 10mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2'};var k=keyMap[nome];if(k){prices[k]=parseFloat(m2);localStorage.setItem(MAT_PRICE_KEY,JSON.stringify(prices));}}
   return '<tr id="matR'+i+'">'
     +'<td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mat\','+i+',\'nome\',this.value)"></td>'
     +'<td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mat\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option><option'+(r.unidade==='ml'?' selected':'')+'>ml</option><option'+(r.unidade==='kg'?' selected':'')+'>kg</option><option'+(r.unidade==='m'?' selected':'')+'>m</option></select></td>'
@@ -10797,6 +10799,12 @@ function cfgSalvar() {
   if(!_cfgData.markup) _cfgData.markup={};
   Object.keys(mkIds).forEach(function(k){ var el=document.getElementById(mkIds[k]); if(el) _cfgData.markup[k]=parseFloat(el.value)||0; });
   cfgSave(_cfgData);
+  // Recalcular R$/m² de todas as linhas antes de re-renderizar
+  (_cfgData.materiais||[]).forEach(function(row,i){
+    var area=(row.comp||0)*(row.larg||0)/10000;
+    if(area>0&&(row.custo||0)>0) row.rsm2=row.custo/area;
+  });
+  cfgRenderTables();
   showToast('Configurações salvas!','ok');
 }
 
