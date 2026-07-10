@@ -963,6 +963,27 @@ function _cloudLoadAll() {
         if(typeof showToast==='function') showToast('⚙️ Configurações atualizadas pela nuvem', 'ok');
       }
     });
+    _cloudWatch("erp_fornecedores", function(d){
+      if(d&&Array.isArray(d)){ try{ localStorage.setItem(FORN_KEY,JSON.stringify(d)); }catch(e){} try{ fornRender(); }catch(e){} }
+    });
+    _cloudWatch("erp_plan_produtos", function(d){
+      if(d&&Array.isArray(d)){ try{ localStorage.setItem(PLAN_PROD_KEY,JSON.stringify(d)); }catch(e){} try{ cfgRenderProdutos(); }catch(e){} }
+    });
+    _cloudWatch("erp_client_history", function(d){
+      if(d&&typeof d==='object') try{ localStorage.setItem(CLIENT_HIST_KEY,JSON.stringify(d)); }catch(e){}
+    });
+    _cloudWatch("erp_bank_config", function(d){
+      if(d&&typeof d==='object') try{ localStorage.setItem(BANK_KEY,JSON.stringify(d)); }catch(e){}
+    });
+    _cloudWatch("erp_posvendas", function(d){
+      if(d&&typeof d==='object') try{ localStorage.setItem(POSV_KEY,JSON.stringify(d)); }catch(e){}
+    });
+    _cloudWatch("erp_orc_produtos", function(d){
+      if(d&&Array.isArray(d)){ ORC_PRODUTOS=d; try{ localStorage.setItem(ORC_PROD_KEY,JSON.stringify(d)); }catch(e){} }
+    });
+    _cloudWatch("erp_mach_presets", function(d){
+      if(d&&Array.isArray(d)) try{ localStorage.setItem(MACH_PRESET_KEY,JSON.stringify(d)); }catch(e){}
+    });
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
@@ -4652,7 +4673,12 @@ function orcAddItem() {
   const tr = document.createElement('tr');
   tr.id = 'oir_'+orcItemCount; tr.dataset.idx = orcItemCount;
   const prodOpts = ORC_PRODUTOS.map(p=>`<option>${p}</option>`).join('');
-  const matOpts  = ORC_MATS.map(m=>`<option value="${m.key}">${m.label}</option>`).join('');
+  // Gerar opções de material dinamicamente a partir da configuração + ORC_MATS fallback
+  var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d.materiais||[]).filter(function(m){ return m.nome&&m.nome!=='Novo material'; }); }catch(e){ return []; } })();
+  var _matOptsCfg = _cfgMats.length
+    ? _cfgMats.map(function(m,i){ return '<option value="cfg_'+i+'" data-rsm2="'+(m.rsm2||(m.comp&&m.larg&&m.custo?(m.custo/(m.comp*m.larg/10000)):0)).toFixed(2)+'" data-esp="'+(m.esp||3)+'">'+m.nome+'</option>'; }).join('')
+    : ORC_MATS.map(function(m){ return '<option value="'+m.key+'">'+m.label+'</option>'; }).join('');
+  const matOpts = _matOptsCfg;
   tr.innerHTML = `
     <td style="text-align:center;font-weight:700;color:var(--muted);width:22px">${orcItemCount}</td>
     <td><select id="oi_prod_${orcItemCount}" onchange="orcOnProdChange(this)">${prodOpts}</select></td>
@@ -4913,13 +4939,48 @@ function planFechar() {
   _planIdx = null;
 }
 
+// ── Helper: preço do material por m² (ORC_MATS ou config dinâmico) ──────────
+function _matGetRsm2(matKey, idx) {
+  if(matKey && matKey.indexOf('cfg_') === 0) {
+    // Material da Config Orçamento
+    var _selEl = idx!=null ? document.getElementById('oi_mat_'+idx) : null;
+    var _stored = _selEl ? parseFloat(_selEl.dataset.rsm2||'0') : 0;
+    if(_stored > 0) return _stored;
+    // Recalcular do cfgLoad
+    try {
+      var _mats = cfgLoad().materiais || [];
+      var _mi = parseInt(matKey.replace('cfg_',''));
+      var _mr = _mats[_mi];
+      if(_mr) {
+        var _area = (_mr.comp||0)*(_mr.larg||0)/10000;
+        return _area > 0 && _mr.custo > 0 ? _mr.custo/_area : (_mr.custo||100);
+      }
+    } catch(e) {}
+    return 100;
+  }
+  // Material ORC_MATS padrão
+  var mObj = ORC_MATS.find(function(m){return m.key===matKey;});
+  if(!mObj) return 100;
+  var el = document.getElementById(mObj.field);
+  return el ? (parseFloat(el.value)||100) : 100;
+}
+
 function orcMatChanged(idx) {
   var sel = document.getElementById('oi_mat_'+idx);
   if (!sel) return;
-  var mObj = ORC_MATS.find(function(m){ return m.key===sel.value; });
-  if (mObj && mObj.esp) {
-    var espEl = document.getElementById('oi_esp_'+idx);
-    if (espEl) espEl.value = mObj.esp;
+  var opt = sel.options[sel.selectedIndex];
+  var espEl = document.getElementById('oi_esp_'+idx);
+  if (sel.value.indexOf('cfg_') === 0) {
+    // Material da configuração — pegar esp e rsm2 do data attribute
+    var esp = parseFloat(opt.dataset.esp)||3;
+    var rsm2 = parseFloat(opt.dataset.rsm2)||0;
+    if (espEl) espEl.value = esp;
+    // Guardar rsm2 no select para uso no orcRecalc
+    sel.dataset.rsm2 = rsm2;
+  } else {
+    var mObj = ORC_MATS.find(function(m){ return m.key===sel.value; });
+    if (mObj && mObj.esp && espEl) espEl.value = mObj.esp;
+    sel.dataset.rsm2 = '';
   }
   orcRecalc();
 }
@@ -4988,7 +5049,7 @@ function planCalc() {
   // summary box
   var matKey  = matEl ? matEl.value : 'ac3';
   var mObj    = ORC_MATS.find(function(m){return m.key===matKey;});
-  var priceM2 = mObj ? (parseFloat(document.getElementById(mObj.field)?.value)||100) : 100;
+  var priceM2 = _matGetRsm2(matKey, _planIdx);
   var custoMat = (totalArea/10000) * priceM2;
 
   // Selling price using the correct formula: venda = custo / (1 - overhead - vrml)
@@ -5128,8 +5189,7 @@ function orcRecalc() {
     const larg = parseFloat(document.getElementById('oi_larg_'+idx)?.value)||0;
     const alt  = parseFloat(document.getElementById('oi_alt_'+idx)?.value)||0;
     const matKey = document.getElementById('oi_mat_'+idx)?.value||'ac3';
-    const mat = ORC_MATS.find(function(m){return m.key===matKey;})||ORC_MATS[0];
-    const priceM2 = parseFloat(document.getElementById(mat.field)?.value)||100;
+    const priceM2 = _matGetRsm2(matKey, idx);
     const planArea = parseFloat(row.dataset.planArea)||0;
     const useArea  = planArea > 0 ? planArea : (larg*alt);
     const matCost = (useArea/10000) * priceM2 * qty;
@@ -12259,7 +12319,7 @@ function _planRecompute() {
   var matEl2 = _planIdx!==null ? document.getElementById('oi_mat_'+_planIdx) : null;
   var matKey2= matEl2 ? matEl2.value : 'ac3';
   var mObj2  = ORC_MATS.find(function(m){return m.key===matKey2;});
-  var priceM2= mObj2 ? (parseFloat(document.getElementById(mObj2.field)?.value)||100) : 100;
+  var priceM2= _matGetRsm2(matKey2, _planIdx);
   var custoMat2 = (totalArea/10000) * priceM2;
   var _cfg2=(function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
   var oh2=(_cfg2.overhead!=null?_cfg2.overhead:41.16)/100;
