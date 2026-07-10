@@ -10779,7 +10779,7 @@ var MODULOS = [
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, comercial: ['dashboard','kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['dashboard','kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['dashboard','kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['dashboard','kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){
@@ -10797,8 +10797,8 @@ function usrLoadUsuarios(){
 }
 function usrLoadPerms(){ try{ return JSON.parse(localStorage.getItem(PERM_KEY))||JSON.parse(JSON.stringify(PERM_DEFAULT)); }catch(e){ return JSON.parse(JSON.stringify(PERM_DEFAULT)); } }
 
-var FUNCAO_LABEL = { master:'👑 Master', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
-var FUNCAO_COLOR = { master:'#5B21B6', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
+var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
+var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
 
 function usrRender() {
   var users = usrLoadUsuarios();
@@ -11076,7 +11076,7 @@ function authApplySession(){
 }
 
 function secApplyPerms(funcao){
-  if(funcao==='master') return;
+  if(funcao==='master'||funcao==='admin') return;
   var perms=usrLoadPerms();
   var sbItems=document.querySelectorAll('.sb-item[onclick]');
   sbItems.forEach(function(item){
