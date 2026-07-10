@@ -2357,6 +2357,11 @@ firebase.auth().signInAnonymously().then(function(){
             <option value="recusado">Recusado</option>
             <option value="expirado">Expirado</option>
           </select>
+          <select id="orcEnvFiltroNF" onchange="orcEnviadosRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px">
+            <option value="">🧾 Todas (NF)</option>
+            <option value="sim">🧾 Com NF solicitada</option>
+            <option value="nao">Sem NF</option>
+          </select>
         </div>
         <span style="font-size:11px;color:var(--muted)" id="orcEnvTotal"></span>
       </div>
@@ -3496,21 +3501,57 @@ firebase.auth().signInAnonymously().then(function(){
             </div>
           </div>
 
+        </div>
+
+        <!-- ── ABA 4: MÃO DE OBRA ── -->
+        <div id="cfgPg4" class="cfg-pg" style="display:none">
+          <div class="card">
+            <div class="card-h">
+              <div class="card-h-left">🧑‍🔧 Mão de Obra & Serviços</div>
+              <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="cfgAddRow('mobTable','mob')">+ Adicionar</button>
+            </div>
+            <table class="table" id="mobTable">
+              <thead><tr><th>Serviço</th><th>Unidade</th><th>Valor (R$)</th><th>Obs.</th><th></th></tr></thead>
+              <tbody id="mobBody"></tbody>
+            </table>
+            <div style="text-align:right;margin-top:12px">
+              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── ABA 5: MARKUP ── -->
+        <div id="cfgPg5" class="cfg-pg" style="display:none">
+          <div class="card">
+            <div class="card-h"><div class="card-h-left">📈 Markup por Categoria</div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+              <div class="fg"><label>Markup Geral padrão (%)</label><input type="number" id="cfgMkGeral" step="1" min="0" max="500" placeholder="Ex: 100"></div>
+              <div class="fg"><label>Markup Adesivos / Impressão (%)</label><input type="number" id="cfgMkAdesivo" step="1" min="0" max="500" placeholder="Ex: 120"></div>
+              <div class="fg"><label>Markup Placas / ACM (%)</label><input type="number" id="cfgMkPlaca" step="1" min="0" max="500" placeholder="Ex: 90"></div>
+              <div class="fg"><label>Markup Instalação (%)</label><input type="number" id="cfgMkInstalacao" step="1" min="0" max="500" placeholder="Ex: 150"></div>
+              <div class="fg"><label>Markup Projetos / Arte (%)</label><input type="number" id="cfgMkArte" step="1" min="0" max="500" placeholder="Ex: 200"></div>
+              <div class="fg"><label>Markup Mão de Obra (%)</label><input type="number" id="cfgMkMob" step="1" min="0" max="500" placeholder="Ex: 100"></div>
+            </div>
+            <div style="text-align:right;margin-top:14px">
+              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
+            </div>
+          </div>
+
           <!-- ── Calculadora de Markup ── -->
           <div class="card" style="margin-top:18px">
             <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div><button class="topbar-btn" style="font-size:11px" onclick="mkPopularFromConfig()">🔄 Puxar do ERP</button></div>
-            <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Informe o custo e os fatores para calcular o preço de venda automaticamente.</p>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Informe o custo e os fatores para calcular o preço de venda automaticamente. Clique em "Puxar do ERP" para preencher com os parâmetros salvos.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div class="fg">
                 <label>Custo Unitário (R$)</label>
                 <input type="number" id="mkCalcCusto" step="0.01" min="0" placeholder="Ex: 10,00" oninput="mkCalc()">
               </div>
               <div class="fg">
-                <label>DGA — Desp. Gerais e Adm. (%)</label>
-                <input type="number" id="mkCalcDGA" step="0.1" min="0" max="100" value="39" oninput="mkCalc()">
+                <label>DGA — Overhead / Custos fixos (%)</label>
+                <input type="number" id="mkCalcDGA" step="0.1" min="0" max="100" value="15" oninput="mkCalc()">
               </div>
               <div class="fg">
-                <label>Comissões de Vendedores (%)</label>
+                <label>Comissão de Vendedores (%)</label>
                 <input type="number" id="mkCalcCOM" step="0.1" min="0" max="100" value="0" oninput="mkCalc()">
               </div>
               <div class="fg">
@@ -3548,41 +3589,6 @@ firebase.auth().signInAnonymously().then(function(){
                 <div><div style="opacity:.7">Impostos</div><span id="mkIMPval">R$ 0,00</span></div>
                 <div><div style="opacity:.7">Margem Lucro</div><span id="mkMLDval">R$ 0,00</span></div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── ABA 4: MÃO DE OBRA ── -->
-        <div id="cfgPg4" class="cfg-pg" style="display:none">
-          <div class="card">
-            <div class="card-h">
-              <div class="card-h-left">🧑‍🔧 Mão de Obra & Serviços</div>
-              <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="cfgAddRow('mobTable','mob')">+ Adicionar</button>
-            </div>
-            <table class="table" id="mobTable">
-              <thead><tr><th>Serviço</th><th>Unidade</th><th>Valor (R$)</th><th>Obs.</th><th></th></tr></thead>
-              <tbody id="mobBody"></tbody>
-            </table>
-            <div style="text-align:right;margin-top:12px">
-              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── ABA 5: MARKUP ── -->
-        <div id="cfgPg5" class="cfg-pg" style="display:none">
-          <div class="card">
-            <div class="card-h"><div class="card-h-left">📈 Markup por Categoria</div></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-              <div class="fg"><label>Markup Geral padrão (%)</label><input type="number" id="cfgMkGeral" step="1" min="0" max="500" placeholder="Ex: 100"></div>
-              <div class="fg"><label>Markup Adesivos / Impressão (%)</label><input type="number" id="cfgMkAdesivo" step="1" min="0" max="500" placeholder="Ex: 120"></div>
-              <div class="fg"><label>Markup Placas / ACM (%)</label><input type="number" id="cfgMkPlaca" step="1" min="0" max="500" placeholder="Ex: 90"></div>
-              <div class="fg"><label>Markup Instalação (%)</label><input type="number" id="cfgMkInstalacao" step="1" min="0" max="500" placeholder="Ex: 150"></div>
-              <div class="fg"><label>Markup Projetos / Arte (%)</label><input type="number" id="cfgMkArte" step="1" min="0" max="500" placeholder="Ex: 200"></div>
-              <div class="fg"><label>Markup Mão de Obra (%)</label><input type="number" id="cfgMkMob" step="1" min="0" max="500" placeholder="Ex: 100"></div>
-            </div>
-            <div style="text-align:right;margin-top:14px">
-              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
           </div>
         </div>
@@ -10916,10 +10922,12 @@ function orcEnviadosRender() {
   var lista  = orcGetEnviados();
   var q      = (document.getElementById('orcEnvSearch')||{}).value||'';
   var fs     = (document.getElementById('orcEnvFiltroStatus')||{}).value||'';
+  var fnf    = (document.getElementById('orcEnvFiltroNF')||{}).value||'';
   var filtered = lista.filter(function(o){
     var tOk = !q || (o.cliente+o.num+o.produto).toLowerCase().includes(q.toLowerCase());
     var sOk = !fs || o.status===fs;
-    return tOk&&sOk;
+    var nfOk = !fnf || (fnf==='sim' ? !!o.nfSolicitada : !o.nfSolicitada);
+    return tOk&&sOk&&nfOk;
   });
   var tot = document.getElementById('orcEnvTotal');
   if(tot) tot.textContent = filtered.length+' orçamento(s)';
@@ -10949,7 +10957,7 @@ function orcEnviadosRender() {
     return '<tr>'
       +'<td><strong>#'+o.num+'</strong></td>'
       +'<td>'+o.cliente+'</td>'
-      +'<td style="font-size:11px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+o.produto+extraHtml+'</td>'
+      +'<td style="font-size:11px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+o.produto+(o.nfSolicitada?'<span style="margin-left:5px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;border-radius:6px;padding:1px 5px;font-size:9px;font-weight:700">🧾 NF</span>':'')+extraHtml+'</td>'
       +'<td>'+marcaHtml+'</td>'
       +'<td style="text-align:right;font-weight:600;color:#059669">'+valHtml+'</td>'
       +'<td style="font-size:10px;color:var(--muted)">'+o.dataSalvo+'</td>'
