@@ -11945,6 +11945,14 @@ function authLogin(){
     authApplySession();
     secStartInactivityTimer();
     showToast('Bem-vindo, '+nome+'!','ok');
+    // Redirecionar cargo comercial para área comercial (não dashboard principal)
+    if(funcao==='comercial'){
+      var sbCom=null;
+      document.querySelectorAll('.sb-item').forEach(function(el){
+        if((el.getAttribute('onclick')||'').indexOf("'comercial'")>=0) sbCom=el;
+      });
+      if(sbCom) nav('comercial',sbCom); else nav('comercial',null);
+    }
   } else {
     var lo=secGetLockout();
     lo.count=(lo.count||0)+1;
@@ -11982,7 +11990,7 @@ function secApplyPerms(funcao){
   var perms=usrLoadPerms();
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
-    comercial: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
+    comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
     producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1},
     financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1}
   };
@@ -13865,6 +13873,4 @@ function painelRender() {
       <button class="crm-msg-tpl-btn"    id="crmMsgTpl_entrega"   onclick="crmMsgSelecionarTemplate('entrega')">📦 Entrega</button>
     </div>
     <!-- Mensagem editável -->
-    <textarea id="crmMsgTexto" rows="5" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.6;box-sizing:border-box"></textarea>
-    <!-- Agendar follow-up -->
-    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);
+    <texta
