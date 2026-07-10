@@ -932,7 +932,7 @@ function _cloudLoadAll() {
     try{ stockRenderHistorico(); }catch(e){}
     try{ renderClientes(); }catch(e){}
     try{ orcEnviadosRender(); }catch(e){}
-    if(typeof showToast==="function") showToast("☁️ Dados sincronizados com a nuvem!", "ok");
+    // Sync silencioso — sem notificação
     var cd=document.getElementById("cloudDot"), ct=document.getElementById("cloudTxt");
     if(cd){ cd.style.background="#4ADE80"; cd.style.animation="painelPulse 3s infinite"; }
     if(ct){ ct.textContent="nuvem ativa"; ct.style.color="#059669"; }
@@ -956,12 +956,30 @@ function _cloudLoadAll() {
     });
     _cloudWatch("erp_config", function(d){
       if(d && typeof d==='object'){
-        try{ localStorage.setItem(CFG_KEY, JSON.stringify(d)); }catch(e){}
-        _cfgData = d;
-        // Se a aba de config estiver visível, re-renderizar
+        // Mesclar profundo: preserva comp/larg/custo/esp/rsm2 dos materiais locais
+        var local = cfgLoad();
+        var merged = Object.assign({}, local, d);
+        // Mesclar materiais por nome — preservar campos de dimensão do local se cloud não tem
+        if(Array.isArray(d.materiais) && Array.isArray(local.materiais)) {
+          merged.materiais = d.materiais.map(function(cm){
+            var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
+            if(lm) return Object.assign({}, lm, cm); // local tem prioridade para campos ausentes no cloud
+            return cm;
+          });
+          // Adicionar itens locais que não existem no cloud
+          local.materiais.forEach(function(lm){
+            if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
+          });
+        }
+        // Recalcular rsm2 para todos
+        (merged.materiais||[]).forEach(function(r){
+          var area=(r.comp||0)*(r.larg||0)/10000;
+          if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
+        });
+        try{ localStorage.setItem(CFG_KEY, JSON.stringify(merged)); }catch(e){}
+        _cfgData = merged;
         var pg=document.getElementById('cfgPg1');
         if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
-        if(typeof showToast==='function') showToast('⚙️ Configurações atualizadas pela nuvem', 'ok');
       }
     });
     _cloudWatch("erp_fornecedores", function(d){
@@ -11155,7 +11173,7 @@ function cfgRenderTables() {
 function cfgRowMat(i,r){
   var comp=r.comp||0,larg=r.larg||0,custo=r.custo||0;
   var area=comp*larg/10000;
-  var m2=(area>0&&custo>0)?(custo/area).toFixed(2):'';
+  var m2=(area>0&&custo>0)?(custo/area).toFixed(2):(r.rsm2?(+r.rsm2).toFixed(2):'');
   var espDef=r.esp||(function(){ var mm=String(r.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
   // Sincronizar preço no mapa global também
   if(m2){var prices=_matPricesGet();var nome=(r.nome||'').toLowerCase().trim();var keyMap={'acrílico 2mm':'ac2','acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico 10mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2'};var k=keyMap[nome];if(k){prices[k]=parseFloat(m2);localStorage.setItem(MAT_PRICE_KEY,JSON.stringify(prices));}}
@@ -11233,6 +11251,8 @@ function cfgSalvar() {
   (_cfgData.materiais||[]).forEach(function(row,i){
     var area=(row.comp||0)*(row.larg||0)/10000;
     if(area>0&&(row.custo||0)>0) row.rsm2=row.custo/area;
+    // Garantir que esp também é salvo da detecção automática se não preenchido
+    if(!row.esp){var mm=String(row.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i);if(mm)row.esp=parseFloat(mm[1]);}
   });
   cfgRenderTables();
   showToast('Configurações salvas!','ok');
