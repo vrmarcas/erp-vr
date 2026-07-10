@@ -928,6 +928,7 @@ function _cloudLoadAll() {
     // UI refresh
     try{ finRefreshAll(); }catch(e){}
     try{ retalhoRender(); }catch(e){}
+    try{ stockRenderItems(); }catch(e){}
     try{ stockRenderHistorico(); }catch(e){}
     try{ renderClientes(); }catch(e){}
     try{ orcEnviadosRender(); }catch(e){}
@@ -1514,6 +1515,21 @@ firebase.auth().signInAnonymously().then(function(){
               <button id="kbFileLinkBtn" onclick="kbOpenLink()" style="padding:7px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap" title="Abrir link">↗ Abrir</button>
             </div>
             <div style="font-size:10px;color:var(--muted);margin-top:3px">Google Drive, Dropbox, WeTransfer, OneDrive...</div>
+          </div>
+          <!-- Botão Iniciar Produção (visível quando status=iniciada) -->
+          <div id="kbIniciarProdBox" style="display:none;margin-bottom:10px">
+            <button onclick="kbIniciarProd()" style="width:100%;padding:11px;background:linear-gradient(90deg,#D97706,#B45309);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+              🔧 Iniciar Produção
+            </button>
+          </div>
+          <!-- Exibição do material selecionado para produção -->
+          <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">📦 Material em Produção</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div id="kbMatProdLabel" style="font-size:13px;font-weight:700;color:#78350F">—</div>
+              <button onclick="kbEditarMatProd()" style="padding:5px 10px;background:transparent;border:1.5px solid #D97706;color:#D97706;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar</button>
+            </div>
+            <div id="kbMatProdQtyLabel" style="font-size:11px;color:#92400E;margin-top:3px"></div>
           </div>
           <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
           <!-- Bloco Avisar Cliente — só visível para Master quando OS está pronta -->
@@ -2535,42 +2551,15 @@ firebase.auth().signInAnonymously().then(function(){
       </div>
       <div class="g2">
         <div class="card">
-          <div class="card-h"><div class="card-h-left">📦 Estoque de Placas</div><button class="topbar-btn" onclick="stockOpenEntrada()">+ Entrada</button></div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#059669"></div>
-            <div style="flex:1"><div class="stock-name">Acrílico Cristal 3mm</div><div class="stock-spec">Padrão 2,44×1,22m · Ambas marcas</div></div>
-            <div class="stock-qty" style="color:#059669" id="sqty-ac3">42</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" id="sprog-ac3" style="width:84%;background:#059669"></div></div></div>
+          <div class="card-h">
+            <div class="card-h-left">📦 Estoque de Placas</div>
+            <div style="display:flex;gap:6px">
+              <button class="topbar-btn" onclick="stockOpenNovoItem()" style="background:var(--brand-mid);color:#fff;border:none">+ Novo Material</button>
+              <button class="topbar-btn" onclick="stockOpenEntrada()">+ Entrada</button>
+            </div>
           </div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#DC2626"></div>
-            <div style="flex:1"><div class="stock-name">Acrílico Leitoso 5mm</div><div class="stock-spec">Padrão 2,44×1,22m · Ambas marcas</div></div>
-            <div class="stock-qty" style="color:#DC2626" id="sqty-ac8">4 ⚠</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" id="sprog-ac8" style="width:8%;background:#DC2626"></div></div></div>
-          </div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#DC2626"></div>
-            <div style="flex:1"><div class="stock-name">Acrílico Espelho 3mm</div><div class="stock-spec">Padrão 1,22×1,22m · Vitre</div></div>
-            <div class="stock-qty" style="color:#DC2626">2 ⚠</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" style="width:4%;background:#DC2626"></div></div></div>
-          </div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#D97706"></div>
-            <div style="flex:1"><div class="stock-name">PS Cristal 3mm</div><div class="stock-spec">Padrão 2,44×1,22m · VR Marcas</div></div>
-            <div class="stock-qty" style="color:#D97706" id="sqty-ps3">11</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" id="sprog-ps3" style="width:22%;background:#D97706"></div></div></div>
-          </div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#059669"></div>
-            <div style="flex:1"><div class="stock-name">Chapa Aço Inox 2mm</div><div class="stock-spec">Padrão 2,00×1,00m · VR Marcas</div></div>
-            <div class="stock-qty" style="color:#059669">18</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" style="width:60%;background:#059669"></div></div></div>
-          </div>
-          <div class="stock-item">
-            <div class="stock-alert" style="background:#059669"></div>
-            <div style="flex:1"><div class="stock-name">ACM 3mm</div><div class="stock-spec">Padrão 3,00×1,22m · VR Marcas</div></div>
-            <div class="stock-qty" style="color:#059669">25</div>
-            <div class="stock-prog"><div class="prog"><div class="prog-fill" style="width:50%;background:#059669"></div></div></div>
+          <div id="stockItemsList" style="margin-top:4px">
+            <div style="color:var(--muted);font-size:12px;padding:8px 0;text-align:center">Carregando...</div>
           </div>
         </div>
 
@@ -2582,12 +2571,7 @@ firebase.auth().signInAnonymously().then(function(){
             </div>
             <div class="form-group"><label>Material</label>
               <select id="stSaidaMat" onchange="stockSaidaToggleRetalho()">
-                <option value="ac3">Acrílico Cristal 3mm</option>
-                <option value="ac8">Acrílico Leitoso 5mm</option>
-                <option value="ac10">Acrílico Espelho 3mm</option>
-                <option value="ps3">PS Cristal 3mm</option>
-                <option value="mt2">Chapa Aço Inox 2mm</option>
-                <option value="acm">ACM 3mm</option>
+                <option value="">Carregando...</option>
               </select>
             </div>
             <div class="form-group"><label>Quantidade utilizada <span style="font-size:10px;color:var(--muted)">(use 0.5 para meia placa)</span></label>
@@ -2629,12 +2613,7 @@ firebase.auth().signInAnonymously().then(function(){
             <div class="form-group" style="margin:0">
               <label>Material</label>
               <select id="retalhoFormMat" style="border:1.5px solid #C4B5FD">
-                <option value="ac3">Acrílico Cristal 3mm</option>
-                <option value="ac8">Acrílico Leitoso 5mm</option>
-                <option value="ac10">Acrílico Espelho 3mm</option>
-                <option value="ps3">PS Cristal 3mm</option>
-                <option value="mt2">Chapa Aço Inox 2mm</option>
-                <option value="acm">ACM 3mm</option>
+                <option value="">Carregando...</option>
               </select>
             </div>
             <div class="form-group" style="margin:0">
@@ -2662,12 +2641,6 @@ firebase.auth().signInAnonymously().then(function(){
           <div style="display:flex;gap:6px;align-items:center;margin-left:auto">
             <select id="stockHistFiltMat" onchange="stockRenderHistorico()" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)">
               <option value="">Todos os materiais</option>
-              <option value="ac3">Acrílico Cristal 3mm</option>
-              <option value="ac8">Acrílico Leitoso 5mm</option>
-              <option value="ac10">Acrílico Espelho 3mm</option>
-              <option value="ps3">PS Cristal 3mm</option>
-              <option value="mt2">Chapa Aço Inox 2mm</option>
-              <option value="acm">ACM 3mm</option>
             </select>
             <select id="stockHistFiltTipo" onchange="stockRenderHistorico()" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)">
               <option value="">Entradas e Saídas</option>
@@ -4073,13 +4046,7 @@ firebase.auth().signInAnonymously().then(function(){
         <div class="fg">
           <label>Material</label>
           <select id="stEntMat">
-            <option value="ac3">Acrílico Cristal 3mm</option>
-            <option value="ac5">Acrílico Cristal 5mm</option>
-            <option value="ac8">Acrílico Leitoso 5mm</option>
-            <option value="ac10">Acrílico Espelho 3mm</option>
-            <option value="ps3">PS Cristal 3mm</option>
-            <option value="mt2">Chapa Aço Inox 2mm</option>
-            <option value="acm">ACM 3mm</option>
+            <option value="">Carregando...</option>
           </select>
         </div>
         <div class="fg">
@@ -4102,6 +4069,100 @@ firebase.auth().signInAnonymously().then(function(){
         <input type="text" id="stEntNF" placeholder="NF 00123 ou observação">
       </div>
       <button class="gen-submit" onclick="stockConfirmarEntrada()">📦 Registrar Entrada</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERLAY: NOVO ITEM DE ESTOQUE -->
+<div class="gen-overlay" id="stockNovoItemOverlay" onclick="if(event.target===this)stockCloseNovoItem()">
+  <div class="gen-modal">
+    <div class="gen-modal-hdr">
+      <div class="gen-modal-title">➕ Novo Material no Estoque</div>
+      <button class="gen-close" onclick="stockCloseNovoItem()">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div class="fg">
+        <label>Nome do Material</label>
+        <input type="text" id="sniNome" placeholder="Ex: Acrílico Azul 3mm">
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Cor / Variação</label>
+          <input type="text" id="sniCor" placeholder="Ex: Azul Royal, Cristal, Fumê">
+        </div>
+        <div class="fg">
+          <label>Espessura (mm)</label>
+          <input type="number" id="sniEsp" placeholder="Ex: 3" min="0.5" step="0.5">
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Qtd inicial (chapas)</label>
+          <input type="number" id="sniQty" placeholder="Ex: 10" min="0">
+        </div>
+        <div class="fg">
+          <label>Mínimo (alerta)</label>
+          <input type="number" id="sniMin" placeholder="Ex: 5" min="0">
+        </div>
+      </div>
+      <div class="fg">
+        <label>Máximo (capacidade)</label>
+        <input type="number" id="sniMax" placeholder="Ex: 50" min="1">
+      </div>
+      <button class="gen-submit" onclick="stockSalvarNovoItem()">✅ Adicionar ao Estoque</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERLAY: INICIAR PRODUÇÃO (seleção de material) -->
+<div class="gen-overlay" id="kbProdOverlay" onclick="if(event.target===this)kbCloseProd()">
+  <div class="gen-modal">
+    <div class="gen-modal-hdr">
+      <div>
+        <div class="gen-modal-title">🔧 Iniciar Produção</div>
+        <div id="kbProdSubtitle" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+      </div>
+      <button class="gen-close" onclick="kbCloseProd()">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;background:var(--bg2);padding:9px 11px;border-radius:8px;border-left:3px solid var(--brand-mid)">
+        Selecione o material que será retirado do estoque para esta OS. A baixa será feita automaticamente ao confirmar.
+      </div>
+      <!-- Tipo: chapa ou retalho -->
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button id="kbProdBtnChapa" onclick="kbProdSetTipo('chapa')" style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--brand-mid);background:var(--brand-mid);color:#fff;font-size:12px;font-weight:700;cursor:pointer">📦 Usar Chapa</button>
+        <button id="kbProdBtnRetalho" onclick="kbProdSetTipo('retalho')" style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--border);background:transparent;color:var(--text);font-size:12px;font-weight:700;cursor:pointer">✂️ Usar Retalho</button>
+      </div>
+      <!-- Seleção chapa -->
+      <div id="kbProdChapaBox">
+        <div class="fg">
+          <label>Material / Cor</label>
+          <select id="kbProdMatSel" onchange="kbProdCheckStock()">
+            <option value="">— Selecionar —</option>
+          </select>
+        </div>
+        <div class="fg" style="margin-top:10px">
+          <label>Quantidade de chapas</label>
+          <input type="number" id="kbProdQty" value="1" min="1" step="1" oninput="kbProdCheckStock()">
+        </div>
+        <div id="kbProdStockInfo" style="margin-top:8px;font-size:12px;color:var(--muted);padding:7px 10px;background:var(--bg2);border-radius:7px;display:none"></div>
+      </div>
+      <!-- Seleção retalho -->
+      <div id="kbProdRetalhoBox" style="display:none">
+        <div class="fg">
+          <label>Retalho disponível</label>
+          <select id="kbProdRetalhoSel">
+            <option value="">— Selecionar retalho —</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:4px">
+        <div class="fg">
+          <label>Observação (opcional)</label>
+          <input type="text" id="kbProdObs" placeholder="Ex: placa azul 3mm, prateleira 2">
+        </div>
+      </div>
+      <button class="gen-submit" onclick="kbConfirmarProd()" style="margin-top:14px">🔧 Confirmar — Iniciar Produção</button>
     </div>
   </div>
 </div>
@@ -4550,7 +4611,7 @@ function nav(page, el) {
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
-  if (page === 'estoque')   { setTimeout(function(){ retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
+  if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'painel')     { setTimeout(function(){ painelRender(); painelStartTimer(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
@@ -6098,6 +6159,22 @@ function kbOpen(id) {
     btn.className = 'kb-pronto-btn';
     btn.textContent = '✓ Marcar como Pronta';
   }
+  // Iniciar Produção / Material em Produção
+  var _iniciarBox = document.getElementById('kbIniciarProdBox');
+  var _matProdBox = document.getElementById('kbMatProdBox');
+  var _matProdLbl = document.getElementById('kbMatProdLabel');
+  var _matProdQty = document.getElementById('kbMatProdQtyLabel');
+  if (_iniciarBox) _iniciarBox.style.display = (os.status === 'iniciada') ? '' : 'none';
+  if (_matProdBox) {
+    var _mp = os.matProd;
+    if (_mp && os.status === 'producao') {
+      _matProdBox.style.display = '';
+      if (_matProdLbl) _matProdLbl.textContent = _mp.label || '—';
+      if (_matProdQty) _matProdQty.textContent = _mp.isRetalho ? '✂️ Usando retalho' : (_mp.qty || 1) + ' chapa(s)' + (_mp.obs ? ' · ' + _mp.obs : '');
+    } else {
+      _matProdBox.style.display = 'none';
+    }
+  }
   // Bloco Avisar Cliente — só para master quando pronta
   var avisarBox = document.getElementById('kbAvisarClienteBox');
   var msgEl     = document.getElementById('kbAvisarMsg');
@@ -6440,6 +6517,172 @@ function kbToggle(i) {
   const item = document.getElementById('kbci-' + i);
   item.classList.toggle('done', os._ck[i]);
   item.querySelector('input').checked = os._ck[i];
+}
+
+// ============================================================
+// INICIAR PRODUÇÃO — seleção de material + baixa de estoque
+// ============================================================
+var _kbProdTipo = 'chapa'; // 'chapa' | 'retalho'
+var _kbProdEditMode = false; // true quando editando seleção já feita
+
+function kbIniciarProd() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  _kbProdEditMode = false;
+  _kbProdTipo = 'chapa';
+  _kbOpenProdOverlay(os);
+}
+
+function kbEditarMatProd() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  _kbProdEditMode = true;
+  _kbProdTipo = (os.matProd && os.matProd.isRetalho) ? 'retalho' : 'chapa';
+  _kbOpenProdOverlay(os);
+}
+
+function _kbOpenProdOverlay(os) {
+  // Subtitle
+  var sub = document.getElementById('kbProdSubtitle');
+  if (sub) sub.textContent = 'OS #' + (os.num||os.id) + ' — ' + (os.titulo||'');
+  // Populate material select from STOCK
+  var matSel = document.getElementById('kbProdMatSel');
+  if (matSel) {
+    var keys = Object.keys(STOCK);
+    matSel.innerHTML = '<option value="">— Selecionar material —</option>'
+      + keys.map(function(k){
+          var s = STOCK[k];
+          var avail = s.qty > 0 ? ' (' + s.qty + ' disponíveis)' : ' ⚠ Sem estoque';
+          return '<option value="'+k+'"' + (s.qty<=0?' style="color:#DC2626"':'') + '>' + s.label + (s.cor?' — '+s.cor:'') + avail + '</option>';
+        }).join('');
+    // Pre-select if editing
+    if (_kbProdEditMode && os.matProd && os.matProd.matKey) matSel.value = os.matProd.matKey;
+  }
+  // Populate retalho select
+  var retSel = document.getElementById('kbProdRetalhoSel');
+  if (retSel) {
+    var rList = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
+    retSel.innerHTML = '<option value="">— Selecionar retalho —</option>'
+      + rList.map(function(r,i){
+          return '<option value="'+i+'">'+r.label+' · '+r.dims+' cm ('+r.qty+' un)</option>';
+        }).join('');
+    if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) retSel.value = os.matProd.retalhoIdx;
+  }
+  // Qty
+  var qtyEl = document.getElementById('kbProdQty');
+  if (qtyEl) qtyEl.value = (_kbProdEditMode && os.matProd && !os.matProd.isRetalho) ? (os.matProd.qty||1) : 1;
+  // Obs
+  var obsEl = document.getElementById('kbProdObs');
+  if (obsEl) obsEl.value = (_kbProdEditMode && os.matProd) ? (os.matProd.obs||'') : '';
+  // Set tipo buttons
+  kbProdSetTipo(_kbProdTipo);
+  // Clear stock info
+  var si = document.getElementById('kbProdStockInfo'); if (si) si.style.display = 'none';
+  document.getElementById('kbProdOverlay').classList.add('open');
+}
+
+function kbCloseProd() { document.getElementById('kbProdOverlay').classList.remove('open'); }
+
+function kbProdSetTipo(tipo) {
+  _kbProdTipo = tipo;
+  var btnC = document.getElementById('kbProdBtnChapa');
+  var btnR = document.getElementById('kbProdBtnRetalho');
+  var boxC = document.getElementById('kbProdChapaBox');
+  var boxR = document.getElementById('kbProdRetalhoBox');
+  if (tipo === 'chapa') {
+    if (btnC) { btnC.style.background='var(--brand-mid)'; btnC.style.color='#fff'; btnC.style.borderColor='var(--brand-mid)'; }
+    if (btnR) { btnR.style.background='transparent'; btnR.style.color='var(--text)'; btnR.style.borderColor='var(--border)'; }
+    if (boxC) boxC.style.display = '';
+    if (boxR) boxR.style.display = 'none';
+  } else {
+    if (btnR) { btnR.style.background='#7C3AED'; btnR.style.color='#fff'; btnR.style.borderColor='#7C3AED'; }
+    if (btnC) { btnC.style.background='transparent'; btnC.style.color='var(--text)'; btnC.style.borderColor='var(--border)'; }
+    if (boxC) boxC.style.display = 'none';
+    if (boxR) boxR.style.display = '';
+  }
+}
+
+function kbProdCheckStock() {
+  var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
+  var qty    = parseInt((document.getElementById('kbProdQty')||{}).value)||1;
+  var si     = document.getElementById('kbProdStockInfo');
+  if (!si) return;
+  if (!matKey || !STOCK[matKey]) { si.style.display='none'; return; }
+  var s = STOCK[matKey];
+  var ok = s.qty >= qty;
+  si.style.display = '';
+  si.style.background = ok ? '#F0FDF4' : '#FEF2F2';
+  si.style.color = ok ? '#065F46' : '#991B1B';
+  si.style.border = '1px solid ' + (ok ? '#86EFAC' : '#FECACA');
+  si.textContent = ok
+    ? '✅ Estoque disponível: ' + s.qty + ' chapas. Restarão ' + (s.qty - qty) + ' após a baixa.'
+    : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapas disponíveis.';
+}
+
+function kbConfirmarProd() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  var obs = (document.getElementById('kbProdObs')||{}).value||'';
+
+  if (_kbProdTipo === 'retalho') {
+    var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
+    var rList  = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
+    if (isNaN(retIdx) || !rList[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
+    var retalho = rList[retIdx];
+    // Se editando, restaurar retalho anterior
+    if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
+      var rOld = rList[os.matProd.retalhoIdx];
+      if (rOld) { rOld.qty++; try{localStorage.setItem('erp_retalhos',JSON.stringify(RETALHOS));}catch(e){} }
+    }
+    retalho.qty--;
+    try { localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); } catch(e) {}
+    os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
+  } else {
+    var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
+    var qty    = parseInt((document.getElementById('kbProdQty')||{}).value)||1;
+    if (!matKey) { showToast('Selecione o material', 'warn'); return; }
+    if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
+    if (STOCK[matKey].qty < qty) { showToast('Estoque insuficiente (' + STOCK[matKey].qty + ' disponíveis)', 'warn'); return; }
+    // Se editando, restaurar baixa anterior
+    if (_kbProdEditMode && os.matProd && !os.matProd.isRetalho && os.matProd.matKey) {
+      var prevKey = os.matProd.matKey;
+      var prevQty = os.matProd.qty || 1;
+      if (STOCK[prevKey]) {
+        STOCK[prevKey].qty += prevQty;
+        stockUpdateDisplay(prevKey);
+        _stockLog('entrada', prevKey, prevQty, os.num, 'Correção — material trocado na OS');
+      }
+    }
+    // Fazer baixa
+    STOCK[matKey].qty -= qty;
+    stockUpdateDisplay(matKey);
+    stockSaveData();
+    _stockLog('saida', matKey, qty, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:''));
+    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' — ' + STOCK[matKey].cor : ''), qty: qty, isRetalho: false, obs: obs };
+  }
+
+  // Se não estava em produção ainda, mudar status
+  if (!_kbProdEditMode) {
+    os.status = 'producao';
+    // Atualizar tag no kanban
+    var stag = document.getElementById('kstag-' + _kbOsId);
+    if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
+    document.getElementById('kbOsStag').className = 'stag sp';
+    document.getElementById('kbOsStag').textContent = 'Em Produção';
+    // Ocultar botão Iniciar Produção
+    var ib = document.getElementById('kbIniciarProdBox'); if (ib) ib.style.display = 'none';
+  }
+
+  // Atualizar exibição do material
+  var mb = document.getElementById('kbMatProdBox');
+  var ml = document.getElementById('kbMatProdLabel');
+  var mq = document.getElementById('kbMatProdQtyLabel');
+  if (mb) mb.style.display = '';
+  if (ml) ml.textContent = os.matProd.label;
+  if (mq) mq.textContent = os.matProd.isRetalho ? '✂️ Usando retalho' : os.matProd.qty + ' chapa(s)' + (obs?' · '+obs:'');
+
+  kbCloseProd();
+  renderOsTable();
+  syncSidebarBadges();
+  if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + os.matProd.label);
+  showToast(_kbProdEditMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
 }
 
 function kbMarcarPronto() {
@@ -6919,15 +7162,28 @@ function comercialRender() {
 // ============================================================
 var STOCK_LOG = (function(){try{var s=localStorage.getItem('erp_stock_log');return s?JSON.parse(s):[];}catch(e){return [];}})();  // histórico de movimentações de estoque (persistido)
 
-var STOCK = {
-  ac3: {label:'Acrílico Cristal 3mm',  qty:42, min:10, max:50},
-  ac5: {label:'Acrílico Cristal 5mm',  qty:18, min:10, max:50},
-  ac8: {label:'Acrílico Leitoso 5mm',  qty:4,  min:10, max:50},
-  ac10:{label:'Acrílico Espelho 3mm',  qty:2,  min:5,  max:30},
-  ps3: {label:'PS Cristal 3mm',        qty:11, min:8,  max:50},
-  mt2: {label:'Chapa Aço Inox 2mm',    qty:18, min:5,  max:30},
-  acm: {label:'ACM 3mm',               qty:25, min:10, max:50}
+// STOCK dinâmico — carregado do localStorage, suporta campo 'cor' por item
+var _STOCK_DEFAULTS = {
+  ac3: {label:'Acrílico Cristal 3mm',  qty:42, min:10, max:50, esp:3,  cor:'Cristal'},
+  ac5: {label:'Acrílico Cristal 5mm',  qty:18, min:10, max:50, esp:5,  cor:'Cristal'},
+  ac8: {label:'Acrílico Leitoso 8mm',  qty:4,  min:10, max:50, esp:8,  cor:'Leitoso'},
+  ac10:{label:'Acrílico Espelho 10mm', qty:2,  min:5,  max:30, esp:10, cor:'Espelho'},
+  ps3: {label:'PS Cristal 3mm',        qty:11, min:8,  max:50, esp:3,  cor:'Cristal'},
+  mt2: {label:'Chapa Aço Inox 2mm',    qty:18, min:5,  max:30, esp:2,  cor:'Inox'},
+  acm: {label:'ACM 3mm',              qty:25, min:10, max:50, esp:3,  cor:'Natural'}
 };
+var STOCK = (function(){
+  try {
+    var saved = localStorage.getItem('erp_stock_data');
+    if(saved) return JSON.parse(saved);
+  } catch(e) {}
+  return JSON.parse(JSON.stringify(_STOCK_DEFAULTS));
+})();
+
+function stockSaveData() {
+  try { localStorage.setItem('erp_stock_data', JSON.stringify(STOCK)); } catch(e) {}
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_stock', STOCK);
+}
 
 var FIN_TX = [
   {data:'01/07',cliente:'OI Telecom',    os:'0847',marca:'vr', valor:2400,metodo:'PIX',    status:'recebido',dia:1,sem:1,mes:7},
@@ -8408,15 +8664,99 @@ function relatoriosRender() {
 // ============================================================
 // ESTOQUE
 // ============================================================
-function stockOpenEntrada(){document.getElementById('stockEntradaOverlay').classList.add('open');}
+// ── ESTOQUE: Render dinâmico ──────────────────────────────
+function stockRenderItems() {
+  var el = document.getElementById('stockItemsList');
+  if (!el) return;
+  var keys = Object.keys(STOCK);
+  if (!keys.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Nenhum material cadastrado. Clique em "+ Novo Material".</div>';
+    return;
+  }
+  el.innerHTML = keys.map(function(key) {
+    var s = STOCK[key];
+    var low = s.qty < s.min;
+    var col = low ? '#DC2626' : s.qty < s.max * 0.3 ? '#D97706' : '#059669';
+    var pct = Math.min(100, Math.round(s.qty / s.max * 100));
+    var corBadge = s.cor ? '<span style="font-size:10px;padding:2px 6px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--muted);margin-left:4px">' + s.cor + '</span>' : '';
+    return '<div class="stock-item">'
+      + '<div class="stock-alert" style="background:' + col + '"></div>'
+      + '<div style="flex:1">'
+      + '<div class="stock-name">' + s.label + corBadge + '</div>'
+      + '<div class="stock-spec">' + (s.esp ? s.esp + 'mm · ' : '') + 'min ' + (s.min||0) + ' · max ' + (s.max||50) + '</div>'
+      + '</div>'
+      + '<div class="stock-qty" style="color:' + col + '" id="sqty-' + key + '">' + (low ? s.qty + ' ⚠' : s.qty) + '</div>'
+      + '<div class="stock-prog"><div class="prog"><div class="prog-fill" id="sprog-' + key + '" style="width:' + pct + '%;background:' + col + '"></div></div></div>'
+      + '<button onclick="stockExcluirItem(&quot;' + key + '&quot;)" title="Remover material" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:0 4px;margin-left:4px">🗑</button>'
+      + '</div>';
+  }).join('');
+  // Rebuild material selects
+  stockPopulateSelects();
+}
+
+function stockPopulateSelects() {
+  var keys = Object.keys(STOCK);
+  var opts = keys.map(function(k){ return '<option value="'+k+'">'+STOCK[k].label+(STOCK[k].cor?' — '+STOCK[k].cor:'')+'</option>'; }).join('');
+  ['stEntMat','stSaidaMat','retalhoFormMat','stockHistFiltMat'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    var prev = el.value;
+    var prefix = id === 'stockHistFiltMat' ? '<option value="">Todos os materiais</option>' : '';
+    el.innerHTML = prefix + opts;
+    if (prev && el.querySelector('option[value="'+prev+'"]')) el.value = prev;
+  });
+}
+
+function stockExcluirItem(key) {
+  if (!STOCK[key]) return;
+  if (!confirm('Remover "' + STOCK[key].label + '" do estoque?')) return;
+  delete STOCK[key];
+  stockSaveData();
+  stockRenderItems();
+  showToast('Material removido do estoque', 'info');
+}
+
+function stockOpenNovoItem() {
+  ['sniNome','sniCor','sniEsp','sniMin','sniObs'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  var qEl=document.getElementById('sniQty'); if(qEl) qEl.value='0';
+  var mxEl=document.getElementById('sniMax'); if(mxEl) mxEl.value='50';
+  document.getElementById('stockNovoItemOverlay').classList.add('open');
+}
+function stockCloseNovoItem() { document.getElementById('stockNovoItemOverlay').classList.remove('open'); }
+function stockSalvarNovoItem() {
+  var nome = (document.getElementById('sniNome')||{}).value||'';
+  var cor  = (document.getElementById('sniCor') ||{}).value||'';
+  var esp  = parseFloat((document.getElementById('sniEsp')||{}).value)||0;
+  var qty  = parseInt((document.getElementById('sniQty')||{}).value)||0;
+  var min  = parseInt((document.getElementById('sniMin')||{}).value)||5;
+  var max  = parseInt((document.getElementById('sniMax')||{}).value)||50;
+  if (!nome.trim()) { showToast('Informe o nome do material', 'warn'); return; }
+  // Gerar chave única
+  var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
+  var key = baseKey;
+  var n = 1;
+  while (STOCK[key]) { key = baseKey + '_' + (n++); }
+  STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
+  stockSaveData();
+  stockRenderItems();
+  stockCloseNovoItem();
+  showToast('Material "' + nome + '" adicionado ao estoque!', 'ok');
+  syncSidebarBadges();
+}
+
+function stockOpenEntrada(){
+  stockPopulateSelects();
+  document.getElementById('stockEntradaOverlay').classList.add('open');
+}
 function stockCloseEntrada(){document.getElementById('stockEntradaOverlay').classList.remove('open');}
 function stockConfirmarEntrada() {
-  var key=(document.getElementById('stEntMat')||{}).value||'ac3';
+  var key=(document.getElementById('stEntMat')||{}).value||'';
   var qty=parseInt((document.getElementById('stEntQty')||{}).value)||0;
   var forn=(document.getElementById('stEntForn')||{}).value||'';
+  if(!key){showToast('Selecione o material','warn');return;}
   if(!qty||qty<1){showToast('Informe uma quantidade válida','warn');return;}
   if(!STOCK[key]) STOCK[key]={label:key,qty:0,min:5,max:50};
-  STOCK[key].qty+=qty; stockUpdateDisplay(key); stockCloseEntrada();
+  STOCK[key].qty+=qty; stockUpdateDisplay(key); stockSaveData(); stockCloseEntrada();
   _stockLog('entrada', key, qty, '', forn||'');
   showToast('Entrada de '+qty+' un de '+STOCK[key].label+(forn?' ('+forn+')':''),'ok');
   syncSidebarBadges();
@@ -8424,8 +8764,10 @@ function stockConfirmarEntrada() {
 function stockUpdateDisplay(key) {
   var s=STOCK[key]; if(!s) return;
   var qEl=document.getElementById('sqty-'+key), pEl=document.getElementById('sprog-'+key);
-  if(qEl){var low=s.qty<s.min; qEl.textContent=low?s.qty+' ⚠':s.qty; qEl.style.color=low?'#DC2626':s.qty<s.max*0.3?'#D97706':'#059669';}
-  if(pEl){var pct=Math.min(100,Math.round(s.qty/s.max*100)); var col=s.qty<s.min?'#DC2626':s.qty<s.max*0.3?'#D97706':'#059669'; pEl.style.width=pct+'%'; pEl.style.background=col;}
+  var low=s.qty<s.min;
+  var col=low?'#DC2626':s.qty<s.max*0.3?'#D97706':'#059669';
+  if(qEl){qEl.textContent=low?s.qty+' ⚠':s.qty; qEl.style.color=col;}
+  if(pEl){var pct=Math.min(100,Math.round(s.qty/s.max*100)); pEl.style.width=pct+'%'; pEl.style.background=col;}
 }
 
 function _stockLog(tipo, matKey, qty, os, obs) {
@@ -8650,7 +8992,7 @@ var _lastOsId = null;
     // ──────────────────────────────────────────────────────────────
 
     // Baixa estoque
-    if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');}
+    if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');stockSaveData();}
 
     // Cria/atualiza cliente
     var exists=CLIENTES_DATA.find(function(cl){return cl.nome.toLowerCase()===nomeCliente.toLowerCase();});
@@ -9112,7 +9454,7 @@ function _stockFazSaida() {
   if(!STOCK[matKey]){showToast('Material não encontrado','err');return;}
   var minQty=qty<1?1:Math.round(qty);
   if(STOCK[matKey].qty<minQty){showToast('Estoque insuficiente ('+STOCK[matKey].qty+' disponíveis)','warn');return;}
-  STOCK[matKey].qty-=minQty; stockUpdateDisplay(matKey);
+  STOCK[matKey].qty-=minQty; stockUpdateDisplay(matKey); stockSaveData();
   var _osVinc=(document.getElementById('stSaidaOS')||{}).value||'';
   var _obsVinc=(document.getElementById('stSaidaObs')||{}).value||'';
   _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
@@ -11485,6 +11827,7 @@ document.addEventListener('DOMContentLoaded', function() {
   finRender();
   syncSidebarBadges();
   retalhoRender();
+  stockRenderItems();
   crmUpdateFollowBar();
   orcAtualizarBadgeEnviados();
   setTimeout(crmInitDrag, 800);
