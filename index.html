@@ -928,7 +928,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   #mobileBottomNav { display: block; }
   #mobileDrawer { display: block; }
   .main { left: 0 !important; }
-  .content { padding: 10px 10px 80px; }
+  .content { padding: 10px 10px 80px; overflow-y: scroll; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
   .topbar { padding: 0 10px; height: 48px; min-height: 48px; gap: 6px; }
   .topbar-title { font-size: 13px; }
   .topbar-btn { font-size: 11px; padding: 5px 9px; }
@@ -11881,17 +11881,49 @@ function authApplySession(){
 function secApplyPerms(funcao){
   if(funcao==='master'||funcao==='admin') return;
   var perms=usrLoadPerms();
-  var sbItems=document.querySelectorAll('.sb-item[onclick]');
-  sbItems.forEach(function(item){
-    var m=(item.getAttribute('onclick')||'').match(/nav\('([^']+)'/);
+  function applyToItem(item, pageExtractor){
+    var m=(item.getAttribute('onclick')||'').match(pageExtractor);
     if(!m) return;
     var page=m[1];
     var mod=page;
     if(page==='config-orc'||page==='config-plan'||page==='config-usr'||page==='seguranca') mod='config';
     if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
     if(page==='os-list') mod='os-list';
+    if(page==='relatorios') mod='financeiro';
     var hasPerm=(perms[mod]&&perms[mod][funcao]);
     item.style.display=hasPerm?'':'none';
+    // also hide preceding section label in mobile drawer if all items hidden
+  }
+  // Desktop sidebar
+  document.querySelectorAll('.sb-item[onclick]').forEach(function(item){
+    applyToItem(item, /nav\('([^']+)'/);
+  });
+  // Mobile drawer items
+  document.querySelectorAll('.mdrw-item[onclick]').forEach(function(item){
+    applyToItem(item, /mobileNavDrawer\('([^']+)'/);
+  });
+  // Hide mobile drawer section labels when all their items are hidden
+  var drawer=document.getElementById('mobileDrawer');
+  if(drawer){
+    var sections=drawer.querySelectorAll('.mdrw-section');
+    sections.forEach(function(sec){
+      var next=sec.nextElementSibling;
+      var hasVisible=false;
+      while(next && !next.classList.contains('mdrw-section')){
+        if(next.classList.contains('mdrw-item') && next.style.display!=='none') hasVisible=true;
+        next=next.nextElementSibling;
+      }
+      sec.style.display=hasVisible?'':'none';
+    });
+  }
+  // Mobile bottom nav: hide items that user has no access to
+  var mbnMap = {'mbn-dashboard':'dashboard','mbn-kanban':'kanban','mbn-orcamento':'orcamento','mbn-estoque':'estoque'};
+  Object.keys(mbnMap).forEach(function(btnId){
+    var page=mbnMap[btnId];
+    var mod=page==='orcamento'?'orcamento':page;
+    var hasPerm=(perms[mod]&&perms[mod][funcao]);
+    var el=document.getElementById(btnId);
+    if(el) el.style.display=hasPerm?'':'none';
   });
 }
 
@@ -13835,52 +13867,4 @@ function mobileDrawerClose() {
 // Sync badges from sidebar to bottom nav
 function syncMobileBadges() {
   var kbSide = document.getElementById('sbBadgeKanban');
-  var kbMob  = document.getElementById('mbnBadgeKanban');
-  if(kbSide && kbMob) {
-    kbMob.textContent = kbSide.textContent;
-    kbMob.style.display = kbSide.style.display==='none'?'none':(kbSide.textContent?'':'none');
-  }
-  var stSide = document.getElementById('sbBadgeEstoque');
-  var stMob  = document.getElementById('mbnBadgeEstoque');
-  if(stSide && stMob) {
-    stMob.style.display = stSide.style.display;
-  }
-}
-
-// Patch syncSidebarBadges to also sync mobile
-(function(){
-  var _orig = typeof syncSidebarBadges==='function' ? syncSidebarBadges : null;
-  if(_orig) {
-    window.syncSidebarBadges = function(){
-      _orig();
-      try{ syncMobileBadges(); }catch(e){}
-    };
-  }
-})();
-
-// On page nav, sync mobile bottom bar highlight if navigating from sidebar
-(function(){
-  var _origNav = typeof nav==='function' ? nav : null;
-  if(_origNav) {
-    window.nav = function(page, el) {
-      _origNav(page, el);
-      // Sync bottom nav highlight
-      if(window.innerWidth <= 768) {
-        var matched = null;
-        Object.keys(_mbnPageMap).forEach(function(k){ if(_mbnPageMap[k]===page) matched=k; });
-        if(matched) {
-          document.querySelectorAll('.mbn-item').forEach(function(x){ x.classList.remove('on'); });
-          var mb = document.getElementById(matched); if(mb) mb.classList.add('on');
-        }
-      }
-    };
-  }
-})();
-
-document.addEventListener('DOMContentLoaded', function(){
-  setTimeout(syncMobileBadges, 1000);
-});
-</script>
-
-</body>
-</html>
+  var kbMob  = docume
