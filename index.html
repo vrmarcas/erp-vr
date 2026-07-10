@@ -880,66 +880,81 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 /* =========================================================
    MOBILE RESPONSIVE — max-width 768px
    ========================================================= */
-#mobileBottomNav {
+/* ── Mobile hamburger button (topbar) ── */
+#mobileMenuBtn {
   display: none;
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+  background: none; border: none; cursor: pointer;
+  color: var(--text); font-size: 22px; padding: 4px 6px;
+  line-height: 1; flex-shrink: 0;
+}
+/* ── Mobile side panel ── */
+#mobileSidePanel {
+  display: none;
+  position: fixed; top: 0; left: 0; bottom: 0; width: 280px; z-index: 400;
   background: var(--text);
-  border-top: 1px solid rgba(255,255,255,.1);
-  padding: 0 0 env(safe-area-inset-bottom,0px);
+  transform: translateX(-100%); transition: transform .25s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  box-shadow: 4px 0 30px rgba(0,0,0,.35);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-#mobileBottomNav .mbn-items {
-  display: flex; justify-content: space-around; align-items: center; height: 58px;
+#mobileSidePanel.open { transform: translateX(0); }
+/* Panel header */
+.msp-header {
+  padding: 20px 20px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  display: flex; align-items: center; justify-content: space-between;
 }
-.mbn-item {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 5px 8px; cursor: pointer; color: rgba(255,255,255,.45);
-  font-size: 9px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .3px; border-radius: 8px; transition: .15s; position: relative;
-  min-width: 50px;
+.msp-logo { color:#fff; font-weight:800; font-size:15px; }
+.msp-close {
+  background:none; border:none; color:rgba(255,255,255,.5);
+  font-size:20px; cursor:pointer; padding:4px 6px; line-height:1;
 }
-.mbn-item.on { color: #fff; }
-.mbn-item.on .mbn-ico { background: var(--brand-mid); border-radius: 10px; }
-.mbn-ico { font-size: 20px; padding: 3px 8px; border-radius: 8px; }
-.mbn-badge {
-  position: absolute; top: 2px; right: 4px;
-  background: #DC2626; color: #fff; border-radius: 10px;
-  font-size: 8px; font-weight: 700; padding: 1px 4px; min-width: 14px; text-align: center;
+/* Panel user info */
+.msp-user {
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex; align-items: center; gap: 10px;
 }
-#mobileDrawer {
-  display: none;
-  position: fixed; bottom: 58px; left: 0; right: 0; z-index: 300;
-  background: var(--text); border-radius: 16px 16px 0 0;
-  max-height: 65vh; overflow-y: auto;
-  transform: translateY(100%); transition: transform .25s ease;
-  box-shadow: 0 -4px 30px rgba(0,0,0,.4);
+.msp-avatar {
+  width:34px; height:34px; border-radius:50%;
+  background:var(--brand-mid); color:#fff;
+  font-weight:800; font-size:14px;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
 }
-#mobileDrawer.open { transform: translateY(0); }
-.mdrw-handle {
-  width: 36px; height: 4px; background: rgba(255,255,255,.2);
-  border-radius: 2px; margin: 10px auto 8px;
+.msp-uname { color:#fff; font-size:13px; font-weight:700; }
+.msp-urole { color:rgba(255,255,255,.4); font-size:10px; margin-top:1px; }
+/* Sections & items */
+.msp-section {
+  font-size:9px; font-weight:800; color:rgba(255,255,255,.3);
+  text-transform:uppercase; letter-spacing:.8px;
+  padding: 14px 20px 5px;
 }
 .mdrw-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 13px 20px; color: rgba(255,255,255,.7); font-size: 14px;
-  cursor: pointer; transition: .12s; border-bottom: 1px solid rgba(255,255,255,.05);
+  padding: 13px 20px; color: rgba(255,255,255,.75); font-size: 14px;
+  cursor: pointer; transition: .12s; border-bottom: 1px solid rgba(255,255,255,.04);
 }
 .mdrw-item:active, .mdrw-item.on { background: rgba(255,255,255,.1); color: #fff; }
+.mdrw-item.on { border-left: 3px solid var(--brand-mid); padding-left: 17px; }
 .mdrw-ico { font-size: 18px; width: 26px; text-align: center; }
 .mdrw-section {
   font-size: 10px; font-weight: 700; color: rgba(255,255,255,.3);
   text-transform: uppercase; letter-spacing: .6px; padding: 12px 20px 4px;
 }
 #mobileOverlayBg {
-  display: none; position: fixed; inset: 0; z-index: 290; background: rgba(0,0,0,.5);
+  display: none; position: fixed; inset: 0; z-index: 390; background: rgba(0,0,0,.55);
 }
 #mobileOverlayBg.open { display: block; }
+/* Legacy — hide bottom nav entirely */
+#mobileBottomNav { display: none !important; }
+#mobileDrawer    { display: none !important; }
 
 @media (max-width: 768px) {
   .sidebar { display: none !important; }
-  #mobileBottomNav { display: block; }
-  #mobileDrawer { display: block; }
+  #mobileMenuBtn { display: flex !important; align-items: center; }
+  #mobileSidePanel { display: block; }
   .main { left: 0 !important; }
-  .content { padding: 10px 10px 80px; overflow-y: scroll; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .content { padding: 10px 10px 24px; overflow-y: scroll; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
   .topbar { padding: 0 10px; height: 48px; min-height: 48px; gap: 6px; }
   .topbar-title { font-size: 13px; }
   .topbar-btn { font-size: 11px; padding: 5px 9px; }
@@ -1364,6 +1379,7 @@ firebase.auth().signInAnonymously().then(function(){
 
   <!-- TOPBAR -->
   <div class="topbar">
+    <button id="mobileMenuBtn" onclick="mobilePanelOpen()" title="Menu">☰</button>
     <div class="topbar-title" id="topbarTitle">Dashboard</div>
     <span class="dot-live" title="Atualização em tempo real"></span>
     <span id="cloudIndicator" style="font-size:10px;display:flex;align-items:center;gap:4px;margin-left:4px"><span id="cloudDot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#9CA3AF"></span><span id="cloudTxt" style="color:#9CA3AF">conectando...</span></span>
@@ -12021,31 +12037,25 @@ function secApplyPerms(funcao){
   document.querySelectorAll('.sb-item[onclick]').forEach(function(item){
     applyToItem(item, /nav\('([^']+)'/);
   });
-  // Mobile drawer items
-  document.querySelectorAll('.mdrw-item[onclick]').forEach(function(item){
-    applyToItem(item, /mobileNavDrawer\('([^']+)'/);
-  });
-  // Hide mobile drawer section labels when all their items are hidden
-  var drawer=document.getElementById('mobileDrawer');
-  if(drawer){
-    var sections=drawer.querySelectorAll('.mdrw-section');
-    sections.forEach(function(sec){
-      var next=sec.nextElementSibling;
-      var hasVisible=false;
-      while(next && !next.classList.contains('mdrw-section')){
-        if(next.classList.contains('mdrw-item') && next.style.display!=='none') hasVisible=true;
-        next=next.nextElementSibling;
-      }
-      sec.style.display=hasVisible?'':'none';
-    });
-  }
-  // Mobile bottom nav: hide items that user has no access to
-  var mbnMap = {'mbn-dashboard':'dashboard','mbn-kanban':'kanban','mbn-orcamento':'orcamento','mbn-estoque':'estoque'};
-  Object.keys(mbnMap).forEach(function(btnId){
-    var page=mbnMap[btnId];
+  // Mobile side panel items
+  document.querySelectorAll('#mobileSidePanel .mdrw-item[id]').forEach(function(item){
+    var page=(item.id||'').replace('mspItem-','');
+    if(!page) return;
     var mod=page;
-    var el=document.getElementById(btnId);
-    if(el) el.style.display=getPermForMod(mod,page)?'':'none';
+    if(page==='config-orc'||page==='config-plan'||page==='config-usr'||page==='seguranca') mod='config';
+    if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
+    if(page==='relatorios') mod='financeiro';
+    item.style.display=getPermForMod(mod,page)?'':'none';
+  });
+  // Hide side panel section labels when all items hidden
+  ['principal','operacao','comercial','financeiro','config'].forEach(function(sec){
+    var lbl=document.getElementById('mspSec-'+sec); if(!lbl) return;
+    var el=lbl.nextElementSibling, hasVis=false;
+    while(el && !(el.id&&el.id.startsWith('mspSec-'))){
+      if(el.classList&&el.classList.contains('mdrw-item')&&el.style.display!=='none') hasVis=true;
+      el=el.nextElementSibling;
+    }
+    lbl.style.display=hasVis?'':'none';
   });
 }
 
@@ -13872,5 +13882,163 @@ function painelRender() {
       <button class="crm-msg-tpl-btn"    id="crmMsgTpl_posvenda"  onclick="crmMsgSelecionarTemplate('posvenda')">⭐ Pós-Venda</button>
       <button class="crm-msg-tpl-btn"    id="crmMsgTpl_entrega"   onclick="crmMsgSelecionarTemplate('entrega')">📦 Entrega</button>
     </div>
-    <!-- Mensagem editável -->
-    <texta
+    <textarea id="crmMsgTexto" rows="5" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.6;box-sizing:border-box"></textarea>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);border-radius:8px">
+      <span style="font-size:11px;color:var(--muted);white-space:nowrap">📅 Agendar follow-up:</span>
+      <input type="date" id="crmMsgDataFollowUp" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">
+      <button onclick="crmMsgAgendarFollowUp()" style="padding:5px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Salvar</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button onclick="crmMsgEnviarWA()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer">💬 Enviar pelo WhatsApp</button>
+      <button onclick="crmMsgFechar()" style="padding:11px 16px;border:1.5px solid var(--border);background:transparent;color:var(--muted);border-radius:9px;font-size:12px;cursor:pointer">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MOBILE OVERLAY BG ══ -->
+<div id="mobileOverlayBg" onclick="mobilePanelClose()"></div>
+
+<!-- ══ MOBILE SIDE PANEL ══ -->
+<div id="mobileSidePanel">
+  <div class="msp-header">
+    <div class="msp-logo">ERP Marcas</div>
+    <button class="msp-close" onclick="mobilePanelClose()">✕</button>
+  </div>
+  <div class="msp-user">
+    <div class="msp-avatar" id="mspAvatar">U</div>
+    <div>
+      <div class="msp-uname" id="mspName">Usuário</div>
+      <div class="msp-urole" id="mspRole">—</div>
+    </div>
+  </div>
+
+  <div class="mdrw-section" id="mspSec-principal">Principal</div>
+  <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
+  <div class="mdrw-item" id="mspItem-painel" onclick="mobilePanelNav('painel')"><span class="mdrw-ico">📺</span> Painel Executivo</div>
+
+  <div class="mdrw-section" id="mspSec-operacao">Operação</div>
+  <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS <span id="mspBadgeKanban" style="margin-left:auto;background:#DC2626;color:#fff;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;display:none"></span></div>
+  <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
+  <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque <span id="mspBadgeEstoque" style="margin-left:auto;background:#DC2626;color:#fff;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;display:none"></span></div>
+  <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
+
+  <div class="mdrw-section" id="mspSec-comercial">Comercial</div>
+  <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
+  <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+  <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
+  <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+  <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
+
+  <div class="mdrw-section" id="mspSec-financeiro">Financeiro</div>
+  <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
+  <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
+
+  <div class="mdrw-section" id="mspSec-config">Configurações</div>
+  <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
+  <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
+  <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Usuários</div>
+  <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+
+  <div style="padding:16px 20px;border-top:1px solid rgba(255,255,255,.08);margin-top:8px">
+    <button onclick="authLogout();mobilePanelClose();" style="width:100%;padding:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.7);border-radius:9px;font-size:13px;cursor:pointer;text-align:left">🚪 Sair</button>
+  </div>
+  <div style="height:env(safe-area-inset-bottom,16px)"></div>
+</div>
+
+<script>
+// ── Mobile Side Panel ─────────────────────────────────────────────────────────
+function mobilePanelOpen() {
+  // Sync user info
+  if(typeof _currentSession !== 'undefined' && _currentSession) {
+    var n = _currentSession.user||'Usuário';
+    var av = document.getElementById('mspAvatar'); if(av) av.textContent = n[0].toUpperCase();
+    var nm = document.getElementById('mspName');   if(nm) nm.textContent = n;
+    var rl = document.getElementById('mspRole');   if(rl) rl.textContent = (typeof FUNCAO_LABEL!=='undefined' ? FUNCAO_LABEL[_currentSession.funcao]||_currentSession.funcao : _currentSession.funcao)||'';
+  }
+  // Sync badges
+  var kb = document.getElementById('mspBadgeKanban');
+  var sbKb = document.getElementById('sbBadgeKanban');
+  if(kb && sbKb) { kb.textContent=sbKb.textContent; kb.style.display=sbKb.style.display; }
+  var es = document.getElementById('mspBadgeEstoque');
+  var sbEs = document.getElementById('sbBadgeEstoque');
+  if(es && sbEs) { es.textContent=sbEs.textContent; es.style.display=sbEs.style.display; }
+  // Highlight active item
+  var cur = document.getElementById('topbarTitle');
+  document.querySelectorAll('#mobileSidePanel .mdrw-item').forEach(function(el){ el.classList.remove('on'); });
+  document.getElementById('mobileSidePanel').classList.add('open');
+  document.getElementById('mobileOverlayBg').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function mobilePanelClose() {
+  document.getElementById('mobileSidePanel').classList.remove('open');
+  document.getElementById('mobileOverlayBg').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function mobilePanelNav(page) {
+  mobilePanelClose();
+  // Highlight item
+  document.querySelectorAll('#mobileSidePanel .mdrw-item').forEach(function(el){ el.classList.remove('on'); });
+  var item = document.getElementById('mspItem-'+page);
+  if(item) item.classList.add('on');
+  // Find matching sb-item and call nav()
+  var sbEl = null;
+  document.querySelectorAll('.sb-item').forEach(function(el){
+    if((el.getAttribute('onclick')||'').indexOf("'"+page+"'") >= 0) sbEl = el;
+  });
+  if(sbEl) nav(page, sbEl); else nav(page, null);
+}
+
+// Apply permissions to mobile side panel items
+(function(){
+  var _origSecApplyPerms = typeof secApplyPerms !== 'undefined' ? secApplyPerms : null;
+  var _mspApply = function(funcao) {
+    if(funcao==='master'||funcao==='admin') return;
+    var HARD_DENY = {
+      comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
+      producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'orcamento':1,'orcamentos-enviados':1,'comercial':1,'crm':1,'clientes':1},
+      financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1}
+    };
+    var denied = HARD_DENY[funcao]||{};
+    var pages = ['dashboard','painel','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+    var secMap = {'config-orc':'config','config-plan':'config','config-usr':'config','seguranca':'config','orcamentos-enviados':'orcamento','comercial':'orcamento','relatorios':'financeiro'};
+    // Section visibility tracking
+    var secVis = {};
+    pages.forEach(function(page){
+      var item = document.getElementById('mspItem-'+page);
+      if(!item) return;
+      var hide = !!denied[page];
+      if(!hide) {
+        var mod = secMap[page]||page;
+        var perms = typeof usrLoadPerms==='function' ? usrLoadPerms() : {};
+        var def = typeof PERM_DEFAULT!=='undefined' ? PERM_DEFAULT[mod] : null;
+        if(!def || def[funcao]===false || def[funcao]===undefined) hide=true;
+        else if(!perms[mod] || !perms[mod][funcao]) hide=true;
+      }
+      item.style.display = hide ? 'none' : '';
+      // Track which section label to show
+      var secName = page==='dashboard'||page==='painel'?'principal':page==='kanban'||page==='os-list'||page==='estoque'||page==='fornecedores'?'operacao':page==='orcamento'||page==='orcamentos-enviados'||page==='comercial'||page==='crm'||page==='clientes'?'comercial':page==='financeiro'||page==='relatorios'?'financeiro':'config';
+      if(!hide) secVis[secName]=true;
+    });
+    // Hide section labels with no visible items
+    ['principal','operacao','comercial','financeiro','config'].forEach(function(s){
+      var el = document.getElementById('mspSec-'+s);
+      if(el) el.style.display = secVis[s] ? '' : 'none';
+    });
+  };
+  // Hook into authApplySession
+  var _orig = window.authApplySession;
+  window.authApplySession = function(){
+    if(_orig) _orig.apply(this, arguments);
+    if(typeof _currentSession !== 'undefined' && _currentSession) {
+      _mspApply(_currentSession.funcao||'master');
+    }
+  };
+  // Also expose for direct call
+  window.mspApplyPerms = _mspApply;
+})();
+</script>
+</body>
+</html>
+                                                                                                
