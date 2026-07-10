@@ -866,6 +866,144 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .caixa-saldo-neg{color:#DC2626!important}
 }
 @keyframes painelPulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* =========================================================
+   MOBILE RESPONSIVE — max-width 768px
+   ========================================================= */
+#mobileBottomNav {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+  background: var(--text);
+  border-top: 1px solid rgba(255,255,255,.1);
+  padding: 0 0 env(safe-area-inset-bottom,0px);
+}
+#mobileBottomNav .mbn-items {
+  display: flex; justify-content: space-around; align-items: center; height: 58px;
+}
+.mbn-item {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 5px 8px; cursor: pointer; color: rgba(255,255,255,.45);
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; border-radius: 8px; transition: .15s; position: relative;
+  min-width: 50px;
+}
+.mbn-item.on { color: #fff; }
+.mbn-item.on .mbn-ico { background: var(--brand-mid); border-radius: 10px; }
+.mbn-ico { font-size: 20px; padding: 3px 8px; border-radius: 8px; }
+.mbn-badge {
+  position: absolute; top: 2px; right: 4px;
+  background: #DC2626; color: #fff; border-radius: 10px;
+  font-size: 8px; font-weight: 700; padding: 1px 4px; min-width: 14px; text-align: center;
+}
+#mobileDrawer {
+  display: none;
+  position: fixed; bottom: 58px; left: 0; right: 0; z-index: 300;
+  background: var(--text); border-radius: 16px 16px 0 0;
+  max-height: 65vh; overflow-y: auto;
+  transform: translateY(100%); transition: transform .25s ease;
+  box-shadow: 0 -4px 30px rgba(0,0,0,.4);
+}
+#mobileDrawer.open { transform: translateY(0); }
+.mdrw-handle {
+  width: 36px; height: 4px; background: rgba(255,255,255,.2);
+  border-radius: 2px; margin: 10px auto 8px;
+}
+.mdrw-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 20px; color: rgba(255,255,255,.7); font-size: 14px;
+  cursor: pointer; transition: .12s; border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.mdrw-item:active, .mdrw-item.on { background: rgba(255,255,255,.1); color: #fff; }
+.mdrw-ico { font-size: 18px; width: 26px; text-align: center; }
+.mdrw-section {
+  font-size: 10px; font-weight: 700; color: rgba(255,255,255,.3);
+  text-transform: uppercase; letter-spacing: .6px; padding: 12px 20px 4px;
+}
+#mobileOverlayBg {
+  display: none; position: fixed; inset: 0; z-index: 290; background: rgba(0,0,0,.5);
+}
+#mobileOverlayBg.open { display: block; }
+
+@media (max-width: 768px) {
+  .sidebar { display: none !important; }
+  #mobileBottomNav { display: block; }
+  #mobileDrawer { display: block; }
+  .main { left: 0 !important; }
+  .content { padding: 10px 10px 80px; }
+  .topbar { padding: 0 10px; height: 48px; min-height: 48px; gap: 6px; }
+  .topbar-title { font-size: 13px; }
+  .topbar-btn { font-size: 11px; padding: 5px 9px; }
+  .card { padding: 11px; margin-bottom: 10px; }
+  .card-h { flex-wrap: wrap; gap: 6px; }
+
+  /* Grids single column */
+  .g2, .g3 { grid-template-columns: 1fr !important; }
+  .fg2 { grid-template-columns: 1fr 1fr !important; }
+  .form-grid { grid-template-columns: 1fr !important; }
+  .ekpi-grid { grid-template-columns: 1fr 1fr !important; }
+  .echart-grid { grid-template-columns: 1fr !important; }
+  .kpi-row { grid-template-columns: repeat(2,1fr) !important; }
+  .hm-g { grid-template-columns: repeat(3,1fr) !important; }
+
+  /* Tables horizontal scroll */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+  /* Kanban single column */
+  .kb-cols { grid-template-columns: 1fr !important; gap: 8px; }
+  .kb-os-grid { grid-template-columns: 1fr !important; }
+
+  /* OS/Generic modals full screen */
+  #kbOsOverlay .kb-os-modal {
+    width: 100vw !important; max-width: 100vw !important;
+    height: 100vh !important; border-radius: 0 !important;
+    overflow-y: auto;
+  }
+  .gen-overlay .gen-modal {
+    width: 96vw !important; max-width: 96vw !important;
+    max-height: 88vh !important; overflow-y: auto;
+  }
+  .gen-overlay .gen-modal.wide { width: 98vw !important; }
+  .crm-det-modal, .crm-imp-modal { width: 96vw !important; max-width: 96vw !important; }
+
+  /* Orçamento */
+  #orcSidebar { display: none !important; }
+  #orcMain { width: 100% !important; }
+  #orcItemsTable { display: block; overflow-x: auto; }
+
+  /* Prevent iOS auto-zoom on inputs */
+  input[type="text"], input[type="number"], input[type="email"],
+  input[type="password"], input[type="date"], input[type="url"],
+  select, textarea { font-size: 16px !important; }
+
+  /* Stock items */
+  .stock-item { gap: 6px; }
+  .stock-prog { width: 100%; }
+
+  /* Financeiro */
+  .fin-cards { grid-template-columns: 1fr 1fr !important; }
+
+  /* KPIs */
+  .db-kpi-val { font-size: 20px !important; }
+
+  /* Planificação */
+  #planCanvas { max-width: 100%; height: auto; }
+
+  /* Search box */
+  #osSearchInput { width: 90px !important; }
+
+  /* Hide extra topbar items on mobile */
+  .topbar-pill { display: none; }
+
+  /* Retalho form grid */
+  #retalhoFormWrap .fg2 { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 400px) {
+  .ekpi-grid { grid-template-columns: 1fr !important; }
+  .kpi-row { grid-template-columns: 1fr !important; }
+  .mbn-item { min-width: 44px; font-size: 8px; }
+  .mbn-ico { font-size: 18px; }
+}
+
 </style>
 <!-- Firebase SDK (Compat — carregado antes dos scripts) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -13595,5 +13733,154 @@ function painelRender() {
     </div>
   </div>
 </div>
+<!-- ══ MOBILE BOTTOM NAV ══ -->
+<div id="mobileOverlayBg" onclick="mobileDrawerClose()"></div>
+<div id="mobileBottomNav">
+  <div class="mbn-items">
+    <div class="mbn-item on" id="mbn-dashboard" onclick="mobileNav('dashboard','mbn-dashboard')">
+      <div class="mbn-ico">📊</div><span>Início</span>
+    </div>
+    <div class="mbn-item" id="mbn-kanban" onclick="mobileNav('kanban','mbn-kanban')">
+      <div class="mbn-ico">📋</div><span>Kanban</span>
+      <span class="mbn-badge" id="mbnBadgeKanban" style="display:none"></span>
+    </div>
+    <div class="mbn-item" id="mbn-orcamento" onclick="mobileNav('orcamento','mbn-orcamento')">
+      <div class="mbn-ico">💰</div><span>Orçar</span>
+    </div>
+    <div class="mbn-item" id="mbn-estoque" onclick="mobileNav('estoque','mbn-estoque')">
+      <div class="mbn-ico">📦</div><span>Estoque</span>
+      <span class="mbn-badge" id="mbnBadgeEstoque" style="display:none"></span>
+    </div>
+    <div class="mbn-item" id="mbn-mais" onclick="mobileDrawerToggle()">
+      <div class="mbn-ico">☰</div><span>Mais</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MOBILE DRAWER (Mais) ══ -->
+<div id="mobileDrawer">
+  <div class="mdrw-handle"></div>
+  <div class="mdrw-section">Produção</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
+  <div class="mdrw-section">Comercial</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
+  <div class="mdrw-section">Financeiro</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
+  <div class="mdrw-section">Configurações</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('config-usr')"><span class="mdrw-ico">👥</span> Usuários</div>
+  <div class="mdrw-item" onclick="mobileNavDrawer('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+  <div style="height:16px"></div>
+</div>
+
+<script>
+// ── MOBILE NAV ─────────────────────────────────────────────
+var _mbnCurrent = 'mbn-dashboard';
+var _mbnPageMap = {
+  'mbn-dashboard':'dashboard','mbn-kanban':'kanban',
+  'mbn-orcamento':'orcamento','mbn-estoque':'estoque'
+};
+
+function mobileNav(page, btnId) {
+  // Update bottom nav highlight
+  document.querySelectorAll('.mbn-item').forEach(function(el){ el.classList.remove('on'); });
+  var btn = document.getElementById(btnId);
+  if(btn) btn.classList.add('on');
+  _mbnCurrent = btnId;
+  // Use existing nav() function
+  var sidebarEl = null;
+  document.querySelectorAll('.sb-item').forEach(function(el){
+    if(el.getAttribute('onclick') && el.getAttribute('onclick').indexOf("'"+page+"'")>=0) sidebarEl=el;
+  });
+  if(sidebarEl) { nav(page, sidebarEl); }
+  else { nav(page, null); }
+}
+
+function mobileNavDrawer(page) {
+  mobileDrawerClose();
+  // Highlight "Mais" button
+  document.querySelectorAll('.mbn-item').forEach(function(el){ el.classList.remove('on'); });
+  var maisBtn = document.getElementById('mbn-mais');
+  if(maisBtn) maisBtn.classList.add('on');
+  _mbnCurrent = 'mbn-mais';
+  var sidebarEl = null;
+  document.querySelectorAll('.sb-item').forEach(function(el){
+    if(el.getAttribute('onclick') && el.getAttribute('onclick').indexOf("'"+page+"'")>=0) sidebarEl=el;
+  });
+  if(sidebarEl) { nav(page, sidebarEl); }
+  else { nav(page, null); }
+}
+
+function mobileDrawerToggle() {
+  var d = document.getElementById('mobileDrawer');
+  var bg = document.getElementById('mobileOverlayBg');
+  if(!d) return;
+  if(d.classList.contains('open')) { mobileDrawerClose(); }
+  else { d.classList.add('open'); if(bg) bg.classList.add('open'); }
+}
+
+function mobileDrawerClose() {
+  var d = document.getElementById('mobileDrawer');
+  var bg = document.getElementById('mobileOverlayBg');
+  if(d) d.classList.remove('open');
+  if(bg) bg.classList.remove('open');
+}
+
+// Sync badges from sidebar to bottom nav
+function syncMobileBadges() {
+  var kbSide = document.getElementById('sbBadgeKanban');
+  var kbMob  = document.getElementById('mbnBadgeKanban');
+  if(kbSide && kbMob) {
+    kbMob.textContent = kbSide.textContent;
+    kbMob.style.display = kbSide.style.display==='none'?'none':(kbSide.textContent?'':'none');
+  }
+  var stSide = document.getElementById('sbBadgeEstoque');
+  var stMob  = document.getElementById('mbnBadgeEstoque');
+  if(stSide && stMob) {
+    stMob.style.display = stSide.style.display;
+  }
+}
+
+// Patch syncSidebarBadges to also sync mobile
+(function(){
+  var _orig = typeof syncSidebarBadges==='function' ? syncSidebarBadges : null;
+  if(_orig) {
+    window.syncSidebarBadges = function(){
+      _orig();
+      try{ syncMobileBadges(); }catch(e){}
+    };
+  }
+})();
+
+// On page nav, sync mobile bottom bar highlight if navigating from sidebar
+(function(){
+  var _origNav = typeof nav==='function' ? nav : null;
+  if(_origNav) {
+    window.nav = function(page, el) {
+      _origNav(page, el);
+      // Sync bottom nav highlight
+      if(window.innerWidth <= 768) {
+        var matched = null;
+        Object.keys(_mbnPageMap).forEach(function(k){ if(_mbnPageMap[k]===page) matched=k; });
+        if(matched) {
+          document.querySelectorAll('.mbn-item').forEach(function(x){ x.classList.remove('on'); });
+          var mb = document.getElementById(matched); if(mb) mb.classList.add('on');
+        }
+      }
+    };
+  }
+})();
+
+document.addEventListener('DOMContentLoaded', function(){
+  setTimeout(syncMobileBadges, 1000);
+});
+</script>
+
 </body>
 </html>
