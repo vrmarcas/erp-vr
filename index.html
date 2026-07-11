@@ -7942,8 +7942,7 @@ function renderOsTable() {
 function osLiberar(id) {
   var os=KB_OS[id]; if(!os) return;
   os.status='entregue';
-  var card=document.querySelector('.kcard[data-id="'+id+'"]');
-  if(card){var stag=card.querySelector('.stag');if(stag){stag.className='stag sm ok';stag.textContent='✅ Entregue';}}
+  document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){stag.className='stag sm ok';stag.textContent='✅ Entregue';}});
   renderOsTable(); syncSidebarBadges();
   showToast('OS #'+os.num+' liberada para o cliente!','ok');
 }
@@ -10393,8 +10392,14 @@ function osExcluir(id) {
   if(!confirm('Excluir OS #'+os.num+' — '+os.titulo+'?\nEsta ação não pode ser desfeita.')) return;
   delete KB_OS[id];
   kbClose();
-  var card=document.querySelector('.kcard[data-id="'+id+'"]');
-  if(card&&card.parentNode) card.parentNode.removeChild(card);
+  // Remove card do Kanban (usa data-osid)
+  document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){
+    if(card.parentNode) card.parentNode.removeChild(card);
+  });
+  // Fallback: também tenta data-id (compatibilidade)
+  document.querySelectorAll('.kcard[data-id="'+id+'"]').forEach(function(card){
+    if(card.parentNode) card.parentNode.removeChild(card);
+  });
   kbSaveKbos();
   renderOsTable(); syncSidebarBadges(); kbSyncCounts();
   showToast('OS #'+os.num+' excluída','info');
