@@ -2876,7 +2876,9 @@ firebase.auth().signInAnonymously().then(function(){
           <div style="display:flex;flex-direction:column;gap:10px;">
             <div class="form-group">
               <label>OS Vinculada <span style="font-size:10px;font-weight:400;color:var(--muted)">(pode selecionar mais de uma)</span></label>
-              <div id="stSaidaOSChips" style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;padding:7px 8px;background:var(--bg)">
+              <input id="stSaidaOSSearch" type="text" placeholder="🔍 Buscar por nº ou cliente..." oninput="stockFilterOsChips(this.value)"
+                style="width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text);margin-bottom:5px;box-sizing:border-box">
+              <div id="stSaidaOSChips" style="display:flex;flex-wrap:wrap;gap:5px;max-height:130px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;padding:7px 8px;background:var(--bg)">
                 <span style="color:var(--muted);font-size:11px">Carregando OS...</span>
               </div>
             </div>
@@ -9932,6 +9934,7 @@ function _stockFazSaida() {
 // ── Popula chips de OS na Baixa de Estoque ────────────────────────────────
 function stockPopulateOsChips() {
   var box = document.getElementById('stSaidaOSChips');
+  var srch = document.getElementById('stSaidaOSSearch'); if(srch) srch.value='';
   if(!box) return;
   var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
   var ativos = osArr.filter(function(o){ return o.status!=='entregue'&&o.status!=='cancelado'; })
@@ -9951,6 +9954,14 @@ function stockPopulateOsChips() {
       chip.style.borderColor= sel ? 'var(--brand-mid)' : 'var(--border)';
     });
     box.appendChild(chip);
+  });
+}
+
+function stockFilterOsChips(q) {
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#stSaidaOSChips .os-chip').forEach(function(chip) {
+    var txt = chip.textContent.toLowerCase();
+    chip.style.display = (!q || txt.includes(q)) ? '' : 'none';
   });
 }
 
