@@ -2538,6 +2538,7 @@ firebase.auth().signInAnonymously().then(function(){
           <p style="font-size:11px;color:var(--muted);margin:2px 0 0">Análise baseada nos seus dados reais · Atualiza automaticamente</p>
         </div>
         <button onclick="intelRender()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">↻ Atualizar</button>
+        <button onclick="nav('comercial',null)" style="background:var(--surface);color:var(--brand-mid);border:1.5px solid var(--brand-mid);border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">📈 Ver Dashboard</button>
       </div>
 
       <!-- Abas -->
@@ -2675,7 +2676,8 @@ firebase.auth().signInAnonymously().then(function(){
         <button class="exec-fb on" id="comBtnAll" onclick="comSetBrand('all')">🌐 Todas</button>
         <button class="exec-fb" id="comBtnVR"  onclick="comSetBrand('vr')">🟣 VR Marcas</button>
         <button class="exec-fb" id="comBtnVit" onclick="comSetBrand('vitre')">🌸 Vitre</button>
-        <div class="exec-ts-lbl" style="margin-left:auto">📈 Analítico Comercial</div>
+        <button onclick="nav('inteligencia',null)" style="background:linear-gradient(90deg,#7C3AED,#BE185D);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">🧠 Inteligência</button>
+        <div class="exec-ts-lbl">📈 Analítico Comercial</div>
       </div>
 
       <!-- KPIs comercial -->
@@ -7820,6 +7822,8 @@ var STOCK = (function(){
     if(saved) return JSON.parse(saved);
   } catch(e) {}
   return JSON.parse(JSON.stringify(_STOCK_DEFAULTS));
+  // Atualizar comissões
+  if(typeof comissaoRender==="function") comissaoRender();
 })();
 
 function stockSaveData() {
@@ -14470,6 +14474,102 @@ function painelRender() {
       }).join('')
     : '<div style="font-size:12px;color:var(--muted)">Salve orçamentos com vendedor para ver as comissões.</div>';
 }
+
+// ══ MOBILE PANEL ══════════════════════════════════════════════════════════════
+function mobilePanelOpen() {
+  var panel = document.getElementById('mobileSidePanel');
+  var bg    = document.getElementById('mobileOverlayBg');
+  if(!panel) return;
+  panel.style.display = 'block';
+  panel.style.pointerEvents = 'auto';
+  setTimeout(function(){ panel.style.transform = 'translateX(0)'; }, 10);
+  if(bg) { bg.style.display='block'; setTimeout(function(){ bg.style.opacity='1'; },10); }
+}
+function mobilePanelClose() {
+  var panel = document.getElementById('mobileSidePanel');
+  var bg    = document.getElementById('mobileOverlayBg');
+  if(!panel) return;
+  panel.style.transform = 'translateX(-100%)';
+  if(bg) bg.style.opacity = '0';
+  setTimeout(function(){
+    panel.style.display = 'none';
+    panel.style.pointerEvents = 'none';
+    if(bg) bg.style.display = 'none';
+  }, 300);
+}
+function mobilePanelNav(page) {
+  mobilePanelClose();
+  setTimeout(function(){ nav(page, null); }, 120);
+  document.querySelectorAll('.mdrw-item').forEach(function(i){ i.classList.remove('on'); });
+  var el = document.getElementById('mspItem-'+page);
+  if(el) el.classList.add('on');
+}
+
+// ══ COMISSÕES — Dashboard Comercial ══════════════════════════════════════════
+function comissaoRender() {
+  var el = document.getElementById('comComissaoBody');
+  if(!el) return;
+  var orcs = orcGetEnviados();
+  var comMap = {};
+  orcs.forEach(function(o){
+    var v = o.vendedor || '—';
+    var c = parseFloat(o.comissao) || 0;
+    if(!comMap[v]) comMap[v] = { nome:v, total:0, count:0 };
+    comMap[v].total += c;
+    comMap[v].count++;
+  });
+  var list = Object.values(comMap).sort(function(a,b){ return b.total - a.total; });
+  if(!list.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Nenhum orçamento com comissão registrada ainda.</div>';
+    return;
+  }
+  var maxVal = list[0].total || 1;
+  var paleta = ['#7C3AED','#059669','#D97706','#2563EB','#BE185D'];
+  el.innerHTML = list.map(function(c, i){
+    var pct = Math.round((c.total / maxVal) * 100);
+    var col = paleta[i % paleta.length];
+    var fmt = 'R$' + c.total.toFixed(2).replace('.', ',');
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+      + '<div style="width:30px;height:30px;border-radius:50%;background:'+col+';color:#fff;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0).toUpperCase()+'</div>'
+      + '<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+c.nome+'</div><div style="font-size:10px;color:var(--muted)">'+c.count+' orç.</div></div>'
+      + '<div style="flex:2;height:6px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+      + '<div style="font-size:12px;font-weight:900;color:#059669;white-space:nowrap">'+fmt+'</div>'
+      + '</div>';
+  }).join('');
+}
 </script>
+
+<!-- ══ MOBILE SIDE PANEL ══ -->
+<div id="mobileOverlayBg" onclick="mobilePanelClose()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;opacity:0;transition:opacity .28s"></div>
+<div id="mobileSidePanel">
+  <div style="padding:16px 14px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between">
+    <div style="color:#fff;font-weight:800;font-size:15px">📊 ERP Marcas</div>
+    <button onclick="mobilePanelClose()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:20px;cursor:pointer;padding:2px 6px">✕</button>
+  </div>
+  <div>
+    <div class="mdrw-section">Principal</div>
+    <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
+    <div class="mdrw-section">Operação</div>
+    <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS</div>
+    <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
+    <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque</div>
+    <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
+    <div class="mdrw-section">Comercial</div>
+    <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
+    <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+    <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
+    <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
+    <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+    <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
+    <div class="mdrw-section">Financeiro</div>
+    <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
+    <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
+    <div class="mdrw-section">Admin</div>
+    <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
+    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
+    <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
+    <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+  </div>
+</div>
 </body>
 </html>
