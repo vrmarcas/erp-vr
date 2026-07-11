@@ -2233,15 +2233,15 @@ firebase.auth().signInAnonymously().then(function(){
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <div class="fg" style="margin:0">
-                  <label style="font-size:10px">Dias úteis de produção</label>
+                  <label style="font-size:10px">Dias úteis mínimo</label>
                   <input type="number" id="orcPrazoDias" min="1" max="90" placeholder="Ex: 3" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcCalcDataEntrega()">
                 </div>
                 <div class="fg" style="margin:0">
-                  <label style="font-size:10px">Data de entrega</label>
-                  <input type="date" id="orcPrazoEntrega" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcAtualizarPrazoDias()">
+                  <label style="font-size:10px">Dias úteis máximo</label>
+                  <input type="number" id="orcPrazoDiasMax" min="1" max="90" placeholder="Ex: 5" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcCalcDataEntrega()">
                 </div>
               </div>
-              <div id="orcPrazoInfo" style="font-size:10px;color:var(--muted);margin-top:6px;background:var(--bg2);border-radius:6px;padding:6px 9px;display:none"></div>
+              <div id="orcPrazoInfo" style="font-size:11px;color:var(--muted);margin-top:6px;background:var(--bg2);border-radius:6px;padding:7px 10px;display:none;line-height:1.6"></div>
             </div>
           </div>
 
@@ -2874,8 +2874,11 @@ firebase.auth().signInAnonymously().then(function(){
         <div class="card">
           <div class="card-h"><div class="card-h-left">📉 Baixa Manual de Estoque</div></div>
           <div style="display:flex;flex-direction:column;gap:10px;">
-            <div class="form-group"><label>OS Vinculada</label>
-              <select id="stSaidaOS"><option>#0847 — OI Painel Fachada</option><option>#0848 — CLARO Display</option><option>#0851 — Maria S. Placa</option></select>
+            <div class="form-group">
+              <label>OS Vinculada <span style="font-size:10px;font-weight:400;color:var(--muted)">(pode selecionar mais de uma)</span></label>
+              <div id="stSaidaOSChips" style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;padding:7px 8px;background:var(--bg)">
+                <span style="color:var(--muted);font-size:11px">Carregando OS...</span>
+              </div>
             </div>
             <div class="form-group"><label>Material</label>
               <select id="stSaidaMat" onchange="stockSaidaToggleRetalho()">
@@ -4921,7 +4924,7 @@ function nav(page, el) {
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
-  if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); }, 0); }
+  if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'painel')     { setTimeout(function(){ painelRender(); painelStartTimer(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
@@ -5802,12 +5805,18 @@ function orcOnProdChange(sel) {
 }
 
 function orcCalcDataEntrega() {
-  var dias = parseInt(document.getElementById('orcPrazoDias')?.value)||0;
-  if(!dias) return;
-  var d = new Date(); var util=0;
-  while(util < dias) { d.setDate(d.getDate()+1); var dw=d.getDay(); if(dw!==0&&dw!==6) util++; }
+  var diasMin = parseInt(document.getElementById('orcPrazoDias')?.value)||0;
+  var diasMax = parseInt(document.getElementById('orcPrazoDiasMax')?.value)||0;
+  if(!diasMin) return;
+  function addDiasUteis(n) {
+    var d = new Date(); var util=0;
+    while(util < n) { d.setDate(d.getDate()+1); var dw=d.getDay(); if(dw!==0&&dw!==6) util++; }
+    return d;
+  }
+  var dMin = addDiasUteis(diasMin);
+  var dMax = diasMax > diasMin ? addDiasUteis(diasMax) : null;
   var dt = document.getElementById('orcPrazoEntrega');
-  if(dt) dt.value = d.toISOString().split('T')[0];
+  if(dt) dt.value = (dMax||dMin).toISOString().split('T')[0];
   orcAtualizarInfoPrazo();
 }
 function orcAtualizarPrazoDias() {
@@ -5821,14 +5830,25 @@ function orcAtualizarPrazoDias() {
   orcAtualizarInfoPrazo();
 }
 function orcAtualizarInfoPrazo() {
-  var dias=parseInt(document.getElementById('orcPrazoDias')?.value)||0;
-  var dtVal=(document.getElementById('orcPrazoEntrega')||{}).value||'';
-  var info=document.getElementById('orcPrazoInfo'); if(!info) return;
-  if(dias>0&&dtVal) {
-    var dtFmt=dtVal.split('-').reverse().join('/');
-    info.style.display='';
-    info.innerHTML='📅 Entrega: <strong>'+dtFmt+'</strong> ('+dias+' dia'+(dias!==1?'s úteis':' útil')+' de produção)';
-  } else { info.style.display='none'; }
+  var diasMin = parseInt(document.getElementById('orcPrazoDias')?.value)||0;
+  var diasMax = parseInt(document.getElementById('orcPrazoDiasMax')?.value)||0;
+  var info = document.getElementById('orcPrazoInfo'); if(!info) return;
+  if(!diasMin) { info.style.display='none'; return; }
+  function addDiasUteis(n) {
+    var d = new Date(); var util=0;
+    while(util < n) { d.setDate(d.getDate()+1); var dw=d.getDay(); if(dw!==0&&dw!==6) util++; }
+    return d.toLocaleDateString('pt-BR');
+  }
+  var dtMin = addDiasUteis(diasMin);
+  var txt;
+  if(diasMax > diasMin) {
+    var dtMax = addDiasUteis(diasMax);
+    txt = '📅 De <strong>'+diasMin+'</strong> a <strong>'+diasMax+'</strong> dias úteis &nbsp;·&nbsp; Data prevista: <strong>'+dtMin+'</strong> à <strong>'+dtMax+'</strong>';
+  } else {
+    txt = '📅 <strong>'+diasMin+'</strong> dia'+(diasMin!==1?'s úteis':' útil')+' de produção &nbsp;·&nbsp; Entrega: <strong>'+dtMin+'</strong>';
+  }
+  info.style.display='';
+  info.innerHTML=txt;
 }
 function orcPreencherPrazoAuto() {
   var prazoDiasEl=document.getElementById('orcPrazoDias');
@@ -7394,7 +7414,7 @@ function dashRender() {
   // ── Alertas ────────────────────────────────────────────────────────────
   var alertas = [];
   criticos.forEach(function(s){
-    alertas.push({tipo:'warn', msg:s.label+': apenas '+s.qty+' un (mínimo: '+s.min+')', acao:'Ver Estoque'});
+    var _lbl=s.label+((s.esp&&!s.label.includes(s.esp+'mm'))?' '+s.esp+'mm':''); alertas.push({tipo:'warn', msg:_lbl+': apenas '+s.qty+' un (mínimo: '+s.min+')', acao:'Ver Estoque'});
   });
   if(gargalos.length) {
     alertas.push({tipo:'warn', msg:gargalos.length+' OS aguardando liberação do Master ('+gargalos.map(function(o){return '#'+(o.num||o.id);}).join(', ')+')', acao:'Ver Kanban'});
@@ -9900,7 +9920,7 @@ function _stockFazSaida() {
   var minQty=qty<1?1:Math.round(qty);
   if(STOCK[matKey].qty<minQty){showToast('Estoque insuficiente ('+STOCK[matKey].qty+' disponíveis)','warn');return;}
   STOCK[matKey].qty-=minQty; stockUpdateDisplay(matKey); stockSaveData();
-  var _osVinc=(document.getElementById('stSaidaOS')||{}).value||'';
+  var _osVinc=Array.from(document.querySelectorAll('#stSaidaOSChips .os-chip-sel')).map(function(el){return el.dataset.osid;}).join(', ');
   var _obsVinc=(document.getElementById('stSaidaObs')||{}).value||'';
   _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
   var qEl=document.getElementById('stSaidaQty'); if(qEl) qEl.value='';
@@ -9909,6 +9929,31 @@ function _stockFazSaida() {
   showToast('Saída de '+qty+' un de '+STOCK[matKey].label+' registrada','ok');
   syncSidebarBadges();
 }
+// ── Popula chips de OS na Baixa de Estoque ────────────────────────────────
+function stockPopulateOsChips() {
+  var box = document.getElementById('stSaidaOSChips');
+  if(!box) return;
+  var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
+  var ativos = osArr.filter(function(o){ return o.status!=='entregue'&&o.status!=='cancelado'; })
+    .sort(function(a,b){ return (a.num||'').localeCompare(b.num||''); });
+  if(!ativos.length) { box.innerHTML='<span style="color:var(--muted);font-size:11px">Nenhuma OS em aberto</span>'; return; }
+  box.innerHTML = '';
+  ativos.forEach(function(os) {
+    var chip = document.createElement('div');
+    chip.className = 'os-chip';
+    chip.dataset.osid = '#'+os.num+' — '+(os.titulo||os.cliente||'OS');
+    chip.style.cssText = 'padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);white-space:nowrap;transition:.12s;user-select:none';
+    chip.textContent = '#'+os.num+' — '+(os.cliente||os.titulo||'OS');
+    chip.addEventListener('click', function(){
+      var sel = chip.classList.toggle('os-chip-sel');
+      chip.style.background = sel ? 'var(--brand-mid)' : 'var(--bg2)';
+      chip.style.color      = sel ? '#fff' : 'var(--text)';
+      chip.style.borderColor= sel ? 'var(--brand-mid)' : 'var(--border)';
+    });
+    box.appendChild(chip);
+  });
+}
+
 function stockRegistrarSaida() {
   var qty=parseFloat((document.getElementById('stSaidaQty')||{}).value)||0;
   if(qty>0&&qty<1){showToast('Quantidade fracionada — informe as dimensões do retalho acima','warn');return;}
@@ -10133,10 +10178,12 @@ function crmFiltrarHoje() {
 // ============================================================
 function osExcluir(id) {
   var os=KB_OS[id]; if(!os) return;
+  if(!confirm('Excluir OS #'+os.num+' — '+os.titulo+'?\nEsta ação não pode ser desfeita.')) return;
   delete KB_OS[id];
   kbClose();
   var card=document.querySelector('.kcard[data-id="'+id+'"]');
   if(card&&card.parentNode) card.parentNode.removeChild(card);
+  kbSaveKbos();
   renderOsTable(); syncSidebarBadges(); kbSyncCounts();
   showToast('OS #'+os.num+' excluída','info');
 }
@@ -10565,14 +10612,21 @@ function orcImprimirOrcamentoPDF() {
   var vendedor= (document.getElementById('orcClientVendedor')||{}).value|| '—';
   var pgtoSel = document.getElementById('orcFormaPgto');
   var pgtoLabel = pgtoSel ? pgtoSel.options[pgtoSel.selectedIndex].text : 'A combinar';
-  var prazoDiasPDF = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
+  var prazoDiasPDF    = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
+  var prazoDiasMaxPDF = parseInt((document.getElementById('orcPrazoDiasMax')||{}).value||'0');
   var prazoEntregaPDF = (document.getElementById('orcPrazoEntrega')||{}).value||'';
   var prazoTxtPDF = (function(){
-    if(prazoDiasPDF > 0 && prazoEntregaPDF) {
-      var _pe = prazoEntregaPDF.split('-').reverse().join('/');
-      return prazoDiasPDF + ' dia'+(prazoDiasPDF!==1?'s úteis':' útil')+' de produção — entrega prevista: '+_pe;
-    } else if(prazoDiasPDF > 0) {
-      return prazoDiasPDF + ' dia'+(prazoDiasPDF!==1?'s úteis':' útil')+' após aprovação e comprovante de pagamento';
+    if(prazoDiasPDF > 0) {
+      var faixaTxt = prazoDiasMaxPDF > prazoDiasPDF
+        ? 'De '+prazoDiasPDF+' a '+prazoDiasMaxPDF+' dias úteis'
+        : prazoDiasPDF+' dia'+(prazoDiasPDF!==1?'s úteis':' útil');
+      if(prazoEntregaPDF) {
+        function _addUtil(n){ var d=new Date();var u=0;while(u<n){d.setDate(d.getDate()+1);var dw=d.getDay();if(dw!==0&&dw!==6)u++;}return d.toLocaleDateString('pt-BR');}
+        var dtMinStr = _addUtil(prazoDiasPDF);
+        var dtMaxStr = prazoDiasMaxPDF > prazoDiasPDF ? ' à '+_addUtil(prazoDiasMaxPDF) : '';
+        return faixaTxt+' — entrega prevista: '+dtMinStr+dtMaxStr;
+      }
+      return faixaTxt+' após aprovação e comprovante de pagamento';
     } else { return 'a combinar após aprovação e comprovante de pagamento'; }
   })();
 
@@ -10961,7 +11015,8 @@ function orcSalvarOrcamento() {
     obs: '',
     itens: _itens,
     prazo: (document.getElementById('orcPrazoEntrega')||{}).value||'',
-    prazoDias: (document.getElementById('orcPrazoDias')||{}).value||''
+    prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
+    prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||''
   };
   lista.unshift(orc);
   orcSetEnviados(lista);
