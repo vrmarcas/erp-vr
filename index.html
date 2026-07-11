@@ -2005,6 +2005,10 @@ firebase.auth().signInAnonymously().then(function(){
               <div class="fg"><label>Vendedor</label><select id="orcClientVendedor"><option>RONALDO</option><option>CARLOS</option><option>Outro</option></select></div>
             </div>
             <div class="fg-row">
+              <div class="fg"><label>📅 Cliente solicitou em</label><input type="date" id="orcDataPedido" style="font-size:12px"></div>
+              <div class="fg" style="display:flex;align-items:flex-end;padding-bottom:2px"><span style="font-size:11px;color:var(--muted)">Data em que o cliente fez o pedido de orçamento. Usado para medir prazo médio de resposta.</span></div>
+            </div>
+            <div class="fg-row">
               <!-- orcFormaPgto hidden — seleção movida para o Step 5 -->
               <select id="orcFormaPgto" style="display:none"><option value="pix">PIX (100%)</option><option value="50_50">50% entrada + 50% retirada</option><option value="cartao">Cartão de Crédito</option><option value="link">Link de Pagamento</option><option value="dinheiro">Dinheiro</option></select>
               <div class="fg"><label>Validade</label><select><option>10 dias</option><option>7 dias</option><option>15 dias</option><option>30 dias</option></select></div>
@@ -2544,6 +2548,13 @@ firebase.auth().signInAnonymously().then(function(){
           <div class="ekpi-val" id="comTkVit" style="color:#BE185D">—</div>
           <div class="ekpi-trend">por pedido Vitre</div>
           <div class="ekpi-bar"><div class="ekpi-bar-fill" id="comTkVitBar" style="width:0%;background:#BE185D"></div></div>
+        </div>
+        <div class="ekpi">
+          <div class="ekpi-ico">⏱️</div>
+          <div class="ekpi-lbl">Prazo Médio de Envio</div>
+          <div class="ekpi-val" id="comPrazoMedio">—</div>
+          <div class="ekpi-trend" id="comPrazoSub">pedido → orçamento enviado</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="comPrazoBar" style="width:0%;background:#0891B2"></div></div>
         </div>
       </div>
 
@@ -4903,7 +4914,7 @@ function nav(page, el) {
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
   // Ao entrar no orçamento, sempre resetar para step 1
-  if (page === 'orcamento') { setTimeout(function(){ orcStep(1); }, 0); }
+  if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
@@ -7593,6 +7604,40 @@ function comercialRender() {
   setEl('comOsVit', osByMarca.vit);
   var comOsSub = document.getElementById('comOsSub');
   if(comOsSub) comOsSub.textContent = 'Total: '+Object.keys(KB_OS).length+' OS no sistema';
+
+  // ── Prazo médio de envio do orçamento ──────────────────────────────────
+  var prazos = [];
+  envList.forEach(function(o){
+    if(!o.dataPedido || !o.dataSalvo) return;
+    var dp = new Date(o.dataPedido+'T00:00:00');
+    // dataSalvo formato "DD/MM/YYYY HH:MM"
+    var parts = (o.dataSalvo||'').split(' ');
+    var dmyParts = (parts[0]||'').split('/');
+    if(dmyParts.length < 3) return;
+    var ds = new Date(dmyParts[2]+'-'+dmyParts[1]+'-'+dmyParts[0]+'T'+(parts[1]||'00:00')+':00');
+    if(isNaN(dp)||isNaN(ds)) return;
+    var diffH = (ds - dp) / 3600000; // horas
+    if(diffH >= 0 && diffH < 720) prazos.push(diffH); // ignorar outliers >30 dias
+  });
+  var prazoMedioEl = document.getElementById('comPrazoMedio');
+  var prazoSubEl   = document.getElementById('comPrazoSub');
+  var prazoBarEl   = document.getElementById('comPrazoBar');
+  if(prazos.length) {
+    var mediaH = prazos.reduce(function(s,v){return s+v;},0) / prazos.length;
+    var mediaD = mediaH / 24;
+    var txt, cor, pct;
+    if(mediaH < 4)       { txt = Math.round(mediaH)+'h';      cor = '#059669'; pct = 20; }
+    else if(mediaH < 24) { txt = Math.round(mediaH)+'h';      cor = '#059669'; pct = 40; }
+    else if(mediaD < 2)  { txt = mediaD.toFixed(1)+'d';       cor = '#D97706'; pct = 60; }
+    else if(mediaD < 4)  { txt = mediaD.toFixed(1)+'d';       cor = '#D97706'; pct = 75; }
+    else                 { txt = Math.round(mediaD)+'d';       cor = '#DC2626'; pct = 95; }
+    if(prazoMedioEl) { prazoMedioEl.textContent = txt; prazoMedioEl.style.color = cor; }
+    if(prazoSubEl)   prazoSubEl.textContent = 'média de '+prazos.length+' orçamento'+(prazos.length!==1?'s':'')+(mediaH<4?' ✅ excelente':mediaH<24?' ✅ ótimo':mediaD<3?' ⚠️ atenção':' ❌ melhorar');
+    if(prazoBarEl)   { prazoBarEl.style.width = pct+'%'; prazoBarEl.style.background = cor; }
+  } else {
+    if(prazoMedioEl) prazoMedioEl.textContent = '—';
+    if(prazoSubEl)   prazoSubEl.textContent = 'preencha "Cliente solicitou em" ao criar orçamentos';
+  }
 }
 // ============================================================
 // DADOS BASE
@@ -11034,7 +11079,8 @@ function orcSalvarOrcamento() {
     itens: _itens,
     prazo: (document.getElementById('orcPrazoEntrega')||{}).value||'',
     prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
-    prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||''
+    prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||'',
+    dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10)
   };
   lista.unshift(orc);
   orcSetEnviados(lista);
@@ -14278,64 +14324,4 @@ function mspApplyPerms(funcao) {
   var pages = ['dashboard','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   var secVisible = {};
   var secMap2 = {dashboard:'principal',painel:'principal',kanban:'operacao','os-list':'operacao',estoque:'operacao',fornecedores:'operacao',orcamento:'comercial','orcamentos-enviados':'comercial',comercial:'comercial',crm:'comercial',clientes:'comercial',financeiro:'financeiro',relatorios:'financeiro','config-orc':'config','config-plan':'config','config-usr':'config',seguranca:'config'};
-  pages.forEach(function(page) {
-    var item = document.getElementById('mspItem-' + page);
-    if(!item) return;
-    var hide = !!denied[page];
-    if(!hide) {
-      var mod = modMap[page] || page;
-      var def = (typeof PERM_DEFAULT !== 'undefined') ? PERM_DEFAULT[mod] : null;
-      if(!def || def[funcao] === false || def[funcao] === undefined) hide = true;
-      else {
-        var perms = (typeof usrLoadPerms === 'function') ? usrLoadPerms() : {};
-        if(!perms[mod] || !perms[mod][funcao]) hide = true;
-      }
-    }
-    item.style.display = hide ? 'none' : '';
-    if(!hide) secVisible[secMap2[page] || 'config'] = true;
-  });
-  ['principal','operacao','comercial','financeiro','config'].forEach(function(sec){
-    var lbl = document.getElementById('mspSec-' + sec);
-    if(lbl) lbl.style.display = secVisible[sec] ? '' : 'none';
-  });
-}
-
-
-// ── Mobile: fix inline-style grid columns in modals ──────────────────────────
-function _mobileFixModalGrids(modalEl) {
-  if(!modalEl || window.innerWidth > 768) return;
-  modalEl.querySelectorAll('[style]').forEach(function(el) {
-    var s = el.getAttribute('style') || '';
-    if(s.indexOf('grid-template-columns') >= 0 && s.indexOf('1fr 1fr') >= 0) {
-      el.style.gridTemplateColumns = '1fr';
-    }
-    if(s.indexOf('grid-template-columns') >= 0 && s.indexOf('repeat(2') >= 0) {
-      el.style.gridTemplateColumns = '1fr';
-    }
-  });
-}
-// Hook into gen-overlay opens
-document.addEventListener('click', function(e) {
-  var btn = e.target.closest('[onclick]');
-  if(!btn) return;
-  setTimeout(function() {
-    document.querySelectorAll('.gen-overlay.open .gen-modal-body, .gen-overlay[style*="flex"] .gen-modal-body').forEach(function(body) {
-      _mobileFixModalGrids(body);
-    });
-  }, 50);
-});
-
-// Hook: call mspApplyPerms
-(function(){
-  var _origAuth = window.authApplySession;
-  window.authApplySession = function(){
-    if(_origAuth) _origAuth.apply(this, arguments);
-    var sess = (typeof _currentSession !== 'undefined') ? _currentSession : null;
-    if(sess && sess.funcao) {
-      mspApplyPerms(sess.funcao);
-    }
-  };
-})();
-</script>
-</body>
-</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+  page
