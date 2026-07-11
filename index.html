@@ -1398,7 +1398,6 @@ firebase.auth().signInAnonymously().then(function(){
     <div class="sb-section" onclick="sbToggle('principal')"><span>Principal</span><span class="sb-arrow">▼</span></div>
     <div class="sb-group" id="sbG-principal">
       <div class="sb-item on" onclick="nav('dashboard',this)"><span class="ico">📊</span> Dashboard</div>
-      <div class="sb-item" onclick="nav('painel',this)"><span class="ico">📺</span> Painel Executivo</div>
     </div>
 
     <div class="sb-section" onclick="sbToggle('operacao')"><span>Operação</span><span class="sb-arrow">▼</span></div>
@@ -1563,6 +1562,56 @@ firebase.auth().signInAnonymously().then(function(){
       <div class="echart" style="margin-bottom:12px">
         <div class="echart-h" style="margin-bottom:10px">⚡ Alertas de Ação Imediata <span class="echart-sub" id="dAlertN">0 itens</span></div>
         <div id="dAlerts"></div>
+      </div>
+
+      <!-- ══ PAINEL FINANCEIRO ══ -->
+      <div style="display:flex;align-items:center;gap:12px;margin:22px 0 14px;flex-wrap:wrap">
+        <div style="font-size:13px;font-weight:800;color:var(--text)">
+          <span id="painelLiveDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4ADE80;margin-right:6px;animation:painelPulse 2s infinite"></span>
+          Painel Financeiro
+        </div>
+        <span id="painelLastUpd" style="font-size:11px;color:var(--muted)"></span>
+        <button onclick="painelRender()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">↻ Atualizar</button>
+      </div>
+
+      <!-- KPIs financeiros -->
+      <div id="painelKPIs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px"></div>
+
+      <!-- Alertas financeiros -->
+      <div id="painelAlerts" style="display:none;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:12px;font-weight:700;color:#92400E"></div>
+
+      <!-- CR + OS -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+          <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;font-weight:800">💰 Contas a Receber</span>
+            <span id="painelCRTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+          </div>
+          <div id="painelCRBody" style="padding:14px 16px"></div>
+        </div>
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+          <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;font-weight:800">🏭 Ordens de Serviço</span>
+            <span id="painelOSTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+          </div>
+          <div id="painelOSBody" style="padding:14px 16px"></div>
+        </div>
+      </div>
+
+      <!-- Orçamentos + Estoque + Comissões -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+          <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📋 Orçamentos do Mês</span></div>
+          <div id="painelOrcBody" style="padding:14px 16px"></div>
+        </div>
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+          <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📦 Estoque</span></div>
+          <div id="painelStockBody" style="padding:14px 16px"></div>
+        </div>
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
+          <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">🏆 Comissões</span></div>
+          <div id="painelComBody" style="padding:14px 16px"></div>
+        </div>
       </div>
 
     </div>
@@ -3347,66 +3396,6 @@ firebase.auth().signInAnonymously().then(function(){
     <!-- ═══════════════════════════════════════════════════════
          PAINEL EXECUTIVO AO VIVO
          ═══════════════════════════════════════════════════════ -->
-    <div id="pg-painel" style="display:none">
-      <div id="painelRoot" style="background:var(--bg);min-height:80vh">
-        <!-- topbar de controle -->
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
-          <div style="font-size:13px;font-weight:800;color:var(--text)">
-            <span id="painelLiveDot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#4ADE80;margin-right:6px;animation:painelPulse 2s infinite"></span>
-            Atualiza automaticamente
-          </div>
-          <span id="painelLastUpd" style="font-size:11px;color:var(--muted)"></span>
-          <button onclick="painelRender()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">↻ Atualizar agora</button>
-          <button onclick="painelToggleFullscreen()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer" id="painelFsBtn">⛶ Tela cheia</button>
-          <div style="display:flex;gap:6px">
-            <button onclick="painelSetBrand('all')"   id="pnlAll" style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--brand-mid);color:#fff;cursor:pointer;font-weight:700">🌐 Todas</button>
-            <button onclick="painelSetBrand('vr')"    id="pnlVR"  style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-weight:700">🟣 VR</button>
-            <button onclick="painelSetBrand('vitre')" id="pnlVT"  style="font-size:11px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-weight:700">🌸 Vitre</button>
-          </div>
-        </div>
-        <!-- KPIs -->
-        <div id="painelKPIs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px"></div>
-        <!-- Alertas -->
-        <div id="painelAlerts" style="display:none;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:12px;font-weight:700;color:#92400E"></div>
-        <!-- Grid principal -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-          <!-- CR -->
-          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
-            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
-              <span style="font-size:13px;font-weight:800">💰 Contas a Receber</span>
-              <span id="painelCRTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
-            </div>
-            <div id="painelCRBody" style="padding:14px 16px"></div>
-          </div>
-          <!-- OS -->
-          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
-            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border);display:flex;align-items:center;gap:8px">
-              <span style="font-size:13px;font-weight:800">🏭 Ordens de Serviço</span>
-              <span id="painelOSTotal" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
-            </div>
-            <div id="painelOSBody" style="padding:14px 16px"></div>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
-          <!-- Orçamentos -->
-          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
-            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📋 Orçamentos do Mês</span></div>
-            <div id="painelOrcBody" style="padding:14px 16px"></div>
-          </div>
-          <!-- Estoque -->
-          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
-            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">📦 Estoque</span></div>
-            <div id="painelStockBody" style="padding:14px 16px"></div>
-          </div>
-          <!-- Comissões -->
-          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;overflow:hidden">
-            <div style="padding:13px 16px;border-bottom:1.5px solid var(--border)"><span style="font-size:13px;font-weight:800">🏆 Comissões</span></div>
-            <div id="painelComBody" style="padding:14px 16px"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div id="pg-relatorios" style="display:none">
       <!-- Cabeçalho -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -4880,7 +4869,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','painel'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -4918,6 +4907,7 @@ function nav(page, el) {
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
+  if (page === 'dashboard')  { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
@@ -4928,7 +4918,6 @@ function nav(page, el) {
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
-  if (page === 'painel')     { setTimeout(function(){ painelRender(); painelStartTimer(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
   if (page === 'crm')        { setTimeout(function(){ crmRenderBoard('vr'); crmRenderBoard('vitre'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
   // Log sensitive navigation
@@ -7477,6 +7466,8 @@ function dashRender() {
       +'<div style="text-align:center"><div style="font-size:20px;font-weight:800;color:#D97706">'+rCount+'</div><div style="font-size:10px;color:var(--muted)">Retalhos disp.</div></div>'
       +'</div>';
   }
+  // Renderiza painel financeiro junto
+  if(typeof painelRender === 'function') painelRender();
 }
 
 // ============================================================
@@ -12269,9 +12260,9 @@ function secApplyPerms(funcao){
   var perms=usrLoadPerms();
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
-    comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'estoque':1},
-    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1},
-    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'painel':1}
+    comercial: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1},
+    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
   };
   var denied = HARD_DENY[funcao]||{};
   function getPermForMod(mod, page){
@@ -13889,22 +13880,10 @@ function painelFmt(v) {
 function painelStartTimer() {
   if(_painelTimer) clearInterval(_painelTimer);
   _painelTimer = setInterval(function(){
-    var pg = document.getElementById('pg-painel');
+    var pg = document.getElementById('pg-dashboard');
     if(pg && pg.style.display !== 'none') painelRender();
     else { clearInterval(_painelTimer); _painelTimer=null; }
   }, 30000);
-}
-
-function painelToggleFullscreen() {
-  var root = document.getElementById('painelRoot');
-  var btn = document.getElementById('painelFsBtn');
-  if(!document.fullscreenElement) {
-    (root.requestFullscreen||root.webkitRequestFullscreen||function(){}).call(root);
-    if(btn) btn.textContent = '✕ Sair da tela cheia';
-  } else {
-    (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);
-    if(btn) btn.textContent = '⛶ Tela cheia';
-  }
 }
 
 function painelRender() {
@@ -14177,7 +14156,6 @@ function painelRender() {
 
   <div class="mdrw-section" id="mspSec-principal">Principal</div>
   <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
-  <div class="mdrw-item" id="mspItem-painel" onclick="mobilePanelNav('painel')"><span class="mdrw-ico">📺</span> Painel Executivo</div>
 
   <div class="mdrw-section" id="mspSec-operacao">Operação</div>
   <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS <span id="mspBadgeKanban" style="margin-left:auto;background:#DC2626;color:#fff;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;display:none"></span></div>
@@ -14276,13 +14254,13 @@ function mobilePanelNav(page) {
 function mspApplyPerms(funcao) {
   if(funcao === 'master' || funcao === 'admin') return;
   var HARD_DENY = {
-    comercial: {dashboard:1,financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1,estoque:1},
-    producao:  {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1,orcamento:1,'orcamentos-enviados':1,comercial:1,crm:1,clientes:1},
-    financeiro:{config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,painel:1}
+    comercial: {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,estoque:1},
+    producao:  {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,orcamento:1,'orcamentos-enviados':1,comercial:1,crm:1,clientes:1},
+    financeiro:{config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1}
   };
   var denied = HARD_DENY[funcao] || {};
   var modMap = {'config-orc':'config','config-plan':'config','config-usr':'config','seguranca':'config','orcamentos-enviados':'orcamento','comercial':'orcamento','relatorios':'financeiro'};
-  var pages = ['dashboard','painel','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+  var pages = ['dashboard','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   var secVisible = {};
   var secMap2 = {dashboard:'principal',painel:'principal',kanban:'operacao','os-list':'operacao',estoque:'operacao',fornecedores:'operacao',orcamento:'comercial','orcamentos-enviados':'comercial',comercial:'comercial',crm:'comercial',clientes:'comercial',financeiro:'financeiro',relatorios:'financeiro','config-orc':'config','config-plan':'config','config-usr':'config',seguranca:'config'};
   pages.forEach(function(page) {
@@ -14339,4 +14317,10 @@ document.addEventListener('click', function(e) {
     if(_origAuth) _origAuth.apply(this, arguments);
     var sess = (typeof _currentSession !== 'undefined') ? _currentSession : null;
     if(sess && sess.funcao) {
-     
+      mspApplyPerms(sess.funcao);
+    }
+  };
+})();
+</script>
+</body>
+</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
