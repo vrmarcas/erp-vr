@@ -9937,7 +9937,8 @@ function stockPopulateOsChips() {
   var srch = document.getElementById('stSaidaOSSearch'); if(srch) srch.value='';
   if(!box) return;
   var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
-  var ativos = osArr.filter(function(o){ return o.status!=='entregue'&&o.status!=='cancelado'; })
+  var _prodStatus = ['producao','em_producao','iniciada','aguard_master','pronto'];
+  var ativos = osArr.filter(function(o){ return _prodStatus.indexOf(o.status)>=0; })
     .sort(function(a,b){ return (a.num||'').localeCompare(b.num||''); });
   if(!ativos.length) { box.innerHTML='<span style="color:var(--muted);font-size:11px">Nenhuma OS em aberto</span>'; return; }
   box.innerHTML = '';
@@ -14338,10 +14339,4 @@ document.addEventListener('click', function(e) {
     if(_origAuth) _origAuth.apply(this, arguments);
     var sess = (typeof _currentSession !== 'undefined') ? _currentSession : null;
     if(sess && sess.funcao) {
-      mspApplyPerms(sess.funcao);
-    }
-  };
-})();
-</script>
-</body>
-</html>
+     
