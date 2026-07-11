@@ -10634,36 +10634,51 @@ function orcImprimirOrcamentoPDF() {
   })();
 
   // itens
-  var itensRows = '';
-  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
-    var idx = row.dataset.idx; if(!idx) return;
-    var prod  = (document.getElementById('oi_prod_'+idx)||{}).value||'—';
-    var qty   = (document.getElementById('oi_qty_'+idx)||{}).value||'1';
-    var larg  = (document.getElementById('oi_larg_'+idx)||{}).value||'';
-    var alt   = (document.getElementById('oi_alt_'+idx)||{}).value||'';
-    var matEl = document.getElementById('oi_mat_'+idx);
-    var matLbl= matEl ? matEl.options[matEl.selectedIndex].text : '';
-    var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
-    var unit  = (document.getElementById('oi_unit_'+idx)||{}).textContent||'—';
-    var tot   = (document.getElementById('oi_tot_'+idx)||{}).textContent||'—';
-    var desc  = prod;
-    if(larg && alt) desc += ' ' + larg + '×' + alt + 'cm';
-    if(matLbl) desc += ' em ' + matLbl;
-    if(det) desc += ' — ' + det;
-    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+desc+'</td>'
-      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+unit.trim()+'</td>'
-      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+qty+'</td>'
-      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+tot.trim()+'</td>'
-      +'</tr>';
-  });
-
-  // descontos
+  // descontos (calculados antes dos itens para redistribuir o valor final)
   var condAtivo = !!(document.getElementById('orcDescCondToggle')?.checked);
   var condPct   = condAtivo ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
   var condData  = condAtivo ? (document.getElementById('orcDescCondData')?.value||'') : '';
   var pixAtivo  = !!(document.getElementById('orcPixDiscToggle')?.checked);
   var pixPct    = pixAtivo  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
   var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100)*(1-pixPct/100) : 0;
+
+  // Coleta raw de itens para redistribuição proporcional
+  var _itensDados = [];
+  var _matTotalRaw = 0;
+  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
+    var idx = row.dataset.idx; if(!idx) return;
+    var prod  = (document.getElementById('oi_prod_'+idx)||{}).value||'—';
+    var qty   = parseFloat((document.getElementById('oi_qty_'+idx)||{}).value)||1;
+    var larg  = (document.getElementById('oi_larg_'+idx)||{}).value||'';
+    var alt   = (document.getElementById('oi_alt_'+idx)||{}).value||'';
+    var matEl = document.getElementById('oi_mat_'+idx);
+    var matLbl= matEl ? matEl.options[matEl.selectedIndex].text : '';
+    var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
+    // Parse raw material total for this item
+    var totRawTxt = (document.getElementById('oi_tot_'+idx)||{}).textContent||'0';
+    var totRaw = parseFloat(totRawTxt.replace(/[^\d,]/g,'').replace(',','.').replace(/\./g,function(m,o,s){return o<s.lastIndexOf('.')?'':'.'})) || 0;
+    _matTotalRaw += totRaw;
+    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, matLbl:matLbl, det:det, totRaw:totRaw});
+  });
+
+  // Redistribui o valor final proporcionalmente entre os itens
+  var _totalParaDistribuir = baseEfetiva || c2.finalPrice || 0;
+  var fmtBRL = function(v){ return 'R$'+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var itensRows = '';
+  _itensDados.forEach(function(item){
+    var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (1/_itensDados.length);
+    var itemTotal = _totalParaDistribuir * share;
+    var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
+    var desc = item.prod;
+    if(item.larg && item.alt) desc += ' ' + item.larg + '×' + item.alt + 'cm';
+    if(item.matLbl) desc += ' em ' + item.matLbl;
+    if(item.det) desc += ' — ' + item.det;
+    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+desc+'</td>'
+      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(itemUnit)+'</td>'
+      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+item.qty+'</td>'
+      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(itemTotal)+'</td>'
+      +'</tr>';
+  });
   var totalFmt = baseEfetiva>0
     ? 'R$ '+baseEfetiva.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (c2.finalPrice ? 'R$ '+c2.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
@@ -14323,4 +14338,4 @@ document.addEventListener('click', function(e) {
 })();
 </script>
 </body>
-</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
