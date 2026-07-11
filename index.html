@@ -420,6 +420,12 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
    DASHBOARD EXECUTIVO
    ========================================================= */
 .exec-filter-bar{display:flex;align-items:center;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+.intel-tab{flex:1;padding:8px 12px;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;background:transparent;color:var(--muted);transition:.12s;text-align:center}
+.intel-tab.on{background:var(--surface);color:var(--brand-mid);box-shadow:0 1px 4px rgba(0,0,0,.10)}
+.intel-tab:hover:not(.on){color:var(--brand-mid)}
+.intel-cad-step{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+.intel-cad-dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:#fff;flex-shrink:0}
+.intel-insight{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;margin-bottom:8px;border-left:3px solid}
 .exec-fb{padding:6px 15px;border:1.5px solid var(--border);border-radius:20px;background:transparent;cursor:pointer;font-size:11px;font-weight:700;color:var(--muted);transition:.13s}
 .exec-fb.on{background:var(--brand-mid);border-color:var(--brand-mid);color:#fff}
 .exec-fb:hover:not(.on){border-color:var(--brand-mid);color:var(--brand-mid)}
@@ -1413,6 +1419,7 @@ firebase.auth().signInAnonymously().then(function(){
       <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
       <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
+      <div class="sb-item" onclick="nav('inteligencia',this)"><span class="ico">🧠</span> Inteligência Comercial</div>
       <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
       <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
     </div>
@@ -2510,6 +2517,149 @@ firebase.auth().signInAnonymously().then(function(){
     <!-- ==============================
          ANALÍTICO COMERCIAL
          ============================== -->
+    <!-- ==============================
+         INTELIGÊNCIA COMERCIAL
+         ============================== -->
+    <div id="pg-inteligencia" style="display:none">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+        <div style="width:40px;height:40px;background:linear-gradient(135deg,#7C3AED,#BE185D);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🧠</div>
+        <div>
+          <h2 style="font-size:16px;font-weight:800;margin:0">Inteligência Comercial</h2>
+          <p style="font-size:11px;color:var(--muted);margin:2px 0 0">Análise baseada nos seus dados reais · Atualiza automaticamente</p>
+        </div>
+        <button onclick="intelRender()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">↻ Atualizar</button>
+      </div>
+
+      <!-- Abas -->
+      <div style="display:flex;gap:4px;margin-bottom:18px;background:var(--bg2);border-radius:10px;padding:4px">
+        <button class="intel-tab on" id="intelTab1" onclick="intelTabSwitch('funil',this)">📊 Funil & Métricas</button>
+        <button class="intel-tab" id="intelTab2" onclick="intelTabSwitch('cadencia',this)">📨 Cadência</button>
+        <button class="intel-tab" id="intelTab3" onclick="intelTabSwitch('insights',this)">💡 Insights</button>
+      </div>
+
+      <!-- FUNIL -->
+      <div id="intelPanelFunil">
+        <!-- KPIs row -->
+        <div class="ekpi-grid" style="margin-bottom:16px">
+          <div class="ekpi"><div class="ekpi-ico">🎯</div><div class="ekpi-lbl">Conversão Orç→OS</div><div class="ekpi-val" id="intelConv">—</div><div class="ekpi-trend" id="intelConvSub">orçamentos aprovados</div><div class="ekpi-bar"><div class="ekpi-bar-fill" id="intelConvBar" style="width:0%"></div></div></div>
+          <div class="ekpi"><div class="ekpi-ico">⏱️</div><div class="ekpi-lbl">Prazo Médio Envio</div><div class="ekpi-val" id="intelPrazo">—</div><div class="ekpi-trend" id="intelPrazoSub">pedido → orçamento</div><div class="ekpi-bar"><div class="ekpi-bar-fill" id="intelPrazoBar" style="width:0%;background:#0891B2"></div></div></div>
+          <div class="ekpi"><div class="ekpi-ico">💰</div><div class="ekpi-lbl">Ticket Médio Geral</div><div class="ekpi-val" id="intelTicket">—</div><div class="ekpi-trend">todos os orçamentos</div><div class="ekpi-bar"><div class="ekpi-bar-fill" id="intelTicketBar" style="width:0%;background:#059669"></div></div></div>
+          <div class="ekpi"><div class="ekpi-ico">📋</div><div class="ekpi-lbl">Orç. Sem Resposta</div><div class="ekpi-val" id="intelSemResp" style="color:#D97706">—</div><div class="ekpi-trend">aguardando há 3+ dias</div><div class="ekpi-bar"><div class="ekpi-bar-fill" id="intelSemRespBar" style="width:0%;background:#D97706"></div></div></div>
+        </div>
+
+        <!-- Funil visual + Orçamentos pendentes -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:14px">🔻 Funil de Vendas Real</div>
+            <div id="intelFunilBars"></div>
+            <div style="font-size:10px;color:var(--muted);margin-top:10px;font-style:italic">Meta de conversão: 40%+ (Predictable Revenue)</div>
+          </div>
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:14px">🔥 Orçamentos Sem Retorno (3+ dias)</div>
+            <div id="intelOrcPend" style="max-height:200px;overflow-y:auto"></div>
+          </div>
+        </div>
+
+        <!-- Performance por vendedor -->
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+          <div style="font-size:13px;font-weight:800;margin-bottom:14px">🏆 Performance por Vendedor</div>
+          <div id="intelVendedores" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px"></div>
+        </div>
+      </div>
+
+      <!-- CADÊNCIA -->
+      <div id="intelPanelCadencia" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:4px">📨 Cadência Prospecção Fria — 10 dias</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Para leads do site, Instagram ou indicação</div>
+            <div id="intelCad1"></div>
+            <div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:8px;font-size:11px;color:var(--muted)">📚 Combo Prospecting (Tony Hughes) + Fanatical Prospecting (Jeb Blount)</div>
+          </div>
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:4px">🔁 Follow-up Pós-Orçamento</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Para orçamentos enviados sem resposta</div>
+            <div id="intelCad2"></div>
+            <div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:8px;font-size:11px;color:var(--muted)">📚 Virtual Selling (Jeb Blount) · 80% das vendas fecham no 5º-12º contato</div>
+          </div>
+        </div>
+
+        <!-- Templates de mensagem -->
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-top:16px">
+          <div style="font-size:13px;font-weight:800;margin-bottom:14px">💬 Templates de Mensagem Prontos</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div style="background:var(--bg2);border-radius:10px;padding:12px;border-left:3px solid #7C3AED">
+              <div style="font-size:11px;font-weight:800;color:#7C3AED;margin-bottom:8px">PRIMEIRO CONTATO (WhatsApp)</div>
+              <div style="font-size:12px;color:var(--text);line-height:1.7">Oi [Nome], tudo bem? Vi que você tem interesse em [produto] em acrílico. Trabalhamos com clientes como [empresa similar] e o resultado ficou incrível. Posso te mostrar? [foto do trabalho]</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;font-style:italic">📚 Outbound Sales No Fluff</div>
+            </div>
+            <div style="background:var(--bg2);border-radius:10px;padding:12px;border-left:3px solid #059669">
+              <div style="font-size:11px;font-weight:800;color:#059669;margin-bottom:8px">FOLLOW-UP COM VÍDEO (Dia 2)</div>
+              <div style="font-size:12px;color:var(--text);line-height:1.7">Oi [Nome], gravei um vídeo rápido de 60s mostrando como ficou um projeto parecido com o seu. Acho que vai responder todas as dúvidas sobre acabamento e prazo. [link Loom]</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;font-style:italic">📚 Virtual Selling (Blount) — 3x mais resposta</div>
+            </div>
+            <div style="background:var(--bg2);border-radius:10px;padding:12px;border-left:3px solid #D97706">
+              <div style="font-size:11px;font-weight:800;color:#D97706;margin-bottom:8px">FOCO NA DOR (Dia 4)</div>
+              <div style="font-size:12px;color:var(--text);line-height:1.7">Qual o maior problema no seu ponto de venda hoje — display que não chama atenção, material que quebra fácil, ou prazo de entrega longo? Pergunto porque cada caso tem uma solução diferente.</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;font-style:italic">📚 Problem Prospecting?! — 60% mais resposta</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INSIGHTS -->
+      <div id="intelPanelInsights" style="display:none">
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:800;margin-bottom:14px">⚡ Diagnóstico do Comercial — Baseado nos Seus Dados</div>
+          <div id="intelInsights"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:14px">📐 Os 3 Níveis de Métrica</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="background:#f3f0ff;border-radius:8px;padding:10px 14px">
+                <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Resultado (não controlável)</div>
+                <div style="font-size:14px;font-weight:800;color:#7C3AED;margin-top:2px" id="intelN1">Receita Total</div>
+              </div>
+              <div style="text-align:center;color:var(--muted);font-size:18px">↑ depende de ↓</div>
+              <div style="background:#fef3c7;border-radius:8px;padding:10px 14px">
+                <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Objetivos (influenciáveis)</div>
+                <div style="font-size:13px;font-weight:800;color:#D97706;margin-top:2px">Taxa de conversão · Ticket médio</div>
+              </div>
+              <div style="text-align:center;color:var(--muted);font-size:18px">↑ depende de ↓</div>
+              <div style="background:#d1fae5;border-radius:8px;padding:10px 14px">
+                <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">Atividades (você controla)</div>
+                <div style="font-size:13px;font-weight:800;color:#059669;margin-top:2px">Contatos/dia · Follow-ups · Orçamentos</div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:10px;font-style:italic">📚 Cracking the Sales Management Code (Jordan & Vazzana)</div>
+          </div>
+          <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <div style="font-size:13px;font-weight:800;margin-bottom:14px">🎯 Plano de Ação — Próximos 30 dias</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:var(--bg2);border-radius:8px">
+                <div style="width:24px;height:24px;background:#7C3AED;border-radius:50%;color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+                <div><div style="font-size:12px;font-weight:700">Semana 1</div><div style="font-size:11px;color:var(--muted)">Fazer follow-up em todos os orçamentos aguardando há 3+ dias</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:var(--bg2);border-radius:8px">
+                <div style="width:24px;height:24px;background:#BE185D;border-radius:50%;color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+                <div><div style="font-size:12px;font-weight:700">Semana 2</div><div style="font-size:11px;color:var(--muted)">Gravar 3 vídeos de 60s de trabalhos prontos para usar como abordagem</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:var(--bg2);border-radius:8px">
+                <div style="width:24px;height:24px;background:#D97706;border-radius:50%;color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+                <div><div style="font-size:12px;font-weight:700">Semana 3</div><div style="font-size:11px;color:var(--muted)">Formulário no site Shopify capturando leads direto no CRM</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:var(--bg2);border-radius:8px">
+                <div style="width:24px;height:24px;background:#059669;border-radius:50%;color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">4</div>
+                <div><div style="font-size:12px;font-weight:700">Semana 4</div><div style="font-size:11px;color:var(--muted)">1ª campanha de e-mail para base de clientes (Brevo — grátis)</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="pg-comercial" style="display:none">
       <!-- Brand filter -->
       <div class="exec-filter-bar">
@@ -4880,7 +5030,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -4918,7 +5068,8 @@ function nav(page, el) {
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
-  if (page === 'dashboard')  { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
+  if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
+  if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
@@ -13947,6 +14098,194 @@ function painelStartTimer() {
   }, 30000);
 }
 
+// ============================================================
+// INTELIGÊNCIA COMERCIAL
+// ============================================================
+function intelTabSwitch(id, btn) {
+  ['funil','cadencia','insights'].forEach(function(p){
+    var el = document.getElementById('intelPanel'+p.charAt(0).toUpperCase()+p.slice(1));
+    if(el) el.style.display = (p===id) ? '' : 'none';
+  });
+  document.querySelectorAll('.intel-tab').forEach(function(b){ b.classList.remove('on'); });
+  if(btn) btn.classList.add('on');
+}
+
+function intelRender() {
+  var envList = typeof orcGetEnviados==='function' ? orcGetEnviados() : [];
+  var today   = new Date(); today.setHours(0,0,0,0);
+  var fmtBRL  = function(v){ return 'R$ '+Math.round(v).toLocaleString('pt-BR'); };
+
+  // ── Conversão ──
+  var total   = envList.length;
+  var aprov   = envList.filter(function(o){return o.status==='aprovado';}).length;
+  var aguard  = envList.filter(function(o){return !o.status||o.status==='aguardando';}).length;
+  var recusad = envList.filter(function(o){return o.status==='recusado';}).length;
+  var conv    = total ? Math.round(aprov/total*100) : 0;
+  var convBar = document.getElementById('intelConvBar');
+  setEl('intelConv', conv+'%');
+  setEl('intelConvSub', aprov+' de '+total+' aprovados'+(conv>=40?' ✅':conv>=20?' ⚠️':' ❌'));
+  if(convBar){ convBar.style.width=conv+'%'; convBar.style.background=conv>=40?'#059669':conv>=20?'#D97706':'#DC2626'; }
+
+  // ── Ticket médio ──
+  var vals = envList.map(function(o){return parseFloat(o.valorFinal||o.valorBase)||0;}).filter(Boolean);
+  var ticket = vals.length ? vals.reduce(function(s,v){return s+v;},0)/vals.length : 0;
+  setEl('intelTicket', ticket>0?fmtBRL(ticket):'—');
+  var tkBar = document.getElementById('intelTicketBar');
+  if(tkBar) tkBar.style.width = Math.min(100, Math.round(ticket/2000*100))+'%';
+
+  // ── Prazo médio ──
+  var prazos = [];
+  envList.forEach(function(o){
+    if(!o.dataPedido||!o.dataSalvo) return;
+    var dp=new Date(o.dataPedido+'T00:00:00');
+    var parts=(o.dataSalvo||'').split(' '); var dmy=(parts[0]||'').split('/');
+    if(dmy.length<3) return;
+    var ds=new Date(dmy[2]+'-'+dmy[1]+'-'+dmy[0]+'T'+(parts[1]||'00:00')+':00');
+    if(isNaN(dp)||isNaN(ds)) return;
+    var h=(ds-dp)/3600000; if(h>=0&&h<720) prazos.push(h);
+  });
+  var prazoEl=document.getElementById('intelPrazo'); var prazoSEl=document.getElementById('intelPrazoSub'); var prazoBarEl=document.getElementById('intelPrazoBar');
+  if(prazos.length){
+    var mH=prazos.reduce(function(s,v){return s+v;},0)/prazos.length;
+    var txt=mH<24?Math.round(mH)+'h':(mH/24).toFixed(1)+'d';
+    var cor=mH<8?'#059669':mH<24?'#059669':mH<72?'#D97706':'#DC2626';
+    if(prazoEl){prazoEl.textContent=txt;prazoEl.style.color=cor;}
+    if(prazoSEl) prazoSEl.textContent='média de '+prazos.length+' orç.'+(mH<24?' ✅ menos de 1 dia':mH<72?' ⚠️ até 3 dias':' ❌ mais de 3 dias');
+    if(prazoBarEl){prazoBarEl.style.width=Math.min(95,Math.round(mH/72*100))+'%';prazoBarEl.style.background=cor;}
+  } else { if(prazoEl) prazoEl.textContent='—'; if(prazoSEl) prazoSEl.textContent='preencha "solicitou em" nos orçamentos'; }
+
+  // ── Sem resposta 3+ dias ──
+  var semResp = envList.filter(function(o){
+    if(o.status&&o.status!=='aguardando') return false;
+    var parts=(o.dataSalvo||'').split(' '); var dmy=(parts[0]||'').split('/');
+    if(dmy.length<3) return false;
+    var ds=new Date(dmy[2]+'-'+dmy[1]+'-'+dmy[0]+'T00:00:00');
+    if(isNaN(ds)) return false;
+    return (today-ds)/(86400000)>=3;
+  });
+  setEl('intelSemResp', semResp.length||'0');
+  var srBar=document.getElementById('intelSemRespBar');
+  if(srBar) srBar.style.width=Math.min(100,semResp.length*10)+'%';
+
+  // ── Funil visual ──
+  var funilEl=document.getElementById('intelFunilBars');
+  if(funilEl){
+    var steps=[
+      {lbl:'Orçamentos Enviados', n:total,    col:'#7C3AED'},
+      {lbl:'Aguardando Resposta', n:aguard,   col:'#D97706'},
+      {lbl:'Aprovados',           n:aprov,    col:'#059669'},
+      {lbl:'Recusados',           n:recusad,  col:'#DC2626'}
+    ];
+    var maxN=Math.max(total,1);
+    funilEl.innerHTML=steps.map(function(s){
+      var pct=Math.round(s.n/maxN*100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+        +'<div style="font-size:11px;font-weight:700;width:140px;color:var(--text)">'+s.lbl+'</div>'
+        +'<div style="flex:1;height:26px;background:var(--bg2);border-radius:6px;overflow:hidden">'
+        +'<div style="height:100%;width:'+pct+'%;background:'+s.col+';border-radius:6px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:11px;font-weight:800;min-width:24px;transition:width .6s">'+s.n+'</div>'
+        +'</div>'
+        +'<div style="font-size:11px;color:var(--muted);width:36px;text-align:right">'+pct+'%</div>'
+        +'</div>';
+    }).join('');
+  }
+
+  // ── Orçamentos sem retorno ──
+  var pendEl=document.getElementById('intelOrcPend');
+  if(pendEl){
+    if(!semResp.length){
+      pendEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">✅ Nenhum orçamento parado há 3+ dias.</div>';
+    } else {
+      pendEl.innerHTML=semResp.slice(0,8).map(function(o){
+        var parts=(o.dataSalvo||'').split(' '); var dmy=(parts[0]||'').split('/');
+        var ds=new Date(dmy[2]+'-'+dmy[1]+'-'+dmy[0]+'T00:00:00');
+        var dias=Math.round((today-ds)/86400000);
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
+          +'<div><div style="font-size:12px;font-weight:700">'+o.cliente+'</div>'
+          +'<div style="font-size:10px;color:var(--muted)">'+fmtBRL(o.valorFinal||o.valorBase||0)+' · '+o.produto+'</div></div>'
+          +'<span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:#FEF3C7;color:#92400E">'+dias+'d sem retorno</span>'
+          +'</div>';
+      }).join('');
+    }
+  }
+
+  // ── Performance por vendedor ──
+  var vMap={};
+  envList.forEach(function(o){
+    var v=o.vendedor||'—'; if(!vMap[v]) vMap[v]={nome:v,total:0,aprov:0,valor:0,count:0};
+    vMap[v].count++; vMap[v].valor+=(parseFloat(o.valorFinal||o.valorBase)||0);
+    if(o.status==='aprovado'){vMap[v].aprov++;vMap[v].total+=(parseFloat(o.valorFinal||o.valorBase)||0);}
+  });
+  var vList=Object.values(vMap).sort(function(a,b){return b.total-a.total;});
+  var paleta=['#7C3AED','#BE185D','#059669','#D97706','#2563EB'];
+  var vEl=document.getElementById('intelVendedores');
+  if(vEl) vEl.innerHTML=vList.length?vList.map(function(v,i){
+    var conv=v.count?Math.round(v.aprov/v.count*100):0;
+    var col=paleta[i%paleta.length];
+    return '<div style="background:var(--bg2);border-radius:10px;padding:14px;border-top:3px solid '+col+'">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+      +'<div style="width:32px;height:32px;border-radius:50%;background:'+col+';color:#fff;font-size:14px;font-weight:900;display:flex;align-items:center;justify-content:center">'+v.nome.charAt(0)+'</div>'
+      +'<div style="font-size:13px;font-weight:800">'+v.nome+'</div></div>'
+      +'<div style="font-size:20px;font-weight:900;color:'+col+'">'+conv+'%</div>'
+      +'<div style="font-size:10px;color:var(--muted)">conversão · '+v.count+' orç.</div>'
+      +'<div style="font-size:12px;font-weight:700;color:#059669;margin-top:4px">'+fmtBRL(v.total)+' fechados</div>'
+      +'</div>';
+  }).join(''):'<div style="color:var(--muted);font-size:12px">Salve orçamentos com vendedor para ver.</div>';
+
+  // ── Cadências ──
+  var cad1=[
+    {d:'D1',col:'#7C3AED',ico:'📱',titulo:'WhatsApp — Primeiro contato',desc:'Mensagem curta, cite o produto específico. "Vi que você tem interesse em displays em acrílico..."'},
+    {d:'D2',col:'#BE185D',ico:'🎬',titulo:'Vídeo 60s (Loom/WhatsApp)',desc:'Mostre um trabalho similar. Taxa de abertura 3x maior que texto.'},
+    {d:'D4',col:'#7C3AED',ico:'✉️',titulo:'E-mail — Valor + Prova Social',desc:'Case de cliente similar + foto do produto pronto.'},
+    {d:'D7',col:'#BE185D',ico:'💬',titulo:'WhatsApp — Foco na dor',desc:'"Qual o maior desafio no seu ponto de venda hoje?" (Problem Prospecting?!)'},
+    {d:'D10',col:'#6b7280',ico:'🚪',titulo:'Break-up message',desc:'"Não quero incomodar. Se quiser retomar quando fizer sentido, estarei aqui." — 30% respondem.'}
+  ];
+  var cad2=[
+    {d:'D1',col:'#059669',ico:'✅',titulo:'Confirmação de recebimento',desc:'"Acabei de enviar o orçamento. Alguma dúvida sobre os materiais ou prazo?"'},
+    {d:'D3',col:'#7C3AED',ico:'🎬',titulo:'Vídeo explicando o orçamento',desc:'60s navegando pelo PDF. Personalizado. Alta taxa de resposta.'},
+    {d:'D6',col:'#D97706',ico:'💬',titulo:'Pergunta de qualificação',desc:'"Está avaliando outras opções? Posso ajudar a comparar."'},
+    {d:'D10',col:'#DC2626',ico:'⏰',titulo:'Urgência real',desc:'"Nossa agenda deste mês está quase cheia. Posso garantir o prazo se fecharmos até sexta."'}
+  ];
+  function renderCad(id, steps){
+    var el=document.getElementById(id); if(!el) return;
+    el.innerHTML=steps.map(function(s,i){
+      return '<div class="intel-cad-step"><div class="intel-cad-dot" style="background:'+s.col+'">'+s.d+'</div>'
+        +'<div style="flex:1"><div style="font-size:12px;font-weight:700;color:var(--text)">'+s.ico+' '+s.titulo+'</div>'
+        +'<div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4">'+s.desc+'</div></div></div>'
+        +(i<steps.length-1?'<div style="width:2px;height:10px;background:var(--border);margin:0 0 6px 14px"></div>':'');
+    }).join('');
+  }
+  renderCad('intelCad1',cad1); renderCad('intelCad2',cad2);
+
+  // ── Insights baseados nos dados ──
+  var insights=[];
+  if(semResp.length>0)
+    insights.push({tipo:'warn',ico:'⚠️',txt:'<strong>'+semResp.length+' orçamento'+( semResp.length!==1?'s':'')+' parado'+( semResp.length!==1?'s':'')+' há 3+ dias sem retorno.</strong> Faça follow-up hoje — 80% das vendas fecham entre o 5º e 12º contato (Fanatical Prospecting).'});
+  if(conv<20)
+    insights.push({tipo:'bad',ico:'❌',txt:'<strong>Conversão de '+conv+'% está abaixo do ideal.</strong> Meta: 40%+. Revise a qualificação dos leads antes de emitir orçamento.'});
+  else if(conv<40)
+    insights.push({tipo:'warn',ico:'⚠️',txt:'<strong>Conversão de '+conv+'% pode melhorar.</strong> Meta: 40%+. Use vídeo no follow-up D3 para aumentar o engajamento.'});
+  else
+    insights.push({tipo:'ok',ico:'✅',txt:'<strong>Conversão de '+conv+'% está boa!</strong> Meta atingida. Foque agora em aumentar o volume de orçamentos enviados.'});
+  if(!prazos.length)
+    insights.push({tipo:'warn',ico:'📅',txt:'<strong>Prazo médio de envio não está sendo medido.</strong> Preencha "Cliente solicitou em" nos novos orçamentos para gerar este indicador.'});
+  else if(prazos.reduce(function(s,v){return s+v;},0)/prazos.length>72)
+    insights.push({tipo:'bad',ico:'❌',txt:'<strong>Prazo médio de envio acima de 3 dias.</strong> Gong.io: responder em menos de 1h aumenta conversão em 7x. Priorize agilidade.'});
+  if(ticket>0&&ticket<500)
+    insights.push({tipo:'warn',ico:'💡',txt:'<strong>Ticket médio de '+fmtBRL(ticket)+' está baixo.</strong> Experimente oferecer combos (display + porta-cartão, por ex.) para elevar o valor médio por pedido.'});
+  if(!insights.length)
+    insights.push({tipo:'ok',ico:'🎉',txt:'<strong>Dados insuficientes para diagnóstico completo.</strong> Continue salvando orçamentos com todos os campos preenchidos para análises mais precisas.'});
+
+  var insEl=document.getElementById('intelInsights');
+  var corMap={ok:{bg:'#f0fdf4',bc:'#059669'},warn:{bg:'#fffbeb',bc:'#D97706'},bad:{bg:'#fff1f2',bc:'#DC2626'}};
+  if(insEl) insEl.innerHTML=insights.map(function(ins){
+    var c=corMap[ins.tipo]||corMap.warn;
+    return '<div class="intel-insight" style="background:'+c.bg+';border-color:'+c.bc+';margin-bottom:8px">'
+      +'<span style="font-size:16px;flex-shrink:0">'+ins.ico+'</span>'
+      +'<span style="font-size:12px;color:var(--text);line-height:1.5">'+ins.txt+'</span>'
+      +'</div>';
+  }).join('');
+}
+
 function painelRender() {
   var now = new Date();
   var upd = document.getElementById('painelLastUpd');
@@ -13954,374 +14293,4 @@ function painelRender() {
 
   // ── Dados brutos ──
   var cr = (typeof FIN_CR !== 'undefined' ? FIN_CR : []).filter(function(r){ return painelMatchBrand(r.marca); });
-  var cp = (typeof FIN_CP !== 'undefined' ? FIN_CP : []).filter(function(r){ return painelMatchBrand(r.marca); });
-  var orcs = orcGetEnviados().filter(function(o){ return painelMatchBrand(o.marca||o.brand); });
-  var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
-  if(_painelBrand!=='all') osArr = osArr.filter(function(o){ return painelMatchBrand(o.mk); });
-
-  // ── Cálculos ──
-  var crPend = cr.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
-  var crRec  = cr.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
-  var crVenc = cr.filter(function(r){return r.status==='vencido';});
-  var cpPend = cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
-  var mesAtual = now.getMonth()+1;
-  var orcMes = orcs.filter(function(o){ return o.data&&o.data.indexOf('/'+mesAtual+'/')!==-1||o.dataEnvio&&o.dataEnvio.indexOf('/'+mesAtual+'/')!==-1; });
-  var orcMesVal = orcMes.reduce(function(s,o){return s+(parseFloat(o.total||o.valor)||0);},0);
-  var osEmProd = osArr.filter(function(o){return o.status==='em_producao'||o.status==='iniciada';}).length;
-  var today = new Date(); today.setHours(0,0,0,0);
-  var osAtras = osArr.filter(function(o){
-    if(o.pronto) return false;
-    if(!o.prazo) return false;
-    var d2 = new Date((o.prazo.indexOf('/')!==-1?o.prazo.split('/').reverse().join('-'):o.prazo)+'T00:00:00');
-    return d2 < today;
-  });
-
-  // ── Alertas ──
-  var alerts = [];
-  if(crVenc.length) alerts.push('⚠️ '+crVenc.length+' conta(s) a receber vencida(s)');
-  if(osAtras.length) alerts.push('⚠️ '+osAtras.length+' OS atrasada(s)');
-  var alertEl = document.getElementById('painelAlerts');
-  if(alertEl) {
-    if(alerts.length){ alertEl.style.display=''; alertEl.innerHTML=alerts.join(' &nbsp;&middot;&nbsp; '); }
-    else alertEl.style.display='none';
-  }
-
-  // ── KPIs ──
-  var kpis = [
-    {icon:'💰',lbl:'CR Pendente',  val:painelFmt(crPend), sub:cr.filter(function(r){return r.status==='pendente';}).length+' conta(s)', ac:'#7C3AED', warn:crVenc.length>0},
-    {icon:'✅',lbl:'Recebido',      val:painelFmt(crRec),  sub:'total liquidado',      ac:'#059669', warn:false},
-    {icon:'📤',lbl:'CP a Pagar',   val:painelFmt(cpPend), sub:cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).length+' conta(s)', ac:'#D97706', warn:false},
-    {icon:'🏭',lbl:'OS em Aberto', val:String(osArr.length), sub:osEmProd+' em produção', ac:'#BE185D', warn:osAtras.length>0},
-    {icon:'📋',lbl:'Orçamentos/Mês',val:String(orcMes.length), sub:painelFmt(orcMesVal), ac:'#2563EB', warn:false},
-    {icon:'✂️',lbl:'Retalhos',      val:String((typeof RETALHOS!=='undefined'?RETALHOS:[] ).filter(function(r){return r.qty>0;}).length), sub:'disponíveis', ac:'#0891B2', warn:false}
-  ];
-  var kpiEl = document.getElementById('painelKPIs');
-  if(kpiEl) kpiEl.innerHTML = kpis.map(function(k){
-    return '<div style="background:var(--card);border:1.5px solid '+(k.warn?'#EF4444':'var(--border)')+';border-top:3px solid '+k.ac+';border-radius:12px;padding:16px 18px;position:relative">'
-      +'<div style="font-size:20px;margin-bottom:6px">'+k.icon+'</div>'
-      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:3px">'+k.lbl+'</div>'
-      +'<div style="font-size:22px;font-weight:900;color:var(--text);line-height:1">'+k.val+'</div>'
-      +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+k.sub+'</div>'
-      +(k.warn?'<div style="position:absolute;top:10px;right:10px;font-size:16px">⚠️</div>':'')
-      +'</div>';
-  }).join('');
-
-  // ── CR ──
-  var crEl = document.getElementById('painelCRBody');
-  var crTEl = document.getElementById('painelCRTotal');
-  if(crTEl) crTEl.textContent = cr.length+' lançamento(s)';
-  var crRows = cr.slice(0,5);
-  if(crEl) crEl.innerHTML = crRows.length
-    ? '<table style="width:100%;border-collapse:collapse;font-size:12px">'
-      +'<thead><tr><th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Cliente</th>'
-      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Valor</th>'
-      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Status</th></tr></thead><tbody>'
-      + crRows.map(function(r){
-          var sc={recebido:'#D1FAE5;color:#065F46',pendente:'#FEF3C7;color:#92400E',vencido:'#FEE2E2;color:#991B1B'}[r.status]||'#F3F4F6;color:#374151';
-          var sl={recebido:'Recebido',pendente:'Pendente',vencido:'Vencido'}[r.status]||r.status;
-          return '<tr><td style="padding:8px;border-bottom:1px solid var(--border)"><strong>'+r.cliente+'</strong>'+(r.osRef?'<div style="font-size:10px;color:var(--muted)">'+r.osRef+'</div>':'')+'</td>'
-            +'<td style="padding:8px;border-bottom:1px solid var(--border);font-weight:800;white-space:nowrap">'+painelFmt(r.valor)+'</td>'
-            +'<td style="padding:8px;border-bottom:1px solid var(--border)"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+sc+'">'+sl+'</span></td></tr>';
-        }).join('')+'</tbody></table>'
-    : '<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma conta.</div>';
-
-  // ── OS ──
-  var osEl = document.getElementById('painelOSBody');
-  var osTEl = document.getElementById('painelOSTotal');
-  if(osTEl) osTEl.textContent = osArr.length+' ordem(ns)';
-  var statusCfg = {iniciada:{lbl:'Iniciada',col:'#EDE9FE',bc:'#7C3AED'},em_producao:{lbl:'Em Produção',col:'#FEF3C7',bc:'#D97706'},pronto:{lbl:'Pronto',col:'#D1FAE5',bc:'#059669'}};
-  if(osEl) osEl.innerHTML = Object.keys(statusCfg).map(function(k){
-    var cnt = osArr.filter(function(o){return o.status===k;}).length;
-    var sc = statusCfg[k];
-    var items = osArr.filter(function(o){return o.status===k;}).slice(0,2);
-    return '<div style="margin-bottom:10px">'
-      +'<div style="background:'+sc.col+';color:'+sc.bc+';font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px 7px 0 0">'+sc.lbl+' ('+cnt+')</div>'
-      +'<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 7px 7px;padding:6px 10px">'
-      +(items.length?items.map(function(o){
-          return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">'
-            +'<strong>'+o.titulo+'</strong>'
-            +(o.prazo?'<span style="color:var(--muted);font-size:10px"> · '+o.prazo+'</span>':'')
-            +'</div>';
-        }).join(''):'<div style="font-size:11px;color:var(--muted)">Vazio</div>')
-      +'</div></div>';
-  }).join('');
-
-  // ── Orçamentos do mês ──
-  var orcEl = document.getElementById('painelOrcBody');
-  if(orcEl) {
-    var orcPend2 = orcs.filter(function(o){return !o.status||o.status==='aguardando';}).length;
-    var orcAprov = orcs.filter(function(o){return o.status==='aprovado';}).length;
-    orcEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
-      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcMes.length+'</div><div style="font-size:10px;color:var(--muted)">este mês</div></div>'
-      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:#059669">'+painelFmt(orcMesVal)+'</div><div style="font-size:10px;color:var(--muted)">valor total</div></div>'
-      +'</div>'
-      +'<div style="font-size:11px;color:var(--muted)">'+orcPend2+' aguardando · '+orcAprov+' aprovado(s)</div>';
-  }
-
-  // ── Estoque ──
-  var stEl = document.getElementById('painelStockBody');
-  if(stEl && typeof STOCK!=='undefined') {
-    stEl.innerHTML = Object.keys(STOCK).map(function(k){
-      var s=STOCK[k];
-      var pct=Math.min(100,Math.round((s.qty/(s.max||50))*100));
-      var low=s.qty<=(s.min||5);
-      var col=low?'#EF4444':s.qty<(s.max||50)*0.4?'#F59E0B':'#10B981';
-      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
-        +'<div style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+s.label.replace('Acrílico','Acr.').replace('Cristal','Crist.')+'</div>'
-        +'<div style="width:80px;height:6px;background:var(--bg);border-radius:4px;overflow:hidden">'
-        +'<div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
-        +'<div style="font-size:11px;font-weight:700;color:'+col+';min-width:24px;text-align:right">'+s.qty+'</div>'
-        +(low?'<span style="font-size:10px">⚠️</span>':'')
-        +'</div>';
-    }).join('');
-  } else if(stEl) {
-    stEl.innerHTML = '<div style="font-size:12px;color:var(--muted)">Dados de estoque carregando...</div>';
-  }
-
-  // ── Comissões ──
-  var comEl = document.getElementById('painelComBody');
-  var comMap = {};
-  orcs.forEach(function(o){
-    var v=o.vendedor||'—'; var c=parseFloat(o.comissao)||0;
-    if(!comMap[v]) comMap[v]={nome:v,total:0,count:0};
-    comMap[v].total+=c; comMap[v].count++;
-  });
-  var comList=Object.values(comMap).sort(function(a,b){return b.total-a.total;});
-  var maxCom=comList.length?comList[0].total:1;
-  var paleta=['#7C3AED','#059669','#D97706','#2563EB','#BE185D'];
-  if(comEl) comEl.innerHTML = comList.length
-    ? comList.map(function(c,i){
-        var pct=maxCom?Math.round((c.total/maxCom)*100):0;
-        var col=paleta[i%paleta.length];
-        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
-          +'<div style="width:28px;height:28px;border-radius:50%;background:'+col+';color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0)+'</div>'
-          +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+c.nome+'</div><div style="font-size:10px;color:var(--muted)">'+c.count+' orç.</div></div>'
-          +'<div style="flex:2;height:6px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
-          +'<div style="font-size:12px;font-weight:900;color:#059669;white-space:nowrap">'+painelFmt(c.total)+'</div>'
-          +'</div>';
-      }).join('')
-    : '<div style="font-size:12px;color:var(--muted)">Salve orçamentos com vendedor para ver as comissões.</div>';
-}
-
-</script>
-
-<!-- ══ PÓS-VENDA OVERLAY ══ -->
-<div class="gen-overlay" id="posVendaOverlay" onclick="if(event.target===this)posVendaFechar()">
-  <div class="gen-modal" style="width:560px">
-    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#7C3AED,#BE185D);border-radius:16px 16px 0 0">
-      <div>
-        <div class="gen-modal-title" style="color:#fff">📬 Pós-Venda</div>
-        <div id="pvClienteNome" style="font-size:11px;color:rgba(255,255,255,.75);margin-top:2px"></div>
-      </div>
-      <button class="gen-close" onclick="posVendaFechar()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
-    </div>
-    <div class="gen-modal-body">
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Selecione os contatos de pós-venda que deseja agendar para este cliente:</div>
-      <div id="pvCheckList" style="display:flex;flex-direction:column;gap:8px"></div>
-      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">🛍️ Produtos Análogos para Oferecer</div>
-        <div id="pvProdutosSug" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px"></div>
-        <div class="fg"><label>Mensagem personalizada (opcional)</label>
-          <textarea id="pvMsgCustom" rows="2" placeholder="Ex: Aproveite nossa nova linha de displays para PDV!" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text);resize:none;font-family:inherit"></textarea>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="topbar-btn ghost" style="font-size:11px" onclick="pvNovoLembreteOpen()">➕ Novo Lembrete</button>
-        <button class="gen-submit" style="flex:1" onclick="posVendaSalvar()">💾 Salvar Agenda</button>
-        <button class="topbar-btn ghost" onclick="posVendaFechar()">Cancelar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- OVERLAY: Novo Lembrete Personalizado -->
-<div id="pvNovoLembreteOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
-  <div style="background:var(--surface);border-radius:14px;width:420px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.3)">
-    <div style="background:linear-gradient(135deg,#7C3AED,#5B21B6);border-radius:14px 14px 0 0;padding:16px 20px;display:flex;justify-content:space-between;align-items:center">
-      <span style="color:#fff;font-size:14px;font-weight:800">📌 Novo Lembrete Personalizado</span>
-      <button onclick="pvNovoLembreteClose()" style="background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:7px;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>
-    </div>
-    <div style="padding:18px 20px;display:flex;flex-direction:column;gap:11px">
-      <div class="fg">
-        <label>Título do Lembrete</label>
-        <input type="text" id="pvNlTitulo" placeholder="Ex: 6 meses — Verificação de uso" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
-      </div>
-      <div class="fg">
-        <label>Descrição / Objetivo</label>
-        <input type="text" id="pvNlSub" placeholder="Ex: Verificar se o produto ainda está sendo utilizado" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
-      </div>
-      <div class="fg">
-        <label>Dias após o fechamento</label>
-        <input type="number" id="pvNlDias" min="1" placeholder="Ex: 180" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
-      </div>
-      <div class="fg">
-        <label>Mensagem para enviar (opcional)</label>
-        <textarea id="pvNlMsg" rows="3" placeholder="Olá [nome]! Passando para saber como está sendo a experiência..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text);resize:none;font-family:inherit"></textarea>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
-        <button class="topbar-btn ghost" onclick="pvNovoLembreteClose()">Cancelar</button>
-        <button class="topbar-btn" onclick="pvNovoLembreteSalvar()">✅ Criar Lembrete</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL CRM: Enviar mensagem -->
-<div class="crm-msg-overlay" id="crmMsgOverlay" onclick="if(event.target===this)crmMsgFechar()">
-  <div class="crm-msg-modal">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div>
-        <div style="font-size:15px;font-weight:800" id="crmMsgNome">—</div>
-        <div style="font-size:11px;color:var(--muted)" id="crmMsgTel">—</div>
-      </div>
-      <button onclick="crmMsgFechar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
-    </div>
-    <!-- Templates -->
-    <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Template de mensagem</div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      <button class="crm-msg-tpl-btn on" id="crmMsgTpl_followup"  onclick="crmMsgSelecionarTemplate('followup')">🔄 Follow-up</button>
-      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_orcamento" onclick="crmMsgSelecionarTemplate('orcamento')">💰 Orçamento</button>
-      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_fechamento"onclick="crmMsgSelecionarTemplate('fechamento')">🤝 Fechamento</button>
-      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_posvenda"  onclick="crmMsgSelecionarTemplate('posvenda')">⭐ Pós-Venda</button>
-      <button class="crm-msg-tpl-btn"    id="crmMsgTpl_entrega"   onclick="crmMsgSelecionarTemplate('entrega')">📦 Entrega</button>
-    </div>
-    <textarea id="crmMsgTexto" rows="5" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;line-height:1.6;box-sizing:border-box"></textarea>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:var(--bg2);border-radius:8px">
-      <span style="font-size:11px;color:var(--muted);white-space:nowrap">📅 Agendar follow-up:</span>
-      <input type="date" id="crmMsgDataFollowUp" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">
-      <button onclick="crmMsgAgendarFollowUp()" style="padding:5px 12px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Salvar</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button onclick="crmMsgEnviarWA()" style="flex:1;padding:11px;background:#25D366;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer">💬 Enviar pelo WhatsApp</button>
-      <button onclick="crmMsgFechar()" style="padding:11px 16px;border:1.5px solid var(--border);background:transparent;color:var(--muted);border-radius:9px;font-size:12px;cursor:pointer">Cancelar</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ MOBILE OVERLAY BG ══ -->
-<div id="mobileOverlayBg" onclick="mobilePanelClose()"></div>
-
-<!-- ══ MOBILE SIDE PANEL ══ -->
-<div id="mobileSidePanel">
-  <div class="msp-header">
-    <div class="msp-logo">ERP Marcas</div>
-    <button class="msp-close" onclick="mobilePanelClose()">✕</button>
-  </div>
-  <div class="msp-user">
-    <div class="msp-avatar" id="mspAvatar">U</div>
-    <div>
-      <div class="msp-uname" id="mspName">Usuário</div>
-      <div class="msp-urole" id="mspRole">—</div>
-    </div>
-  </div>
-
-  <div class="mdrw-section" id="mspSec-principal">Principal</div>
-  <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
-
-  <div class="mdrw-section" id="mspSec-operacao">Operação</div>
-  <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS <span id="mspBadgeKanban" style="margin-left:auto;background:#DC2626;color:#fff;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;display:none"></span></div>
-  <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
-  <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque <span id="mspBadgeEstoque" style="margin-left:auto;background:#DC2626;color:#fff;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;display:none"></span></div>
-  <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
-
-  <div class="mdrw-section" id="mspSec-comercial">Comercial</div>
-  <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
-  <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
-  <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
-  <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
-  <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
-
-  <div class="mdrw-section" id="mspSec-financeiro">Financeiro</div>
-  <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
-  <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
-
-  <div class="mdrw-section" id="mspSec-config">Configurações</div>
-  <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
-  <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
-  <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Usuários</div>
-  <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
-
-  <div style="padding:16px 20px;border-top:1px solid rgba(255,255,255,.08);margin-top:8px">
-    <button onclick="authLogout();mobilePanelClose();" style="width:100%;padding:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.7);border-radius:9px;font-size:13px;cursor:pointer;text-align:left">🚪 Sair</button>
-  </div>
-  <div style="height:env(safe-area-inset-bottom,16px)"></div>
-</div>
-
-<script>
-// ── Mobile Side Panel ────────────────────────────────────────────────────────
-function mobilePanelOpen() {
-  var panel = document.getElementById('mobileSidePanel');
-  var overlay = document.getElementById('mobileOverlayBg');
-  if(!panel) return;
-  // Sync user info
-  if(typeof _currentSession !== 'undefined' && _currentSession) {
-    var n = _currentSession.user || 'Usuário';
-    var av = document.getElementById('mspAvatar'); if(av) av.textContent = n[0].toUpperCase();
-    var nm = document.getElementById('mspName');   if(nm) nm.textContent = n;
-    var rl = document.getElementById('mspRole');
-    if(rl) {
-      var lbl = (typeof FUNCAO_LABEL !== 'undefined' ? FUNCAO_LABEL[_currentSession.funcao] : null) || _currentSession.funcao || '';
-      rl.textContent = lbl;
-    }
-  }
-  // Sync badges
-  var sbKb = document.getElementById('sbBadgeKanban');
-  var mspKb = document.getElementById('mspBadgeKanban');
-  if(sbKb && mspKb) { mspKb.textContent = sbKb.textContent; mspKb.style.display = sbKb.style.display; }
-  var sbEs = document.getElementById('sbBadgeEstoque');
-  var mspEs = document.getElementById('mspBadgeEstoque');
-  if(sbEs && mspEs) { mspEs.textContent = sbEs.textContent; mspEs.style.display = sbEs.style.display; }
-  // Show panel
-  panel.style.display = 'flex';
-  panel.style.flexDirection = 'column';
-  requestAnimationFrame(function(){
-    panel.style.transform = 'translateX(0)';
-    panel.style.pointerEvents = 'auto';
-  });
-  if(overlay) { overlay.style.display = 'block'; }
-  document.body.style.overflow = 'hidden';
-  document.body.style.position = 'fixed';
-  document.body.style.width = '100%';
-}
-
-function mobilePanelClose() {
-  var panel = document.getElementById('mobileSidePanel');
-  var overlay = document.getElementById('mobileOverlayBg');
-  if(panel) {
-    panel.style.transform = 'translateX(-100%)';
-    panel.style.pointerEvents = 'none';
-    setTimeout(function(){ panel.style.display = 'none'; }, 300);
-  }
-  if(overlay) { overlay.style.display = 'none'; }
-  document.body.style.overflow = '';
-  document.body.style.position = '';
-  document.body.style.width = '';
-}
-
-function mobilePanelNav(page) {
-  mobilePanelClose();
-  setTimeout(function(){
-    var sbEl = null;
-    document.querySelectorAll('.sb-item').forEach(function(el){
-      if((el.getAttribute('onclick') || '').indexOf("'" + page + "'") >= 0) sbEl = el;
-    });
-    if(typeof nav === 'function') {
-      if(sbEl) nav(page, sbEl); else nav(page, null);
-    }
-  }, 50);
-}
-
-// Apply permissions to side panel items
-function mspApplyPerms(funcao) {
-  if(funcao === 'master' || funcao === 'admin') return;
-  var HARD_DENY = {
-    comercial: {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,estoque:1},
-    producao:  {financeiro:1,relatorios:1,config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1,orcamento:1,'orcamentos-enviados':1,comercial:1,crm:1,clientes:1},
-    financeiro:{config:1,'config-orc':1,'config-plan':1,'config-usr':1,seguranca:1}
-  };
-  var denied = HARD_DENY[funcao] || {};
-  var modMap = {'config-orc':'config','config-plan':'config','config-usr':'config','seguranca':'config','orcamentos-enviados':'orcamento','comercial':'orcamento','relatorios':'financeiro'};
-  var pages = ['dashboard','kanban','os-list','estoque','fornecedores','orcamento','orcamentos-enviados','comercial','crm','clientes','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
-  var secVisible = {};
-  var secMap2 = {dashboard:'principal',painel:'principal',kanban:'operacao','os-list':'operacao',estoque:'operacao',fornecedores:'operacao',orcamento:'comercial','orcamentos-enviados':'comercial',comercial:'comercial',crm:'comercial',clientes:'comercial',financeiro:'financeiro',relatorios:'financeiro','config-orc':'config','config-plan':'config','config-usr':'config',seguranca:'config'};
-  page
+  var cp = (typeof FIN_CP !== 'undefined' ? FIN_CP : []).filter(function(r){ return paine
