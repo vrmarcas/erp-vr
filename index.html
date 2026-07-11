@@ -1214,8 +1214,8 @@ function _cloudLoadAll() {
         // Mesclar profundo: preserva comp/larg/custo/esp/rsm2 dos materiais locais
         var local = cfgLoad();
         var merged = Object.assign({}, local, d);
-        // Mesclar materiais por nome — preservar campos de dimensão do local se cloud não tem
-        if(Array.isArray(d.materiais) && Array.isArray(local.materiais)) {
+        // Mesclar materiais por nome — cloud vazio não sobrescreve local
+        if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
           merged.materiais = d.materiais.map(function(cm){
             var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
             if(lm) return Object.assign({}, lm, cm); // local tem prioridade para campos ausentes no cloud
@@ -1225,6 +1225,11 @@ function _cloudLoadAll() {
           local.materiais.forEach(function(lm){
             if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
           });
+        } else {
+          // Cloud sem materiais — preserva o local
+          merged.materiais = local.materiais;
+          merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : local.maquinas;
+          merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : local.maodeobra;
         }
         // Recalcular rsm2 para todos
         (merged.materiais||[]).forEach(function(r){
@@ -1281,8 +1286,8 @@ function _cloudLoadAll() {
     if(d && typeof d==='object'){
       var local = cfgLoad();
       var merged = Object.assign({}, local, d);
-      // Deep merge: materiais — preservar comp/larg/custo/esp do local se cloud não tem
-      if(Array.isArray(d.materiais) && Array.isArray(local.materiais)) {
+      // Deep merge: materiais — cloud vazio não sobrescreve local
+      if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
         merged.materiais = d.materiais.map(function(cm){
           var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
           return lm ? Object.assign({}, lm, cm) : cm;
@@ -1290,6 +1295,10 @@ function _cloudLoadAll() {
         local.materiais.forEach(function(lm){
           if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
         });
+      } else {
+        merged.materiais = local.materiais;
+        merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : local.maquinas;
+        merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : local.maodeobra;
       }
       // Recalcular rsm2 para todos
       (merged.materiais||[]).forEach(function(r){
@@ -11731,7 +11740,15 @@ var CFG_DEFAULT = {
 };
 
 function cfgLoad() {
-  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || JSON.parse(JSON.stringify(CFG_DEFAULT)); }
+  try {
+    var d = JSON.parse(localStorage.getItem(CFG_KEY));
+    if(!d) return JSON.parse(JSON.stringify(CFG_DEFAULT));
+    // Se materiais/máquinas/mão de obra estiverem vazios, restaura os padrões
+    if(!d.materiais  || !d.materiais.length)  d.materiais  = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+    if(!d.maquinas   || !d.maquinas.length)   d.maquinas   = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
+    if(!d.maodeobra  || !d.maodeobra.length)  d.maodeobra  = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
+    return d;
+  }
   catch(e) { return JSON.parse(JSON.stringify(CFG_DEFAULT)); }
 }
 function cfgSave(d) {
@@ -14293,4 +14310,166 @@ function painelRender() {
 
   // ── Dados brutos ──
   var cr = (typeof FIN_CR !== 'undefined' ? FIN_CR : []).filter(function(r){ return painelMatchBrand(r.marca); });
-  var cp = (typeof FIN_CP !== 'undefined' ? FIN_CP : []).filter(function(r){ return paine
+  var cp = (typeof FIN_CP !== 'undefined' ? FIN_CP : []).filter(function(r){ return painelMatchBrand(r.marca); });
+  var orcs = orcGetEnviados().filter(function(o){ return painelMatchBrand(o.marca||o.brand); });
+  var osArr = typeof KB_OS !== 'undefined' ? Object.values(KB_OS) : [];
+  if(_painelBrand!=='all') osArr = osArr.filter(function(o){ return painelMatchBrand(o.mk); });
+
+  // ── Cálculos ──
+  var crPend = cr.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var crRec  = cr.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
+  var crVenc = cr.filter(function(r){return r.status==='vencido';});
+  var cpPend = cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var mesAtual = now.getMonth()+1;
+  var orcMes = orcs.filter(function(o){
+    return (o.data&&o.data.indexOf('/'+mesAtual+'/')!==-1)||(o.dataEnvio&&o.dataEnvio.indexOf('/'+mesAtual+'/')!==-1);
+  });
+  var orcMesVal = orcMes.reduce(function(s,o){return s+(parseFloat(o.total||o.valor)||0);},0);
+  var osEmProd = osArr.filter(function(o){return o.status==='em_producao'||o.status==='iniciada';}).length;
+  var today2 = new Date(); today2.setHours(0,0,0,0);
+  var osAtras = osArr.filter(function(o){
+    if(o.pronto) return false;
+    if(!o.prazo) return false;
+    var d2 = new Date((o.prazo.indexOf('/')!==-1?o.prazo.split('/').reverse().join('-'):o.prazo)+'T00:00:00');
+    return d2 < today2;
+  });
+
+  // ── Alertas ──
+  var alerts = [];
+  if(crVenc.length) alerts.push('⚠️ '+crVenc.length+' conta(s) a receber vencida(s)');
+  if(osAtras.length) alerts.push('⚠️ '+osAtras.length+' OS atrasada(s)');
+  var alertEl = document.getElementById('painelAlerts');
+  if(alertEl) {
+    if(alerts.length){ alertEl.style.display=''; alertEl.innerHTML=alerts.join(' &nbsp;&middot;&nbsp; '); }
+    else alertEl.style.display='none';
+  }
+
+  // ── KPIs ──
+  var kpis = [
+    {icon:'💰',lbl:'CR Pendente',    val:painelFmt(crPend), sub:cr.filter(function(r){return r.status==='pendente';}).length+' conta(s)', ac:'#7C3AED', warn:crVenc.length>0},
+    {icon:'✅',lbl:'Recebido',        val:painelFmt(crRec),  sub:'total liquidado', ac:'#059669', warn:false},
+    {icon:'📤',lbl:'CP a Pagar',     val:painelFmt(cpPend), sub:cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).length+' conta(s)', ac:'#D97706', warn:false},
+    {icon:'🏭',lbl:'OS em Aberto',   val:String(osArr.length), sub:osEmProd+' em produção', ac:'#BE185D', warn:osAtras.length>0},
+    {icon:'📋',lbl:'Orçamentos/Mês', val:String(orcMes.length), sub:painelFmt(orcMesVal), ac:'#2563EB', warn:false},
+    {icon:'✂️',lbl:'Retalhos', val:String((typeof RETALHOS!=='undefined'?RETALHOS:[]).filter(function(r){return r.qty>0;}).length), sub:'disponíveis', ac:'#0891B2', warn:false}
+  ];
+  var kpiEl = document.getElementById('painelKPIs');
+  if(kpiEl) kpiEl.innerHTML = kpis.map(function(k){
+    return '<div style="background:var(--card);border:1.5px solid '+(k.warn?'#EF4444':'var(--border)')+';border-top:3px solid '+k.ac+';border-radius:12px;padding:16px 18px;position:relative">'
+      +'<div style="font-size:20px;margin-bottom:6px">'+k.icon+'</div>'
+      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:3px">'+k.lbl+'</div>'
+      +'<div style="font-size:22px;font-weight:900;color:var(--text);line-height:1">'+k.val+'</div>'
+      +'<div style="font-size:11px;color:var(--muted);margin-top:4px">'+k.sub+'</div>'
+      +(k.warn?'<div style="position:absolute;top:10px;right:10px;font-size:16px">⚠️</div>':'')
+      +'</div>';
+  }).join('');
+
+  // ── Contas a Receber ──
+  var crEl = document.getElementById('painelCRBody');
+  var crTEl = document.getElementById('painelCRTotal');
+  if(crTEl) crTEl.textContent = cr.length+' lançamento(s)';
+  var crRows = cr.slice(0,5);
+  if(crEl) crEl.innerHTML = crRows.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<thead><tr>'
+      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Cliente</th>'
+      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Valor</th>'
+      +'<th style="text-align:left;padding:6px 8px;background:var(--bg);font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);border-bottom:1.5px solid var(--border)">Status</th>'
+      +'</tr></thead><tbody>'
+      +crRows.map(function(r){
+        var sc={recebido:'#D1FAE5;color:#065F46',pendente:'#FEF3C7;color:#92400E',vencido:'#FEE2E2;color:#991B1B'}[r.status]||'#F3F4F6;color:#374151';
+        var sl={recebido:'Recebido',pendente:'Pendente',vencido:'Vencido'}[r.status]||r.status;
+        return '<tr>'
+          +'<td style="padding:8px;border-bottom:1px solid var(--border)"><strong>'+r.cliente+'</strong>'+(r.osRef?'<div style="font-size:10px;color:var(--muted)">'+r.osRef+'</div>':'')+'</td>'
+          +'<td style="padding:8px;border-bottom:1px solid var(--border);font-weight:800;white-space:nowrap">'+painelFmt(r.valor)+'</td>'
+          +'<td style="padding:8px;border-bottom:1px solid var(--border)"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+sc+'">'+sl+'</span></td>'
+          +'</tr>';
+      }).join('')
+      +'</tbody></table>'
+    : '<div style="color:var(--muted);font-size:12px;padding:8px">Nenhuma conta a receber registrada.</div>';
+
+  // ── OS ──
+  var osEl = document.getElementById('painelOSBody');
+  var osTEl = document.getElementById('painelOSTotal');
+  if(osTEl) osTEl.textContent = osArr.length+' ordem(ns)';
+  var statusCfg = {
+    iniciada:   {lbl:'Iniciada',    col:'#EDE9FE', bc:'#7C3AED'},
+    em_producao:{lbl:'Em Produção', col:'#FEF3C7', bc:'#D97706'},
+    pronto:     {lbl:'Pronto',      col:'#D1FAE5', bc:'#059669'}
+  };
+  if(osEl) osEl.innerHTML = Object.keys(statusCfg).map(function(k){
+    var cnt = osArr.filter(function(o){return o.status===k;}).length;
+    var sc = statusCfg[k];
+    var items = osArr.filter(function(o){return o.status===k;}).slice(0,2);
+    return '<div style="margin-bottom:10px">'
+      +'<div style="background:'+sc.col+';color:'+sc.bc+';font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px 7px 0 0">'+sc.lbl+' ('+cnt+')</div>'
+      +'<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 7px 7px;padding:6px 10px">'
+      +(items.length ? items.map(function(o){
+          return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">'
+            +'<strong>'+o.titulo+'</strong>'
+            +(o.prazo?'<span style="color:var(--muted);font-size:10px"> · '+o.prazo+'</span>':'')
+            +'</div>';
+        }).join('') : '<div style="font-size:11px;color:var(--muted)">Vazio</div>')
+      +'</div></div>';
+  }).join('');
+
+  // ── Orçamentos do mês ──
+  var orcEl = document.getElementById('painelOrcBody');
+  if(orcEl) {
+    var orcPend2 = orcs.filter(function(o){return !o.status||o.status==='aguardando';}).length;
+    var orcAprov = orcs.filter(function(o){return o.status==='aprovado';}).length;
+    orcEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
+      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcMes.length+'</div><div style="font-size:10px;color:var(--muted)">este mês</div></div>'
+      +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:#059669">'+painelFmt(orcMesVal)+'</div><div style="font-size:10px;color:var(--muted)">valor total</div></div>'
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--muted)">'+orcPend2+' aguardando · '+orcAprov+' aprovado(s)</div>';
+  }
+
+  // ── Estoque ──
+  var stEl = document.getElementById('painelStockBody');
+  if(stEl && typeof STOCK!=='undefined' && Object.keys(STOCK).length) {
+    stEl.innerHTML = Object.keys(STOCK).map(function(k){
+      var s=STOCK[k];
+      var pct=Math.min(100,Math.round((s.qty/(s.max||50))*100));
+      var low=s.qty<=(s.min||5);
+      var col=low?'#EF4444':s.qty<(s.max||50)*0.4?'#F59E0B':'#10B981';
+      var lbl=(s.label||k)+(s.esp&&!(s.label||'').includes(s.esp+'mm')?' '+s.esp+'mm':'');
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
+        +'<div style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+lbl.replace('Acrílico','Acr.').replace('Cristal','Crist.')+'</div>'
+        +'<div style="width:80px;height:6px;background:var(--bg);border-radius:4px;overflow:hidden">'
+        +'<div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+        +'<div style="font-size:11px;font-weight:700;color:'+col+';min-width:24px;text-align:right">'+s.qty+'</div>'
+        +(low?'<span style="font-size:10px">⚠️</span>':'')
+        +'</div>';
+    }).join('');
+  } else if(stEl) {
+    stEl.innerHTML='<div style="font-size:12px;color:var(--muted)">Nenhum item no estoque.</div>';
+  }
+
+  // ── Comissões ──
+  var comEl = document.getElementById('painelComBody');
+  var comMap = {};
+  orcs.forEach(function(o){
+    var v=o.vendedor||'—'; var c=parseFloat(o.comissao)||0;
+    if(!comMap[v]) comMap[v]={nome:v,total:0,count:0};
+    comMap[v].total+=c; comMap[v].count++;
+  });
+  var comList=Object.values(comMap).sort(function(a,b){return b.total-a.total;});
+  var maxCom=comList.length?comList[0].total:1;
+  var paleta=['#7C3AED','#059669','#D97706','#2563EB','#BE185D'];
+  if(comEl) comEl.innerHTML = comList.length
+    ? comList.map(function(c,i){
+        var pct=maxCom?Math.round((c.total/maxCom)*100):0;
+        var col=paleta[i%paleta.length];
+        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+          +'<div style="width:28px;height:28px;border-radius:50%;background:'+col+';color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+c.nome.charAt(0).toUpperCase()+'</div>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+c.nome+'</div><div style="font-size:10px;color:var(--muted)">'+c.count+' orç.</div></div>'
+          +'<div style="flex:2;height:6px;background:var(--bg);border-radius:4px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:4px"></div></div>'
+          +'<div style="font-size:12px;font-weight:900;color:#059669;white-space:nowrap">'+painelFmt(c.total)+'</div>'
+          +'</div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--muted)">Salve orçamentos com vendedor para ver as comissões.</div>';
+}
+</script>
+</body>
+</html>
