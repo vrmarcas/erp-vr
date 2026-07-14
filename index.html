@@ -1195,6 +1195,9 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; try{finCRRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
+    _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
+    _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{localStorage.setItem('erp_stock_log',JSON.stringify(d));stockRenderHistorico();}catch(e){} } });
+    _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ try{localStorage.setItem('erp_permissoes',JSON.stringify(d));}catch(e){} } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } });
@@ -7372,10 +7375,11 @@ function kbConfirmarProd() {
     // Se editando, restaurar retalho anterior
     if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
       var rOld = rList[os.matProd.retalhoIdx];
-      if (rOld) { rOld.qty++; try{localStorage.setItem('erp_retalhos',JSON.stringify(RETALHOS));}catch(e){} }
+      if (rOld) { rOld.qty++; try{localStorage.setItem('erp_retalhos',JSON.stringify(RETALHOS));}catch(e){} if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
     }
     retalho.qty--;
     try { localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); } catch(e) {}
+    if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS);
     os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
   } else {
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
@@ -8009,7 +8013,7 @@ var STOCK = (function(){
 
 function stockSaveData() {
   try { localStorage.setItem('erp_stock_data', JSON.stringify(STOCK)); } catch(e) {}
-  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_stock', STOCK);
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('stock', STOCK);
 }
 
 var FIN_TX = [
@@ -9632,6 +9636,7 @@ function _stockLog(tipo, matKey, qty, os, obs) {
   });
   if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
   try{ localStorage.setItem('erp_stock_log', JSON.stringify(STOCK_LOG)); }catch(e){}
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
   stockRenderHistorico();
 }
 
@@ -11405,7 +11410,7 @@ function orcRefreshFinalPrice() {
 // ============================================================
 var ORC_ENVIADOS_KEY = 'erp_orcamentos_enviados';
 function orcGetEnviados(){ try{ return JSON.parse(localStorage.getItem(ORC_ENVIADOS_KEY)||'[]'); }catch(e){return[];} }
-function orcSetEnviados(arr){ localStorage.setItem(ORC_ENVIADOS_KEY, JSON.stringify(arr)); }
+function orcSetEnviados(arr){ localStorage.setItem(ORC_ENVIADOS_KEY, JSON.stringify(arr)); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
 
 function orcSalvarOrcamento() {
   var c = window._orcCalc||{};
@@ -12434,6 +12439,7 @@ function usrSalvarPerms() {
     });
   });
   try{ localStorage.setItem(PERM_KEY, JSON.stringify(perms)); }catch(e){}
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_permissoes', perms);
   showToast('Permissões salvas!','ok');
   usrRender();
 }
