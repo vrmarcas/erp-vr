@@ -1203,6 +1203,7 @@ function _cloudLoadAll() {
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } });
+    _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
       if(d&&d.length){
@@ -3674,8 +3675,11 @@ firebase.auth().signInAnonymously().then(function(){
     <div id="pg-clientes" style="display:none">
       <div class="card">
         <div class="card-h">
-          <div class="card-h-left">👥 Clientes <span id="cliCount" style="font-size:11px;font-weight:500;color:var(--muted)"></span></div>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="card-h-left" style="cursor:pointer;padding:6px 12px;border-radius:7px" id="cliTabAtivos" onclick="cliSetTab('ativos')" >👥 Clientes <span id="cliCount" style="font-size:11px;font-weight:500;color:var(--muted)"></span></div>
+            <div style="cursor:pointer;padding:6px 12px;border-radius:7px;font-size:13px;font-weight:700;color:var(--muted)" id="cliTabLixeira" onclick="cliSetTab('lixeira')">🗑 Lixeira <span id="cliLixeiraBadge" style="background:#FEE2E2;color:#DC2626;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:3px"></span></div>
+          </div>
+          <div style="display:flex;gap:6px" id="cliAtivosBtns">
             <input id="cliSearch" placeholder="🔍 Buscar..." oninput="renderClientes()" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:140px">
             <button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
           </div>
@@ -3684,6 +3688,21 @@ firebase.auth().signInAnonymously().then(function(){
           <tr><th>Nome</th><th>Tipo</th><th>Cidade</th><th>Marca</th><th>Último Pedido</th><th>OS Ativas</th><th></th></tr>
           <tbody id="cliTableBody"></tbody>
         </table>
+
+      <!-- LIXEIRA DE CLIENTES -->
+      <div class="card" id="cliLixeiraCard" style="display:none;margin-top:12px">
+        <div class="card-h">
+          <div class="card-h-left">🗑 Lixeira de Clientes</div>
+          <button onclick="cliEsvaziarLixeira()" style="padding:5px 12px;border:1.5px solid #DC2626;border-radius:7px;background:none;color:#DC2626;font-size:11px;font-weight:700;cursor:pointer">Esvaziar Lixeira</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);padding:6px 0 10px">
+          Clientes excluídos ficam aqui por 30 dias. Você pode restaurá-los ou apagar definitivamente.
+        </div>
+        <table class="table">
+          <tr><th>Nome</th><th>Tipo / Cidade</th><th>Excluído em</th><th style="text-align:right">Ações</th></tr>
+          <tbody id="cliLixeiraTbody"></tbody>
+        </table>
+      </div>
       </div>
     </div>
 
@@ -8051,6 +8070,8 @@ var CLIENTES_DATA = [
   {id:'c7',nome:'Lucas Mendes',     tipo:'PF',cidade:'Araraquara',     marca:'vit',ultimoPedido:'01/07/2026',tel:'(16) 99300-0007',email:'lucas.mendes@gmail.com',   os:['0855']},
   {id:'c8',nome:'Ana Ferreira',     tipo:'PF',cidade:'São Carlos',     marca:'vit',ultimoPedido:'28/06/2026',tel:'(16) 99200-0008',email:'ana.ferreira@gmail.com',   os:['0840']}
 ];
+var CLIENTES_LIXEIRA = JSON.parse(localStorage.getItem('erp_clientes_lixeira') || '[]');
+
 
 // ============================================================
 // SIDEBAR BADGES
@@ -9696,6 +9717,39 @@ function stockRenderHistorico() {
 // ============================================================
 // CLIENTES
 // ============================================================
+function cliSetupTableDelegation(){
+  var tbody=document.getElementById('cliTableBody'); if(!tbody||tbody._delegated) return;
+  tbody._delegated=true;
+  tbody.addEventListener('click',function(e){
+    var btn=e.target.closest('[data-action]');
+    var row=e.target.closest('tr[data-cid]');
+    if(btn){
+      e.stopPropagation();
+      var id=btn.dataset.cid;
+      var act=btn.dataset.action;
+      if(act==='ver') cliOpenDetalhe(id);
+      else if(act==='editar') cliEditar(id);
+      else if(act==='excluir') cliExcluir(id);
+    } else if(row){
+      cliOpenDetalhe(row.dataset.cid);
+    }
+  });
+}
+function cliSetTab(tab){
+  var isLixeira = tab==='lixeira';
+  var tabA=document.getElementById('cliTabAtivos');
+  var tabL=document.getElementById('cliTabLixeira');
+  var tbl=document.getElementById('cliTableBody');
+  var lixCard=document.getElementById('cliLixeiraCard');
+  var btns=document.getElementById('cliAtivosBtns');
+  var mainCard=tbl ? tbl.closest('div.card') : null;
+  if(tabA){ tabA.style.background=isLixeira?'':'var(--surface)'; tabA.style.color=isLixeira?'var(--muted)':'var(--text)'; }
+  if(tabL){ tabL.style.background=isLixeira?'var(--surface)':''; tabL.style.color=isLixeira?'#DC2626':'var(--muted)'; }
+  if(lixCard) lixCard.style.display=isLixeira?'':'none';
+  if(mainCard) mainCard.style.display=isLixeira?'none':'';
+  if(btns) btns.style.display=isLixeira?'none':'flex';
+  if(isLixeira) cliRenderLixeira();
+}
 function renderClientes() {
   var tbody=document.getElementById('cliTableBody'), cntEl=document.getElementById('cliCount');
   if(!tbody) return;
@@ -9704,8 +9758,24 @@ function renderClientes() {
   if(cntEl) cntEl.textContent='('+list.length+' clientes)';
   if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum cliente encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(c){
-    return '<tr style="cursor:pointer" onclick="cliOpenDetalhe(\''+c.id+'\')"><td><strong>'+c.nome+'</strong></td><td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+(c.tipo==='PJ'?'#EDE9FE':'#FEF3C7')+';color:'+(c.tipo==='PJ'?'#5B21B6':'#92400E')+';font-weight:700">'+c.tipo+'</span></td><td>'+c.cidade+'</td><td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+(c.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(c.marca==='vr'?'#5B21B6':'#9D174D')+';font-weight:700">'+(c.marca==='vr'?'VR Marcas':'Vitre')+'</span></td><td>'+c.ultimoPedido+'</td><td>'+(c.os?c.os.length:0)+'</td><td><button class="topbar-btn ghost" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation();cliOpenDetalhe(\''+c.id+'\')">Ver</button><button class=\'topbar-btn ghost\' style=\'font-size:10px;padding:3px 8px;margin-right:3px;color:#5B21B6;border-color:#5B21B6\' onclick=\'event.stopPropagation();cliEditar(\'+c.id+\')\'>✏️</button><button class=\'topbar-btn ghost\' style=\'font-size:10px;padding:3px 8px;color:#DC2626;border-color:#DC2626\' onclick=\'event.stopPropagation();cliExcluir(\'+c.id+\')\'>🗑</button></td></tr>';
+    var tipoBg=c.tipo==='PJ'?'#EDE9FE':'#FEF3C7', tipoCor=c.tipo==='PJ'?'#5B21B6':'#92400E';
+    var mBg=c.marca==='vr'?'#EDE9FE':'#FCE7F3', mCor=c.marca==='vr'?'#5B21B6':'#9D174D';
+    var mLabel=c.marca==='vr'?'VR Marcas':'Vitre';
+    return '<tr style="cursor:pointer" data-cid="'+c.id+'">'
+      +'<td><strong>'+c.nome+'</strong></td>'
+      +'<td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+tipoBg+';color:'+tipoCor+';font-weight:700">'+c.tipo+'</span></td>'
+      +'<td>'+c.cidade+'</td>'
+      +'<td><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:'+mBg+';color:'+mCor+';font-weight:700">'+mLabel+'</span></td>'
+      +'<td>'+c.ultimoPedido+'</td>'
+      +'<td>'+(c.os?c.os.length:0)+'</td>'
+      +'<td>'
+        +'<button class="topbar-btn ghost" style="font-size:10px;padding:3px 8px" data-action="ver" data-cid="'+c.id+'">Ver</button> '
+        +'<button class="topbar-btn ghost" style="font-size:10px;padding:3px 8px;color:#5B21B6;border-color:#5B21B6" data-action="editar" data-cid="'+c.id+'">✏️</button> '
+        +'<button class="topbar-btn ghost" style="font-size:10px;padding:3px 8px;color:#DC2626;border-color:#DC2626" data-action="excluir" data-cid="'+c.id+'">🗑</button>'
+      +'</td>'
+      +'</tr>';
   }).join('');
+  cliSetupTableDelegation();
 }
 function cliOpenDetalhe(id) {
   var c=CLIENTES_DATA.find(function(x){return x.id===id;}); if(!c) return;
@@ -9767,11 +9837,75 @@ function cliEditar(id){
 }
 function cliExcluir(id){
   var c=CLIENTES_DATA.find(function(x){return x.id===id;}); if(!c) return;
-  if(!confirm('Excluir cliente "'+c.nome+'"?\nEsta ação não pode ser desfeita.')) return;
+  if(!confirm('Mover "'+c.nome+'" para a lixeira?')) return;
+  c.deletedAt = new Date().toISOString();
+  CLIENTES_LIXEIRA.unshift(c);
   CLIENTES_DATA=CLIENTES_DATA.filter(function(x){return x.id!==id;});
-  renderClientes();
+  cliSaveLixeira();
   if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
-  showToast('Cliente "'+c.nome+'" excluído.','info');
+  renderClientes();
+  showToast('Cliente movido para a Lixeira. Acesse a aba Lixeira para restaurar.','info');
+}
+function cliSaveLixeira(){
+  localStorage.setItem('erp_clientes_lixeira', JSON.stringify(CLIENTES_LIXEIRA));
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('clientes_lixeira', CLIENTES_LIXEIRA);
+}
+function cliRestaurar(id){
+  var c=CLIENTES_LIXEIRA.find(function(x){return x.id===id;}); if(!c) return;
+  delete c.deletedAt;
+  CLIENTES_DATA.unshift(c);
+  CLIENTES_LIXEIRA=CLIENTES_LIXEIRA.filter(function(x){return x.id!==id;});
+  cliSaveLixeira();
+  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+  renderClientes(); cliRenderLixeira();
+  showToast('Cliente "'+c.nome+'" restaurado!','ok');
+}
+function cliExcluirPermanente(id){
+  var c=CLIENTES_LIXEIRA.find(function(x){return x.id===id;}); if(!c) return;
+  if(!confirm('Excluir "'+c.nome+'" PERMANENTEMENTE? Esta ação não pode ser desfeita.')) return;
+  CLIENTES_LIXEIRA=CLIENTES_LIXEIRA.filter(function(x){return x.id!==id;});
+  cliSaveLixeira();
+  cliRenderLixeira();
+  showToast('Cliente excluído permanentemente.','warn');
+}
+function cliEsvaziarLixeira(){
+  if(!CLIENTES_LIXEIRA.length) return;
+  if(!confirm('Excluir TODOS os '+CLIENTES_LIXEIRA.length+' clientes da lixeira permanentemente?')) return;
+  CLIENTES_LIXEIRA=[];
+  cliSaveLixeira(); cliRenderLixeira();
+  showToast('Lixeira esvaziada.','warn');
+}
+function cliRenderLixeira(){
+  var tbody=document.getElementById('cliLixeiraTbody'); if(!tbody) return;
+  var badge=document.getElementById('cliLixeiraBadge');
+  if(badge) badge.textContent=CLIENTES_LIXEIRA.length||'';
+  if(!CLIENTES_LIXEIRA.length){
+    tbody.innerHTML='<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Lixeira vazia.</td></tr>';
+    return;
+  }
+  tbody.innerHTML=CLIENTES_LIXEIRA.map(function(c){
+    var dtDel=c.deletedAt?new Date(c.deletedAt).toLocaleDateString('pt-BR'):'-';
+    return '<tr style="border-bottom:1px solid var(--border)" data-cid="'+c.id+'">'
+      +'<td style="padding:10px 12px;font-weight:700">'+c.nome+'</td>'
+      +'<td style="padding:10px 12px;font-size:11px;color:var(--muted)">'+c.tipo+' · '+(c.cidade||'-')+'</td>'
+      +'<td style="padding:10px 12px;font-size:11px;color:var(--muted)">'+dtDel+'</td>'
+      +'<td style="padding:10px 12px;text-align:right">'
+        +'<button data-action="restaurar" data-cid="'+c.id+'" style="padding:4px 10px;border:1.5px solid #059669;border-radius:6px;background:none;color:#059669;font-size:11px;font-weight:700;cursor:pointer;margin-right:4px">↩ Restaurar</button>'
+        +'<button data-action="excluir-perm" data-cid="'+c.id+'" style="padding:4px 10px;border:1.5px solid #DC2626;border-radius:6px;background:none;color:#DC2626;font-size:11px;font-weight:700;cursor:pointer">🗑 Apagar</button>'
+      +'</td>'
+      +'</tr>';
+  }).join('');
+  // Event delegation for lixeira
+  if(!tbody._delegated){
+    tbody._delegated=true;
+    tbody.addEventListener('click',function(e){
+      var btn=e.target.closest('[data-action]');
+      if(!btn) return;
+      var id=btn.dataset.cid, act=btn.dataset.action;
+      if(act==='restaurar') cliRestaurar(id);
+      else if(act==='excluir-perm') cliExcluirPermanente(id);
+    });
+  }
 }
 function cliConfirmarNovo() {
   var nome=(document.getElementById('cliNovoNome')||{}).value||'';
