@@ -6039,7 +6039,14 @@ var ORC_ITEM_EXTRAS = {};
 function orcItemExtras(ri) {
   var ex = ORC_ITEM_EXTRAS[ri] || {};
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
-  // Create/reuse overlay
+  var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
+  var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
+  var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
+  var area_m2 = (larg/100)*(alt/100)*qty;
+  var adhCalc  = area_m2*0.0056;
+  var adhbCalc = area_m2*0.0011;
+  var adhFmt  = adhCalc.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  var adhbFmt = adhbCalc.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   var ov = document.getElementById('orcItemExtrasOverlay');
   if(!ov){
     ov=document.createElement('div'); ov.id='orcItemExtrasOverlay';
@@ -6047,10 +6054,25 @@ function orcItemExtras(ri) {
     ov.onclick=function(e){if(e.target===ov)ov.style.display='none';};
     document.body.appendChild(ov);
   }
-  ov.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(400px,95vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+  var adSim  = ex.adesivoSim  ? 'sim' : 'nao';
+  var adbSim = ex.adesivoBaseSim ? 'sim' : 'nao';
+  ov.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(420px,95vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
     +'<div style="font-size:14px;font-weight:800;margin-bottom:14px">➕ Custos Extras — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
-    +'<div style="display:grid;gap:8px">'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Adesivo / Vinil (R$)</label><input type="number" id="exAdesivo" value="'+(ex.adesivo||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
+    +'<div style="display:grid;gap:10px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface);border-radius:8px">'
+    +'<div><div style="font-size:11px;font-weight:700">Adesivo / Vinil</div>'
+    +'<div id="exAdhPreview" style="font-size:10px;color:var(--brand-mid)">≈ R$ '+adhFmt+'</div></div>'
+    +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-weight:700">'
+    +'<option value="nao"'+(adSim==='nao'?' selected':'')+'>Não</option>'
+    +'<option value="sim"'+(adSim==='sim'?' selected':'')+'>Sim</option>'
+    +'</select></div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface);border-radius:8px">'
+    +'<div><div style="font-size:11px;font-weight:700">Biadesivo / Base</div>'
+    +'<div id="exAdhbPreview" style="font-size:10px;color:var(--brand-mid)">≈ R$ '+adhbFmt+'</div></div>'
+    +'<select id="exAdesivoBaseSim" onchange="orcItemExtraPreview('+ri+')" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-weight:700">'
+    +'<option value="nao"'+(adbSim==='nao'?' selected':'')+'>Não</option>'
+    +'<option value="sim"'+(adbSim==='sim'?' selected':'')+'>Sim</option>'
+    +'</select></div>'
     +'<div class="fg" style="margin:0"><label style="font-size:10px">Acabamento / Fita (R$)</label><input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
     +'<div class="fg" style="margin:0"><label style="font-size:10px">Instalação (R$)</label><input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
     +'<div class="fg" style="margin:0"><label style="font-size:10px">Outros (R$)</label><input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
@@ -6065,28 +6087,44 @@ function orcItemExtras(ri) {
   ov.style.display='flex';
   orcItemExtraPreview(ri);
 }
-
 function orcItemExtraPreview(ri){
-  var total=(parseFloat((document.getElementById('exAdesivo')||{}).value)||0)
-           +(parseFloat((document.getElementById('exAcabamento')||{}).value)||0)
-           +(parseFloat((document.getElementById('exInstalacao')||{}).value)||0)
-           +(parseFloat((document.getElementById('exOutros')||{}).value)||0);
+  var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
+  var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
+  var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
+  var area_m2 = (larg/100)*(alt/100)*qty;
+  var adhSim  = (document.getElementById('exAdesivoSim')||{}).value==='sim';
+  var adbSim  = (document.getElementById('exAdesivoBaseSim')||{}).value==='sim';
+  var adhVal  = adhSim  ? area_m2*0.0056 : 0;
+  var adbVal  = adbSim  ? area_m2*0.0011 : 0;
+  var acabVal = parseFloat((document.getElementById('exAcabamento')||{}).value)||0;
+  var instVal = parseFloat((document.getElementById('exInstalacao')||{}).value)||0;
+  var outVal  = parseFloat((document.getElementById('exOutros')||{}).value)||0;
+  var total   = adhVal + adbVal + acabVal + instVal + outVal;
   var el=document.getElementById('exPreview');
   if(el) el.textContent=total>0?'Total extras: R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
 }
 
 function orcItemExtrasSalvar(ri){
+  var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
+  var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
+  var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
+  var area_m2 = (larg/100)*(alt/100)*qty;
+  var adhSim  = (document.getElementById('exAdesivoSim')||{}).value==='sim';
+  var adbSim  = (document.getElementById('exAdesivoBaseSim')||{}).value==='sim';
   ORC_ITEM_EXTRAS[ri]={
-    adesivo:   parseFloat((document.getElementById('exAdesivo')||{}).value)||0,
-    acabamento:parseFloat((document.getElementById('exAcabamento')||{}).value)||0,
-    instalacao:parseFloat((document.getElementById('exInstalacao')||{}).value)||0,
-    outros:    parseFloat((document.getElementById('exOutros')||{}).value)||0,
-    descricao: (document.getElementById('exDesc')||{}).value||''
+    adesivoSim:    adhSim,
+    adesivoBaseSim:adbSim,
+    adesivo:       adhSim  ? area_m2*0.0056 : 0,
+    adesivoBase:   adbSim  ? area_m2*0.0011 : 0,
+    acabamento:    parseFloat((document.getElementById('exAcabamento')||{}).value)||0,
+    instalacao:    parseFloat((document.getElementById('exInstalacao')||{}).value)||0,
+    outros:        parseFloat((document.getElementById('exOutros')||{}).value)||0,
+    descricao:     (document.getElementById('exDesc')||{}).value||''
   };
   document.getElementById('orcItemExtrasOverlay').style.display='none';
-  // Update extras button visual indicator
   var btn=document.querySelector('#oir_'+ri+' .plan-icon-btn[onclick*="orcItemExtras"]');
-  var total=ORC_ITEM_EXTRAS[ri].adesivo+ORC_ITEM_EXTRAS[ri].acabamento+ORC_ITEM_EXTRAS[ri].instalacao+ORC_ITEM_EXTRAS[ri].outros;
+  var ex=ORC_ITEM_EXTRAS[ri];
+  var total=ex.adesivo+ex.adesivoBase+ex.acabamento+ex.instalacao+ex.outros;
   if(btn) { btn.style.background=total>0?'#7C3AED':'var(--surface)'; btn.style.color=total>0?'#fff':'var(--text)'; btn.title=total>0?'Extras: R$'+total.toFixed(2):'Custos extras'; }
   orcRecalc();
   showToast('Custos extras do item salvos!','ok');
@@ -6094,7 +6132,7 @@ function orcItemExtrasSalvar(ri){
 
 function orcGetItemExtrasTotal(){
   return Object.values(ORC_ITEM_EXTRAS).reduce(function(s,ex){
-    return s+(ex.adesivo||0)+(ex.acabamento||0)+(ex.instalacao||0)+(ex.outros||0);
+    return s+(ex.adesivo||0)+(ex.adesivoBase||0)+(ex.acabamento||0)+(ex.instalacao||0)+(ex.outros||0);
   },0);
 }
 
