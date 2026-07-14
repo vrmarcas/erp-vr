@@ -2957,6 +2957,10 @@ firebase.auth().signInAnonymously().then(function(){
           style="padding:10px 20px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);">
           🌸 Vitre <span style="background:#FCE7F3;color:#831843;border-radius:20px;padding:2px 8px;font-size:10px;margin-left:5px" id="crmVTcount">3</span>
         </button>
+        <button id="crmTabSite" onclick="crmSetBrand('site')"
+          style="padding:10px 20px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);">
+          🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:2px 8px;font-size:10px;margin-left:5px" id="crmSiteCount">0</span>
+        </button>
         <div style="margin-left:auto;display:flex;gap:7px;padding-bottom:8px;flex-wrap:wrap;">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular Lead IA</button>
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmOpenImport()">📥 Importar Lead</button>
@@ -2974,6 +2978,97 @@ firebase.auth().signInAnonymously().then(function(){
       <div id="crmBrandVT" style="display:none">
         <div id="crmKpiVT" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:12px"></div>
         <div style="overflow-x:auto;padding-bottom:8px"><div class="crm-board" id="crmBoardVT"></div></div>
+      </div>
+      <div id="crmBrandSite" style="display:none">
+        <!-- KPI bar -->
+        <div id="crmKpiSite" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+
+        <!-- Topbar ações -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <input id="siteLeadSearch" type="text" placeholder="🔍 Buscar por nome, email, tel..."
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
+            oninput="siteLeadRender()">
+          <select id="siteLeadFiltroStatus" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os status</option>
+            <option value="novo">🆕 Novo</option>
+            <option value="contatado">📞 Contatado</option>
+            <option value="qualificado">⭐ Qualificado</option>
+            <option value="convertido">✅ Convertido</option>
+            <option value="inativo">❌ Inativo</option>
+          </select>
+          <select id="siteLeadFiltroOrigem" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todas as origens</option>
+            <option value="cadastro">👤 Cadastro</option>
+            <option value="compra">🛍 Compra</option>
+            <option value="newsletter">📧 Newsletter</option>
+            <option value="manual">✏️ Manual</option>
+          </select>
+          <button class="topbar-btn" style="font-size:11px" onclick="siteLeadNovoModal()">+ Novo Lead</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteShopifyPanel()">🔄 Sync Shopify</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteImportCSV()">📥 Importar CSV</button>
+        </div>
+
+        <!-- Shopify sync panel (hidden by default) -->
+        <div id="siteShopifyPanelDiv" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-size:20px">🛒</span>
+            <div>
+              <div style="font-weight:800;font-size:13px">Sincronizar com Shopify</div>
+              <div style="font-size:10px;color:var(--muted)">Puxe os clientes do vitredecor.com automaticamente</div>
+            </div>
+            <button onclick="document.getElementById('siteShopifyPanelDiv').style.display='none'" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted)">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">URL da loja (.myshopify.com)</label>
+              <input id="shopifyStoreUrl" type="text" placeholder="vitredecor.myshopify.com"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Admin API Access Token</label>
+              <input id="shopifyToken" type="password" placeholder="shpat_xxxxxxxxxxxx"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#92400E;line-height:1.5">
+            <strong>Como obter o token:</strong> No painel Shopify → Configurações → Aplicativos → Desenvolver aplicativos → Criar aplicativo → 
+            em "Permissões da API Admin" ative <em>read_customers</em> e <em>read_orders</em> → Instalar → copiar o "Token de acesso da API Admin".
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button onclick="siteShopifySync()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">🔄 Sincronizar Agora</button>
+            <button onclick="siteSalvarConfig()" style="padding:9px 14px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:11px;color:var(--text)">💾 Salvar Config</button>
+            <span id="shopifySyncStatus" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <!-- CSV import -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ou importe um CSV exportado do Shopify (Clientes → Exportar):</div>
+            <input type="file" id="siteCSVInput" accept=".csv" onchange="siteParseCSV(this)" style="font-size:11px">
+          </div>
+        </div>
+
+        <!-- Leads table -->
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cliente</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Contato</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Origem</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Pedidos</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Status</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cadastro</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="siteLeadsTbody">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
+                Nenhum lead ainda. Clique em <strong>Sync Shopify</strong> para importar clientes do site ou em <strong>+ Novo Lead</strong> para adicionar manualmente.
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div><!-- /pg-crm -->
 
@@ -6318,9 +6413,11 @@ let crmActiveBrand = 'vr';
 function crmSetBrand(b) {
   crmActiveBrand = b;
   const isVR = b === 'vr';
+  const isSite = b === 'site';
   document.getElementById('crmBrandVR').style.display = isVR ? '' : 'none';
-  document.getElementById('crmBrandVT').style.display = isVR ? 'none' : '';
-  if(isVR) crmRenderBoard('vr'); else crmRenderBoard('vitre');
+  document.getElementById('crmBrandVT').style.display = (!isVR&&!isSite) ? '' : 'none';
+  var siteBrand=document.getElementById('crmBrandSite'); if(siteBrand) siteBrand.style.display=isSite?'':'none';
+  if(isVR) crmRenderBoard('vr'); else if(!isSite) crmRenderBoard('vitre'); else { siteLeadRender(); siteKpiRender(); }
   const tabVR = document.getElementById('crmTabVR');
   const tabVT = document.getElementById('crmTabVT');
   tabVR.style.borderBottomColor = isVR ? '#7C3AED' : 'transparent';
@@ -6329,6 +6426,10 @@ function crmSetBrand(b) {
   tabVT.style.borderBottomColor = !isVR ? '#BE185D' : 'transparent';
   tabVT.style.color = !isVR ? '#831843' : 'var(--muted)';
   tabVT.style.fontWeight = !isVR ? '800' : '700';
+  var tabSite=document.getElementById('crmTabSite');
+  if(tabSite){tabSite.style.borderBottomColor=isSite?'#059669':'transparent';
+  tabSite.style.color=isSite?'#065F46':'var(--muted)';
+  tabSite.style.fontWeight=isSite?'800':'700';}
 }
 function crmShowPayload()  { /* removido */ }
 function crmShowSchema()   { /* removido */ }
@@ -14654,6 +14755,338 @@ function comissaoRender() {
       + '</div>';
   }).join('');
 }
+
+// ==========================================
+// CRM SITE LEADS (Vitre Decor / Shopify)
+// ==========================================
+var SITE_LEADS = JSON.parse(localStorage.getItem('crm_site_leads') || '[]');
+
+function siteSaveLeads() {
+  localStorage.setItem('crm_site_leads', JSON.stringify(SITE_LEADS));
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_site_leads', SITE_LEADS);
+}
+
+function siteUpdateCount() {
+  var el = document.getElementById('crmSiteCount');
+  if(el) el.textContent = SITE_LEADS.length;
+}
+
+var SITE_STATUS_LABELS = {
+  novo: '🆕 Novo', contatado: '📞 Contatado',
+  qualificado: '⭐ Qualificado', convertido: '✅ Convertido', inativo: '❌ Inativo'
+};
+var SITE_STATUS_COLORS = {
+  novo: '#3B82F6', contatado: '#F59E0B',
+  qualificado: '#8B5CF6', convertido: '#059669', inativo: '#6B7280'
+};
+var SITE_ORIGEM_LABELS = {
+  cadastro: '👤 Cadastro', compra: '🛍 Compra',
+  newsletter: '📧 Newsletter', manual: '✏️ Manual'
+};
+
+function siteKpiRender() {
+  var el = document.getElementById('crmKpiSite'); if(!el) return;
+  var total = SITE_LEADS.length;
+  var hoje = new Date().toISOString().slice(0,10);
+  var novosHoje = SITE_LEADS.filter(function(l){ return (l.dataCad||'').slice(0,10)===hoje; }).length;
+  var convertidos = SITE_LEADS.filter(function(l){ return l.status==='convertido'; }).length;
+  var taxaConv = total > 0 ? Math.round(convertidos/total*100) : 0;
+  var totalPedidos = SITE_LEADS.reduce(function(a,l){ return a+(l.totalPedidos||0); }, 0);
+  var kpis = [
+    {label:'Total de Leads', val: total, cor:'#3B82F6', ic:'👥'},
+    {label:'Novos Hoje', val: novosHoje, cor:'#10B981', ic:'🆕'},
+    {label:'Convertidos', val: convertidos, cor:'#8B5CF6', ic:'✅'},
+    {label:'Taxa Conversão', val: taxaConv+'%', cor:'#F59E0B', ic:'📈'},
+    {label:'Total Pedidos', val: 'R$ '+totalPedidos.toLocaleString('pt-BR',{minimumFractionDigits:2}), cor:'#EC4899', ic:'🛍'}
+  ];
+  el.innerHTML = kpis.map(function(k){
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;border-left:3px solid '+k.cor+'">'
+      +'<div style="font-size:10px;color:var(--muted);margin-bottom:4px">'+k.ic+' '+k.label+'</div>'
+      +'<div style="font-size:18px;font-weight:800;color:var(--text)">'+k.val+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function siteLeadRender() {
+  var tbody = document.getElementById('siteLeadsTbody'); if(!tbody) return;
+  var search = (document.getElementById('siteLeadSearch')||{}).value||'';
+  var fStatus = (document.getElementById('siteLeadFiltroStatus')||{}).value||'';
+  var fOrigem = (document.getElementById('siteLeadFiltroOrigem')||{}).value||'';
+  var leads = SITE_LEADS.filter(function(l){
+    if(fStatus && l.status !== fStatus) return false;
+    if(fOrigem && l.origem !== fOrigem) return false;
+    if(search){
+      var q = search.toLowerCase();
+      if(!(l.nome||'').toLowerCase().includes(q) &&
+         !(l.email||'').toLowerCase().includes(q) &&
+         !(l.tel||'').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }).sort(function(a,b){ return (b.dataCad||'').localeCompare(a.dataCad||''); });
+
+  if(!leads.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Nenhum lead encontrado.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = leads.map(function(l){
+    var stColor = SITE_STATUS_COLORS[l.status]||'#6B7280';
+    var stLabel = SITE_STATUS_LABELS[l.status]||l.status;
+    var orLabel = SITE_ORIGEM_LABELS[l.origem]||l.origem||'-';
+    var dataCad = l.dataCad ? l.dataCad.slice(0,10).split('-').reverse().join('/') : '-';
+    var pedStr = l.qtdPedidos ? l.qtdPedidos+' (R$ '+(l.totalPedidos||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+')' : '-';
+    var opts = Object.keys(SITE_STATUS_LABELS).map(function(s){
+      return '<option value="'+s+'"'+(l.status===s?' selected':'')+'>'+SITE_STATUS_LABELS[s]+'</option>';
+    }).join('');
+    return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onmouseover="this.style.background=\'var(--surface)\'" onmouseout="this.style.background=\'\'">'
+      +'<td style="padding:10px 12px" onclick="siteLeadAbrir(\''+l.id+'\')"><div style="font-weight:700;font-size:12px">'+escHtml(l.nome||'-')+'</div></td>'
+      +'<td style="padding:10px 12px" onclick="siteLeadAbrir(\''+l.id+'\')"><div style="font-size:11px">'+escHtml(l.email||'-')+'</div><div style="font-size:10px;color:var(--muted)">'+escHtml(l.tel||'')+'</div></td>'
+      +'<td style="padding:10px 12px" onclick="siteLeadAbrir(\''+l.id+'\')"><span style="font-size:10px">'+orLabel+'</span></td>'
+      +'<td style="padding:10px 12px;font-size:11px" onclick="siteLeadAbrir(\''+l.id+'\')">'+pedStr+'</td>'
+      +'<td style="padding:10px 12px">'
+        +'<select onchange="siteLeadStatus(\''+l.id+'\',this.value)" onclick="event.stopPropagation()"'
+          +' style="padding:4px 6px;border:1.5px solid '+stColor+';border-radius:20px;font-size:10px;font-weight:700;color:'+stColor+';background:var(--bg);cursor:pointer">'
+        +opts
+        +'</select>'
+      +'</td>'
+      +'<td style="padding:10px 12px;font-size:11px;color:var(--muted)" onclick="siteLeadAbrir(\''+l.id+'\')">'+dataCad+'</td>'
+      +'<td style="padding:10px 12px;text-align:center">'
+        +'<button onclick="siteLeadAbrir(\''+l.id+'\')" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;color:var(--text)">Ver</button> '
+        +'<button onclick="siteLeadExcluir(\''+l.id+'\')" style="background:none;border:1px solid #FECACA;border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;color:#DC2626">🗑</button>'
+      +'</td>'
+      +'</tr>';
+  }).join('');
+  siteUpdateCount();
+}
+
+
+function siteLeadStatus(id, status) {
+  var l = SITE_LEADS.find(function(x){ return x.id===id; }); if(!l) return;
+  l.status = status;
+  siteSaveLeads();
+  siteLeadRender(); siteKpiRender();
+}
+
+function siteLeadExcluir(id) {
+  if(!confirm('Excluir este lead?')) return;
+  SITE_LEADS = SITE_LEADS.filter(function(x){ return x.id!==id; });
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+}
+
+// ── Modal detalhe do lead ──
+var _siteLeadId = null;
+function siteLeadAbrir(id) {
+  var l = SITE_LEADS.find(function(x){ return x.id===id; }); if(!l) return;
+  _siteLeadId = id;
+  var overlay = document.getElementById('siteLeadOverlay');
+  if(!overlay) { siteCreateOverlay(); overlay = document.getElementById('siteLeadOverlay'); }
+  document.getElementById('slNome').textContent = l.nome||'-';
+  document.getElementById('slEmail').textContent = l.email||'-';
+  document.getElementById('slTel').textContent = l.tel||'-';
+  document.getElementById('slOrigem').textContent = SITE_ORIGEM_LABELS[l.origem]||l.origem||'-';
+  document.getElementById('slDataCad').textContent = l.dataCad ? l.dataCad.slice(0,10).split('-').reverse().join('/') : '-';
+  document.getElementById('slCidade').textContent = l.cidade||'-';
+  document.getElementById('slPedidos').textContent = l.qtdPedidos ? l.qtdPedidos+' pedido(s) · R$ '+(l.totalPedidos||0).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-';
+  document.getElementById('slStatus').value = l.status||'novo';
+  document.getElementById('slNotas').value = l.notas||'';
+  overlay.style.display = 'flex';
+}
+
+function siteCreateOverlay() {
+  var div = document.createElement('div');
+  div.id = 'siteLeadOverlay';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9100;display:none;align-items:center;justify-content:center';
+  div.onclick = function(e){ if(e.target===div) div.style.display='none'; };
+  var stOpts = Object.keys(SITE_STATUS_LABELS).map(function(s){ return '<option value="'+s+'">'+SITE_STATUS_LABELS[s]+'</option>'; }).join('');
+  div.innerHTML = '<div style="background:var(--surface);border-radius:14px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+      +'<div style="font-size:16px;font-weight:800" id="slNome">-</div>'
+      +'<button id="slCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">x</button>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Email</div><div style="font-size:12px;font-weight:600" id="slEmail">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Telefone</div><div style="font-size:12px;font-weight:600" id="slTel">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Origem</div><div style="font-size:12px" id="slOrigem">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cadastro</div><div style="font-size:12px" id="slDataCad">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cidade</div><div style="font-size:12px" id="slCidade">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Pedidos</div><div style="font-size:12px" id="slPedidos">-</div></div>'
+    +'</div>'
+    +'<div style="margin-bottom:12px">'
+      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Status</label>'
+      +'<select id="slStatus" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px">'+stOpts+'</select>'
+    +'</div>'
+    +'<div style="margin-bottom:16px">'
+      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Anotacoes</label>'
+      +'<textarea id="slNotas" rows="4" placeholder="Observacoes sobre este lead..." style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box"></textarea>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+      +'<button id="slCancelBtn" style="padding:9px 16px;background:none;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text)">Cancelar</button>'
+      +'<button onclick="siteLeadSalvar()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">Salvar</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(div);
+  div.querySelector('#slCloseBtn').onclick = function(){ div.style.display='none'; };
+  div.querySelector('#slCancelBtn').onclick = function(){ div.style.display='none'; };
+}
+
+
+function siteLeadSalvar() {
+  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return;
+  l.status = document.getElementById('slStatus').value;
+  l.notas = document.getElementById('slNotas').value;
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+  document.getElementById('siteLeadOverlay').style.display = 'none';
+  showToast('Lead atualizado!','ok');
+}
+
+// ── Novo Lead manual ──
+function siteLeadNovoModal() {
+  var nome = prompt('Nome do cliente:'); if(!nome) return;
+  var email = prompt('Email:') || '';
+  var tel = prompt('Telefone (opcional):') || '';
+  var origem = 'manual';
+  var lead = {
+    id: 'sl'+Date.now(), nome: nome.trim(), email: email.trim(), tel: tel.trim(),
+    origem: origem, status: 'novo', dataCad: new Date().toISOString(), notas: ''
+  };
+  SITE_LEADS.unshift(lead);
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+  showToast('Lead adicionado!','ok');
+}
+
+// ── Shopify Sync ──
+function siteShopifyPanel() {
+  var p = document.getElementById('siteShopifyPanelDiv');
+  if(!p) return;
+  p.style.display = p.style.display==='none' ? '' : 'none';
+  // Load saved config
+  var cfg = JSON.parse(localStorage.getItem('shopify_cfg')||'{}');
+  if(cfg.url) document.getElementById('shopifyStoreUrl').value = cfg.url;
+  if(cfg.token) document.getElementById('shopifyToken').value = cfg.token;
+}
+
+function siteSalvarConfig() {
+  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
+  var token = (document.getElementById('shopifyToken').value||'').trim();
+  localStorage.setItem('shopify_cfg', JSON.stringify({url:url,token:token}));
+  showToast('Configuração salva!','ok');
+}
+
+function siteShopifySync() {
+  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
+  var token = (document.getElementById('shopifyToken').value||'').trim();
+  if(!url || !token){ showToast('Preencha URL e Token antes de sincronizar.','warn'); return; }
+  // Save config
+  localStorage.setItem('shopify_cfg', JSON.stringify({url:url,token:token}));
+  var stEl = document.getElementById('shopifySyncStatus');
+  if(stEl) stEl.textContent = '⏳ Sincronizando...';
+
+  // Shopify Admin API - customers endpoint
+  var shopUrl = url.replace(/\/$/, '');
+  if(!shopUrl.includes('.myshopify.com')) shopUrl = shopUrl+'.myshopify.com';
+  var apiUrl = 'https://'+shopUrl+'/admin/api/2024-01/customers.json?limit=250';
+
+  fetch(apiUrl, {
+    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }
+  }).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status+' - verifique o token e a URL da loja.');
+    return r.json();
+  }).then(function(data){
+    var customers = data.customers || [];
+    var added = 0, updated = 0;
+    customers.forEach(function(c){
+      var existIdx = SITE_LEADS.findIndex(function(l){ return l.shopifyId===String(c.id); });
+      var lead = {
+        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+c.id,
+        shopifyId: String(c.id),
+        nome: (c.first_name||'') + ' ' + (c.last_name||''),
+        email: c.email||'',
+        tel: c.phone||'',
+        cidade: (c.default_address&&c.default_address.city)||'',
+        dataCad: c.created_at||new Date().toISOString(),
+        origem: c.orders_count > 0 ? 'compra' : 'cadastro',
+        qtdPedidos: c.orders_count||0,
+        totalPedidos: parseFloat(c.total_spent||'0'),
+        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
+        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
+      };
+      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
+      else { SITE_LEADS.unshift(lead); added++; }
+    });
+    siteSaveLeads(); siteLeadRender(); siteKpiRender();
+    if(stEl) stEl.textContent = '✅ '+added+' novos · '+updated+' atualizados ('+customers.length+' total)';
+    showToast(customers.length+' clientes sincronizados!','ok');
+  }).catch(function(err){
+    if(stEl) stEl.textContent = '❌ Erro: '+err.message;
+    // Check if it's a CORS error
+    var msg = err.message||'';
+    if(msg.toLowerCase().includes('failed to fetch')||msg.toLowerCase().includes('cors')){
+      showToast('CORS bloqueado - use o Shopify Proxy App ou importe via CSV','warn');
+      if(stEl) stEl.innerHTML = '❌ CORS bloqueado pelo Shopify.<br><small>Solução: No Shopify Admin → Aplicativos → Criar app → ative CORS para o seu domínio, ou importe o CSV de clientes abaixo.</small>';
+    } else {
+      showToast('Erro ao sincronizar: '+err.message,'err');
+    }
+  });
+}
+
+// ── CSV Import (Shopify customer export) ──
+function siteImportCSV() {
+  var p = document.getElementById('siteShopifyPanelDiv');
+  if(p){ p.style.display=''; }
+  // Scroll to file input
+  var inp = document.getElementById('siteCSVInput');
+  if(inp){ setTimeout(function(){ inp.scrollIntoView({behavior:'smooth'}); inp.click(); }, 200); }
+}
+
+function siteParseCSV(input) {
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var lines = e.target.result.split('\n')
+    var headers = lines[0].split(',').map(function(h){ return h.replace(/"/g,'').trim().toLowerCase(); });
+    var added=0, updated=0;
+    for(var i=1;i<lines.length;i++){
+      var cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+      cols = cols.map(function(c){ return c.replace(/^"|"$/g,'').trim(); });
+      if(cols.length<3) continue;
+      var get = function(name){ var idx=headers.indexOf(name); return idx>=0?cols[idx]||'':''; };
+      var email = get('email');
+      if(!email) continue;
+      var shopifyId = get('id')||get('customer id');
+      var existIdx = SITE_LEADS.findIndex(function(l){ return l.email===email; });
+      var nome = (get('first name')||get('nome'))+' '+(get('last name')||'');
+      var orders = parseInt(get('total orders')||get('orders count')||'0')||0;
+      var spent = parseFloat((get('total spent')||get('total amount spent')||'0').replace('R$','').replace(',','.'))||0;
+      var lead = {
+        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+Date.now()+'_'+i,
+        shopifyId: shopifyId,
+        nome: nome.trim()||email,
+        email: email,
+        tel: get('phone')||get('telefone')||'',
+        cidade: get('city')||get('billing city')||'',
+        dataCad: get('created at')||get('customer since')||new Date().toISOString(),
+        origem: orders>0 ? 'compra' : 'cadastro',
+        qtdPedidos: orders,
+        totalPedidos: spent,
+        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
+        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
+      };
+      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
+      else { SITE_LEADS.push(lead); added++; }
+    }
+    siteSaveLeads(); siteLeadRender(); siteKpiRender();
+    showToast(added+' leads importados · '+updated+' atualizados do CSV','ok');
+    input.value='';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Init site leads on CRM open
+setTimeout(function(){
+  siteUpdateCount();
+}, 1200);
+
 </script>
 
 <!-- ══ MOBILE SIDE PANEL ══ -->
