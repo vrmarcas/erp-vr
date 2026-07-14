@@ -1545,6 +1545,13 @@ firebase.auth().signInAnonymously().then(function(){
           <div class="ekpi-trend" id="dkEstqSub">materiais abaixo do mínimo</div>
           <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkEstqBar" style="width:0%"></div></div>
         </div>
+        <div class="ekpi">
+          <div class="ekpi-ico">📤</div>
+          <div class="ekpi-lbl">Despesas do Mês</div>
+          <div class="ekpi-val" id="dkDesp">—</div>
+          <div class="ekpi-trend" id="dkDespSub">vs mês anterior</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkDespBar" style="width:0%;background:#DC2626"></div></div>
+        </div>
       </div>
 
       <!-- Charts 2×2 -->
@@ -1649,7 +1656,13 @@ firebase.auth().signInAnonymously().then(function(){
         <button class="kb-fb" id="kbfVR"  onclick="kbFilter('vr')">🟣 VR Marcas</button>
         <button class="kb-fb" id="kbfVit" onclick="kbFilter('vit')">🌸 Vitre</button>
         <input class="kb-search" id="kbSearch" placeholder="🔍 Buscar cliente ou OS..." oninput="kbFilter()">
-        <button class="topbar-btn" style="font-size:12px;background:var(--brand-mid);color:#fff;font-weight:800;border:none;margin-left:auto" onclick="kbOpenNovaOS()">+ Nova OS</button>
+        <div style="display:flex;gap:4px;align-items:center;margin-left:auto">
+          <span style="font-size:10px;color:var(--muted);font-weight:700">Visão:</span>
+          <button class="kb-fb on" id="kbViewAll" onclick="kbSetView('all',this)" style="font-size:10px;padding:4px 8px">Tudo</button>
+          <button class="kb-fb" id="kbViewWeek" onclick="kbSetView('week',this)" style="font-size:10px;padding:4px 8px">📅 Semana</button>
+          <button class="kb-fb" id="kbViewMonth" onclick="kbSetView('month',this)" style="font-size:10px;padding:4px 8px">📆 Mês</button>
+        </div>
+        <button class="topbar-btn" style="font-size:12px;background:var(--brand-mid);color:#fff;font-weight:800;border:none" onclick="kbOpenNovaOS()">+ Nova OS</button>
       </div>
       <div class="kb-wrap">
         <div class="kb">
@@ -2137,8 +2150,24 @@ firebase.auth().signInAnonymously().then(function(){
                     </select>
                     <button onclick="orcSalvarPreset()" style="padding:5px 8px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">💾 Salvar</button>
                   </div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px 10px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border)">
+                    <input type="checkbox" id="orcSoCorte" onchange="orcSoCorteChange()" style="accent-color:var(--brand-mid);width:16px;height:16px;cursor:pointer">
+                    <div>
+                      <div style="font-size:11px;font-weight:800;color:var(--text)">✂️ Modo Só Corte</div>
+                      <div style="font-size:10px;color:var(--muted)">Cliente traz o próprio material — cobrar apenas serviço de corte</div>
+                    </div>
+                  </div>
+                  <div id="soCortePanel" style="display:none;margin-bottom:10px;padding:8px 10px;background:#FEF3C7;border:1.5px solid #FDE68A;border-radius:8px">
+                    <div style="font-size:10px;font-weight:800;color:#92400E;margin-bottom:6px">✂️ Serviço de Corte — R$130/h</div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <label style="font-size:10px;color:#92400E;white-space:nowrap">Minutos de corte:</label>
+                      <input type="number" id="orcSoCorteMin" value="30" min="30" step="5" oninput="orcRecalc()" style="width:70px;padding:4px 8px;border:1.5px solid #FDE68A;border-radius:6px;font-size:12px;font-weight:700;background:#FFF8EB">
+                      <span style="font-size:10px;color:#92400E">(mín. 30 min)</span>
+                      <span id="soCorteValor" style="font-size:12px;font-weight:800;color:#92400E;margin-left:auto">R$ 0,00</span>
+                    </div>
+                  </div>
                   <div class="section-lbl">Máquinas (minutos)</div>
-                  <div class="cost-row"><div class="cost-name">⚡ Laser</div><div class="cost-unit">×R$0,10/min</div><input class="cost-inp" type="number" id="om_laser" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_laser">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">⚡ Laser</div><div class="cost-unit">×R$0,10/min</div><input class="cost-inp" type="number" id="om_laser" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_laser">R$0,00</div><button onclick="orcAutoLaser()" title="Calcular automaticamente por espessura do material" style="background:var(--brand-mid);color:#fff;border:none;border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:2px;white-space:nowrap">Auto</button></div>
                   <div class="cost-row"><div class="cost-name">📐 Dobra</div><div class="cost-unit">×R$0,01/min</div><input class="cost-inp" type="number" id="om_dobra" value="0"  min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_dobra">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">✨ Politrix</div><div class="cost-unit">×R$0,02/min</div><input class="cost-inp" type="number" id="om_pol" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_pol">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">☀️ UV</div><div class="cost-unit">×R$0,002/min</div><input class="cost-inp" type="number" id="om_uv" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_uv">R$0,00</div></div>
@@ -2189,6 +2218,18 @@ firebase.auth().signInAnonymously().then(function(){
                   </div>
                   <div class="fg"><label>Montagem (R$)</label><input type="number" id="orcMontagem" value="0" min="0" oninput="orcRecalc()"></div>
                   <div class="fg"><label>Deslocamento (R$)</label><input type="number" id="orcDesl" value="0" min="0" oninput="orcRecalc()"></div>
+                  <div class="fg">
+                    <label>Acréscimo</label>
+                    <div style="display:flex;gap:0;align-items:stretch;border:1.5px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg)">
+                      <input type="number" id="orcAcres" value="0" min="0" step="1" oninput="orcRecalc()"
+                        style="flex:1;border:none;padding:8px 10px;background:transparent;color:var(--text);font-size:14px;min-width:0;outline:none">
+                      <select id="orcAcresTipo" onchange="orcRecalc()"
+                        style="border:none;border-left:1.5px solid var(--border);padding:0 10px;background:var(--surface);color:var(--text);font-size:12px;font-weight:800;cursor:pointer;outline:none;min-width:52px">
+                        <option value="pct">%</option>
+                        <option value="rs">R$</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <!-- hidden price inputs — loaded from Config → Materiais -->
                 <input type="hidden" id="op_ac3"  value="100"><input type="hidden" id="op_ac5"  value="145"><input type="hidden" id="op_ac8"  value="195"><input type="hidden" id="op_ac10" value="240"><input type="hidden" id="op_ps3"  value="65"><input type="hidden" id="op_mt2"  value="180">
@@ -2321,6 +2362,7 @@ firebase.auth().signInAnonymously().then(function(){
                 <button class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
                 <button class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
                 <button class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="orcSalvarOrcamento()">💾 Salvar Orçamento</button>
+                <button class="topbar-btn ghost" style="font-size:11px;color:#7C3AED;border-color:#7C3AED" onclick="orcGerarLinkPagamento()">🔗 Link Pgto</button>
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:7px">Envie o orçamento antes de confirmar o pagamento</div>
             </div>
@@ -3876,6 +3918,7 @@ firebase.auth().signInAnonymously().then(function(){
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
               <div class="fg"><label>Overhead / Custos fixos (%)</label><input type="number" id="cfgOverhead" step="0.1" min="0" max="100" placeholder="Ex: 15"></div>
               <div class="fg"><label>Margem VRML / Lucro (%)</label><input type="number" id="cfgVrml" step="0.1" min="0" max="100" placeholder="Ex: 30"></div>
+              <div class="fg"><label>% Despesas Operacionais (ref.)</label><input type="number" id="cfgDespPct" step="0.1" min="0" max="100" placeholder="Ex: 20" title="Usado para alertar quando despesas ultrapassarem esse % do faturamento"></div>
               <div class="fg"><label>Taxa Cartão de Crédito (%)</label><input type="number" id="cfgCartao" step="0.01" min="0" max="10" placeholder="Ex: 3.49"></div>
               <div class="fg"><label>Taxa PIX / Mercado Pago (%)</label><input type="number" id="cfgPix" step="0.01" min="0" max="5" placeholder="Ex: 0.99"></div>
               <div class="fg"><label>Taxa Link de Pagamento (%)</label><input type="number" id="cfgLink" step="0.01" min="0" max="10" placeholder="Ex: 4.99"></div>
@@ -5379,7 +5422,7 @@ function orcAddItem() {
     <td style="font-size:11px;font-weight:700;color:var(--muted);text-align:right;white-space:nowrap" id="oi_custo_${orcItemCount}">—</td>
     <td style="font-size:11px;font-weight:700;color:var(--brand-mid);text-align:right;white-space:nowrap" id="oi_unit_${orcItemCount}">—</td>
     <td style="font-size:12px;font-weight:800;color:var(--brand-text);text-align:right;white-space:nowrap" id="oi_tot_${orcItemCount}">—</td>
-    <td style="white-space:nowrap;vertical-align:middle"><button id="oi_planBtn_${orcItemCount}" class="plan-icon-btn" onclick="planAbrir(${orcItemCount})" title="Planificar peças">📐</button><button class="item-del" onclick="orcRemItem(${orcItemCount})">×</button></td>
+    <td style="white-space:nowrap;vertical-align:middle"><button id="oi_planBtn_${orcItemCount}" class="plan-icon-btn" onclick="planAbrir(${orcItemCount})" title="Planificar peças">📐</button><button class="plan-icon-btn" onclick="orcItemExtras(${orcItemCount})" title="Custos extras deste item" style="background:var(--surface);border:1.5px solid var(--border);font-size:12px">➕</button><button class="item-del" onclick="orcRemItem(${orcItemCount})">×</button></td>
   `;
   tbody.appendChild(tr);
   // Hint row for retalho alert
@@ -5905,7 +5948,8 @@ function orcRecalc() {
   const mont = parseFloat(document.getElementById('orcMontagem')?.value)||0;
   const desl = parseFloat(document.getElementById('orcDesl')?.value)||0;
   const extras = maqTotal + consTotal + mont + desl;
-  const totalCost = matTotal + extras;
+  const itemExtrasTotal = (typeof orcGetItemExtrasTotal==='function') ? orcGetItemExtrasTotal() : 0;
+  const totalCost = matTotal + extras + itemExtrasTotal;
 
   // PASS 2: colunas do item mostram APENAS custo de material (extras só no sidebar)
   itemRows.forEach(function(item) {
@@ -5922,6 +5966,20 @@ function orcRecalc() {
   // preço final
   let finalPrice = 0;
   if (factor>0 && totalCost>0) finalPrice = (totalCost/factor) * (1-descPct) - descRS;
+  // Acréscimo
+  var _acresTipo=(document.getElementById('orcAcresTipo')?.value)||'pct';
+  var _acresVal=parseFloat(document.getElementById('orcAcres')?.value)||0;
+  var acresPct=_acresTipo==='pct'?_acresVal/100:0;
+  var acresRS =_acresTipo==='rs' ?_acresVal:0;
+  if(finalPrice>0) finalPrice = finalPrice*(1+acresPct)+acresRS;
+  // Só Corte override
+  var _soCorte = !!(document.getElementById('orcSoCorte')?.checked);
+  var _soCorteMin = _soCorte ? Math.max(30, parseFloat(document.getElementById('orcSoCorteMin')?.value)||30) : 0;
+  if(_soCorte) {
+    finalPrice = _soCorteMin * (130/60);
+    var scEl = document.getElementById('soCorteValor');
+    if(scEl) scEl.textContent = 'R$ '+finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
 
   // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
@@ -5940,8 +5998,12 @@ function orcRecalc() {
           if(consTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal/factor*(1-descPct))+'</span></div>';
           if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
           if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
+          if(itemExtrasTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#7C3AED;font-weight:600">Extras por item</span><span style="color:#7C3AED;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
         }
-        if(descPct>0||descRS>0) lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">-'+(descPct*100).toFixed(0)+'%</span></div>';
+        if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
+        if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#7C3AED;font-weight:700">'+_acresLbl+'</span></div>'; }
+        var _margin=finalPrice>0?((finalPrice-totalCost)/finalPrice*100):0;
+        lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
         lines += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
         brk.innerHTML = lines;
       }
@@ -5960,12 +6022,150 @@ function orcRecalc() {
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal)+'</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Mont+Des</span><span>'+orcFmt(mont+desl)+'</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-top:1px solid var(--border);margin-top:2px"><span style="color:var(--muted)">Custo Total</span><span style="font-weight:700">'+orcFmt(totalCost)+'</span></div>';
-    if(descPct>0||descRS>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">-'+(descPct*100).toFixed(0)+'%</span></div>';
+    if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
+    if(acresPct>0||acresRS>0){ var _acresLbl3=acresRS>0?('+'+orcFmt(acresRS)):('+'+( acresPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#7C3AED;font-weight:700">'+_acresLbl3+'</span></div>'; }
+    var _margin3=finalPrice>0?((finalPrice-totalCost)/finalPrice*100):0;
+    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin3.toFixed(1)+'%</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid);margin-top:4px"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:18px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
     b3.innerHTML = lines3;
   }
   // payload interno
-  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml };
+  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, acresPct, acresRS, acresTipo:_acresTipo };
+}
+
+// Per-item extras store
+var ORC_ITEM_EXTRAS = {};
+
+function orcItemExtras(ri) {
+  var ex = ORC_ITEM_EXTRAS[ri] || {};
+  var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
+  // Create/reuse overlay
+  var ov = document.getElementById('orcItemExtrasOverlay');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='orcItemExtrasOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
+    ov.onclick=function(e){if(e.target===ov)ov.style.display='none';};
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(400px,95vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="font-size:14px;font-weight:800;margin-bottom:14px">➕ Custos Extras — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
+    +'<div style="display:grid;gap:8px">'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Adesivo / Vinil (R$)</label><input type="number" id="exAdesivo" value="'+(ex.adesivo||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Acabamento / Fita (R$)</label><input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Instalação (R$)</label><input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Outros (R$)</label><input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Descrição (opcional)</label><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Ex: Adesivo recorte + instalação" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;font-size:12px"></div>'
+    +'</div>'
+    +'<div id="exPreview" style="margin-top:10px;font-size:11px;color:var(--brand-mid);font-weight:700"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
+    +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcItemExtrasOverlay\').style.display=\'none\'">Cancelar</button>'
+    +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
+    +'</div>'
+    +'</div>';
+  ov.style.display='flex';
+  orcItemExtraPreview(ri);
+}
+
+function orcItemExtraPreview(ri){
+  var total=(parseFloat((document.getElementById('exAdesivo')||{}).value)||0)
+           +(parseFloat((document.getElementById('exAcabamento')||{}).value)||0)
+           +(parseFloat((document.getElementById('exInstalacao')||{}).value)||0)
+           +(parseFloat((document.getElementById('exOutros')||{}).value)||0);
+  var el=document.getElementById('exPreview');
+  if(el) el.textContent=total>0?'Total extras: R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+}
+
+function orcItemExtrasSalvar(ri){
+  ORC_ITEM_EXTRAS[ri]={
+    adesivo:   parseFloat((document.getElementById('exAdesivo')||{}).value)||0,
+    acabamento:parseFloat((document.getElementById('exAcabamento')||{}).value)||0,
+    instalacao:parseFloat((document.getElementById('exInstalacao')||{}).value)||0,
+    outros:    parseFloat((document.getElementById('exOutros')||{}).value)||0,
+    descricao: (document.getElementById('exDesc')||{}).value||''
+  };
+  document.getElementById('orcItemExtrasOverlay').style.display='none';
+  // Update extras button visual indicator
+  var btn=document.querySelector('#oir_'+ri+' .plan-icon-btn[onclick*="orcItemExtras"]');
+  var total=ORC_ITEM_EXTRAS[ri].adesivo+ORC_ITEM_EXTRAS[ri].acabamento+ORC_ITEM_EXTRAS[ri].instalacao+ORC_ITEM_EXTRAS[ri].outros;
+  if(btn) { btn.style.background=total>0?'#7C3AED':'var(--surface)'; btn.style.color=total>0?'#fff':'var(--text)'; btn.title=total>0?'Extras: R$'+total.toFixed(2):'Custos extras'; }
+  orcRecalc();
+  showToast('Custos extras do item salvos!','ok');
+}
+
+function orcGetItemExtrasTotal(){
+  return Object.values(ORC_ITEM_EXTRAS).reduce(function(s,ex){
+    return s+(ex.adesivo||0)+(ex.acabamento||0)+(ex.instalacao||0)+(ex.outros||0);
+  },0);
+}
+
+function orcGerarLinkPagamento(){
+  var c2=window._orcCalc||{};
+  if(!c2.finalPrice){ showToast('Calcule o orçamento primeiro (Passo 3)','warn'); return; }
+  var nome=(document.getElementById('orcClientNome')||{}).value||'cliente';
+  var tel =(document.getElementById('orcClientTel')||{}).value||'';
+  var marca=document.body.classList.contains('vitre')?'Vitre':'VR Marcas';
+  var valor=c2.finalPrice||0;
+  var valorFmt='R$ '+valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  // Get PIX key from config
+  var cfgD=cfgLoad?cfgLoad():{};
+  var pixKey=(cfgD.pix||cfgD.pixKey||'');
+  var pixInfo=pixKey?('\n\n💠 *Chave PIX:* '+pixKey):'';
+  var items=[];
+  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
+    var ri=row.dataset.idx;
+    var p=(document.getElementById('oi_prod_'+ri)||{}).value||'';
+    var q=(document.getElementById('oi_qty_'+ri)||{}).value||'1';
+    if(p) items.push(q+'× '+p);
+  });
+  var msg='Olá, *'+nome+'*! 👋\n\n'
+    +'Segue seu orçamento da *'+marca+'*:\n\n'
+    +(items.length?'📦 *Pedido:*\n'+items.map(function(i){return '• '+i;}).join('\n')+'\n\n':'')
+    +'💰 *Valor Total: '+valorFmt+'*'
+    +pixInfo
+    +'\n\n✅ Para confirmar, basta efetuar o pagamento e enviar o comprovante por aqui.\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
+  var telNum=tel.replace(/\D/g,'');
+  var url='https://wa.me/'+(telNum?'55'+telNum:'')+'?text='+encodeURIComponent(msg);
+  window.open(url,'_blank');
+  // Also copy PIX key to clipboard if available
+  if(pixKey){
+    try{ navigator.clipboard.writeText(pixKey).then(function(){ showToast('Chave PIX copiada e mensagem WhatsApp aberta!','ok'); }); }
+    catch(e){ showToast('Mensagem WhatsApp aberta!','ok'); }
+  } else {
+    showToast('Mensagem WhatsApp com link de pagamento aberta!','ok');
+  }
+}
+
+function orcSoCorteChange(){
+  var on = !!(document.getElementById('orcSoCorte')?.checked);
+  var panel = document.getElementById('soCortePanel');
+  if(panel) panel.style.display = on ? 'block' : 'none';
+  orcRecalc();
+}
+
+function orcAutoLaser(){
+  // Velocidades de corte (mm/s) por espessura (mm)
+  var LASER_SPEED = {2:20, 3:18, 4:15, 5:13, 6:12, 8:10, 10:8};
+  var totalMin = 0;
+  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
+    var ri = row.dataset.idx;
+    var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
+    var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
+    var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
+    var esp  = parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3;
+    var matEl = document.getElementById('oi_mat_'+ri);
+    var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
+    // inox: velocidade maior
+    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : (LASER_SPEED[Math.round(esp)] || 18);
+    if(larg>0 && alt>0){
+      // Perímetro do retângulo em mm (larg e alt estão em cm → *10)
+      var perim = 2*(larg*10 + alt*10);
+      totalMin += (perim / speed / 60) * qty;
+    }
+  });
+  if(totalMin <= 0){ showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn'); return; }
+  var el = document.getElementById('om_laser');
+  if(el){ el.value = Math.ceil(totalMin); orcRecalc(); }
+  showToast('Laser calculado automaticamente: '+Math.ceil(totalMin)+' min','ok');
 }
 
 function orcDescTipoChange(){
@@ -7659,6 +7859,27 @@ function dashRender() {
   if(dkEstqSub) dkEstqSub.textContent = criticos.length ? criticos.map(function(s){return s.label.split(' ').slice(0,3).join(' ');}).join(', ') : 'Todos os materiais OK';
   if(dkEstqBar) { dkEstqBar.style.width = Math.min(criticos.length*25,100)+'%'; dkEstqBar.style.background = criticos.length?'#DC2626':'#059669'; }
 
+  // ── KPI 5: Despesas do mês (FIN_CP) ────────────────────────────────────
+  var mesAtual = new Date().getMonth()+1;
+  var mesAnt   = mesAtual===1?12:mesAtual-1;
+  var anoAtual = new Date().getFullYear();
+  var cpParseDate = function(venc){ var p=(venc||'').split('/'); return p.length===3?new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])):null; };
+  var dspMes   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAtual&&d.getFullYear()===anoAtual; }).reduce(function(s,c){return s+c.valor;},0);
+  var dspAnt   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAnt&&(mesAnt===12?d.getFullYear()===anoAtual-1:d.getFullYear()===anoAtual); }).reduce(function(s,c){return s+c.valor;},0);
+  var dspVar   = dspAnt>0?((dspMes-dspAnt)/dspAnt*100):0;
+  var dspVarStr = dspAnt>0?(dspVar>=0?'▲ +'+dspVar.toFixed(1)+'%':'▼ '+dspVar.toFixed(1)+'%'):'(sem dados mês ant.)';
+  var dspColor  = dspVar>10?'#DC2626':(dspVar>0?'#D97706':'#059669');
+  // Compare against config despesa %
+  var cfgD=(typeof cfgLoad==='function')?cfgLoad():{};
+  var despPctCfg=parseFloat((cfgD.financeiro||{}).despPct)||parseFloat(cfgD.despPct)||0;
+  var fatMesTotal=txAll.reduce(function(s,t){return s+t.valor;},0);
+  var dspPctReal=fatMesTotal>0?(dspMes/fatMesTotal*100):0;
+  var dspAlerta=despPctCfg>0&&dspPctReal>despPctCfg;
+  var dkDesp=document.getElementById('dkDesp'), dkDespSub=document.getElementById('dkDespSub'), dkDespBar=document.getElementById('dkDespBar');
+  if(dkDesp){ dkDesp.textContent='R$ '+Math.round(dspMes).toLocaleString('pt-BR'); dkDesp.style.color=dspAlerta?'#DC2626':'var(--text)'; }
+  if(dkDespSub){ dkDespSub.textContent=dspVarStr+(despPctCfg>0?' · '+dspPctReal.toFixed(1)+'% do fat.'+(dspAlerta?' ⚠️':''):''); dkDespSub.style.color=dspColor; }
+  if(dkDespBar){ dkDespBar.style.width=Math.min(dspPctReal||Math.min(Math.abs(dspVar),100),100)+'%'; dkDespBar.style.background=dspAlerta?'#DC2626':'#D97706'; }
+
   // ── Chart 1: Faturamento mês a mês ──────────────────────────────────────
   var fatMes = {};
   FIN_TX.forEach(function(t){
@@ -8103,6 +8324,52 @@ function kbFilter(brand) {
     card.style.display=(bOk&&tOk)?'':'none';
   });
 }
+var _kbView = 'all'; // 'all', 'week', 'month'
+
+function kbSetView(view, btn) {
+  _kbView = view;
+  ['kbViewAll','kbViewWeek','kbViewMonth'].forEach(function(id){ var b=document.getElementById(id); if(b) b.classList.remove('on'); });
+  if(btn) btn.classList.add('on');
+  kbApplyViewFilter();
+}
+
+function kbApplyViewFilter() {
+  if(_kbView === 'all') {
+    document.querySelectorAll('.kcard').forEach(function(c){ c.dataset.viewHide=''; });
+    kbFilter();
+    return;
+  }
+  var now = new Date();
+  var weekStart = new Date(now); weekStart.setDate(now.getDate()-now.getDay());  weekStart.setHours(0,0,0,0);
+  var weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate()+6); weekEnd.setHours(23,59,59,999);
+  var monthStart= new Date(now.getFullYear(), now.getMonth(), 1);
+  var monthEnd  = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59,999);
+  document.querySelectorAll('.kcard').forEach(function(card){
+    var osId=card.dataset.osid||card.id;
+    var os=KB_OS[osId];
+    if(!os){ card.dataset.viewHide=''; return; }
+    // Parse date fields: dataOS, prazo, entrega (format dd/mm/yyyy)
+    var dateStr=os.dataOS||os.prazo||os.entrega||'';
+    var parts=dateStr.split('/');
+    var osDate=parts.length===3?new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0])):null;
+    var inRange=false;
+    if(osDate){
+      if(_kbView==='week')  inRange=(osDate>=weekStart&&osDate<=weekEnd);
+      if(_kbView==='month') inRange=(osDate>=monthStart&&osDate<=monthEnd);
+    }
+    card.dataset.viewHide=inRange?'':'hide';
+  });
+  // Apply combined filter
+  var q=(document.getElementById('kbSearch')||{}).value||'';
+  document.querySelectorAll('.kcard').forEach(function(card){
+    var cb=card.dataset.brand||'vr', txt=card.textContent.toLowerCase();
+    var bOk=(_kbBrandFilter==='all'||cb===_kbBrandFilter);
+    var tOk=(!q||txt.includes(q.toLowerCase()));
+    var vOk=card.dataset.viewHide!=='hide';
+    card.style.display=(bOk&&tOk&&vOk)?'':'none';
+  });
+}
+
 function kbOpenNovaOS() {
   var el=document.querySelector('.sb-item[onclick*="orcamento"]');
   nav('orcamento',el);
@@ -11600,7 +11867,13 @@ function orcSalvarOrcamento() {
     cliente:   _nome||(document.getElementById('orcCliente')||{}).value||'(não informado)',
     tel:       _tel,
     email:     _email,
-    produto:   c.prodDesc||c.prod||'Produto',
+    produto:   (function(){
+      var _rows=[]; document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){ var ri=row.dataset.idx; var p=(document.getElementById('oi_prod_'+ri)||{}).value||''; if(p) _rows.push(p); });
+      if(_rows.length===0) return c.prodDesc||c.prod||'Produto';
+      if(_rows.length===1) return _rows[0];
+      var _uniq=[...(new Set(_rows))];
+      return _uniq.length===1?_uniq[0]+'×'+_rows.length:_rows.length+'x peças ('+_uniq.join(', ')+')';
+    })(),
     marca:     document.body.classList.contains('vitre') ? 'vitre' : 'vr',
     valorBase: c.finalPrice,
     valorFinal:afterDisc,
@@ -11798,8 +12071,47 @@ function orcEnviadosRender() {
 function orcEnvSetStatus(id, status) {
   var lista = orcGetEnviados();
   var orc   = lista.find(function(o){ return o.id===id; });
-  if(orc){ orc.status=status; orcSetEnviados(lista); orcAtualizarBadgeEnviados(); }
-  if(status==='aprovado') showToast('Orçamento marcado como Aprovado! 🎉','ok');
+  if(!orc) return;
+  var prevStatus = orc.status;
+  orc.status = status;
+  orcSetEnviados(lista);
+  orcAtualizarBadgeEnviados();
+  if(status==='aprovado' && prevStatus!=='aprovado') {
+    // Auto-cria entrada em Contas a Receber
+    if(!orc.crId) {
+      var crId = 'cr'+Date.now();
+      orc.crId = crId;
+      orcSetEnviados(lista); // salva crId no orçamento
+      var hoje = new Date();
+      var dd = hoje.getDate().toString().padStart(2,'0');
+      var mm = (hoje.getMonth()+1).toString().padStart(2,'0');
+      var yyyy = hoje.getFullYear();
+      var vencDate = new Date(hoje);
+      vencDate.setDate(vencDate.getDate()+30);
+      var vdd = vencDate.getDate().toString().padStart(2,'0');
+      var vmm = (vencDate.getMonth()+1).toString().padStart(2,'0');
+      var venc = vdd+'/'+vmm+'/'+vencDate.getFullYear();
+      FIN_CR.unshift({
+        id: crId,
+        cliente: orc.cliente||'(não informado)',
+        descricao: 'ORC #'+orc.num+' — '+(orc.produto||'Produto'),
+        valor: orc.valorFinal||0,
+        vencimento: venc,
+        status: 'pendente',
+        marca: orc.marca||'vr',
+        metodo: orc.pgto||'PIX',
+        osRef: 'ORC-'+orc.num,
+        dataCriacao: dd+'/'+mm+'/'+yyyy,
+        dataRecebimento: null
+      });
+      _finSaveCR();
+      showToast('Orçamento aprovado! Entrada criada em Contas a Receber. 🎉','ok');
+    } else {
+      showToast('Orçamento marcado como Aprovado! 🎉','ok');
+    }
+  } else if(status==='aprovado') {
+    showToast('Orçamento já estava aprovado.','info');
+  }
 }
 
 function orcEnvAbrir(id) {
@@ -11861,8 +12173,10 @@ function orcEnvAbrir(id) {
     +'<div style="font-size:15px;font-weight:800;color:'+accent+';margin-top:6px">VALOR FINAL: '+fmtVal(o.valorFinal)+'</div>'
     +(o.valorFinal<o.valorBase?'<div style="font-size:10px;color:var(--muted)">Valor base: '+fmtVal(o.valorBase)+'</div>':'')
     +'</div>'
-    +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">'
+    +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'">Fechar</button>'
+    +'<button class="topbar-btn ghost" style="color:#5B21B6;border-color:#5B21B6" onclick="orcEnvEditar(\''+ o.id +'\')" >✏️ Editar</button>'
+    +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
     +'</div></div>';
   modal.style.display='flex';
 }
@@ -11873,6 +12187,237 @@ function orcEnvExcluir(id) {
   orcEnviadosRender();
   orcAtualizarBadgeEnviados();
   showToast('Orçamento removido.','info');
+}
+
+// ── Editar orçamento salvo: preenche o formulário e navega para o orçamento ──
+function orcEnvEditar(id) {
+  var lista = orcGetEnviados();
+  var o = lista.find(function(x){ return x.id===id; });
+  if(!o){ showToast('Orçamento não encontrado','warn'); return; }
+  document.getElementById('orcEnvModal').style.display='none';
+  // Navegar para a aba de orçamento
+  nav('orcamento');
+  setTimeout(function(){
+    // Preencher dados do cliente
+    var setV = function(id,v){ var el=document.getElementById(id); if(el) el.value=v||''; };
+    setV('orcClientNome', o.cliente);
+    setV('orcClientTel',  o.tel);
+    setV('orcClientEmail',o.email);
+    // Marca
+    if(o.marca==='vr') { if(document.body.classList.contains('vitre')) orcToggleMarca(); }
+    else               { if(!document.body.classList.contains('vitre')) orcToggleMarca(); }
+    // Preencher itens se existem no snapshot
+    if(o.itens && o.itens.length){
+      // Limpar itens atuais
+      var tbody=document.getElementById('orcItemBody');
+      if(tbody) tbody.innerHTML='';
+      orcItemCount=0;
+      o.itens.forEach(function(it){
+        orcAddItem();
+        var ri = orcItemCount;
+        setV('oi_prod_'+ri, it.prod);
+        setV('oi_qty_'+ri,  it.qty||'1');
+        setV('oi_larg_'+ri, it.larg);
+        setV('oi_alt_'+ri,  it.alt);
+        setV('oi_det_'+ri,  it.det);
+      });
+    }
+    // Desconto
+    setV('orcDesc', o.valorBase>o.valorFinal ? (o.valorBase-o.valorFinal).toFixed(2) : '0');
+    // Forma pagamento
+    var pgtoEl=document.getElementById('orcFormaPgto');
+    if(pgtoEl && o.pgto){ for(var i=0;i<pgtoEl.options.length;i++){ if(pgtoEl.options[i].text===o.pgto){ pgtoEl.selectedIndex=i; break; } } }
+    // Badge de edição
+    var _editBanner = document.getElementById('orcEditBanner');
+    if(!_editBanner){
+      _editBanner=document.createElement('div');
+      _editBanner.id='orcEditBanner';
+      _editBanner.style.cssText='background:#FEF3C7;border:1.5px solid #FDE68A;border-radius:8px;padding:8px 12px;font-size:11px;color:#92400E;font-weight:700;margin-bottom:10px';
+      _editBanner.innerHTML='✏️ Editando orçamento <strong>#'+o.num+'</strong> — recalcule e salve para atualizar.';
+      var orcHeader=document.querySelector('#pg-orcamento .card');
+      if(orcHeader) orcHeader.insertBefore(_editBanner, orcHeader.firstChild);
+    }
+    _editBanner._orcOrigId = o.id;
+    showToast('Orçamento #'+o.num+' carregado para edição','ok');
+    orcRecalc();
+  }, 200);
+}
+
+// ── Confirmar Pagamento / Converter em OS ──
+var _orcPagtoId = null;
+function orcEnvConfirmarPgto(id) {
+  var lista = orcGetEnviados();
+  var o = lista.find(function(x){ return x.id===id; });
+  if(!o){ showToast('Orçamento não encontrado','warn'); return; }
+  _orcPagtoId = id;
+  document.getElementById('orcEnvModal').style.display='none';
+
+  // Build or reuse payment modal
+  var pm = document.getElementById('orcPagtoModal');
+  if(!pm){
+    pm=document.createElement('div'); pm.id='orcPagtoModal';
+    pm.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center';
+    pm.onclick=function(e){if(e.target===pm)pm.style.display='none';};
+    document.body.appendChild(pm);
+  }
+  var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var valorTotal = o.valorFinal||0;
+  var statusColor = {aguardando:'#D97706',aprovado:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
+  pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(520px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
+    +'<div><div style="font-size:16px;font-weight:900">💳 Confirmar Pagamento</div>'
+    +'<div style="font-size:11px;color:var(--muted)">Orçamento <strong>#'+o.num+'</strong> · '+o.cliente+'</div></div>'
+    +'<button onclick="document.getElementById(\'orcPagtoModal\').style.display=\'none\'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted)">×</button>'
+    +'</div>'
+    // Valor total em destaque
+    +'<div style="text-align:center;padding:16px;background:var(--bg2);border-radius:12px;margin-bottom:16px">'
+    +'<div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Valor do Orçamento</div>'
+    +'<div style="font-size:28px;font-weight:900;color:#059669;margin:4px 0">'+fmtV(valorTotal)+'</div>'
+    +(o.pgto?'<div style="font-size:11px;color:var(--muted)">'+o.pgto+'</div>':'')
+    +'</div>'
+    // Tipo de pagamento
+    +'<div style="margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Tipo de Pagamento</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="pgtoTipoGrid">'
+    +'<button class="pgto-tipo-btn active" data-tipo="integral" onclick="orcPagtoTipoSel(this)" style="padding:10px;border:2px solid #059669;border-radius:8px;background:#F0FDF4;color:#059669;font-weight:800;font-size:11px;cursor:pointer">✅ Integral<br><span style="font-size:10px;font-weight:400">Valor total</span></button>'
+    +'<button class="pgto-tipo-btn" data-tipo="50-50" onclick="orcPagtoTipoSel(this)" style="padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:800;font-size:11px;cursor:pointer">⚡ 50/50<br><span style="font-size:10px;font-weight:400">Entrada + restante</span></button>'
+    +'<button class="pgto-tipo-btn" data-tipo="parcial" onclick="orcPagtoTipoSel(this)" style="padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:800;font-size:11px;cursor:pointer">💰 Entrada<br><span style="font-size:10px;font-weight:400">Valor personalizado</span></button>'
+    +'<button class="pgto-tipo-btn" data-tipo="futuro" onclick="orcPagtoTipoSel(this)" style="padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-weight:800;font-size:11px;cursor:pointer">📅 A Receber<br><span style="font-size:10px;font-weight:400">Sem pagamento agora</span></button>'
+    +'</div></div>'
+    // Entrada personalizada (só aparece quando parcial ou 50-50)
+    +'<div id="pgtoEntradaBox" style="margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Valor da Entrada</div>'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+    +'<input type="number" id="pgtoEntradaVal" placeholder="0,00" min="0" step="0.01" style="flex:1;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:700">'
+    +'<span style="font-size:12px;color:var(--muted)">de '+fmtV(valorTotal)+'</span>'
+    +'</div>'
+    +'<div style="font-size:10px;color:var(--muted);margin-top:4px" id="pgtoEntradaPct"></div>'
+    +'</div>'
+    // Forma de pagamento
+    +'<div style="margin-bottom:16px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Forma de Pagamento</div>'
+    +'<select id="pgtoForma" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px">'
+    +'<option>PIX</option><option>Cartão de Crédito</option><option>Cartão de Débito</option><option>Dinheiro</option><option>Boleto</option><option>Transferência</option>'
+    +'</select></div>'
+    // Obs
+    +'<div style="margin-bottom:18px">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Observação</div>'
+    +'<input type="text" id="pgtoObs" placeholder="Ex: pago 50% entrada" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px">'
+    +'</div>'
+    // Botões
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
+    +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcPagtoModal\').style.display=\'none\'">Cancelar</button>'
+    +'<button onclick="orcEnvGerarOS()" style="background:linear-gradient(90deg,#059669,#047857);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer">🔧 Gerar OS no Kanban</button>'
+    +'</div>'
+    +'</div>';
+  pm.style.display='flex';
+
+  // Init: show/hide entrada box based on tipo
+  orcPagtoTipoSel(pm.querySelector('[data-tipo="integral"]'));
+  // Pre-fill forma pagamento
+  var pf=document.getElementById('pgtoForma');
+  if(pf&&o.pgto){ for(var i=0;i<pf.options.length;i++){if(pf.options[i].text.toLowerCase()===o.pgto.toLowerCase()){pf.selectedIndex=i;break;}} }
+  // Entrada value update %
+  var entEl=document.getElementById('pgtoEntradaVal');
+  if(entEl){ entEl.oninput=function(){ var v=parseFloat(this.value)||0; var pct=valorTotal>0?v/valorTotal*100:0; var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl)pctEl.textContent='≈ '+pct.toFixed(1)+'% do total'; }; }
+}
+
+function orcPagtoTipoSel(btn){
+  if(!btn) return;
+  document.querySelectorAll('.pgto-tipo-btn').forEach(function(b){
+    b.style.borderColor='var(--border)'; b.style.background='var(--bg)'; b.style.color='var(--text)';
+  });
+  btn.style.borderColor='#059669'; btn.style.background='#F0FDF4'; btn.style.color='#059669';
+  var tipo=btn.dataset.tipo;
+  var entBox=document.getElementById('pgtoEntradaBox');
+  var lista=orcGetEnviados(); var o=lista.find(function(x){return x.id===_orcPagtoId;});
+  var valorTotal=o?o.valorFinal:0;
+  if(tipo==='50-50'){
+    entBox.style.display='';
+    var entEl=document.getElementById('pgtoEntradaVal');
+    if(entEl) entEl.value=(valorTotal/2).toFixed(2);
+    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='= 50% do total';
+  } else if(tipo==='parcial'){
+    entBox.style.display='';
+    var entEl=document.getElementById('pgtoEntradaVal'); if(entEl) entEl.value='';
+    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='';
+  } else {
+    entBox.style.display='none';
+  }
+}
+
+function orcEnvGerarOS(){
+  var lista=orcGetEnviados();
+  var o=lista.find(function(x){return x.id===_orcPagtoId;});
+  if(!o){showToast('Orçamento não encontrado','warn');return;}
+  var tipo=document.querySelector('.pgto-tipo-btn[style*="059669"]')?.dataset?.tipo||'futuro';
+  var forma=(document.getElementById('pgtoForma')||{}).value||'PIX';
+  var obs=(document.getElementById('pgtoObs')||{}).value||'';
+  var valorTotal=o.valorFinal||0;
+  var entradaVal=parseFloat((document.getElementById('pgtoEntradaVal')||{}).value)||0;
+  var valorEntrada = tipo==='integral'?valorTotal:(tipo==='50-50'||tipo==='parcial')?entradaVal:0;
+  var restante = valorTotal-valorEntrada;
+
+  // Criar OS no Kanban
+  var n=parseInt(localStorage.getItem('erp_os_counter')||'0')+1;
+  localStorage.setItem('erp_os_counter',String(n));
+  var hoje=new Date();
+  var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  var newId='os'+Date.now();
+  var prodNome=o.produto||'Produto';
+  var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
+  var itens=o.itens||[];
+  var matLabel=itens.length&&itens[0].mat?itens[0].mat:'—';
+  var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
+  var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
+  KB_OS[newId]={
+    id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
+    cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
+    material:matLabel,medidas:medidasStr,qty:qtyTotal,
+    status:'iniciada',prazo:dia,entrega:dia,
+    valor:valorTotal,prog:0,pronto:false,
+    checks:['Corte','Gravação','Acabamento','Embalagem'],_ck:[false,false,false,false],
+    parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+    clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
+    itens:itens,totalGeral:valorTotal,obs:obs,
+    orcRef:o.id, orcNum:o.num,
+    pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
+  };
+  // Salva KB_OS
+  try{localStorage.setItem('erp_kb_os',JSON.stringify(KB_OS));}catch(e){}
+  if(typeof _cloudSave==='function') _cloudSave('kb_os',KB_OS);
+  // Renderiza Kanban
+  try{kbRender();}catch(e){}
+  // Atualiza status do orçamento para aprovado
+  o.status='aprovado'; o.osRef=newId; orcSetEnviados(lista);
+  // Se tem entrada, lança no CR/Caixa
+  if(valorEntrada>0){
+    var crId='cr'+Date.now();
+    FIN_CR.unshift({
+      id:crId,cliente:o.cliente||'Cliente',
+      descricao:'Entrada ORC #'+o.num+' — '+prodNome,
+      valor:valorEntrada,vencimento:dia,status:'recebido',
+      marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,
+      dataCriacao:dia,dataRecebimento:dia
+    });
+    _finSaveCR();
+    // Se tem restante, cria CR pendente
+    if(restante>0){
+      FIN_CR.unshift({
+        id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',
+        descricao:'Restante ORC #'+o.num+' — '+prodNome,
+        valor:restante,vencimento:dia,status:'pendente',
+        marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,
+        dataCriacao:dia,dataRecebimento:null
+      });
+      _finSaveCR();
+    }
+  }
+  document.getElementById('orcPagtoModal').style.display='none';
+  orcEnviadosRender();
+  showToast('OS #'+n+' criada no Kanban! 🎉','ok');
+  // Navegar para kanban
+  setTimeout(function(){ nav('kanban'); },800);
 }
 
 // ============================================================
@@ -12341,7 +12886,7 @@ function cfgRenderTables() {
     if(el && f[k]!=null) el.value=f[k];
   });
   var fin = d.financeiro||{};
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
   // Markup
   var mk = d.markup||{};
@@ -12429,7 +12974,7 @@ function cfgDelRow(tipo, idx) {
 function cfgSalvar() {
   if(!_cfgData) _cfgData = cfgLoad();
   // Financeiro
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',despPct:'cfgDespPct'};
   if(!_cfgData.financeiro) _cfgData.financeiro={};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el) _cfgData.financeiro[k]=parseFloat(el.value)||0; });
   // Markup
@@ -13250,6 +13795,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🗂️ Layout Visual na Chapa (200×100 cm)</div>
         <button id="planBtnExport" onclick="planExportPNG()" style="background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer">📥 Baixar PNG</button>
+      <button onclick="planExportSVG()" style="background:#5B21B6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;margin-left:4px">📐 Baixar SVG</button>
       </div>
       <canvas id="planCanvas" style="width:100%;border-radius:8px;border:1px solid var(--border);background:#f8f9fa;display:block"></canvas>
       <div id="planLayoutLegenda" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
@@ -13890,6 +14436,83 @@ function planExportPNG() {
   var a = document.createElement('a');
   a.href = dataURL; a.download = 'Planificacao_' + titulo.replace(/\s+/g,'_') + '.png'; a.click();
   showToast('PNG exportado com sucesso 📥','ok');
+}
+
+function planExportSVG() {
+  // Coletar peças (mesma lógica do planDrawCanvas)
+  var allPieces = [];
+  var sumBox = document.getElementById('planSumBox');
+  if (sumBox && sumBox.dataset.pcs) {
+    try { JSON.parse(sumBox.dataset.pcs).forEach(function(p){ for(var i=0;i<p.qty;i++) allPieces.push({nome:p.nome,larg:p.larg,alt:p.alt,manual:false}); }); } catch(e){}
+  }
+  planManualPieces.forEach(function(p){ if(p.larg>0&&p.alt>0) for(var i=0;i<(p.qty||1);i++) allPieces.push({nome:(p.nome||'Manual'),larg:p.larg,alt:p.alt,manual:true}); });
+  if(!allPieces.length){ showToast('Calcule as dimensões antes de exportar','warn'); return; }
+
+  var SHEET_W=200, SHEET_H=100;
+  var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#C4B5FD','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
+  var colorMap={}, colorIdx=0;
+  allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
+
+  // Packing
+  var sorted=allPieces.slice().sort(function(a,b){return (b.alt-a.alt)||(b.larg-a.larg);});
+  var chapas=[]; var curChapa=[]; var curX=0,curY=0,rowH=0;
+  sorted.forEach(function(p){
+    if(curX+p.larg>SHEET_W+0.01){curY+=rowH;curX=0;rowH=0;}
+    if(curY+p.alt>SHEET_H+0.01){chapas.push(curChapa);curChapa=[];curX=0;curY=0;rowH=0;}
+    curChapa.push({p:p,x:curX,y:curY}); curX+=p.larg; if(p.alt>rowH) rowH=p.alt;
+  });
+  if(curChapa.length) chapas.push(curChapa);
+
+  var SC=3; // px per cm scale in SVG
+  var PAD=20, GAP=30, LABEL_H=16;
+  var svgW=SHEET_W*SC+PAD*2;
+  var svgH=PAD+chapas.length*(SHEET_H*SC+GAP+LABEL_H)+PAD;
+
+  var svgParts=['<?xml version="1.0" encoding="UTF-8"?>'];
+  svgParts.push('<svg xmlns="http://www.w3.org/2000/svg" width="'+svgW+'" height="'+svgH+'" viewBox="0 0 '+svgW+' '+svgH+'">');
+  svgParts.push('<rect width="'+svgW+'" height="'+svgH+'" fill="#e8eaed"/>');
+  svgParts.push('<style>.plbl{font:bold 8px sans-serif}.pdim{font:6px sans-serif;fill:#555}</style>');
+
+  chapas.forEach(function(pieces,si){
+    var offY=PAD+si*(SHEET_H*SC+GAP+LABEL_H);
+    // Label
+    svgParts.push('<text x="'+PAD+'" y="'+(offY-4)+'" font-family="sans-serif" font-size="9" font-weight="bold" fill="'+(chapas.length>1?'#5B21B6':'#888')+'">Chapa '+(si+1)+(chapas.length>1?' de '+chapas.length:'')+' — 200×100 cm</text>');
+    // Sheet background
+    svgParts.push('<rect x="'+PAD+'" y="'+offY+'" width="'+(SHEET_W*SC)+'" height="'+(SHEET_H*SC)+'" fill="#fff" stroke="#aaa" stroke-width="1.5"/>');
+    // Grid
+    for(var gx=20;gx<SHEET_W;gx+=20) svgParts.push('<line x1="'+(PAD+gx*SC)+'" y1="'+offY+'" x2="'+(PAD+gx*SC)+'" y2="'+(offY+SHEET_H*SC)+'" stroke="rgba(0,0,0,0.08)" stroke-width="0.5"/>');
+    for(var gy=20;gy<SHEET_H;gy+=20) svgParts.push('<line x1="'+PAD+'" y1="'+(offY+gy*SC)+'" x2="'+(PAD+SHEET_W*SC)+'" y2="'+(offY+gy*SC)+'" stroke="rgba(0,0,0,0.08)" stroke-width="0.5"/>');
+    // Pieces
+    pieces.forEach(function(item){
+      var p=item.p, px=PAD+item.x*SC, py=offY+item.y*SC, pw=p.larg*SC, ph=p.alt*SC;
+      var col=colorMap[p.nome]||'#93C5FD';
+      svgParts.push('<rect x="'+px+'" y="'+py+'" width="'+pw+'" height="'+ph+'" fill="'+col+'" fill-opacity="0.85" stroke="#fff" stroke-width="1.5" rx="2"/>');
+      var cx=px+pw/2, cy=py+ph/2;
+      svgParts.push('<text x="'+cx+'" y="'+(cy-3)+'" text-anchor="middle" font-family="sans-serif" font-size="7" font-weight="bold" fill="#1e293b">'+p.nome+'</text>');
+      svgParts.push('<text x="'+cx+'" y="'+(cy+7)+'" text-anchor="middle" font-family="sans-serif" font-size="6" fill="#334155">'+p.larg+'×'+p.alt+'cm</text>');
+    });
+  });
+
+  // Legend
+  var legY=svgH-PAD+4;
+  var legX=PAD;
+  svgParts.push('<text x="'+legX+'" y="'+legY+'" font-family="sans-serif" font-size="8" font-weight="bold" fill="#555">Legenda:</text>');
+  legX+=52;
+  Object.keys(colorMap).forEach(function(nome){
+    svgParts.push('<rect x="'+legX+'" y="'+(legY-7)+'" width="10" height="8" fill="'+colorMap[nome]+'" rx="2"/>');
+    svgParts.push('<text x="'+(legX+13)+'" y="'+legY+'" font-family="sans-serif" font-size="7.5" fill="#333">'+nome+'</text>');
+    legX+=nome.length*5+22;
+  });
+
+  svgParts.push('</svg>');
+  var svgStr=svgParts.join('\n');
+  var blob=new Blob([svgStr],{type:'image/svg+xml'});
+  var url=URL.createObjectURL(blob);
+  var titulo=((document.getElementById('planModalTitle')||{}).textContent||'Planificacao').replace(/[^a-zA-Z0-9À-ɏ ]/g,'').trim();
+  var a=document.createElement('a');
+  a.href=url; a.download='Planificacao_'+titulo.replace(/\s+/g,'_')+'.svg'; a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  showToast('SVG exportado com sucesso 📐','ok');
 }
 // ────────────────────────────────────────────────────────────────────────────
 
