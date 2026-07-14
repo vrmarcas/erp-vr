@@ -1198,6 +1198,8 @@ function _cloudLoadAll() {
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{localStorage.setItem('erp_stock_log',JSON.stringify(d));stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ try{localStorage.setItem('erp_permissoes',JSON.stringify(d));}catch(e){} } });
+    _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;localStorage.setItem('erp_sb_state',JSON.stringify(d));sbRestoreState();}catch(e){} } });
+    _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ try{Object.keys(d).forEach(function(dt){localStorage.setItem('erp_caixa_ant_'+dt,d[dt]);});}catch(e){} } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); } });
@@ -5142,6 +5144,7 @@ function sbToggle(key) {
   }
   if(sec) sec.classList.toggle('collapsed', !!_sbState[key]);
   localStorage.setItem('erp_sb_state', JSON.stringify(_sbState));
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_sb_state', _sbState);
 }
 function sbRestoreState() {
   try { _sbState = JSON.parse(localStorage.getItem('erp_sb_state')||'{}'); } catch(e){_sbState={};}
@@ -6750,6 +6753,13 @@ function kbOpen(id) {
   // Planificação — mostrar preview ou área de upload
   (function(){
     var planImg = os.planImg || localStorage.getItem('erp_plan_'+id) || null;
+    if(!planImg && typeof _cloudLoad==='function'){
+      _cloudLoad('erp_plan_'+id, function(d){ if(d){ os.planImg=d; try{localStorage.setItem('erp_plan_'+id,d);}catch(e){}
+        var imgEl=document.getElementById('kbPlanImgEl'); if(imgEl){imgEl.src=d;}
+        var emEl=document.getElementById('kbPlanEmpty'); if(emEl) emEl.style.display='none';
+        var pvEl=document.getElementById('kbPlanPreview'); if(pvEl) pvEl.style.display='';
+      }});
+    }
     var emptyEl   = document.getElementById('kbPlanEmpty');
     var previewEl = document.getElementById('kbPlanPreview');
     var imgEl     = document.getElementById('kbPlanImgEl');
@@ -7128,6 +7138,7 @@ function kbPlanAnexar(input) {
     var dataURL = e.target.result;
     os.planImg = dataURL;
     try { localStorage.setItem('erp_plan_'+_kbOsId, dataURL); } catch(ex) {}
+    if(typeof _cloudSave==='function'&&_cloudReady) try{_cloudSave('erp_plan_'+_kbOsId, dataURL);}catch(ex){}
     if(typeof _cloudSave==='function') {
       var kbCopy={};
       Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
@@ -7149,6 +7160,7 @@ function kbPlanRemover() {
   if(!confirm('Remover a planificação desta OS?')) return;
   os.planImg = null;
   try { localStorage.removeItem('erp_plan_'+_kbOsId); } catch(ex) {}
+  if(typeof _db!=='undefined'&&_db) try{_db.collection(_COL).doc('erp_plan_'+_kbOsId).delete();}catch(ex){}
   var imgEl   = document.getElementById('kbPlanImgEl');   if(imgEl) imgEl.src='';
   var emptyEl = document.getElementById('kbPlanEmpty');
   var prevEl  = document.getElementById('kbPlanPreview');
@@ -9277,6 +9289,7 @@ function relSalvarCaixaAnt() {
   var p=dtIn.value.split('-'); var dtBR=p[2]+'/'+p[1]+'/'+p[0];
   var val=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
   localStorage.setItem('erp_caixa_ant_'+dtBR, val);
+  if(typeof _cloudSave==='function'&&_cloudReady){ try{var _cxAll=JSON.parse(localStorage.getItem('erp_caixa_all')||'{}'); _cxAll[dtBR]=val; localStorage.setItem('erp_caixa_all',JSON.stringify(_cxAll)); _cloudSave('erp_caixa_ant',_cxAll);}catch(e){} }
   showToast('Caixa anterior salvo para '+dtBR,'ok');
 }
 
