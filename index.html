@@ -1196,7 +1196,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{crmRenderBoard(crmActiveBrand);if(typeof crmRenderDia==='function'&&document.getElementById('crmBrandDia')?.style.display!=='none')crmRenderDia();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'vr');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -1286,7 +1286,10 @@ function _cloudLoadAll() {
       if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('crm_leads', CRM_LEADS);
     }
     // Re-render if CRM page is already open
-    try{ crmRenderBoard('vr'); crmRenderBoard('vitre'); }catch(e){}
+    try{
+      if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none') crmSetBrand(typeof crmActiveBrand!=='undefined'?crmActiveBrand:'vr');
+      if(typeof tarefasAtualizarBadge==='function') tarefasAtualizarBadge();
+    }catch(e){}
     done();
   });
   _cloudLoad("erp_os_counter", function(d){ if(d) _OS_COUNTER=parseInt(d)||0; done(); });
@@ -1463,6 +1466,7 @@ firebase.auth().signInAnonymously().then(function(){
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
       <div class="sb-item" onclick="nav('inteligencia',this)"><span class="ico">🧠</span> Inteligência Comercial</div>
       <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
+      <div class="sb-item" onclick="nav('tarefas',this)"><span class="ico">📅</span> Tarefas <span class="sb-badge red" id="sbBadgeTarefas" style="display:none">0</span></div>
       <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
     </div>
 
@@ -3199,6 +3203,33 @@ firebase.auth().signInAnonymously().then(function(){
         </div>
       </div>
     </div><!-- /pg-crm -->
+
+    <!-- ════════════════════════════════════════════════════
+         PG-TAREFAS — Agenda de follow-ups por dia
+         ════════════════════════════════════════════════════ -->
+    <div id="pg-tarefas" style="display:none">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:20px;font-weight:900;color:var(--text)">📅 Tarefas & Follow-ups</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Todos os contatos agendados, organizados por data</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="tarefasFiltroBrand" onchange="tarefasRender()" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todas as marcas</option>
+            <option value="vr">🟣 VR Marcas</option>
+            <option value="vitre">🌸 Vitre</option>
+          </select>
+          <button onclick="nav('crm',null)" style="padding:8px 16px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">→ Abrir CRM</button>
+        </div>
+      </div>
+
+      <!-- KPI strip -->
+      <div id="tarefasKpi" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:22px"></div>
+
+      <!-- Board por data -->
+      <div id="tarefasBoard"></div>
+    </div><!-- /pg-tarefas -->
 
     <!-- MODAL CRM: detalhes do lead -->
     <div class="crm-overlay" id="crmOverlay">
@@ -5504,7 +5535,7 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 
 function nav(page, el) {
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -5527,6 +5558,7 @@ function nav(page, el) {
     comercial: 'Dashboard Comercial',
     inteligencia: '🧠 Inteligência Comercial',
     crm: 'CRM',
+    tarefas: '📅 Tarefas & Follow-ups',
     clientes: 'Clientes', estoque: 'Estoque',
     financeiro: 'Dashboard Financeiro',
     relatorios: '🖨️ Relatórios Financeiros',
@@ -5556,7 +5588,8 @@ function nav(page, el) {
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
-  if (page === 'crm')        { setTimeout(function(){ crmRenderBoard('vr'); crmRenderBoard('vitre'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
+  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'vr'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
+  if (page === 'tarefas')    { setTimeout(function(){ if(typeof tarefasRender==='function') tarefasRender(); }, 80); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
 }
@@ -14221,6 +14254,162 @@ var CRM_FASES = [
 var CRM_TEMP_MAP = { quente:'🔴', morno:'🟡', frio:'🔵' };
 var CRM_ORIG_MAP = { ia:'🤖 IA', whatsapp:'💬 WhatsApp', instagram:'📸 Instagram', site:'🌐 Site', indicacao:'🤝 Indicação', email:'📧 E-mail', manual:'✏️ Manual' };
 
+// ── TAREFAS & FOLLOW-UPS PAGE ─────────────────────────────────────────────────
+function tarefasRender() {
+  var kpiEl   = document.getElementById('tarefasKpi');
+  var boardEl = document.getElementById('tarefasBoard');
+  if(!kpiEl || !boardEl) return;
+
+  var filtroMarca = (document.getElementById('tarefasFiltroBrand')||{}).value || '';
+
+  // Collect all leads
+  var allLeads = Object.values(CRM_LEADS).filter(function(l){
+    return l && l._id && l.etapa !== 'fechado' && l.etapa !== 'congelado';
+  });
+  if(filtroMarca) allLeads = allLeads.filter(function(l){ return l.marca === filtroMarca; });
+
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var amanha  = new Date(hoje); amanha.setDate(amanha.getDate()+1);
+  var semFim  = new Date(hoje); semFim.setDate(semFim.getDate()+7);
+  var proxSemFim = new Date(hoje); proxSemFim.setDate(proxSemFim.getDate()+14);
+
+  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  function fmtPhone(tel){ return tel?(tel.replace(/\D/g,'')):''; }
+
+  // Classify each lead by date group
+  function grupo(lead) {
+    if(!lead.data_retorno) return null;
+    var dr = new Date(lead.data_retorno+'T00:00:00');
+    if(dr < hoje) return 'atrasado';
+    if(dr.getTime() === hoje.getTime()) return 'hoje';
+    if(dr.getTime() === amanha.getTime()) return 'amanha';
+    if(dr < semFim) return 'semana';
+    if(dr < proxSemFim) return 'proxSemana';
+    return 'futuro';
+  }
+
+  var grupos = { atrasado:[], hoje:[], amanha:[], semana:[], proxSemana:[], futuro:[] };
+  allLeads.forEach(function(l){
+    var g = grupo(l);
+    if(g) grupos[g].push(l);
+  });
+
+  // Sort each group by data_retorno
+  Object.values(grupos).forEach(function(arr){
+    arr.sort(function(a,b){ return (a.data_retorno||'').localeCompare(b.data_retorno||''); });
+  });
+
+  // KPI strip
+  var totalTarefas = allLeads.filter(function(l){ return l.data_retorno; }).length;
+  var totalAtrasados = grupos.atrasado.length;
+  var totalHoje = grupos.hoje.length;
+  var valPipeline = allLeads.filter(function(l){ return l.data_retorno; }).reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
+  function fmtV(v){ if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1).replace('.',',')+'M'; if(v>=1000) return 'R$ '+Math.round(v/1000)+'k'; return 'R$ '+Math.round(v); }
+
+  kpiEl.innerHTML = [
+    { v: totalTarefas,    l:'Total de Tarefas',   c:'#4F46E5', ico:'📅' },
+    { v: totalAtrasados,  l:'Atrasadas',           c:'#DC2626', ico:'⚠️' },
+    { v: totalHoje,       l:'Para Hoje',           c:'#D97706', ico:'🔥' },
+    { v: grupos.amanha.length, l:'Para Amanhã',   c:'#0891B2', ico:'📌' },
+    { v: fmtV(valPipeline),  l:'Valor em Jogo',   c:'#059669', ico:'💰' }
+  ].map(function(k){
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px">'
+      +'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">'+k.ico+' '+k.l+'</div>'
+      +'<div style="font-size:22px;font-weight:900;color:'+k.c+'">'+k.v+'</div>'
+      +'</div>';
+  }).join('');
+
+  // Update sidebar badge
+  var sbBadge = document.getElementById('sbBadgeTarefas');
+  if(sbBadge) {
+    var urgentes = totalAtrasados + totalHoje;
+    sbBadge.textContent = urgentes;
+    sbBadge.style.display = urgentes > 0 ? '' : 'none';
+  }
+
+  // Card HTML for a lead (list style)
+  function leadCard(lead) {
+    var dr = new Date(lead.data_retorno+'T00:00:00');
+    var diff = Math.round((dr - hoje) / 86400000);
+    var drLabel = diff < 0 ? Math.abs(diff)+'d atrás' : diff === 0 ? 'Hoje' : diff === 1 ? 'Amanhã' : dr.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+    var drColor = diff < 0 ? '#DC2626' : diff === 0 ? '#D97706' : diff <= 2 ? '#0891B2' : '#059669';
+    var words   = (lead.nome||'?').trim().split(/\s+/);
+    var initials= words.length >= 2 ? (words[0][0]+words[words.length-1][0]).toUpperCase() : (lead.nome||'?').slice(0,2).toUpperCase();
+    var avatarColors = ['#7C3AED','#1D4ED8','#059669','#B45309','#BE185D','#0E7490','#DC2626'];
+    var avatarColor = avatarColors[(lead.nome||'').charCodeAt(0) % avatarColors.length];
+    var fase = (CRM_FASES.find(function(f){ return f.id===lead.etapa; })||{});
+    var phone = fmtPhone(lead.tel);
+    var marcaLabel = lead.marca==='vr' ? '<span style="font-size:9px;background:#EDE9FE;color:#4C1D95;border-radius:4px;padding:1px 5px;font-weight:700">VR</span>' : '<span style="font-size:9px;background:#FCE7F3;color:#831843;border-radius:4px;padding:1px 5px;font-weight:700">Vitre</span>';
+
+    return '<div onclick="nav(\'crm\');setTimeout(function(){crmOpenCard(\''+lead._id+'\');},150)" style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:.15s" onmouseover="this.style.boxShadow=\'0 4px 14px rgba(0,0,0,.10)\'" onmouseout="this.style.boxShadow=\'none\'">'
+      +'<div style="width:38px;height:38px;border-radius:10px;background:'+avatarColor+';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0">'+initials+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">'
+          +'<span style="font-size:13px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+lead.nome+'</span>'
+          +marcaLabel
+        +'</div>'
+        +'<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(lead.sub||lead.email||'—')+'</div>'
+      +'</div>'
+      +'<div style="text-align:center;min-width:80px">'
+        +'<div style="font-size:10px;font-weight:800;color:'+drColor+';background:'+(diff<0?'#FEF2F2':diff===0?'#FFF7ED':'#EFF6FF')+';border-radius:6px;padding:3px 8px">'+drLabel+'</div>'
+      +'</div>'
+      +'<div style="min-width:90px;text-align:center">'
+        +'<div style="font-size:9px;padding:2px 7px;border-radius:4px;background:'+(fase.cor||'#6B7280')+'22;color:'+(fase.cor||'#6B7280')+';font-weight:700;border:1px solid '+(fase.cor||'#6B7280')+'44">'+(fase.label||lead.etapa)+'</div>'
+      +'</div>'
+      +'<div style="font-size:13px;font-weight:800;color:#059669;min-width:80px;text-align:right">'+(lead.valor_potencial||'—')+'</div>'
+      +'<div style="display:flex;gap:4px;flex-shrink:0">'
+        +(phone ? '<a href="https://wa.me/55'+phone+'" target="_blank" onclick="event.stopPropagation()" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:#25D366;color:#fff;border-radius:7px;font-size:14px;text-decoration:none">💬</a>' : '')
+        +'<button onclick="event.stopPropagation();nav(\'crm\');setTimeout(function(){crmOpenCard(\''+lead._id+'\');},150)" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:#EDE9FE;color:#5B21B6;border:none;border-radius:7px;font-size:13px;cursor:pointer">✏️</button>'
+      +'</div>'
+      +'</div>';
+  }
+
+  // Section HTML
+  function secao(titulo, cor, leads, icone) {
+    if(!leads.length) return '';
+    return '<div style="margin-bottom:28px">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
+        +'<div style="width:4px;height:20px;background:'+cor+';border-radius:2px"></div>'
+        +'<span style="font-size:14px;font-weight:900;color:var(--text)">'+icone+' '+titulo+'</span>'
+        +'<span style="background:'+cor+'22;color:'+cor+';border-radius:20px;padding:1px 9px;font-size:11px;font-weight:800;border:1px solid '+cor+'44">'+leads.length+'</span>'
+      +'</div>'
+      + leads.map(leadCard).join('')
+      +'</div>';
+  }
+
+  var html = '';
+  html += secao('Atrasadas', '#DC2626', grupos.atrasado, '⚠️');
+  html += secao('Hoje', '#D97706', grupos.hoje, '🔥');
+  html += secao('Amanhã', '#0891B2', grupos.amanha, '📌');
+  html += secao('Esta semana', '#7C3AED', grupos.semana, '📆');
+  html += secao('Próxima semana', '#059669', grupos.proxSemana, '🗓️');
+  html += secao('Futuros', '#6B7280', grupos.futuro, '⏳');
+
+  if(!html) {
+    html = '<div style="text-align:center;padding:60px 20px;color:var(--muted)">'
+      +'<div style="font-size:40px;margin-bottom:12px">✅</div>'
+      +'<div style="font-size:15px;font-weight:700">Nenhuma tarefa agendada</div>'
+      +'<div style="font-size:12px;margin-top:6px">Adicione datas de follow-up nos leads do CRM</div>'
+      +'</div>';
+  }
+
+  boardEl.innerHTML = html;
+}
+
+// Atualizar badge de tarefas quando leads mudam
+function tarefasAtualizarBadge() {
+  var sbBadge = document.getElementById('sbBadgeTarefas');
+  if(!sbBadge) return;
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var urgentes = Object.values(CRM_LEADS).filter(function(l){
+    if(!l || !l.data_retorno || l.etapa==='fechado'||l.etapa==='congelado') return false;
+    var dr = new Date(l.data_retorno+'T00:00:00');
+    return dr <= hoje;
+  }).length;
+  sbBadge.textContent = urgentes;
+  sbBadge.style.display = urgentes > 0 ? '' : 'none';
+}
+
 function crmLeadsFor(marca) {
   return Object.entries(CRM_LEADS)
     .filter(function(e){ return e[1].marca === marca; })
@@ -16218,7 +16407,6 @@ function siteShopifySync() {
     showToast(customers.length+' clientes sincronizados!','ok');
   }).catch(function(err){
     if(stEl) stEl.textContent = '❌ Erro: '+err.message;
-    // Check if it's a CORS error
     var msg = err.message||'';
     if(msg.toLowerCase().includes('failed to fetch')||msg.toLowerCase().includes('cors')){
       showToast('CORS bloqueado - use o Shopify Proxy App ou importe via CSV','warn');
@@ -16233,7 +16421,6 @@ function siteShopifySync() {
 function siteImportCSV() {
   var p = document.getElementById('siteShopifyPanelDiv');
   if(p){ p.style.display=''; }
-  // Scroll to file input
   var inp = document.getElementById('siteCSVInput');
   if(inp){ setTimeout(function(){ inp.scrollIntoView({behavior:'smooth'}); inp.click(); }, 200); }
 }
@@ -16311,13 +16498,14 @@ setTimeout(function(){
     <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
     <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
     <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+    <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
     <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
     <div class="mdrw-section">Financeiro</div>
     <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
     <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
     <div class="mdrw-section">Admin</div>
     <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
-    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
+    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📏</span> Produtos / Planif.</div>
     <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
     <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
   </div>
@@ -16327,7 +16515,6 @@ setTimeout(function(){
 <!-- ══ CLIENT IMPORT OVERLAY ══ -->
 <div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
   <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <!-- Header -->
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
       <span style="font-size:20px">📥</span>
       <div>
@@ -16336,9 +16523,7 @@ setTimeout(function(){
       </div>
       <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
     </div>
-    <!-- Body -->
     <div style="padding:20px 22px;overflow-y:auto;flex:1">
-      <!-- Upload zone -->
       <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
         style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
         ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
@@ -16349,13 +16534,11 @@ setTimeout(function(){
         <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
         <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
       </div>
-      <!-- Template download -->
       <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
         <span style="font-size:14px">💡</span>
         <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
         <button onclick="cliImportDownloadTemplate()" style="margin-left:auto;padding:5px 12px;background:#1E40AF;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⬇ Baixar Modelo</button>
       </div>
-      <!-- Preview -->
       <div id="cliImportPreview" style="display:none;margin-top:16px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <div style="font-weight:700;font-size:13px;color:var(--text)" id="cliImportPreviewTitle">Prévia</div>
@@ -16370,7 +16553,6 @@ setTimeout(function(){
         <div id="cliImportWarn" style="display:none;margin-top:8px;padding:8px 12px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E;border:1px solid #FDE68A"></div>
       </div>
     </div>
-    <!-- Footer -->
     <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
       <button onclick="cliImportClose()" style="padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--text);font-size:12px;cursor:pointer">Cancelar</button>
       <button id="cliImportBtn" onclick="cliImportConfirm()" disabled style="padding:8px 22px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;opacity:.4">Importar</button>
