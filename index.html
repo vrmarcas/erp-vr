@@ -3345,9 +3345,11 @@ firebase.auth().signInAnonymously().then(function(){
               <option value="">Todos os materiais</option>
             </select>
             <select id="stockHistFiltTipo" onchange="stockRenderHistorico()" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)">
-              <option value="">Entradas e Saídas</option>
-              <option value="entrada">Só Entradas</option>
-              <option value="saida">Só Saídas</option>
+              <option value="">Todos</option>
+              <option value="entrada">Entradas</option>
+              <option value="saida">Saídas</option>
+              <option value="retalho-entrada">✂️ Retalho — Criação</option>
+              <option value="retalho-saida">✂️ Retalho — Consumo</option>
             </select>
             <button onclick="STOCK_LOG=[];try{localStorage.removeItem('erp_stock_log');}catch(e){}stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
           </div>
@@ -7649,6 +7651,7 @@ function kbConfirmarProd() {
     retalho.qty--;
     try { localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); } catch(e) {}
     if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS);
+    _retalhoLog('retalho-saida', retalho.mat, retalho.label+' '+retalho.dims+' cm', retalho.codigo||'', os.num||os.id||'');
     os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
   } else {
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
@@ -9978,6 +9981,24 @@ function _stockLog(tipo, matKey, qty, os, obs) {
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
   stockRenderHistorico();
 }
+function _retalhoLog(tipo, mat, labelDims, cod, os) {
+  var now = new Date();
+  var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  STOCK_LOG.unshift({
+    tipo: tipo,
+    matKey: mat || 'retalho',
+    matLabel: labelDims || '',
+    qty: 1,
+    os: os || '',
+    obs: cod ? 'Cód: ' + cod : '',
+    dt: dtStr
+  });
+  if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
+  try{ localStorage.setItem('erp_stock_log', JSON.stringify(STOCK_LOG)); }catch(e){}
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
+  stockRenderHistorico();
+}
+
 
 function stockRenderHistorico() {
   var el = document.getElementById('stockHistBody');
@@ -10002,8 +10023,8 @@ function stockRenderHistorico() {
     + '<th style="text-align:left;padding:6px 8px">OS / Obs</th>'
     + '</tr></thead><tbody>'
     + log.map(function(e) {
-        var cor = e.tipo === 'entrada' ? '#059669' : '#DC2626';
-        var ico = e.tipo === 'entrada' ? '⬆️ Entrada' : '⬇️ Saída';
+        var cor = e.tipo === 'entrada' ? '#059669' : e.tipo === 'retalho-entrada' ? '#7C3AED' : e.tipo === 'retalho-saida' ? '#D97706' : '#DC2626';
+        var ico = e.tipo === 'entrada' ? '⬆️ Entrada' : e.tipo === 'retalho-entrada' ? '✂️ Retalho ↓' : e.tipo === 'retalho-saida' ? '✂️ Retalho ↑' : '⬇️ Saída';
         var detalhe = [e.os ? 'OS: ' + e.os : '', e.obs || ''].filter(Boolean).join(' | ') || '—';
         return '<tr style="border-bottom:1px solid var(--border)">'
           + '<td style="padding:5px 8px;color:var(--muted)">' + e.dt + '</td>'
@@ -10718,6 +10739,7 @@ function retalhoAdicionar(mat, dims) {
   RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d,codigo:cod});
   retalhoSalvar();
   retalhoRender();
+  _retalhoLog('retalho-entrada', mat, label+' '+dims.trim()+' cm', cod, '');
   showToast('Retalho '+label+' ('+dims+' cm) — Cód: '+cod+' adicionado!','ok');
 }
 
@@ -10759,6 +10781,7 @@ function retalhoAdicionarManual() {
   RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:cod});
   retalhoSalvar();
   retalhoRender();
+  _retalhoLog('retalho-entrada', mat, label+' '+dims+' cm', cod, '');
   // Reset form
   var dEl = document.getElementById('retalhoFormDims'); if(dEl) dEl.value = '';
   var oEl = document.getElementById('retalhoFormObs');  if(oEl) oEl.value = '';
