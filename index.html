@@ -1277,7 +1277,18 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ if(d){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
-  _cloudLoad("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; } done(); });
+  _cloudLoad("crm_leads", function(d){
+    if(d&&typeof d==='object'&&Object.keys(d).length){
+      CRM_LEADS=d;
+    } else {
+      // Firebase empty — seed with defaults and save
+      CRM_LEADS = Object.assign({}, CRM_LEADS_DEFAULT);
+      if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('crm_leads', CRM_LEADS);
+    }
+    // Re-render if CRM page is already open
+    try{ crmRenderBoard('vr'); crmRenderBoard('vitre'); }catch(e){}
+    done();
+  });
   _cloudLoad("erp_os_counter", function(d){ if(d) _OS_COUNTER=parseInt(d)||0; done(); });
   _cloudLoad("clientes_lixeira", function(d){ if(d&&Array.isArray(d)) CLIENTES_LIXEIRA=d; done(); });
   _cloudLoad("erp_caixa_ant", function(d){ if(d&&typeof d=='object') _CX_ALL=d; done(); });
@@ -3792,7 +3803,7 @@ firebase.auth().signInAnonymously().then(function(){
           </div>
           <div style="display:flex;gap:6px" id="cliAtivosBtns">
             <input id="cliSearch" placeholder="🔍 Buscar..." oninput="renderClientes()" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:140px">
-            <button class="topbar-btn ghost" onclick="cliOpenImport()" style="font-size:11px">📥 Importar Planilha</button><button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
+            <button class="topbar-btn ghost" onclick="cliOpenImport()" style="font-size:11px">📥 Importar Clientes</button><button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
           </div>
         </div>
         <table class="table">
@@ -4965,59 +4976,6 @@ firebase.auth().signInAnonymously().then(function(){
     </div>
   </div>
 
-<!-- ══ CLIENT IMPORT OVERLAY ══ -->
-<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
-  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <!-- Header -->
-    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-      <span style="font-size:20px">📥</span>
-      <div>
-        <div style="font-weight:800;font-size:15px;color:var(--text)">Importar Clientes por Planilha</div>
-        <div style="font-size:11px;color:var(--muted)">Aceita .xlsx ou .csv — importe 50, 100, 500 clientes de uma vez</div>
-      </div>
-      <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
-    </div>
-    <!-- Body -->
-    <div style="padding:20px 22px;overflow-y:auto;flex:1">
-      <!-- Upload zone -->
-      <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
-        style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
-        ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
-        ondragleave="this.style.borderColor='var(--border)'"
-        ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
-        <div style="font-size:36px;margin-bottom:8px">📊</div>
-        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:4px">Arraste a planilha aqui</div>
-        <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
-        <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
-      </div>
-      <!-- Template download -->
-      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
-        <span style="font-size:14px">💡</span>
-        <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
-        <button onclick="cliImportDownloadTemplate()" style="margin-left:auto;padding:5px 12px;background:#1E40AF;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⬇ Baixar Modelo</button>
-      </div>
-      <!-- Preview -->
-      <div id="cliImportPreview" style="display:none;margin-top:16px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div style="font-weight:700;font-size:13px;color:var(--text)" id="cliImportPreviewTitle">Prévia</div>
-          <span id="cliImportBadge" style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700"></span>
-        </div>
-        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;max-height:280px;overflow-y:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:11px">
-            <thead id="cliImportThead" style="position:sticky;top:0;background:var(--bg)"></thead>
-            <tbody id="cliImportTbody"></tbody>
-          </table>
-        </div>
-        <div id="cliImportWarn" style="display:none;margin-top:8px;padding:8px 12px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E;border:1px solid #FDE68A"></div>
-      </div>
-    </div>
-    <!-- Footer -->
-    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
-      <button onclick="cliImportClose()" style="padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--text);font-size:12px;cursor:pointer">Cancelar</button>
-      <button id="cliImportBtn" onclick="cliImportConfirm()" disabled style="padding:8px 22px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;opacity:.4">Importar</button>
-    </div>
-  </div>
-</div>
 
 </div>
 
@@ -6824,7 +6782,23 @@ function orcSimPagamento() {
 // ============================================================
 
 // CRM_LEADS — carregado do Firebase (fonte de dados única)
-let CRM_LEADS = {};
+let CRM_LEADS_DEFAULT = (function(){
+  var now = new Date();
+  function dt(daysAgo){ var d=new Date(now); d.setDate(d.getDate()-daysAgo); return d.toISOString().slice(0,10); }
+  return {
+    'lead_001':{ _id:'lead_001', nome:'CONSTRUSHOW',      sub:'M. Silva - Gerente',      etapa:'ia_novo',      marca:'vr',    origem:'ia',        valor_potencial:'R$ 3.200.000', score:90, temp:'quente', data_retorno:dt(14), horas_sem_resposta:0,  cor:'#7C3AED', tel:'(16)99000-0001', email:'msilva@construshow.com' },
+    'lead_002':{ _id:'lead_002', nome:'ARQX Studio',      sub:'Escritório de arquitetura',etapa:'ia_novo',      marca:'vr',    origem:'ia',        valor_potencial:'R$ 188.000',   score:75, temp:'morno', data_retorno:dt(0),  horas_sem_resposta:0,  cor:'#1D4ED8', tel:'(16)99000-0002', email:'contato@arqx.com' },
+    'lead_003':{ _id:'lead_003', nome:'MEGA Varejo',      sub:'Loads de farmácias - 1 loja', etapa:'qualificando', marca:'vr', origem:'manual',   valor_potencial:'R$ 912.100',   score:90, temp:'quente', data_retorno:dt(14), horas_sem_resposta:0,  cor:'#1D4ED8', tel:'(16)99000-0003', email:'compras@megavarejo.com' },
+    'lead_004':{ _id:'lead_004', nome:'TechStore Franquia',sub:'Displays POV - 30 varidades',etapa:'qualificando',marca:'vr',  origem:'ia',        valor_potencial:'R$ 4.200.000', score:92, temp:'quente', data_retorno:dt(1),  horas_sem_resposta:0,  cor:'#1D4ED8', tel:'(16)99000-0004', email:'ti@techstore.com' },
+    'lead_005':{ _id:'lead_005', nome:'CLARO - Gerente',  sub:'Orçamento Emitido',        etapa:'orc_emitido',  marca:'vr',    origem:'manual',    valor_potencial:'R$ 811.000',   score:90, temp:'quente', data_retorno:dt(0),  horas_sem_resposta:0,  cor:'#92400E', tel:'(16)99800-0001', email:'gerente@claro.com.br' },
+    'lead_006':{ _id:'lead_006', nome:'VIVO — Painel Loja',sub:'Orçamento R$200.00',      etapa:'orc_emitido',  marca:'vitre', origem:'ia',        valor_potencial:'R$ 5.200.000', score:75, temp:'morno', data_retorno:dt(0),  horas_sem_resposta:49, cor:'#BE185D', tel:'(16)99000-0006', email:'loja@vivo.com.br' },
+    'lead_007':{ _id:'lead_007', nome:'OI Telecom',       sub:'Aguardando aprovação PO',   etapa:'negociacao',  marca:'vr',    origem:'manual',    valor_potencial:'R$ 7.900.000', score:70, temp:'morno', data_retorno:dt(1),  horas_sem_resposta:0,  cor:'#6D28D9', tel:'(16)99000-0007', email:'po@oi.com.br' },
+    'lead_008':{ _id:'lead_008', nome:'OI Telecom',       sub:'Aguardando aprovação PO',   etapa:'negociacao',  marca:'vr',    origem:'manual',    valor_potencial:'R$ 7.900.000', score:70, temp:'morno', data_retorno:dt(1),  horas_sem_resposta:0,  cor:'#6D28D9', tel:'(16)99000-0008', email:'po2@oi.com.br' },
+    'lead_009':{ _id:'lead_009', nome:'VIVO',             sub:'M. Silva - Gerente',        etapa:'fechado',     marca:'vr',    origem:'manual',    valor_potencial:'R$ 5.200.000', score:95, temp:'quente', data_retorno:null,  horas_sem_resposta:0,  cor:'#065F46', tel:'(16)99000-0009', email:'gerente@vivo.com.br' },
+    'lead_010':{ _id:'lead_010', nome:'VIVO',             sub:'M. Silva - Gerente',        etapa:'fechado',     marca:'vr',    origem:'manual',    valor_potencial:'R$ 5.200.000', score:95, temp:'quente', data_retorno:null,  horas_sem_resposta:0,  cor:'#065F46', tel:'(16)99000-0010', email:'gerente2@vivo.com.br' }
+  };
+})();
+let CRM_LEADS = Object.assign({}, CRM_LEADS_DEFAULT);
 
 let crmLeadIdCounter = 100;
 
@@ -16256,6 +16230,61 @@ setTimeout(function(){
     <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
     <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
     <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+  </div>
+</div>
+
+
+<!-- ══ CLIENT IMPORT OVERLAY ══ -->
+<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
+  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <!-- Header -->
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">📥</span>
+      <div>
+        <div style="font-weight:800;font-size:15px;color:var(--text)">Importar Clientes por Planilha</div>
+        <div style="font-size:11px;color:var(--muted)">Aceita .xlsx ou .csv — importe 50, 100, 500 clientes de uma vez</div>
+      </div>
+      <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
+    </div>
+    <!-- Body -->
+    <div style="padding:20px 22px;overflow-y:auto;flex:1">
+      <!-- Upload zone -->
+      <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
+        style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
+        ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
+        <div style="font-size:36px;margin-bottom:8px">📊</div>
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:4px">Arraste a planilha aqui</div>
+        <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
+        <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
+      </div>
+      <!-- Template download -->
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
+        <span style="font-size:14px">💡</span>
+        <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
+        <button onclick="cliImportDownloadTemplate()" style="margin-left:auto;padding:5px 12px;background:#1E40AF;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⬇ Baixar Modelo</button>
+      </div>
+      <!-- Preview -->
+      <div id="cliImportPreview" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13px;color:var(--text)" id="cliImportPreviewTitle">Prévia</div>
+          <span id="cliImportBadge" style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700"></span>
+        </div>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;max-height:280px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead id="cliImportThead" style="position:sticky;top:0;background:var(--bg)"></thead>
+            <tbody id="cliImportTbody"></tbody>
+          </table>
+        </div>
+        <div id="cliImportWarn" style="display:none;margin-top:8px;padding:8px 12px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E;border:1px solid #FDE68A"></div>
+      </div>
+    </div>
+    <!-- Footer -->
+    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="cliImportClose()" style="padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--text);font-size:12px;cursor:pointer">Cancelar</button>
+      <button id="cliImportBtn" onclick="cliImportConfirm()" disabled style="padding:8px 22px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;opacity:.4">Importar</button>
+    </div>
   </div>
 </div>
 </body>
