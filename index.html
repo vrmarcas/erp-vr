@@ -6856,10 +6856,10 @@ function crmOpenCard(id) {
       </div>
       <div class="ia-insights-txt">${d.resumo_ia}</div>
       <div class="ia-score-row">
-        <div class="ia-score-pill">Produto: <strong>${d.intencao.produto}</strong></div>
-        <div class="ia-score-pill">Material: <strong>${d.intencao.material}</strong></div>
-        <div class="ia-score-pill">Medidas: <strong>${d.intencao.medidas}</strong></div>
-        <div class="ia-score-pill">Qtd: <strong>${d.intencao.quantidade}</strong></div>
+        <div class="ia-score-pill">Produto: <strong>${(d.intencao&&d.intencao.produto)||'—'}</strong></div>
+        <div class="ia-score-pill">Material: <strong>${(d.intencao&&d.intencao.material)||'—'}</strong></div>
+        <div class="ia-score-pill">Medidas: <strong>${(d.intencao&&d.intencao.medidas)||'—'}</strong></div>
+        <div class="ia-score-pill">Qtd: <strong>${(d.intencao&&d.intencao.quantidade)||'—'}</strong></div>
       </div>
       ${d.dores.length ? `<div style="margin-top:8px;font-size:10px;color:#8B949E"><strong style="color:#FF7B72">Dores identificadas:</strong> ${d.dores.map(x=>`<span style="background:#21262D;border-radius:4px;padding:2px 6px;margin:2px;display:inline-block">${x}</span>`).join('')}</div>` : ''}
     </div>`;
@@ -6885,7 +6885,7 @@ function crmOpenCard(id) {
       <div style="font-size:11px;color:#991B1B;margin-bottom:10px">A IA pode gerar uma mensagem personalizada no WhatsApp para tentar recuperar esta venda.</div>
       <div style="background:#fff;border-radius:7px;padding:10px;font-size:11px;color:#374151;border:1px solid #FECACA;margin-bottom:10px;font-style:italic">
         <strong style="color:#374151;font-style:normal">Prévia da mensagem da IA:</strong><br><br>
-        "Oi ${d.contato.split(' ')[0]}! Tudo bem? 😊 Passando pra perguntar se tive a oportunidade de revisar o orçamento que enviei de ${d.valor_potencial} para ${d.intencao.produto.toLowerCase()}. Se tiver alguma dúvida ou quiser ajustar alguma coisa, estou à disposição! 🙌"
+        "Oi ${d.contato.split(' ')[0]}! Tudo bem? 😊 Passando pra perguntar se tive a oportunidade de revisar o orçamento que enviei de ${d.valor_potencial} para ${(d.intencao&&d.intencao.produto?d.intencao.produto.toLowerCase():'o produto')}. Se tiver alguma dúvida ou quiser ajustar alguma coisa, estou à disposição! 🙌"
       </div>
       <button class="topbar-btn" style="width:100%;background:#DC2626" onclick="crmDispararFollowup('${id}')">🤖 Disparar IA de Follow-up via N8N</button>
     </div>`;
@@ -6943,7 +6943,7 @@ function crmDispararFollowup(id) {
       cliente_nome: d.nome,
       whatsapp: d.tel,
       valor_orcamento: parseFloat(d.valor_potencial.replace('R$ ','').replace('.','').replace(',','.')),
-      contexto_produtos: `${d.intencao.produto} · ${d.intencao.material} · ${d.intencao.medidas}`,
+      contexto_produtos: d.intencao ? (d.intencao.produto+' · '+d.intencao.material+' · '+d.intencao.medidas) : '',
       horas_sem_resposta: d.horas_sem_resposta,
       resumo_ia_original: d.resumo_ia
     },
@@ -14112,6 +14112,12 @@ document.addEventListener('DOMContentLoaded', function() {
 <script>
 
 // ============================================================
+// UTILITÁRIOS GLOBAIS (usados em CRM, Tarefas, Comercial etc.)
+// ============================================================
+function _parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+function _fmtV(v){ if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1).replace('.',',')+'M'; if(v>=1000) return 'R$ '+Math.round(v/1000)+'k'; return 'R$ '+Math.round(v); }
+
+// ============================================================
 // PÓS-VENDA CRM
 // ============================================================
 var POSV_KEY = 'erp_posvendas';
@@ -14263,7 +14269,7 @@ function tarefasRender() {
   var semFim  = new Date(hoje); semFim.setDate(semFim.getDate()+7);
   var proxSemFim = new Date(hoje); proxSemFim.setDate(proxSemFim.getDate()+14);
 
-  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var parsVal=_parsVal;
   function fmtPhone(tel){ return tel?(tel.replace(/\D/g,'')):''; }
 
   // Classify each lead by date group
@@ -14294,7 +14300,7 @@ function tarefasRender() {
   var totalAtrasados = grupos.atrasado.length;
   var totalHoje = grupos.hoje.length;
   var valPipeline = allLeads.filter(function(l){ return l.data_retorno; }).reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
-  function fmtV(v){ if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1).replace('.',',')+'M'; if(v>=1000) return 'R$ '+Math.round(v/1000)+'k'; return 'R$ '+Math.round(v); }
+  var fmtV=_fmtV;
 
   kpiEl.innerHTML = [
     { v: totalTarefas,    l:'Total de Tarefas',   c:'#4F46E5', ico:'📅' },
@@ -14478,7 +14484,7 @@ function crmRenderKpi(marca) {
     if(l.data_retorno) { var dr=new Date(l.data_retorno+'T00:00:00'); return dr<hoje0; }
     return false;
   }).length;
-  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var parsVal=_parsVal;
   var valTot = leads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
   var valOrc = orcLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
   function fmtK(v){ return v>=1000?'R$'+Math.round(v/1000)+'k':'R$'+Math.round(v); }
@@ -14550,7 +14556,7 @@ function crmRenderDia() {
   }
   if(emptyEl) emptyEl.style.display = 'none';
 
-  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var parsVal=_parsVal;
   var avatarColors = ['#7C3AED','#1D4ED8','#059669','#B45309','#BE185D','#0E7490','#DC2626'];
 
   boardEl.innerHTML = diaLeads.map(function(lead) {
@@ -14601,7 +14607,7 @@ function crmRenderDia() {
 function crmRenderHeroBar() {
   // Aggregate all leads across both brands
   var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id; });
-  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var parsVal=_parsVal;
   var pipeline = allLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
   var fechados = allLeads.filter(function(l){ return l.etapa==='fechado'; }).length;
   var total = allLeads.length;
@@ -14625,7 +14631,7 @@ function crmRenderHeroBar() {
   var onTrack = total - overdue - urgent - fechados;
   var atencao = overdue + urgent;
   // Formatter
-  function fmtV(v){ if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1).replace('.',',')+'M'; if(v>=1000) return 'R$ '+Math.round(v/1000)+'k'; return 'R$ '+Math.round(v); }
+  var fmtV=_fmtV;
   // Update DOM
   var el = function(id){ return document.getElementById(id); };
   if(el('crmHeroPipeline')) el('crmHeroPipeline').textContent = fmtV(pipeline);
@@ -14648,8 +14654,8 @@ function crmRenderBoard(marca) {
   var boardEl = document.getElementById('crmBoard'+suf);
   if(!boardEl) return;
   var leads = crmLeadsFor(marca);
-  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
-  function fmtV(v){ if(v>=1000000) return 'R$'+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$'+Math.round(v/1000)+'k'; return 'R$'+Math.round(v); }
+  var parsVal=_parsVal;
+  var fmtV=_fmtV;
   boardEl.innerHTML = CRM_FASES.map(function(fase){
     var cards = leads.filter(function(l){ return l.etapa === fase.id; });
     var colVal = cards.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
@@ -16555,4 +16561,4 @@ setTimeout(function(){
   </div>
 </div>
 </body>
-</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+</html>              
