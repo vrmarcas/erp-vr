@@ -333,17 +333,17 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
    CRM INTELIGENTE
    ========================================================= */
 /* Kanban CRM */
-.crm-board { display:flex; gap:10px; min-width:1000px; align-items:flex-start; min-height:200px; }
+.crm-board { display:flex; gap:12px; min-width:900px; align-items:flex-start; min-height:200px; }
 .cfg-tab { padding:9px 18px; border:none; background:none; font-size:12px; font-weight:700; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-2px; transition:.12s; }
 .cfg-tab.on { color:var(--brand-mid); border-bottom-color:var(--brand-mid); }
 .cfg-tab:hover { color:var(--brand-mid); }
 .cfg-pg input[type=number] { text-align:right; }
-.crm-col   { flex:1; min-width:160px; }
-.crm-head  { padding:9px 11px; border-radius:9px 9px 0 0; font-weight:800; font-size:11px; color:#fff; display:flex; align-items:center; justify-content:space-between; }
-.crm-head .cc { background:rgba(255,255,255,.25); border-radius:20px; padding:1px 7px; font-size:10px; }
-.crm-body  { background:#F3F4F6; border:1px solid var(--border); border-top:none; border-radius:0 0 9px 9px; padding:8px; min-height:260px; }
-.crm-card  { background:var(--surface); border-radius:10px; padding:11px 11px 9px; margin-bottom:8px; border-left:4px solid; box-shadow:0 2px 8px rgba(0,0,0,.08); cursor:pointer; transition:.15s; position:relative; overflow:hidden; }
-.crm-card::before { content:''; position:absolute; top:0; right:0; width:40px; height:40px; border-radius:0 10px 0 40px; background:rgba(255,255,255,.07); }
+.crm-col   { flex:1; min-width:200px; max-width:260px; }
+.crm-head  { padding:10px 13px 8px; border-radius:10px 10px 0 0; font-weight:800; font-size:12px; color:#fff; }
+.crm-head .cc { background:rgba(255,255,255,.22); border-radius:20px; padding:1px 8px; font-size:10px; font-weight:700; }
+.crm-body  { background:#F8F9FB; border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px; padding:10px; min-height:280px; }
+.crm-card  { background:var(--surface); border-radius:10px; padding:12px 12px 10px; margin-bottom:9px; border-left:4px solid; box-shadow:0 1px 6px rgba(0,0,0,.07); cursor:pointer; transition:.15s; }
+
 .crm-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.14); transform:translateY(-2px); }
 .crm-card-name { font-weight:800; font-size:11px; }
 .crm-card-sub  { font-size:10px; color:var(--muted); margin-top:2px; line-height:1.4; }
@@ -1338,6 +1338,7 @@ firebase.auth().signInAnonymously().then(function(){
   setTimeout(kbProntaSync, 600);
 }).catch(function(e){ console.warn("[Cloud] Auth falhou:", e); });
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -3012,35 +3013,87 @@ firebase.auth().signInAnonymously().then(function(){
       </div>
 
       <!-- BRAND TABS -->
-      <div style="display:flex;align-items:center;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">
+      <!-- Hero KPI bar -->
+      <div id="crmHeroBar" style="background:linear-gradient(135deg,#1E1B4B 0%,#312E81 60%,#4C1D95 100%);border-radius:14px;padding:18px 24px;margin-bottom:18px;display:flex;align-items:center;gap:0;flex-wrap:wrap;gap:20px;box-shadow:0 4px 20px rgba(79,70,229,.25)">
+        <!-- Pipeline Value -->
+        <div>
+          <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">Total Pipeline</div>
+          <div id="crmHeroPipeline" style="font-size:28px;font-weight:900;color:#fff;letter-spacing:-.5px">R$ 0</div>
+        </div>
+        <div style="width:1px;height:44px;background:rgba(255,255,255,.15)"></div>
+        <!-- Leads count -->
+        <div>
+          <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Total Leads</div>
+          <div style="display:flex;align-items:baseline;gap:12px">
+            <span id="crmHeroTotal" style="font-size:22px;font-weight:900;color:#fff">0</span>
+            <div style="display:flex;flex-direction:column;gap:2px">
+              <div style="font-size:10px;color:rgba(255,255,255,.7)">🤖 IA / Site: <span id="crmHeroIA" style="font-weight:700;color:#A5B4FC">0</span></div>
+              <div style="font-size:10px;color:rgba(255,255,255,.7)">✏️ Manual: <span id="crmHeroManual" style="font-weight:700;color:#A5B4FC">0</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="width:1px;height:44px;background:rgba(255,255,255,.15)"></div>
+        <!-- Win Rate -->
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:52px;height:52px;position:relative">
+            <svg viewBox="0 0 52 52" style="transform:rotate(-90deg)">
+              <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="5"/>
+              <circle id="crmWinRateCircle" cx="26" cy="26" r="22" fill="none" stroke="#34D399" stroke-width="5" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" style="transition:stroke-dashoffset .8s"/>
+            </svg>
+            <div id="crmWinRatePct" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#fff">0%</div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);letter-spacing:.08em;text-transform:uppercase">Win Rate</div>
+            <div id="crmHeroFechados" style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px">0 fechados</div>
+          </div>
+        </div>
+        <div style="width:1px;height:44px;background:rgba(255,255,255,.15)"></div>
+        <!-- Status legend -->
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#EF4444;display:inline-block"></span><span style="font-size:10px;color:rgba(255,255,255,.7)">Vencido</span><span id="crmStatOverdue" style="font-size:10px;font-weight:800;color:#FCA5A5">0</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#F59E0B;display:inline-block"></span><span style="font-size:10px;color:rgba(255,255,255,.7)">Urgente</span><span id="crmStatUrgent" style="font-size:10px;font-weight:800;color:#FDE68A">0</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#34D399;display:inline-block"></span><span style="font-size:10px;color:rgba(255,255,255,.7)">No prazo</span><span id="crmStatOk" style="font-size:10px;font-weight:800;color:#A7F3D0">0</span></div>
+          </div>
+        </div>
+        <!-- Atenção badge -->
+        <div style="margin-left:auto;background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.4);border-radius:10px;padding:10px 16px;text-align:center">
+          <div style="font-size:10px;color:rgba(255,255,255,.6);font-weight:700;text-transform:uppercase;letter-spacing:.06em">⚠️ Atenção</div>
+          <div id="crmStatAtencao" style="font-size:24px;font-weight:900;color:#FCA5A5">0</div>
+        </div>
+      </div>
+
+      <!-- Tab bar + actions -->
+      <div style="display:flex;align-items:center;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
         <button id="crmTabVR" onclick="crmSetBrand('vr')"
-          style="padding:10px 20px;border:none;background:none;font-size:13px;font-weight:800;cursor:pointer;border-bottom:3px solid #7C3AED;margin-bottom:-2px;color:#4C1D95;">
-          🟣 VR Marcas <span style="background:#EDE9FE;color:#4C1D95;border-radius:20px;padding:2px 8px;font-size:10px;margin-left:5px" id="crmVRcount">6</span>
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:800;cursor:pointer;border-bottom:3px solid #7C3AED;margin-bottom:-2px;color:#4C1D95;display:flex;align-items:center;gap:6px">
+          <span style="width:8px;height:8px;border-radius:50%;background:#7C3AED;display:inline-block"></span>
+          VR Marcas <span style="background:#EDE9FE;color:#4C1D95;border-radius:20px;padding:1px 7px;font-size:10px" id="crmVRcount">0</span>
         </button>
         <button id="crmTabVT" onclick="crmSetBrand('vitre')"
-          style="padding:10px 20px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);">
-          🌸 Vitre <span style="background:#FCE7F3;color:#831843;border-radius:20px;padding:2px 8px;font-size:10px;margin-left:5px" id="crmVTcount">3</span>
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          <span style="width:8px;height:8px;border-radius:50%;background:#BE185D;display:inline-block"></span>
+          Vitre <span style="background:#FCE7F3;color:#831843;border-radius:20px;padding:1px 7px;font-size:10px" id="crmVTcount">0</span>
         </button>
         <button id="crmTabSite" onclick="crmSetBrand('site')"
-          style="padding:10px 20px;border:none;background:none;font-size:13px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);">
-          🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:2px 8px;font-size:10px;margin-left:5px" id="crmSiteCount">0</span>
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px" id="crmSiteCount">0</span>
         </button>
-        <div style="margin-left:auto;display:flex;gap:7px;padding-bottom:8px;flex-wrap:wrap;">
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular Lead IA</button>
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="crmOpenImport()">📥 Importar Lead</button>
-          <button class="topbar-btn" style="font-size:11px" onclick="crmAbrirNovoLead()">+ Novo Lead</button>
+        <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="crmOpenImport()">📥 Importar</button>
           <button class="topbar-btn ghost" style="font-size:11px" onclick="chatvoltTogglePanel()">🤖 Chatvolt</button>
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="nav('orcamento',null)">+ Novo Orçamento</button>
+          <button class="topbar-btn" style="font-size:11px" onclick="crmAbrirNovoLead()">+ Novo Lead</button>
         </div>
       </div>
 
       <!-- Boards dinâmicos -->
       <div id="crmBrandVR">
-        <div id="crmKpiVR" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:12px"></div>
+        <div id="crmKpiVR" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <div style="overflow-x:auto;padding-bottom:8px"><div class="crm-board" id="crmBoardVR"></div></div>
       </div>
       <div id="crmBrandVT" style="display:none">
-        <div id="crmKpiVT" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:12px"></div>
+        <div id="crmKpiVT" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <div style="overflow-x:auto;padding-bottom:8px"><div class="crm-board" id="crmBoardVT"></div></div>
       </div>
       <div id="crmBrandSite" style="display:none">
@@ -3739,7 +3792,7 @@ firebase.auth().signInAnonymously().then(function(){
           </div>
           <div style="display:flex;gap:6px" id="cliAtivosBtns">
             <input id="cliSearch" placeholder="🔍 Buscar..." oninput="renderClientes()" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:140px">
-            <button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
+            <button class="topbar-btn ghost" onclick="cliOpenImport()" style="font-size:11px">📥 Importar Planilha</button><button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
           </div>
         </div>
         <table class="table">
@@ -4911,6 +4964,61 @@ firebase.auth().signInAnonymously().then(function(){
       <button class="gen-submit" onclick="cliConfirmarNovo()">✓ Cadastrar Cliente</button>
     </div>
   </div>
+
+<!-- ══ CLIENT IMPORT OVERLAY ══ -->
+<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
+  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <!-- Header -->
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">📥</span>
+      <div>
+        <div style="font-weight:800;font-size:15px;color:var(--text)">Importar Clientes por Planilha</div>
+        <div style="font-size:11px;color:var(--muted)">Aceita .xlsx ou .csv — importe 50, 100, 500 clientes de uma vez</div>
+      </div>
+      <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
+    </div>
+    <!-- Body -->
+    <div style="padding:20px 22px;overflow-y:auto;flex:1">
+      <!-- Upload zone -->
+      <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
+        style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
+        ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
+        <div style="font-size:36px;margin-bottom:8px">📊</div>
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:4px">Arraste a planilha aqui</div>
+        <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
+        <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
+      </div>
+      <!-- Template download -->
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
+        <span style="font-size:14px">💡</span>
+        <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
+        <button onclick="cliImportDownloadTemplate()" style="margin-left:auto;padding:5px 12px;background:#1E40AF;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⬇ Baixar Modelo</button>
+      </div>
+      <!-- Preview -->
+      <div id="cliImportPreview" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13px;color:var(--text)" id="cliImportPreviewTitle">Prévia</div>
+          <span id="cliImportBadge" style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700"></span>
+        </div>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;max-height:280px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead id="cliImportThead" style="position:sticky;top:0;background:var(--bg)"></thead>
+            <tbody id="cliImportTbody"></tbody>
+          </table>
+        </div>
+        <div id="cliImportWarn" style="display:none;margin-top:8px;padding:8px 12px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E;border:1px solid #FDE68A"></div>
+      </div>
+    </div>
+    <!-- Footer -->
+    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="cliImportClose()" style="padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--text);font-size:12px;cursor:pointer">Cancelar</button>
+      <button id="cliImportBtn" onclick="cliImportConfirm()" disabled style="padding:8px 22px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;opacity:.4">Importar</button>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -4926,6 +5034,200 @@ function navFin(tab, el) {
 }
 
 // Navigation
+
+// ══════════════════════════════════════════════════════════════
+// IMPORT DE CLIENTES POR PLANILHA
+// ══════════════════════════════════════════════════════════════
+var _cliImportRows = [];
+
+function cliOpenImport() {
+  _cliImportRows = [];
+  document.getElementById('cliImportPreview').style.display = 'none';
+  document.getElementById('cliImportBtn').disabled = true;
+  document.getElementById('cliImportBtn').style.opacity = '.4';
+  document.getElementById('cliImportFile').value = '';
+  document.getElementById('cliImportOverlay').style.display = 'flex';
+}
+
+function cliImportClose() {
+  document.getElementById('cliImportOverlay').style.display = 'none';
+}
+
+function cliImportHandleFile(file) {
+  if(!file) return;
+  var ext = file.name.split('.').pop().toLowerCase();
+  if(ext !== 'xlsx' && ext !== 'csv') { showToast('Formato inválido — use .xlsx ou .csv','err'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = e.target.result;
+      var wb, ws;
+      if(ext === 'csv') {
+        wb = XLSX.read(data, {type:'binary'});
+      } else {
+        wb = XLSX.read(new Uint8Array(data), {type:'array'});
+      }
+      ws = wb.Sheets[wb.SheetNames[0]];
+      var json = XLSX.utils.sheet_to_json(ws, {defval:''});
+      cliImportProcess(json);
+    } catch(ex) {
+      showToast('Erro ao ler arquivo: ' + ex.message, 'err');
+    }
+  };
+  if(ext === 'csv') {
+    reader.readAsBinaryString(file);
+  } else {
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function cliImportNormalizeKey(k) {
+  return (k||'').toLowerCase().trim()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9]/g,'');
+}
+
+function cliImportProcess(rows) {
+  if(!rows || !rows.length) { showToast('Planilha vazia','err'); return; }
+  // Column alias map
+  var ALIAS = {
+    nome:    ['nome','name','empresa','company','cliente'],
+    tel:     ['tel','telefone','celular','phone','fone','whatsapp'],
+    email:   ['email','e-mail','correio'],
+    cidade:  ['cidade','city','municipio','localidade'],
+    tipo:    ['tipo','type','categoria'],
+    marca:   ['marca','brand','unidade']
+  };
+  // Detect column mapping from first row keys
+  var keys = Object.keys(rows[0]);
+  var colMap = {};
+  keys.forEach(function(k) {
+    var norm = cliImportNormalizeKey(k);
+    Object.keys(ALIAS).forEach(function(field) {
+      if(ALIAS[field].indexOf(norm) >= 0 && !colMap[field]) colMap[field] = k;
+    });
+  });
+
+  if(!colMap.nome) { showToast('Coluna "Nome" não encontrada na planilha','err'); return; }
+
+  // Parse rows
+  _cliImportRows = rows.map(function(r, i) {
+    var nome = String(r[colMap.nome]||'').trim();
+    if(!nome) return null;
+    var tipo = String(r[colMap.tipo]||'PJ').trim();
+    if(tipo.toLowerCase().includes('pf') || tipo.toLowerCase().includes('fisica') || tipo.toLowerCase().includes('física') || tipo.toLowerCase().includes('pessoa f')) tipo = 'PF';
+    else tipo = 'PJ';
+    var marca = String(r[colMap.marca]||'vr').trim().toLowerCase();
+    if(marca.includes('vitre') || marca.includes('vt')) marca = 'vitre';
+    else marca = 'vr';
+    var dup = CLIENTES_DATA.some(function(c){ return c.nome && c.nome.toLowerCase().trim() === nome.toLowerCase(); });
+    return {
+      nome:   nome,
+      tipo:   tipo,
+      tel:    colMap.tel ? String(r[colMap.tel]||'').trim() : '',
+      email:  colMap.email ? String(r[colMap.email]||'').trim() : '',
+      cidade: colMap.cidade ? String(r[colMap.cidade]||'').trim() : '',
+      marca:  marca,
+      _dup:   dup
+    };
+  }).filter(Boolean);
+
+  if(!_cliImportRows.length) { showToast('Nenhuma linha válida encontrada','err'); return; }
+
+  var novos = _cliImportRows.filter(function(r){ return !r._dup; }).length;
+  var dups  = _cliImportRows.filter(function(r){ return r._dup; }).length;
+
+  // Render preview (first 100 rows)
+  var preview = _cliImportRows.slice(0, 100);
+  var thead = document.getElementById('cliImportThead');
+  var tbody = document.getElementById('cliImportTbody');
+  var thStyle = 'padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap';
+  var tdStyle = 'padding:6px 10px;font-size:11px;border-bottom:1px solid var(--border)';
+  thead.innerHTML = '<tr>'
+    +'<th style="'+thStyle+'">#</th>'
+    +'<th style="'+thStyle+'">Nome</th>'
+    +'<th style="'+thStyle+'">Tipo</th>'
+    +'<th style="'+thStyle+'">Tel</th>'
+    +'<th style="'+thStyle+'">Email</th>'
+    +'<th style="'+thStyle+'">Cidade</th>'
+    +'<th style="'+thStyle+'">Marca</th>'
+    +'<th style="'+thStyle+'">Status</th>'
+    +'</tr>';
+  tbody.innerHTML = preview.map(function(r, i) {
+    var dupBadge = r._dup
+      ? '<span style="background:#FEE2E2;color:#DC2626;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700">Duplicata</span>'
+      : '<span style="background:#D1FAE5;color:#065F46;border-radius:4px;padding:1px 6px;font-size:9px;font-weight:700">Novo</span>';
+    var rowBg = r._dup ? 'background:#FFFBEB' : '';
+    return '<tr style="'+rowBg+'">'
+      +'<td style="'+tdStyle+';color:var(--muted)">'+(i+1)+'</td>'
+      +'<td style="'+tdStyle+';font-weight:700">'+cfgEsc(r.nome)+'</td>'
+      +'<td style="'+tdStyle+'">'+r.tipo+'</td>'
+      +'<td style="'+tdStyle+'">'+cfgEsc(r.tel)+'</td>'
+      +'<td style="'+tdStyle+'">'+cfgEsc(r.email)+'</td>'
+      +'<td style="'+tdStyle+'">'+cfgEsc(r.cidade)+'</td>'
+      +'<td style="'+tdStyle+'">'+r.marca+'</td>'
+      +'<td style="'+tdStyle+'">'+dupBadge+'</td>'
+      +'</tr>';
+  }).join('');
+
+  document.getElementById('cliImportBadge').textContent = novos + ' novos · ' + dups + ' duplicatas';
+  document.getElementById('cliImportPreview').style.display = 'block';
+
+  var warnEl = document.getElementById('cliImportWarn');
+  if(_cliImportRows.length > 100) {
+    warnEl.style.display = 'block';
+    warnEl.textContent = '⚠️ Mostrando prévia das primeiras 100 linhas de ' + _cliImportRows.length + ' total. Todos serão importados.';
+  } else {
+    warnEl.style.display = 'none';
+  }
+
+  var btn = document.getElementById('cliImportBtn');
+  if(novos > 0) {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.textContent = 'Importar ' + novos + ' cliente' + (novos !== 1 ? 's' : '');
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '.4';
+    btn.textContent = 'Nenhum novo cliente';
+  }
+}
+
+function cliImportConfirm() {
+  var novos = _cliImportRows.filter(function(r){ return !r._dup; });
+  if(!novos.length) return;
+  var agora = new Date().toLocaleDateString('pt-BR');
+  novos.forEach(function(r) {
+    var newId = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+    CLIENTES_DATA.push({
+      id:           newId,
+      nome:         r.nome,
+      tipo:         r.tipo,
+      tel:          r.tel,
+      email:        r.email,
+      cidade:       r.cidade,
+      marca:        r.marca,
+      ultimoPedido: agora,
+      os:           []
+    });
+  });
+  if(typeof _cloudSave === 'function') _cloudSave('clientes', CLIENTES_DATA);
+  renderClientes();
+  cliImportClose();
+  showToast('✅ ' + novos.length + ' cliente' + (novos.length !== 1 ? 's importados' : ' importado') + ' com sucesso!', 'ok');
+}
+
+function cliImportDownloadTemplate() {
+  if(typeof XLSX === 'undefined') { showToast('Aguarde o carregamento da biblioteca','err'); return; }
+  var ws = XLSX.utils.aoa_to_sheet([
+    ['Nome','Tipo','Tel','Email','Cidade','Marca'],
+    ['Exemplo Empresa Ltda','PJ','(16) 99999-0001','contato@exemplo.com','São Carlos','vr'],
+    ['João Silva','PF','(16) 98888-0002','joao@exemplo.com','Ribeirão Preto','vitre']
+  ]);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  XLSX.writeFile(wb, 'modelo_importacao_clientes.xlsx');
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // MÓDULO FORNECEDORES
@@ -13956,6 +14258,11 @@ function crmCardHTML(lead) {
   var fuVencido = lead.followup_vencido || (lead.horas_sem_resposta && lead.horas_sem_resposta > 48);
   var phone = crmFmtPhone(lead.tel);
   var waLink = phone ? 'https://wa.me/55'+phone : '#';
+  // Avatar: initials from name
+  var words = (lead.nome||'?').trim().split(/\s+/);
+  var initials = words.length >= 2 ? (words[0][0]+words[words.length-1][0]).toUpperCase() : (lead.nome||'?').slice(0,2).toUpperCase();
+  var avatarColors = ['#7C3AED','#1D4ED8','#059669','#B45309','#BE185D','#0E7490','#DC2626','#7C3AED'];
+  var avatarColor = avatarColors[(lead.nome||'').charCodeAt(0) % avatarColors.length];
 
   var fuBadge = '';
   if(fuVencido) {
@@ -13969,26 +14276,34 @@ function crmCardHTML(lead) {
     fuBadge = '<div style="font-size:10px;color:'+drColor+';margin-top:5px;font-weight:700">📅 Follow-up: '+drStr+(diff===0?' (hoje)':diff===1?' (amanhã)':(diff<0?' ('+Math.abs(diff)+'d atrás)':''))+'</div>';
   }
 
-  return '<div class="crm-card" data-id="'+lead._id+'" onclick="crmOpenCard(this.dataset.id)" style="border-color:'+(lead.cor||'#7C3AED')+';cursor:pointer">'
-    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin-bottom:6px">'
-    +'<div style="font-size:13px;font-weight:800;color:var(--text);line-height:1.3">'+lead.nome+'</div>'
-    +'<span style="font-size:16px;flex-shrink:0" title="'+lead.temp+'">'+tempIcon+'</span>'
+  return '<div class="crm-card" data-id="'+lead._id+'" onclick="crmOpenCard(this.dataset.id)" style="border-color:'+(lead.cor||avatarColor)+'">'
+    // Avatar + name row
+    +'<div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:7px">'
+    +'<div style="width:36px;height:36px;border-radius:9px;background:'+avatarColor+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0;letter-spacing:-.5px">'+initials+'</div>'
+    +'<div style="flex:1;min-width:0">'
+    +'<div style="font-size:12px;font-weight:800;color:var(--text);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+lead.nome+'</div>'
+    +(lead.sub ? '<div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+lead.sub+'</div>' : '')
     +'</div>'
-    +(lead.sub ? '<div style="font-size:10px;color:var(--muted);margin-bottom:4px">'+lead.sub+'</div>' : '')
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin:5px 0">'
-    +'<span style="font-size:10px;color:var(--muted)">'+(CRM_ORIG_MAP[lead.origem]||lead.origem||'')+'</span>'
-    +'<span style="font-size:11px;font-weight:800;color:#059669">'+(lead.valor_potencial||'')+'</span>'
+    +'<span style="font-size:14px;flex-shrink:0" title="'+lead.temp+'">'+tempIcon+'</span>'
     +'</div>'
-    +(score>0 ? '<div style="margin:4px 0 2px"><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:2px"><span>Score</span><span style="color:'+scoreColor+';font-weight:700">'+score+'</span></div>'
-    +'<div style="height:4px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:4px;background:'+scoreColor+';border-radius:2px;transition:width .4s"></div></div></div>' : '')
+    // Origin + value
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'
+    +'<span style="font-size:9px;color:var(--muted);background:var(--bg);border-radius:4px;padding:1px 5px">'+(CRM_ORIG_MAP[lead.origem]||lead.origem||'—')+'</span>'
+    +'<span style="font-size:12px;font-weight:800;color:#059669">'+(lead.valor_potencial||'')+'</span>'
+    +'</div>'
+    // Score bar
+    +(score>0 ? '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:2px"><span>Deal Score</span><span style="color:'+scoreColor+';font-weight:700">'+score+'</span></div>'
+    +'<div style="height:3px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:3px;background:'+scoreColor+';border-radius:2px"></div></div></div>' : '')
     +fuBadge
+    // Action buttons
     +'<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">'
-    +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none;cursor:pointer">💬 WhatsApp</a>' : '')
+    +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">💬 WhatsApp</a>' : '')
     +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Msg</button>'
-    +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid #7C3AED;border-radius:6px;font-size:10px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️ Editar</button>'
+    +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--brand-mid);border-radius:6px;font-size:10px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️ Editar</button>'
     +'</div>'
-    +'<div style="display:flex;gap:4px;margin-top:5px">'
-    +'<select data-cid="'+lead._id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
+    // Stage selector
+    +'<div style="display:flex;gap:4px;margin-top:6px">'
+    +'<select data-cid="'+lead._id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
     + CRM_FASES.map(function(f){ return '<option value="'+f.id+'"'+(lead.etapa===f.id?' selected':'')+'>'+f.label+'</option>'; }).join('')
     +'</select>'
     +'</div>'
@@ -14025,7 +14340,7 @@ function crmRenderKpi(marca) {
     {v:fuVenc,       l:'Follow-up Vencido',         c:'#B45309', ico:'⏰'},
     {v:parados,      l:'Cards Parados',             c:'#6B7280', ico:'⚠️'}
   ];
-   kpiEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">'
+   kpiEl.innerHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap">'
     + kpis.map(function(k){
         return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px">'
           +'<div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">'+k.ico+' '+k.l+'</div>'
@@ -14039,16 +14354,71 @@ function crmRenderKpi(marca) {
   if(countEl) countEl.textContent = total;
 }
 
+
+function crmRenderHeroBar() {
+  // Aggregate all leads across both brands
+  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id; });
+  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var pipeline = allLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
+  var fechados = allLeads.filter(function(l){ return l.etapa==='fechado'; }).length;
+  var total = allLeads.length;
+  var winRate = (total > 0) ? Math.round(fechados / (total) * 100) : 0;
+  var iaOrigens = ['ia','site','whatsapp_ia'];
+  var iaCount = allLeads.filter(function(l){ return iaOrigens.indexOf(l.origem)>=0; }).length;
+  var manualCount = total - iaCount;
+  // Status counts
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var overdue = allLeads.filter(function(l){
+    if(l.etapa==='fechado'||l.etapa==='congelado') return false;
+    if(l.horas_sem_resposta && l.horas_sem_resposta>48) return true;
+    if(l.data_retorno){ var dr=new Date(l.data_retorno+'T00:00:00'); return dr<hoje; }
+    return false;
+  }).length;
+  var urgent = allLeads.filter(function(l){
+    if(l.etapa==='fechado'||l.etapa==='congelado') return false;
+    if(l.data_retorno){ var dr=new Date(l.data_retorno+'T00:00:00'); var diff=Math.round((dr-hoje)/(86400000)); return diff>=0&&diff<=2; }
+    return false;
+  }).length;
+  var onTrack = total - overdue - urgent - fechados;
+  var atencao = overdue + urgent;
+  // Formatter
+  function fmtV(v){ if(v>=1000000) return 'R$ '+(v/1000000).toFixed(1).replace('.',',')+'M'; if(v>=1000) return 'R$ '+Math.round(v/1000)+'k'; return 'R$ '+Math.round(v); }
+  // Update DOM
+  var el = function(id){ return document.getElementById(id); };
+  if(el('crmHeroPipeline')) el('crmHeroPipeline').textContent = fmtV(pipeline);
+  if(el('crmHeroTotal')) el('crmHeroTotal').textContent = total;
+  if(el('crmHeroIA')) el('crmHeroIA').textContent = iaCount;
+  if(el('crmHeroManual')) el('crmHeroManual').textContent = manualCount;
+  if(el('crmHeroFechados')) el('crmHeroFechados').textContent = fechados + ' fechado' + (fechados!==1?'s':'');
+  if(el('crmWinRatePct')) el('crmWinRatePct').textContent = winRate + '%';
+  if(el('crmWinRateCircle')){ var circ = 2*Math.PI*22; el('crmWinRateCircle').style.strokeDashoffset = circ*(1-winRate/100); }
+  if(el('crmStatOverdue')) el('crmStatOverdue').textContent = overdue;
+  if(el('crmStatUrgent')) el('crmStatUrgent').textContent = urgent;
+  if(el('crmStatOk')) el('crmStatOk').textContent = Math.max(0,onTrack);
+  if(el('crmStatAtencao')) el('crmStatAtencao').textContent = atencao;
+}
+
 function crmRenderBoard(marca) {
   crmRenderKpi(marca);
+  crmRenderHeroBar();
   var suf = marca==='vr' ? 'VR' : 'VT';
   var boardEl = document.getElementById('crmBoard'+suf);
   if(!boardEl) return;
   var leads = crmLeadsFor(marca);
+  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  function fmtV(v){ if(v>=1000000) return 'R$'+(v/1000000).toFixed(1)+'M'; if(v>=1000) return 'R$'+Math.round(v/1000)+'k'; return 'R$'+Math.round(v); }
   boardEl.innerHTML = CRM_FASES.map(function(fase){
     var cards = leads.filter(function(l){ return l.etapa === fase.id; });
+    var colVal = cards.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
+    var valStr = colVal > 0 ? fmtV(colVal) : '';
     return '<div class="crm-col">'
-      +'<div class="crm-head" style="background:'+fase.cor+'">'+fase.label+' <span class="cc">'+cards.length+'</span></div>'
+      +'<div class="crm-head" style="background:'+fase.cor+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<span>'+fase.label+'</span>'
+      +'<span class="cc">'+cards.length+'</span>'
+      +'</div>'
+      +(valStr ? '<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.75);margin-top:3px">'+valStr+'</div>' : '')
+      +'</div>'
       +'<div class="crm-body" style="min-height:120px">'
       +(cards.length ? cards.map(crmCardHTML).join('') : '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">Nenhum lead aqui</div>')
       +'</div>'
