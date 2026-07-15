@@ -2974,11 +2974,7 @@ firebase.auth().signInAnonymously().then(function(){
          ============================== -->
     <div id="pg-crm" style="display:none">
       <!-- FOLLOW-UP BAR -->
-      <div class="crm-follow-bar" id="crmFollowBar" onclick="nav('crm');setTimeout(function(){crmSetBrand('dia');},120)" style="display:none">
-        <span>📅</span>
-        <span id="crmFollowTxt" style="font-weight:700">Tarefas de Hoje: 0 contatos agendados</span>
-        <span style="margin-left:auto;font-size:10px;color:var(--muted)">Clique para filtrar ›</span>
-      </div>
+      <!-- follow bar removida — use a aba Tarefas na sidebar -->
       <!-- RECORRÊNCIA ALERT BAR -->
       <div id="crmRecorrenciaBar" style="display:none;background:linear-gradient(90deg,#065F46,#047857);color:#fff;border-radius:8px;padding:9px 14px;margin-bottom:10px;font-size:12px;align-items:center;gap:8px;cursor:pointer" onclick="crmVerRecorrentes()">
         <span style="font-size:15px">🔁</span>
@@ -11321,13 +11317,7 @@ function crmSalvarAgenda(id) {
   showToast('Agenda salva para '+d.nome,'ok');
 }
 
-function crmUpdateFollowBar() {
-  var hoje=new Date().toISOString().slice(0,10);
-  var leads=Object.values(CRM_LEADS).filter(function(l){return l.data_retorno&&l.data_retorno<=hoje;});
-  var bar=document.getElementById('crmFollowBar'), txt=document.getElementById('crmFollowTxt');
-  if(bar) bar.style.display=leads.length?'flex':'none';
-  if(txt) txt.textContent='Tarefas de Hoje: '+leads.length+' contato'+(leads.length!==1?'s':'')+' agendado'+(leads.length!==1?'s':'');
-}
+function crmUpdateFollowBar() { if(typeof tarefasAtualizarBadge==='function') tarefasAtualizarBadge(); }
 
 function crmFiltrarHoje() {
   var hoje=new Date().toISOString().slice(0,10), count=0;
@@ -16560,4 +16550,9 @@ setTimeout(function(){
   </div>
 </div>
 </body>
-</html>
+</html>ity:.4">Importar</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
