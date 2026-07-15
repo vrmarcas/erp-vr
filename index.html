@@ -1196,6 +1196,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{crmRenderBoard(crmActiveBrand);comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{localStorage.setItem('erp_stock_log',JSON.stringify(d));stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ try{localStorage.setItem('erp_permissoes',JSON.stringify(d));}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;localStorage.setItem('erp_sb_state',JSON.stringify(d));sbRestoreState();}catch(e){} } });
@@ -1277,6 +1278,7 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ if(d){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
+  _cloudLoad("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; } done(); });
   _cloudLoad("erp_usuarios", function(d){
     if(d&&d.length){
       // Mesclar: usuários da nuvem têm prioridade, mas preserva locais únicos
@@ -6508,51 +6510,14 @@ function orcSimPagamento() {
 // CRM INTELIGENTE
 // ============================================================
 
-// Base de dados simulada dos leads
-const CRM_LEADS = {
-  vr1: {
-    nome: 'CONSTRUSHOW Ltda.', tipo:'B2B', marca:'vr', cor:'#7C3AED',
-    sub: 'Materiais de construção — Goiânia',
-    contato: 'Carlos Menezes — Gerente de Marketing',
-    tel: '(62) 99900-1234', email: 'carlos@construshow.com.br',
-    temp: 'quente', score: 87, origem: 'ia',
-    resumo_ia: 'Rede de lojas em expansão buscando fornecedor de displays em acrílico para PDV. Decisor identificado, orçamento disponível Q3/2026. Concorrente atual: fornecedor de SP com prazo longo. Alta intenção de troca.',
-    intencao: { produto: 'Display acrílico PDV', material: 'Acrílico cristal 3mm', medidas: '60×40cm', quantidade: 20 },
-    dores: ['Prazo de entrega do fornecedor atual muito longo', 'Qualidade inconsistente entre lotes', 'Sem personalização por loja'],
-    etapa: 'ia_novo', valor_potencial: 'R$ 3.200,00', tempo: 'há 12 min', data_retorno: '2026-07-01', nota_followup: 'Confirmar interesse na reunião de apresentação'
-  },
-  vt1: {
-    nome: 'Fernanda Alves', tipo:'B2C', marca:'vitre', cor:'#F9A8D4',
-    sub: 'WhatsApp: (62) 99841-0022',
-    contato: 'Fernanda Alves (decisora direta)',
-    tel: '(62) 99841-0022', email: '—',
-    temp: 'morno', score: 62, origem: 'ia',
-    resumo_ia: 'Cliente B2C contactou via WhatsApp interessada em placa decorativa personalizada para quarto de bebê. Mencionou medidas de 50×30cm e referenciou post do Instagram da Vitre. Pediu urgência para data de chá de bebê.',
-    intencao: { produto: 'Placa decorativa', material: 'Acrílico cristal 3mm', medidas: '50×30cm', quantidade: 1 },
-    dores: ['Data urgente (chá de bebê em 2 semanas)', 'Quer personalização com nome do bebê'],
-    etapa: 'ia_novo', valor_potencial: 'R$ 280,00', tempo: 'há 34 min', data_retorno: '2026-07-01', nota_followup: 'Confirmar prazo de entrega para o chá de bebê'
-  },
-  vr2: {
-    nome: 'ARQX Studio', tipo:'B2B', marca:'vr', cor:'#7C3AED',
-    sub: 'Escritório de arquitetura — São Paulo',
-    contato: 'Renata Souza — Sócia-diretora',
-    tel: '(11) 98771-0055', email: 'renata@arqxstudio.com.br',
-    temp: 'quente', score: 91, origem: 'ia',
-    resumo_ia: 'Escritório de arquitetura premium com projeto de loja conceito para cliente varejista. Buscando fornecedor de corte a laser em acrílico e metal para peças de comunicação visual exclusivas. Budget estimado: R$15k–25k. Decisão em 3 semanas.',
-    intencao: { produto: 'Peças comunicação visual', material: 'Acrílico + Metal Inox', medidas: 'Variadas (projeto)', quantidade: 'Múltiplas' },
-    dores: ['Projeto exclusivo — precisa de parceiro técnico, não só fornecedor', 'Prazo apertado para entrega da loja'],
-    etapa: 'ia_novo', valor_potencial: 'R$ 18.000,00', tempo: 'há 1h'
-  },
-  vr3: { nome:'MEGA Varejo', tipo:'B2B', marca:'vr', cor:'#2563EB', sub:'Rede de farmácias — 12 lojas', contato:'Fernando Lima — Diretoria', tel:'(62) 99100-2233', email:'flima@megavarejo.com.br', temp:'quente', score:80, origem:'manual', resumo_ia:'Lead manual qualificado pela equipe. Rede em expansão.', intencao:{produto:'Display farmácia',material:'Acrílico leitoso 5mm',medidas:'40×60cm',quantidade:50}, dores:[], etapa:'qualificando', valor_potencial:'R$ 9.500,00', tempo:'ontem', data_retorno:'2026-07-01', nota_followup:'Enviar portfólio de displays para farmácias' },
-  vt2: { nome:'Camila Rocha', tipo:'B2C', marca:'vitre', cor:'#9D174D', sub:'Placa personalizada casamento', contato:'Camila Rocha', tel:'(62) 99522-8811', email:'camila@email.com', temp:'morno', score:55, origem:'manual', resumo_ia:'Cliente B2C buscando placa para casamento.', intencao:{produto:'Placa casamento',material:'Acrílico espelho',medidas:'60×20cm',quantidade:2}, dores:[], etapa:'qualificando', valor_potencial:'R$ 420,00', tempo:'ontem' },
-  vr4: { nome:'TechStore Franquia', tipo:'B2B', marca:'vr', cor:'#2563EB', sub:'Displays PDV — 30 unidades', contato:'Marcos Andrade', tel:'(11) 98800-1122', email:'marcos@techstore.com.br', temp:'frio', score:38, origem:'ia', resumo_ia:'Lead identificado pela IA em pesquisa de fornecedores. Score baixo — concorrente já cotado.', intencao:{produto:'Display PDV',material:'PS Cristal 3mm',medidas:'30×40cm',quantidade:30}, dores:['Já tem 2 cotações'], etapa:'qualificando', valor_potencial:'R$ 4.200,00', tempo:'há 3h' },
-  vr5: { nome:'CLARO — Display PDV', tipo:'B2B', marca:'vr', cor:'#D97706', sub:'Orçamento R$2.480,00 enviado há 2h', contato:'Juliana Castro', tel:'(62) 98800-3344', email:'juliana@claro.com.br', temp:'quente', score:78, origem:'manual', resumo_ia:'Cliente recorrente. Orçamento enviado há 2h. Aguardando resposta.', intencao:{produto:'Display PS cristal',material:'PS Cristal 3mm',medidas:'60×40cm',quantidade:10}, dores:[], etapa:'orc_emitido', valor_potencial:'R$ 2.480,00', tempo:'há 2h', horas_sem_resposta:2 },
-  vt3: { nome:'João Pedro — Letra Caixa', tipo:'B2C', marca:'vitre', cor:'#DC2626', sub:'Orçamento R$380,00 · VENCIDO 51h', contato:'João Pedro', tel:'(62) 99841-0022', email:'joao@email.com', temp:'morno', score:60, origem:'manual', resumo_ia:'Cliente B2C. Orçamento emitido há 51h sem resposta. Follow-up de IA necessário.', intencao:{produto:'Letra caixa',material:'Acrílico leitoso 8mm',medidas:'80×20cm',quantidade:1}, dores:[], etapa:'orc_emitido', valor_potencial:'R$ 380,00', tempo:'há 51h', horas_sem_resposta:51, followup_vencido:true },
-  vr6: { nome:'VIVO — Painel Loja', tipo:'B2B', marca:'vr', cor:'#DC2626', sub:'Orçamento R$5.200,00 · VENCIDO 49h', contato:'Paulo Henrique', tel:'(11) 97700-5544', email:'paulo@vivo.com.br', temp:'quente', score:82, origem:'manual', resumo_ia:'Lead de alto valor. 49h sem resposta. Risco de perda. Follow-up urgente.', intencao:{produto:'Painel loja',material:'Acrílico 10mm + ACM',medidas:'120×80cm',quantidade:5}, dores:[], etapa:'orc_emitido', valor_potencial:'R$ 5.200,00', tempo:'há 49h', horas_sem_resposta:49, followup_vencido:true },
-  vr7: { nome:'OI Telecom', tipo:'B2B', marca:'vr', cor:'#7C3AED', sub:'Aguardando aprovação PO', contato:'Rodrigo Avelar', tel:'(62) 99100-4455', email:'rodrigo@oi.com.br', temp:'quente', score:90, origem:'manual', resumo_ia:'Cliente estratégico em fase de negociação. PO em aprovação interna.', intencao:{produto:'Painel fachada',material:'Acrílico 10mm + ACM',medidas:'120×80cm',quantidade:8}, dores:[], etapa:'negociacao', valor_potencial:'R$ 8.700,00', tempo:'há 2 dias' }
-};
+// CRM_LEADS — carregado do Firebase (fonte de dados única)
+let CRM_LEADS = {};
 
 let crmLeadIdCounter = 100;
+
+function crmSaveLeads() {
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_leads', CRM_LEADS);
+}
 
 function crmOpenCard(id) {
   const d = CRM_LEADS[id]; if(!d) return;
@@ -6797,6 +6762,7 @@ function crmExecutarImport() {
   const sub = document.getElementById('crmImpSuccessSub');
   sub.textContent = `${nome} adicionado à coluna "Novo Lead" ${isVR?'(VR Marcas)':'(Vitre)'}.`;
   document.getElementById('crmImpSuccess').classList.add('show');
+  crmSaveLeads();
 }
 
 function crmImpReset() {
@@ -6865,6 +6831,7 @@ function crmSimLeadIA() {
   if(bc) bc.textContent = parseInt(bc.textContent)+1;
   const kpiIA = document.getElementById('crmKpiIA');
   if(kpiIA && sim.marca==='vr') kpiIA.textContent = parseInt(kpiIA.textContent)+1;
+  crmSaveLeads();
 }
 
 // ============================================================
@@ -10928,6 +10895,7 @@ function crmMoverCongelado(id) {
   d.etapa = 'congelado';
   crmCloseModal();
   showToast(d.nome+' movido para Congelado ❄️','info');
+  crmSaveLeads();
 }
 
 function crmAvançarEtapa(id) {
@@ -10948,6 +10916,7 @@ function crmAvançarEtapa(id) {
   var nomes = {ia_novo:'IA/Novos', qualificando:'Qualificando', orc_emitido:'Orçamento', negociacao:'Negociação', fechado:'Fechado'};
   crmCloseModal();
   showToast(d.nome+' → '+( nomes[prox]||prox),'ok');
+  crmSaveLeads();
 }
 
 function crmAbrirWhatsApp(id) {
@@ -12606,6 +12575,7 @@ function crmSalvarNovoLead() {
   } else {
     showToast(nome+' adicionado ao CRM ✓','ok');
   }
+  crmSaveLeads();
 }
 
 // ============================================================
@@ -12671,6 +12641,7 @@ function crmPushOrcamento(osId) {
   if(cnt) cnt.textContent=parseInt(cnt.textContent||'0')+1;
   if(isVR) { var vr3cnt=col.closest('.crm-col'); if(vr3cnt){var cc=vr3cnt.querySelector('.cc');if(cc)cc.textContent=parseInt(cc.textContent||'0')+1;} }
   showToast(os.cliente+' adicionado ao CRM — Orçamento Emitido 💰','ok');
+  crmSaveLeads();
 }
 
 // ============================================================
@@ -14128,6 +14099,7 @@ function crmRenderBoard(marca) {
 function crmMoverFase(id, novaFase) {
   var lead = CRM_LEADS[id]; if(!lead) return;
   lead.etapa = novaFase;
+  crmSaveLeads();
   crmRenderBoard(lead.marca);
   showToast('Lead movido para '+CRM_FASES.find(function(f){return f.id===novaFase;})?.label,'ok');
 }
@@ -15113,6 +15085,7 @@ function _crmVincularCliente(leadId, nome, tel, email, marca) {
   CLIENTES_DATA.push(novoCliente);
   if(CRM_LEADS[leadId]) CRM_LEADS[leadId].clienteId = novoId;
   _crmAdicionarBadgeCliente(leadId, novoId, true);
+  crmSaveLeads();
   return { criado: true, encontrado: false, cliente: novoCliente };
 }
 
