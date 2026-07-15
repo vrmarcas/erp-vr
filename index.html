@@ -1196,7 +1196,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{crmRenderBoard(crmActiveBrand);comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{crmRenderBoard(crmActiveBrand);if(typeof crmRenderDia==='function'&&document.getElementById('crmBrandDia')?.style.display!=='none')crmRenderDia();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -2970,7 +2970,7 @@ firebase.auth().signInAnonymously().then(function(){
          ============================== -->
     <div id="pg-crm" style="display:none">
       <!-- FOLLOW-UP BAR -->
-      <div class="crm-follow-bar" id="crmFollowBar" onclick="crmFiltrarHoje()" style="display:none">
+      <div class="crm-follow-bar" id="crmFollowBar" onclick="nav('crm');setTimeout(function(){crmSetBrand('dia');},120)" style="display:none">
         <span>📅</span>
         <span id="crmFollowTxt" style="font-weight:700">Tarefas de Hoje: 0 contatos agendados</span>
         <span style="margin-left:auto;font-size:10px;color:var(--muted)">Clique para filtrar ›</span>
@@ -6932,22 +6932,29 @@ function crmSetBrand(b) {
   crmActiveBrand = b;
   const isVR = b === 'vr';
   const isSite = b === 'site';
+  const isDia = b === 'dia';
   document.getElementById('crmBrandVR').style.display = isVR ? '' : 'none';
-  document.getElementById('crmBrandVT').style.display = (!isVR&&!isSite) ? '' : 'none';
+  document.getElementById('crmBrandVT').style.display = (!isVR&&!isSite&&!isDia) ? '' : 'none';
   var siteBrand=document.getElementById('crmBrandSite'); if(siteBrand) siteBrand.style.display=isSite?'':'none';
-  if(isVR) crmRenderBoard('vr'); else if(!isSite) crmRenderBoard('vitre'); else { siteLeadRender(); siteKpiRender(); var _sp=document.getElementById('siteShopifyPanelDiv'); if(_sp&&SITE_LEADS.length===0) _sp.style.display=''; }
+  var diaBrand=document.getElementById('crmBrandDia'); if(diaBrand) diaBrand.style.display=isDia?'':'none';
+  if(isVR) crmRenderBoard('vr'); else if(isDia) crmRenderDia(); else if(!isSite) crmRenderBoard('vitre'); else { siteLeadRender(); siteKpiRender(); var _sp=document.getElementById('siteShopifyPanelDiv'); if(_sp&&SITE_LEADS.length===0) _sp.style.display=''; }
   const tabVR = document.getElementById('crmTabVR');
   const tabVT = document.getElementById('crmTabVT');
   tabVR.style.borderBottomColor = isVR ? '#7C3AED' : 'transparent';
   tabVR.style.color = isVR ? '#4C1D95' : 'var(--muted)';
   tabVR.style.fontWeight = isVR ? '800' : '700';
-  tabVT.style.borderBottomColor = !isVR ? '#BE185D' : 'transparent';
-  tabVT.style.color = !isVR ? '#831843' : 'var(--muted)';
-  tabVT.style.fontWeight = !isVR ? '800' : '700';
+  var isVT = !isVR&&!isSite&&!isDia;
+  tabVT.style.borderBottomColor = isVT ? '#BE185D' : 'transparent';
+  tabVT.style.color = isVT ? '#831843' : 'var(--muted)';
+  tabVT.style.fontWeight = isVT ? '800' : '700';
   var tabSite=document.getElementById('crmTabSite');
   if(tabSite){tabSite.style.borderBottomColor=isSite?'#059669':'transparent';
   tabSite.style.color=isSite?'#065F46':'var(--muted)';
   tabSite.style.fontWeight=isSite?'800':'700';}
+  var tabDia2=document.getElementById('crmTabDia');
+  if(tabDia2){tabDia2.style.borderBottomColor=isDia?'#D97706':'transparent';
+  tabDia2.style.color=isDia?'#92400E':'var(--muted)';
+  tabDia2.style.fontWeight=isDia?'800':'700';}
 }
 function crmShowPayload()  { /* removido */ }
 function crmShowSchema()   { /* removido */ }
@@ -14251,7 +14258,6 @@ function crmCardHTML(lead) {
   }
 
   return '<div class="crm-card" data-id="'+lead._id+'" onclick="crmOpenCard(this.dataset.id)" style="border-color:'+(lead.cor||avatarColor)+'">'
-    // Avatar + name row
     +'<div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:7px">'
     +'<div style="width:36px;height:36px;border-radius:9px;background:'+avatarColor+';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;flex-shrink:0;letter-spacing:-.5px">'+initials+'</div>'
     +'<div style="flex:1;min-width:0">'
@@ -14260,22 +14266,17 @@ function crmCardHTML(lead) {
     +'</div>'
     +'<span style="font-size:14px;flex-shrink:0" title="'+lead.temp+'">'+tempIcon+'</span>'
     +'</div>'
-    // Origin + value
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">'
     +'<span style="font-size:9px;color:var(--muted);background:var(--bg);border-radius:4px;padding:1px 5px">'+(CRM_ORIG_MAP[lead.origem]||lead.origem||'—')+'</span>'
     +'<span style="font-size:12px;font-weight:800;color:#059669">'+(lead.valor_potencial||'')+'</span>'
     +'</div>'
-    // Score bar
-    +(score>0 ? '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:2px"><span>Deal Score</span><span style="color:'+scoreColor+';font-weight:700">'+score+'</span></div>'
-    +'<div style="height:3px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:3px;background:'+scoreColor+';border-radius:2px"></div></div></div>' : '')
+    +(score>0 ? '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-bottom:2px"><span>Deal Score</span><span style="color:'+scoreColor+';font-weight:700">'+score+'</span></div>'+'<div style="height:3px;background:var(--border);border-radius:2px"><div style="width:'+score+'%;height:3px;background:'+scoreColor+';border-radius:2px"></div></div></div>' : '')
     +fuBadge
-    // Action buttons
     +'<div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">'
     +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">💬 WhatsApp</a>' : '')
     +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Msg</button>'
     +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--brand-mid);border-radius:6px;font-size:10px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️ Editar</button>'
     +'</div>'
-    // Stage selector
     +'<div style="display:flex;gap:4px;margin-top:6px">'
     +'<select data-cid="'+lead._id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
     + CRM_FASES.map(function(f){ return '<option value="'+f.id+'"'+(lead.etapa===f.id?' selected':'')+'>'+f.label+'</option>'; }).join('')
@@ -14328,6 +14329,95 @@ function crmRenderKpi(marca) {
   if(countEl) countEl.textContent = total;
 }
 
+
+
+function crmRenderDia() {
+  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id; });
+  var hoje = new Date(); hoje.setHours(0,0,0,0);
+  var amanha = new Date(hoje); amanha.setDate(amanha.getDate()+1);
+
+  // Leads com follow-up hoje ou atrasados (exceto fechado/congelado)
+  var diaLeads = allLeads.filter(function(l) {
+    if(l.etapa==='fechado'||l.etapa==='congelado') return false;
+    if(l.horas_sem_resposta && l.horas_sem_resposta > 24) return true;
+    if(l.data_retorno) {
+      var dr = new Date(l.data_retorno+'T00:00:00');
+      return dr <= amanha;
+    }
+    return false;
+  });
+
+  // Sort: overdue first, then by date
+  diaLeads.sort(function(a,b) {
+    var aVenc = a.horas_sem_resposta>48 || (a.data_retorno && new Date(a.data_retorno+'T00:00:00')<hoje);
+    var bVenc = b.horas_sem_resposta>48 || (b.data_retorno && new Date(b.data_retorno+'T00:00:00')<hoje);
+    if(aVenc && !bVenc) return -1;
+    if(!aVenc && bVenc) return 1;
+    return 0;
+  });
+
+  // Update count badge
+  var diaCount = document.getElementById('crmDiaCount');
+  if(diaCount) diaCount.textContent = diaLeads.length;
+
+  var boardEl = document.getElementById('crmBoardDia');
+  var emptyEl = document.getElementById('crmBoardDiaEmpty');
+  if(!boardEl) return;
+
+  if(!diaLeads.length) {
+    boardEl.innerHTML = '';
+    if(emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+  if(emptyEl) emptyEl.style.display = 'none';
+
+  function parsVal(v){ return parseFloat((v||'0').replace(/[^\d,]/g,'').replace(',','.'))||0; }
+  var avatarColors = ['#7C3AED','#1D4ED8','#059669','#B45309','#BE185D','#0E7490','#DC2626'];
+
+  boardEl.innerHTML = diaLeads.map(function(lead) {
+    var words = (lead.nome||'?').trim().split(/\s+/);
+    var initials = words.length>=2 ? (words[0][0]+words[words.length-1][0]).toUpperCase() : (lead.nome||'?').slice(0,2).toUpperCase();
+    var avatarColor = avatarColors[(lead.nome||'').charCodeAt(0) % avatarColors.length];
+    var phone = crmFmtPhone(lead.tel);
+    var waLink = phone ? 'https://wa.me/55'+phone : '#';
+    var score = lead.score||0;
+    var scoreColor = score>=70?'#059669':score>=40?'#D97706':'#DC2626';
+    var isVencido = lead.horas_sem_resposta>48 || (lead.data_retorno && new Date(lead.data_retorno+'T00:00:00')<hoje);
+    var faseLabel = (CRM_FASES.find(function(f){return f.id===lead.etapa;})||{}).label||lead.etapa;
+    var faseCor   = (CRM_FASES.find(function(f){return f.id===lead.etapa;})||{}).cor||'#6B7280';
+    var drStr = '';
+    if(lead.data_retorno) {
+      var dr = new Date(lead.data_retorno+'T00:00:00');
+      var diff = Math.round((dr-hoje)/86400000);
+      drStr = dr.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+      if(diff<0) drStr += ' ('+Math.abs(diff)+'d atrás)';
+      else if(diff===0) drStr += ' (hoje)';
+      else if(diff===1) drStr += ' (amanhã)';
+    }
+
+    return '<div style="background:var(--surface);border-radius:12px;padding:14px 16px;border-left:4px solid '+(isVencido?'#EF4444':faseCor)+';box-shadow:0 1px 6px rgba(0,0,0,.07);display:flex;align-items:center;gap:14px;cursor:pointer" onclick="crmOpenCard(\''+lead._id+'\')">'
+      +'<div style="width:42px;height:42px;border-radius:10px;background:'+avatarColor+';display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0">'+initials+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">'
+          +'<span style="font-size:13px;font-weight:800;color:var(--text)">'+lead.nome+'</span>'
+          +(isVencido ? '<span style="background:#FEE2E2;color:#DC2626;border-radius:4px;padding:1px 7px;font-size:9px;font-weight:700">⚠️ ATRASADO</span>' : '<span style="background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 7px;font-size:9px;font-weight:700">📅 HOJE</span>')
+          +'<span style="margin-left:auto;background:'+faseCor+';color:#fff;border-radius:4px;padding:1px 8px;font-size:9px;font-weight:700">'+faseLabel+'</span>'
+        +'</div>'
+        +(lead.sub ? '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">'+lead.sub+'</div>' : '')
+        +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+          +(drStr ? '<span style="font-size:10px;color:'+(isVencido?'#DC2626':'#D97706')+';font-weight:700">📅 '+drStr+'</span>' : '')
+          +(lead.valor_potencial ? '<span style="font-size:11px;font-weight:800;color:#059669">'+lead.valor_potencial+'</span>' : '')
+          +(score>0 ? '<span style="font-size:10px;color:'+scoreColor+';font-weight:700">Score: '+score+'</span>' : '')
+        +'</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:6px;flex-shrink:0">'
+        +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="padding:7px 12px;background:#25D366;color:#fff;border-radius:8px;font-size:11px;font-weight:700;text-decoration:none">💬</a>' : '')
+        +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmMsgAbrir(this.dataset.cid)" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:11px;background:var(--bg);color:var(--text);cursor:pointer">✉️</button>'
+        +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:7px 10px;border:1px solid var(--brand-mid);border-radius:8px;font-size:11px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️</button>'
+      +'</div>'
+      +'</div>';
+  }).join('');
+}
 
 function crmRenderHeroBar() {
   // Aggregate all leads across both brands
