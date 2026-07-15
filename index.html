@@ -1197,10 +1197,10 @@ function _cloudLoadAll() {
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{crmRenderBoard(crmActiveBrand);comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
-    _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{localStorage.setItem('erp_stock_log',JSON.stringify(d));stockRenderHistorico();}catch(e){} } });
-    _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ try{localStorage.setItem('erp_permissoes',JSON.stringify(d));}catch(e){} } });
-    _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;localStorage.setItem('erp_sb_state',JSON.stringify(d));sbRestoreState();}catch(e){} } });
-    _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ try{Object.keys(d).forEach(function(dt){localStorage.setItem('erp_caixa_ant_'+dt,d[dt]);});}catch(e){} } });
+    _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
+    _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
+    _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
+    _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]) STOCK[k].qty=d[k].qty||STOCK[k].qty; }); } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
@@ -1211,7 +1211,7 @@ function _cloudLoadAll() {
         var local=usrLoadUsuarios();
         var merged=d.slice();
         local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
-        try{ localStorage.setItem('erp_usuarios',JSON.stringify(merged)); }catch(e){}
+        try{ }catch(e){}
         try{ usrRender(); }catch(e){}
         var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
       }
@@ -1243,32 +1243,31 @@ function _cloudLoadAll() {
           var area=(r.comp||0)*(r.larg||0)/10000;
           if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
         });
-        try{ localStorage.setItem(CFG_KEY, JSON.stringify(merged)); }catch(e){}
         _cfgData = merged;
         var pg=document.getElementById('cfgPg1');
         if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
       }
     });
     _cloudWatch("erp_fornecedores", function(d){
-      if(d&&Array.isArray(d)){ try{ localStorage.setItem(FORN_KEY,JSON.stringify(d)); }catch(e){} try{ fornRender(); }catch(e){} }
+      if(d&&Array.isArray(d)){ _FORN_DATA=d; try{ fornRender(); }catch(e){} }
     });
     _cloudWatch("erp_plan_produtos", function(d){
-      if(d&&Array.isArray(d)){ try{ localStorage.setItem(PLAN_PROD_KEY,JSON.stringify(d)); }catch(e){} try{ cfgRenderProdutos(); }catch(e){} }
+      if(d&&Array.isArray(d)){ _PLAN_PROD_DATA=d; try{ cfgRenderProdutos(); }catch(e){} }
     });
     _cloudWatch("erp_client_history", function(d){
-      if(d&&typeof d==='object') try{ localStorage.setItem(CLIENT_HIST_KEY,JSON.stringify(d)); }catch(e){}
+      if(d&&typeof d==='object') _CLIENT_HIST=d;
     });
     _cloudWatch("erp_bank_config", function(d){
-      if(d&&typeof d==='object') try{ localStorage.setItem(BANK_KEY,JSON.stringify(d)); }catch(e){}
+      if(d&&typeof d==='object') _BANK_DATA=d;
     });
     _cloudWatch("erp_posvendas", function(d){
-      if(d&&typeof d==='object') try{ localStorage.setItem(POSV_KEY,JSON.stringify(d)); }catch(e){}
+      if(d&&typeof d==='object') _POSV_DATA=d;
     });
     _cloudWatch("erp_orc_produtos", function(d){
-      if(d&&Array.isArray(d)){ ORC_PRODUTOS=d; try{ localStorage.setItem(ORC_PROD_KEY,JSON.stringify(d)); }catch(e){} }
+      if(d&&Array.isArray(d)){ ORC_PRODUTOS=d; }
     });
     _cloudWatch("erp_mach_presets", function(d){
-      if(d&&Array.isArray(d)) try{ localStorage.setItem(MACH_PRESET_KEY,JSON.stringify(d)); }catch(e){}
+      if(d&&Array.isArray(d)) _MACH_PRESETS=d;
     });
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
@@ -1279,15 +1278,29 @@ function _cloudLoadAll() {
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; } done(); });
+  _cloudLoad("erp_os_counter", function(d){ if(d) _OS_COUNTER=parseInt(d)||0; done(); });
+  _cloudLoad("clientes_lixeira", function(d){ if(d&&Array.isArray(d)) CLIENTES_LIXEIRA=d; done(); });
+  _cloudLoad("erp_caixa_ant", function(d){ if(d&&typeof d=='object') _CX_ALL=d; done(); });
+  _cloudLoad("erp_fornecedores", function(d){ if(d&&Array.isArray(d)&&d.length) _FORN_DATA=d; done(); });
+  _cloudLoad("erp_plan_produtos", function(d){ if(d&&Array.isArray(d)&&d.length) _PLAN_PROD_DATA=d; done(); });
+  _cloudLoad("erp_client_history", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _CLIENT_HIST=d; done(); });
+  _cloudLoad("erp_bank_config", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _BANK_DATA=d; done(); });
+  _cloudLoad("erp_posvendas", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _POSV_DATA=d; done(); });
+  _cloudLoad("erp_orc_produtos", function(d){ if(d&&Array.isArray(d)&&d.length) ORC_PRODUTOS=d; done(); });
+  _cloudLoad("erp_mach_presets", function(d){ if(d&&Array.isArray(d)&&d.length) _MACH_PRESETS=d; done(); });
+  _cloudLoad("erp_mat_prices", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _MAT_PRICES=d; done(); });
+  _cloudLoad("erp_permissoes", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _PERM_DATA=d; done(); });
+  _cloudLoad("erp_sb_state", function(d){ if(d&&typeof d==='object') _sbState=d; done(); });
+  _cloudLoad("erp_master_pwd", function(d){ if(d) _SEC_MASTER=d; done(); });
+  _cloudLoad("erp_audit_log", function(d){ if(d&&Array.isArray(d)) _SEC_AUDIT=d; done(); });
+  _cloudLoad("erp_inact_mins", function(d){ if(d) _SEC_INACT_MINS=parseInt(d)||20; done(); });
+  _cloudLoad("chatvolt_agent_id", function(d){ if(d) _chatvoltAgentId=d; done(); });
+  _cloudLoad("chatvolt_marca", function(d){ if(d) _chatvoltMarca=d; done(); });
+  _cloudLoad("chatvolt_fase", function(d){ if(d) _chatvoltFase=d; done(); });
+  _cloudLoad("shopify_cfg", function(d){ if(d&&typeof d==='object') _SHOPIFY_CFG=d; done(); });
+  _cloudLoad("crm_site_leads", function(d){ if(d&&Array.isArray(d)) SITE_LEADS=d; done(); });
   _cloudLoad("erp_usuarios", function(d){
-    if(d&&d.length){
-      // Mesclar: usuários da nuvem têm prioridade, mas preserva locais únicos
-      var local=usrLoadUsuarios();
-      var merged=d.slice();
-      local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
-      try{ localStorage.setItem('erp_usuarios',JSON.stringify(merged)); }catch(e){}
-      var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
-    }
+    if(d&&d.length){ _USR_DATA=d; var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none'; }
     done();
   });
   _cloudLoad("erp_config", function(d){
@@ -1313,7 +1326,6 @@ function _cloudLoadAll() {
         var area=(r.comp||0)*(r.larg||0)/10000;
         if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
       });
-      try{ localStorage.setItem(CFG_KEY, JSON.stringify(merged)); }catch(e){}
       _cfgData = merged;
     }
     done();
@@ -3353,7 +3365,7 @@ firebase.auth().signInAnonymously().then(function(){
               <option value="retalho-entrada">✂️ Retalho — Criação</option>
               <option value="retalho-saida">✂️ Retalho — Consumo</option>
             </select>
-            <button onclick="STOCK_LOG=[];try{localStorage.removeItem('erp_stock_log');}catch(e){}stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
+            <button onclick="STOCK_LOG=[];stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
           </div>
         </div>
         <div id="stockHistBody" style="margin-top:8px">
@@ -4919,8 +4931,8 @@ function navFin(tab, el) {
 // MÓDULO FORNECEDORES
 // ════════════════════════════════════════════════════════════════════════
 var FORN_KEY = 'erp_fornecedores';
-function fornLoad(){ try{ var d=JSON.parse(localStorage.getItem(FORN_KEY)||'[]'); return Array.isArray(d)?d:[]; }catch(e){ return []; } }
-function fornSaveAll(arr){ localStorage.setItem(FORN_KEY, JSON.stringify(arr)); if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_fornecedores', arr); }
+function fornLoad(){ return _FORN_DATA.slice(); }
+function fornSaveAll(arr){ _FORN_DATA=arr; if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_fornecedores', arr); }
 
 var FORN_CAT_COLOR = {
   'Matéria-Prima':'#7C3AED','Mão de Obra':'#059669','Serviços':'#3B82F6',
@@ -5211,11 +5223,10 @@ function sbToggle(key) {
     }
   }
   if(sec) sec.classList.toggle('collapsed', !!_sbState[key]);
-  localStorage.setItem('erp_sb_state', JSON.stringify(_sbState));
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_sb_state', _sbState);
 }
 function sbRestoreState() {
-  try { _sbState = JSON.parse(localStorage.getItem('erp_sb_state')||'{}'); } catch(e){_sbState={};}
+  // _sbState loaded from cloud
   ['principal','operacao','comercial','financeiro','admin'].forEach(function(k){
     var grp = document.getElementById('sbG-'+k);
     var sec = grp ? grp.previousElementSibling : null;
@@ -5333,7 +5344,7 @@ var ORC_PRAZO_MEDIO = {
 };
 
 var ORC_PRODUTOS_DEFAULT = ['Armário','Baleiro tubo','Bandeja','Barreira de proteção','Caixa','Chaveiro','Decoração','Display','Expositor','Galheteiro','Medalha','Organizador','Placa','Porta documentos','Porta pasta','Porta tablet','Prateleira','Protetor biometria','Púlpito','Quadro decorativo','Suporte','Tabuleiro de damas','Totem','Troféu','Urna'];
-var ORC_PRODUTOS = (function(){ try{ var s=localStorage.getItem('erp_orc_produtos'); return s?JSON.parse(s):ORC_PRODUTOS_DEFAULT.slice(); }catch(e){ return ORC_PRODUTOS_DEFAULT.slice(); } })();
+var ORC_PRODUTOS = ORC_PRODUTOS_DEFAULT.slice();
 const ORC_MATS = [
   { key:'ac3',  label:'Acrílico Cristal 3mm',  field:'op_ac3',  esp:3  },
   { key:'ac5',  label:'Acrílico Cristal 5mm',  field:'op_ac5',  esp:5  },
@@ -5571,8 +5582,8 @@ var PLAN_RECIPES = {
 };
 // default recipe for products not listed above
 var PLAN_PROD_KEY = 'erp_plan_produtos';
-function planProdLoad(){ try{ return JSON.parse(localStorage.getItem(PLAN_PROD_KEY)||'[]'); }catch(e){ return []; } }
-function planProdSaveList(arr){ localStorage.setItem(PLAN_PROD_KEY, JSON.stringify(arr)); }
+function planProdLoad(){ return _PLAN_PROD_DATA.length ? _PLAN_PROD_DATA.slice() : []; }
+function planProdSaveList(arr){ _PLAN_PROD_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_plan_produtos', arr); }
 
 function planEvalFormula(formula, L, A, P, e) {
   if(!formula || formula==='') return 0;
@@ -5789,7 +5800,7 @@ function planCalc() {
   var custoMat = (totalArea/10000) * priceM2;
 
   // Selling price using the correct formula: venda = custo / (1 - overhead - vrml)
-  var _cfgFin2=(function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  var _cfgFin2=(_cfgData&&_cfgData.financeiro)||{};
   var _planOh=(_cfgFin2.overhead!=null?_cfgFin2.overhead:41.16)/100;
   var _planVr=(_cfgFin2.vrml!=null?_cfgFin2.vrml:20)/100;
   var _planFac = 1 - _planOh - _planVr;  // e.g. 1 - 0.4116 - 0.20 = 0.3884
@@ -5893,7 +5904,7 @@ function orcSetV(id,v) { const el=document.getElementById(id); if(el) el.textCon
 
 function orcRecalc() {
   // Lê overhead e vrml do Config salvo (não mais do Step 3)
-  var _cfgFin = (function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  var _cfgFin = (_cfgData&&_cfgData.financeiro)||{};
   const overhead = (_cfgFin.overhead!=null ? _cfgFin.overhead : 41.16) / 100;
   const vrml     = (_cfgFin.vrml    !=null ? _cfgFin.vrml     : 20)    / 100;
   var _descTipo=(document.getElementById('orcDescTipo')?.value)||'pct';
@@ -7614,10 +7625,9 @@ function kbConfirmarProd() {
     // Se editando, restaurar retalho anterior
     if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
       var rOld = rList[os.matProd.retalhoIdx];
-      if (rOld) { rOld.qty++; try{localStorage.setItem('erp_retalhos',JSON.stringify(RETALHOS));}catch(e){} if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
+      if (rOld) { rOld.qty++; if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
     }
     retalho.qty--;
-    try { localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); } catch(e) {}
     if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS);
     _retalhoLog('retalho-saida', retalho.mat, retalho.label+' '+retalho.dims+' cm', retalho.codigo||'', os.num||os.id||'');
     os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
@@ -8250,7 +8260,7 @@ function comercialRender() {
 // ============================================================
 // DADOS BASE
 // ============================================================
-var STOCK_LOG = (function(){try{var s=localStorage.getItem('erp_stock_log');return s?JSON.parse(s):[];}catch(e){return [];}})();  // histórico de movimentações de estoque (persistido)
+var STOCK_LOG = [];  // histórico de movimentações de estoque (persistido)
 
 // STOCK dinâmico — carregado do localStorage, suporta campo 'cor' por item
 var _STOCK_DEFAULTS = {
@@ -8262,18 +8272,9 @@ var _STOCK_DEFAULTS = {
   mt2: {label:'Chapa Aço Inox 2mm',    qty:18, min:5,  max:30, esp:2,  cor:'Inox'},
   acm: {label:'ACM 3mm',              qty:25, min:10, max:50, esp:3,  cor:'Natural'}
 };
-var STOCK = (function(){
-  try {
-    var saved = localStorage.getItem('erp_stock_data');
-    if(saved) return JSON.parse(saved);
-  } catch(e) {}
-  return JSON.parse(JSON.stringify(_STOCK_DEFAULTS));
-  // Atualizar comissões
-  if(typeof comissaoRender==="function") comissaoRender();
-})();
+var STOCK = JSON.parse(JSON.stringify(_STOCK_DEFAULTS));
 
 function stockSaveData() {
-  try { localStorage.setItem('erp_stock_data', JSON.stringify(STOCK)); } catch(e) {}
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('stock', STOCK);
 }
 
@@ -8298,7 +8299,7 @@ var CLIENTES_DATA = [
   {id:'c7',nome:'Lucas Mendes',     tipo:'PF',cidade:'Araraquara',     marca:'vit',ultimoPedido:'01/07/2026',tel:'(16) 99300-0007',email:'lucas.mendes@gmail.com',   os:['0855']},
   {id:'c8',nome:'Ana Ferreira',     tipo:'PF',cidade:'São Carlos',     marca:'vit',ultimoPedido:'28/06/2026',tel:'(16) 99200-0008',email:'ana.ferreira@gmail.com',   os:['0840']}
 ];
-var CLIENTES_LIXEIRA = JSON.parse(localStorage.getItem('erp_clientes_lixeira') || '[]');
+var CLIENTES_LIXEIRA = [];
 
 
 // ============================================================
@@ -8459,10 +8460,7 @@ var _FIN_CR_DEFAULT = [
   {id:'cr004',cliente:'MEGA Varejo',descricao:'Orçamento #040 — Display Farmácia 50 un',valor:9500,vencimento:'20/07/2026',status:'pendente',marca:'vr',metodo:'Link',osRef:'',dataCriacao:'01/07/2026',dataRecebimento:null},
   {id:'cr005',cliente:'João Pedro',descricao:'Orçamento #038 — Letra Caixa',valor:380,vencimento:'02/07/2026',status:'vencido',marca:'vitre',metodo:'PIX',osRef:'',dataCriacao:'28/06/2026',dataRecebimento:null}
 ];
-var FIN_CR = (function(){
-  try{ var s=localStorage.getItem('erp_fin_cr'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
-  return _FIN_CR_DEFAULT.map(function(x){return Object.assign({},x);});
-})();
+var FIN_CR = [];
 
 // Contas a Pagar (baseado na planilha real de Jul/2026)
 var _FIN_CP_DEFAULT = [
@@ -8495,13 +8493,10 @@ var _FIN_CP_DEFAULT = [
   {id:'cp027',descricao:'CDL',categoria:'Operacional',valor:82.72,vencimento:'25/07/2026',status:'agendado',marca:'vr',fornecedor:'CDL',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:null},
   {id:'cp028',descricao:'ISABELLA — VITRE',categoria:'Pessoal',valor:745.28,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'}
 ];
-var FIN_CP = (function(){
-  try{ var s=localStorage.getItem('erp_fin_cp'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
-  return _FIN_CP_DEFAULT.map(function(x){return Object.assign({},x);});
-})();
+var FIN_CP = [];
 
-function _finSaveCR(){ try{ localStorage.setItem('erp_fin_cr', JSON.stringify(FIN_CR)); }catch(e){} _cloudSave('fin_cr', FIN_CR); }
-function _finSaveCP(){ try{ localStorage.setItem('erp_fin_cp', JSON.stringify(FIN_CP)); }catch(e){} _cloudSave('fin_cp', FIN_CP); }
+function _finSaveCR(){ _cloudSave('fin_cr', FIN_CR); }
+function _finSaveCP(){ _cloudSave('fin_cp', FIN_CP); }
 
 // ============================================================
 // FINANCEIRO — Funções Globais
@@ -9488,19 +9483,17 @@ function relCaixaDiario() {
   var cxAntEl=document.getElementById('relCaixaAnt');
   var cxAntKey='erp_caixa_ant_'+dtBR;
   if(cxAntEl&&cxAntEl.value===''){
-    var saved=localStorage.getItem(cxAntKey);
+    var saved=_CX_ALL && _CX_ALL[dtBR] ? _CX_ALL[dtBR] : null;
     if(saved) cxAntEl.value=parseFloat(saved).toFixed(2);
   }
   var cxAnt=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
 
   // ENTRADAS: FIN_CR recebidos na data
-  var loadCR=[];try{loadCR=JSON.parse(localStorage.getItem('erp_fin_cr')||'[]');}catch(e){}
-  var allCR=loadCR.length>0?loadCR:FIN_CR;
+  var allCR=FIN_CR;
   var entradas=allCR.filter(function(r){return r.status==='recebido'&&r.dataRecebimento===dtBR;});
 
   // SAÍDAS: FIN_CP pagos na data
-  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
-  var allCP=loadCP.length>0?loadCP:FIN_CP;
+  var allCP=FIN_CP;
   var saidas=allCP.filter(function(c){return c.status==='pago'&&c.dataPagamento===dtBR;});
 
   var totEnt=entradas.reduce(function(s,r){return s+r.valor;},0);
@@ -9585,8 +9578,7 @@ function relSalvarCaixaAnt() {
   if(!dtIn||!dtIn.value){ showToast('Selecione uma data primeiro','warn'); return; }
   var p=dtIn.value.split('-'); var dtBR=p[2]+'/'+p[1]+'/'+p[0];
   var val=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
-  localStorage.setItem('erp_caixa_ant_'+dtBR, val);
-  if(typeof _cloudSave==='function'&&_cloudReady){ try{var _cxAll=JSON.parse(localStorage.getItem('erp_caixa_all')||'{}'); _cxAll[dtBR]=val; localStorage.setItem('erp_caixa_all',JSON.stringify(_cxAll)); _cloudSave('erp_caixa_ant',_cxAll);}catch(e){} }
+  if(typeof _cloudSave==='function'&&_cloudReady){ try{_CX_ALL[dtBR]=val; _cloudSave('erp_caixa_ant',_CX_ALL);}catch(e){} }
   showToast('Caixa anterior salvo para '+dtBR,'ok');
 }
 
@@ -9597,10 +9589,8 @@ function relMensal() {
   var ano=parseInt((document.getElementById('relMensalAno')||{}).value||'2026');
   var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-  var loadCR=[];try{loadCR=JSON.parse(localStorage.getItem('erp_fin_cr')||'[]');}catch(e){}
-  var allCR=loadCR.length>0?loadCR:FIN_CR;
-  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
-  var allCP=loadCP.length>0?loadCP:FIN_CP;
+  var allCR=FIN_CR;
+  var allCP=FIN_CP;
 
   var daysInMonth=new Date(ano,mes,0).getDate();
   var f=finFmt;
@@ -9658,8 +9648,7 @@ function relContasPagas() {
   var ano=parseInt((document.getElementById('relContasAno')||{}).value||'2026');
   var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-  var loadCP=[];try{loadCP=JSON.parse(localStorage.getItem('erp_fin_cp')||'[]');}catch(e){}
-  var allCP=loadCP.length>0?loadCP:FIN_CP;
+  var allCP=FIN_CP;
 
   var lista=allCP.filter(function(c){
     if(c.status!=='pago'||!c.dataPagamento) return false;
@@ -9945,7 +9934,6 @@ function _stockLog(tipo, matKey, qty, os, obs) {
     dt: dtStr
   });
   if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
-  try{ localStorage.setItem('erp_stock_log', JSON.stringify(STOCK_LOG)); }catch(e){}
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
   stockRenderHistorico();
 }
@@ -9962,7 +9950,6 @@ function _retalhoLog(tipo, mat, labelDims, cod, os) {
     dt: dtStr
   });
   if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
-  try{ localStorage.setItem('erp_stock_log', JSON.stringify(STOCK_LOG)); }catch(e){}
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
   stockRenderHistorico();
 }
@@ -10139,7 +10126,6 @@ function cliExcluir(id){
   showToast('Cliente movido para a Lixeira. Acesse a aba Lixeira para restaurar.','info');
 }
 function cliSaveLixeira(){
-  localStorage.setItem('erp_clientes_lixeira', JSON.stringify(CLIENTES_LIXEIRA));
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('clientes_lixeira', CLIENTES_LIXEIRA);
 }
 function cliRestaurar(id){
@@ -10649,13 +10635,7 @@ document.addEventListener('keydown', e => {
 // ============================================================
 // BANCO DE RETALHOS
 // ============================================================
-var RETALHOS = (function(){
-  try{ var s=localStorage.getItem('erp_retalhos'); if(s){ var a=JSON.parse(s); if(a&&a.length) return a; } }catch(e){}
-  return [
-    {mat:'ac3',label:'Acrílico Cristal 3mm', dims:'60×40',qty:1,data:'30/06',codigo:'AC3-001'},
-    {mat:'ac8',label:'Acrílico Leitoso 5mm', dims:'45×30',qty:1,data:'29/06',codigo:'ACL-001'}
-  ];
-})();
+var RETALHOS = [];
 
 // Mapa de prefixos de código por material
 var RETALHO_PREFIXO = {
@@ -10664,7 +10644,6 @@ var RETALHO_PREFIXO = {
 };
 
 function retalhoSalvar() {
-  try{ localStorage.setItem('erp_retalhos', JSON.stringify(RETALHOS)); }catch(e){}
   _cloudSave('retalhos', RETALHOS);
 }
 
@@ -11171,9 +11150,6 @@ function crmBulkMovePhase(colId) {
 // ============================================================
 // CHATVOLT AI INTEGRATION
 // ============================================================
-var _chatvoltAgentId = localStorage.getItem('chatvolt_agent_id') || '';
-var _chatvoltMarca   = localStorage.getItem('chatvolt_marca') || 'vr';
-var _chatvoltFase    = localStorage.getItem('chatvolt_fase')  || 'ia_novo';
 
 function chatvoltTogglePanel() {
   var panel = document.getElementById('chatvoltPanel');
@@ -11198,9 +11174,7 @@ function chatvoltSalvar() {
   _chatvoltAgentId = agentId.trim();
   _chatvoltMarca   = marca;
   _chatvoltFase    = fase;
-  try { localStorage.setItem('chatvolt_agent_id', _chatvoltAgentId); } catch(e){}
-  try { localStorage.setItem('chatvolt_marca', _chatvoltMarca); } catch(e){}
-  try { localStorage.setItem('chatvolt_fase',  _chatvoltFase);  } catch(e){}
+  if(typeof _cloudSave==='function'&&_cloudReady){ _cloudSave('chatvolt_agent_id',_chatvoltAgentId); _cloudSave('chatvolt_marca',_chatvoltMarca); _cloudSave('chatvolt_fase',_chatvoltFase); }
 
   // Inject Chatvolt widget script
   chatvoltLoadWidget(_chatvoltAgentId);
@@ -11382,12 +11356,8 @@ function orcEnviarOrcamentoWA() {
 // ══════════════════════════════════════════════════════
 var CLIENT_HIST_KEY = 'erp_client_history';
 
-function clientHistLoad() {
-  try { return JSON.parse(localStorage.getItem(CLIENT_HIST_KEY)||'{}'); } catch(e){ return {}; }
-}
-function clientHistSave(db) {
-  localStorage.setItem(CLIENT_HIST_KEY, JSON.stringify(db));
-}
+function clientHistLoad() { return Object.assign({},_CLIENT_HIST); }
+function clientHistSave(db) { _CLIENT_HIST=db; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_client_history', db); }
 function clientHistGetKey(tel, email) {
   // identify client by phone or email (normalized)
   var t = (tel||'').replace(/\D/g,'');
@@ -11854,8 +11824,28 @@ function orcRefreshFinalPrice() {
 // SALVAR / GESTÃO DE ORÇAMENTOS ENVIADOS
 // ============================================================
 var ORC_ENVIADOS_KEY = 'erp_orcamentos_enviados';
-function orcGetEnviados(){ try{ return JSON.parse(localStorage.getItem(ORC_ENVIADOS_KEY)||'[]'); }catch(e){return[];} }
-function orcSetEnviados(arr){ localStorage.setItem(ORC_ENVIADOS_KEY, JSON.stringify(arr)); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
+var _OS_COUNTER = 0;
+var _CX_ALL = {};
+var _FORN_DATA = [];
+var _PLAN_PROD_DATA = [];
+var _CLIENT_HIST = {};
+var _BANK_DATA = {};
+var _POSV_DATA = {};
+var _MACH_PRESETS = [];
+var _MAT_PRICES = {};
+var _USR_DATA = [];
+var _PERM_DATA = null;
+var _SEC_MASTER = null;
+var _SEC_AUDIT = [];
+var _SEC_INACT_MINS = 20;
+var _chatvoltAgentId = '';
+var _chatvoltMarca   = 'vr';
+var _chatvoltFase    = 'ia_novo';
+var _SHOPIFY_CFG = {};
+var SITE_LEADS = [];
+var _ORC_ENVIADOS_DATA = [];
+function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }
+function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
 
 function orcSalvarOrcamento() {
   var c = window._orcCalc||{};
@@ -12388,8 +12378,9 @@ function orcEnvGerarOS(){
   var restante = valorTotal-valorEntrada;
 
   // Criar OS no Kanban
-  var n=parseInt(localStorage.getItem('erp_os_counter')||'0')+1;
-  localStorage.setItem('erp_os_counter',String(n));
+  var n=(_OS_COUNTER+1);
+  _OS_COUNTER=n;
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_os_counter',n);
   var hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
   var newId='os'+Date.now();
@@ -12413,7 +12404,6 @@ function orcEnvGerarOS(){
     pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
   };
   // Salva KB_OS
-  try{localStorage.setItem('erp_kb_os',JSON.stringify(KB_OS));}catch(e){}
   if(typeof _cloudSave==='function') _cloudSave('kb_os',KB_OS);
   // Renderiza Kanban
   try{kbRender();}catch(e){}
@@ -12692,25 +12682,19 @@ var CFG_DEFAULT = {
 };
 
 function cfgLoad() {
-  try {
-    var d = JSON.parse(localStorage.getItem(CFG_KEY));
-    if(!d) return JSON.parse(JSON.stringify(CFG_DEFAULT));
-    // Se materiais/máquinas/mão de obra estiverem vazios, restaura os padrões
-    if(!d.materiais  || !d.materiais.length)  d.materiais  = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
-    if(!d.maquinas   || !d.maquinas.length)   d.maquinas   = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
-    if(!d.maodeobra  || !d.maodeobra.length)  d.maodeobra  = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
-    return d;
+  if(_cfgData && ((_cfgData.materiais&&_cfgData.materiais.length)||(_cfgData.maquinas&&_cfgData.maquinas.length))){
+    return _cfgData;
   }
-  catch(e) { return JSON.parse(JSON.stringify(CFG_DEFAULT)); }
+  return JSON.parse(JSON.stringify(CFG_DEFAULT));
 }
 function cfgSave(d) {
-  try { localStorage.setItem(CFG_KEY, JSON.stringify(d)); } catch(e){}
+  _cfgData=d;
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_config', d);
 }
 
 var BANK_KEY = 'erp_bank_config';
-function bankLoad(){ try{return JSON.parse(localStorage.getItem(BANK_KEY)||'{}');}catch(e){return{};} }
-function bankSave(d){ localStorage.setItem(BANK_KEY,JSON.stringify(d)); }
+function bankLoad(){ return Object.assign({},_BANK_DATA); }
+function bankSave(d){ _BANK_DATA=d; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_bank_config', d); }
 
 function mkPopularFromConfig() {
   var cfg = cfgLoad();
@@ -12942,7 +12926,7 @@ function cfgRowMat(i,r){
   var m2=(area>0&&custo>0)?(custo/area).toFixed(2):(r.rsm2?(+r.rsm2).toFixed(2):'');
   var espDef=r.esp||(function(){ var mm=String(r.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
   // Sincronizar preço no mapa global também
-  if(m2){var prices=_matPricesGet();var nome=(r.nome||'').toLowerCase().trim();var keyMap={'acrílico 2mm':'ac2','acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico 10mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2'};var k=keyMap[nome];if(k){prices[k]=parseFloat(m2);localStorage.setItem(MAT_PRICE_KEY,JSON.stringify(prices));}}
+  if(m2){var prices=_matPricesGet();var nome=(r.nome||'').toLowerCase().trim();var keyMap={'acrílico 2mm':'ac2','acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico 10mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2'};var k=keyMap[nome];if(k){prices[k]=parseFloat(m2);_MAT_PRICES=prices;if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mat_prices', prices);}}
   return '<tr id="matR'+i+'">'
     +'<td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mat\','+i+',\'nome\',this.value)"></td>'
     +'<td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mat\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option><option'+(r.unidade==='ml'?' selected':'')+'>ml</option><option'+(r.unidade==='kg'?' selected':'')+'>kg</option><option'+(r.unidade==='m'?' selected':'')+'>m</option></select></td>'
@@ -12968,7 +12952,7 @@ function cfgCalcM2(i){
     var prices=_matPricesGet();
     var nome=(row.nome||'').toLowerCase().trim();
     var keyMap={'acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico leitoso 5mm':'ac8','acrílico 10mm':'ac10','acrílico espelho 3mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2','acm 3mm':'acm'};
-    var k=keyMap[nome]; if(k){prices[k]=parseFloat(m2);localStorage.setItem(MAT_PRICE_KEY,JSON.stringify(prices));}
+    var k=keyMap[nome]; if(k){prices[k]=parseFloat(m2);_MAT_PRICES=prices;if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mat_prices', prices);}
   } else {
     m2El.textContent='—';
   }
@@ -13106,20 +13090,8 @@ MODULOS.forEach(function(m){
   PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['dashboard','kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['dashboard','kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
-function usrLoadUsuarios(){
-  try{
-    var arr=JSON.parse(localStorage.getItem(USR_KEY));
-    if(arr && arr.length) return arr;
-    // tenta recuperar do backup em erp_config
-    var cfg=JSON.parse(localStorage.getItem('erp_config')||'{}');
-    if(cfg._usuarios_bkp && cfg._usuarios_bkp.length){
-      localStorage.setItem(USR_KEY,JSON.stringify(cfg._usuarios_bkp));
-      return cfg._usuarios_bkp;
-    }
-    return arr||[];
-  }catch(e){ return []; }
-}
-function usrLoadPerms(){ try{ return JSON.parse(localStorage.getItem(PERM_KEY))||JSON.parse(JSON.stringify(PERM_DEFAULT)); }catch(e){ return JSON.parse(JSON.stringify(PERM_DEFAULT)); } }
+function usrLoadUsuarios(){ return _USR_DATA.slice(); }
+function usrLoadPerms(){ return _PERM_DATA ? JSON.parse(JSON.stringify(_PERM_DATA)) : JSON.parse(JSON.stringify(PERM_DEFAULT)); }
 
 var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
 var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
@@ -13163,7 +13135,7 @@ function usrSalvarPerms() {
       if(el) perms[m.id][f]=el.checked;
     });
   });
-  try{ localStorage.setItem(PERM_KEY, JSON.stringify(perms)); }catch(e){}
+  _PERM_DATA=perms;
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_permissoes', perms);
   showToast('Permissões salvas!','ok');
   usrRender();
@@ -13177,12 +13149,7 @@ function usrRedefinirSenha(idx) {
   novaSenha = novaSenha.trim();
   if(novaSenha.length < 4) { showToast('Senha muito curta — mínimo 4 caracteres','err'); return; }
   users[idx].senha = novaSenha;
-  try{
-    localStorage.setItem(USR_KEY, JSON.stringify(users));
-    var cfg2=JSON.parse(localStorage.getItem('erp_config')||'{}');
-    cfg2._usuarios_bkp=users;
-    localStorage.setItem('erp_config',JSON.stringify(cfg2));
-  }catch(e){ showToast('Erro ao salvar','err'); return; }
+  _USR_DATA=users;
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
   showToast('Senha de "' + u.nome + '" redefinida!', 'ok');
 }
@@ -13203,13 +13170,7 @@ function usrSalvar() {
     showToast('E-mail já cadastrado','err'); return;
   }
   users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
-  try{
-    localStorage.setItem(USR_KEY, JSON.stringify(users));
-    // backup dentro de erp_config para recuperação
-    var cfg2=JSON.parse(localStorage.getItem('erp_config')||'{}');
-    cfg2._usuarios_bkp=users;
-    localStorage.setItem('erp_config',JSON.stringify(cfg2));
-  }catch(e){ showToast('Erro ao salvar: '+e.message,'err'); return; }
+  _USR_DATA=users;
   showToast('Usuário "'+nome+'" criado!','ok');
   if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
   // Sincronizar usuários com a nuvem (sem senhas em texto puro — armazena hash)
@@ -13225,7 +13186,7 @@ function usrDel(idx) {
   var users = usrLoadUsuarios();
   var nome = users[idx]?users[idx].nome:'';
   users.splice(idx,1);
-  try{ localStorage.setItem(USR_KEY, JSON.stringify(users)); }catch(e){}
+  _USR_DATA=users;
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
   showToast('Usuário "'+nome+'" removido','warn');
   if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário removido: '+nome);
@@ -13252,10 +13213,11 @@ function secHash(s) {
 }
 
 // ── Inatividade configurável ──────────────────────────────────────────────────
-function secGetInactMins(){ return parseInt(localStorage.getItem(SEC_INACT_KEY)||'20'); }
+function secGetInactMins(){ return _SEC_INACT_MINS||20; }
 function secSaveInactTime(){
   var v=parseInt((document.getElementById('secInactTime')||{}).value||'20');
-  localStorage.setItem(SEC_INACT_KEY,v);
+  _SEC_INACT_MINS=v;
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_inact_mins', v);
   // Restart timer
   secStartInactivityTimer();
   showToast('Bloqueio automático: '+(v?v+' min':'desativado'),'ok');
@@ -13268,9 +13230,8 @@ function secClearSession(){ try{ sessionStorage.removeItem(SEC_SESSION_KEY); }ca
 
 // ── Senha master ──────────────────────────────────────────────────────────────
 function secGetMasterHash(){
-  var h=localStorage.getItem(SEC_MASTER_KEY);
-  if(!h){ h=secHash('master123'); localStorage.setItem(SEC_MASTER_KEY,h); }
-  return h;
+  if(!_SEC_MASTER){ _SEC_MASTER=secHash('master123'); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_master_pwd',_SEC_MASTER); }
+  return _SEC_MASTER;
 }
 
 // ── Lockout ───────────────────────────────────────────────────────────────────
@@ -13590,7 +13551,7 @@ function secAlterarSenha(){
   if(secHash(atual)!==secGetMasterHash()){ errEl.textContent='❌ Senha atual incorreta'; return; }
   if(nova.length<6){ errEl.textContent='❌ Nova senha: mínimo 6 caracteres'; return; }
   if(nova!==conf){ errEl.textContent='❌ Confirmação não confere'; return; }
-  localStorage.setItem(SEC_MASTER_KEY, secHash(nova));
+  _SEC_MASTER=secHash(nova); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_master_pwd',_SEC_MASTER);
   errEl.textContent='';
   ['secPwdAtual','secPwdNova','secPwdConf'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
   secAuditLog('pwd_change','Senha Master alterada');
@@ -13600,19 +13561,17 @@ function secAlterarSenha(){
 // ── Auditoria ─────────────────────────────────────────────────────────────────
 function secAuditLog(action, detail){
   try{
-    var log=JSON.parse(localStorage.getItem(SEC_AUDIT_KEY)||'[]');
     var now=new Date();
     var ts=now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR');
     var user=_currentSession?_currentSession.user:'—';
-    log.unshift({ts:ts, user:user, action:action, detail:detail});
-    if(log.length>300) log=log.slice(0,300);
-    localStorage.setItem(SEC_AUDIT_KEY, JSON.stringify(log));
+    _SEC_AUDIT.unshift({ts:ts, user:user, action:action, detail:detail});
+    if(_SEC_AUDIT.length>300) _SEC_AUDIT=_SEC_AUDIT.slice(0,300);
+    if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_audit_log', _SEC_AUDIT);
   }catch(e){}
 }
 
 function secRenderAudit(){
-  var log=[];
-  try{ log=JSON.parse(localStorage.getItem(SEC_AUDIT_KEY)||'[]'); }catch(e){}
+  var log=_SEC_AUDIT.slice();
   var el=document.getElementById('auditLogBody'); if(!el) return;
   var cntEl=document.getElementById('auditCount'); if(cntEl) cntEl.textContent=log.length+' evento'+(log.length!==1?'s':'');
   var ACTION_LBL={
@@ -13647,7 +13606,8 @@ function secRenderAudit(){
 
 function secLimparAudit(){
   if(!window.confirm('Limpar todo o histórico de auditoria? Esta ação não pode ser desfeita.')) return;
-  localStorage.removeItem(SEC_AUDIT_KEY);
+  _SEC_AUDIT=[];
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_audit_log',[]);
   secAuditLog('audit_clear','Histórico de auditoria limpo');
   secRenderAudit();
   showToast('Histórico de auditoria limpo','info');
@@ -13849,8 +13809,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // PÓS-VENDA CRM
 // ============================================================
 var POSV_KEY = 'erp_posvendas';
-function posvLoad(){ try{ return JSON.parse(localStorage.getItem(POSV_KEY)||'{}'); }catch(e){ return {}; } }
-function posvSave(d){ localStorage.setItem(POSV_KEY,JSON.stringify(d)); }
+function posvLoad(){ return Object.assign({},_POSV_DATA); }
+function posvSave(d){ _POSV_DATA=d; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_posvendas', d); }
 var _pvLeadId = null;
 var _PV_CONTATOS = [
   {id:'d1', label:'1 dia após fechamento',    sub:'Confirmar recebimento e entrega do produto', icon:'📦', dias:1  },
@@ -14215,9 +14175,7 @@ function crmRenderOrcPend() {
 // ITEM 4 — Material prices: load/save
 // ============================================================
 var MAT_PRICE_KEY = 'erp_mat_prices';
-function _matPricesGet() {
-  try { return JSON.parse(localStorage.getItem(MAT_PRICE_KEY)||'{}'); } catch(e) { return {}; }
-}
+function _matPricesGet() { return Object.assign({},_MAT_PRICES); }
 function cfgCarregarMatPrecos() {
   var d = _matPricesGet();
   var map = ['ac3','ac5','ac8','ac10','ps3','mt2'];
@@ -14227,7 +14185,7 @@ function cfgSalvarMatPrecos() {
   var keys = ['ac3','ac5','ac8','ac10','ps3','mt2'];
   var d = {};
   keys.forEach(function(k){ var v=parseFloat((document.getElementById('cfgPrc_'+k)||{}).value); if(!isNaN(v)&&v>0) d[k]=v; });
-  localStorage.setItem(MAT_PRICE_KEY, JSON.stringify(d));
+  _MAT_PRICES=d; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mat_prices', d);
   orcLoadMatPrecos();
   showToast('Preços de material salvos!','ok');
 }
@@ -14586,7 +14544,7 @@ function _planRecompute() {
   var mObj2  = ORC_MATS.find(function(m){return m.key===matKey2;});
   var priceM2= _matGetRsm2(matKey2, _planIdx);
   var custoMat2 = (totalArea/10000) * priceM2;
-  var _cfg2=(function(){ try{ var d=JSON.parse(localStorage.getItem('erp_config')||'{}'); return d.financeiro||{}; }catch(e){ return {}; } })();
+  var _cfg2=(_cfgData&&_cfgData.financeiro)||{};
   var oh2=(_cfg2.overhead!=null?_cfg2.overhead:41.16)/100;
   var vr2=(_cfg2.vrml!=null?_cfg2.vrml:20)/100;
   var fac2=1-oh2-vr2; var venda2=fac2>0?custoMat2/fac2:0;
@@ -14628,7 +14586,7 @@ planAbrir = function(i){ planManualPieces=[]; planRenderManual(); _origAbrir(i);
 // ITEM 8 — Machine time presets
 // ============================================================
 var MACH_PRESET_KEY = 'erp_mach_presets';
-function _machPresetsGet() { try{return JSON.parse(localStorage.getItem(MACH_PRESET_KEY)||'[]');}catch(e){return[];} }
+function _machPresetsGet() { return _MACH_PRESETS.slice(); }
 function orcPresetPopulateSelect() {
   var sel = document.getElementById('orcMachPresetSel'); if(!sel) return;
   var list = _machPresetsGet();
@@ -14657,7 +14615,7 @@ function orcSalvarPreset() {
   };
   var list=_machPresetsGet();
   var ei=list.findIndex(function(x){return x.nome===nome;}); if(ei>=0)list[ei]=preset; else list.push(preset);
-  localStorage.setItem(MACH_PRESET_KEY,JSON.stringify(list));
+  _MACH_PRESETS=list; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mach_presets', list);
   orcPresetPopulateSelect();
   showToast('Preset "'+nome+'" salvo!','ok');
 }
@@ -14674,7 +14632,7 @@ function cfgRenderMachPresets() {
   }).join('');
 }
 function cfgDeleteMachPreset(i){
-  var list=_machPresetsGet(); list.splice(i,1); localStorage.setItem(MACH_PRESET_KEY,JSON.stringify(list));
+  var list=_machPresetsGet(); list.splice(i,1); _MACH_PRESETS=list; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mach_presets', list);
   cfgRenderMachPresets(); showToast('Preset removido','info');
 }
 // Hook cfgTab to load presets on tab 2
@@ -14755,7 +14713,7 @@ function _comIntelligence() {
 var ORC_PROD_KEY = 'erp_orc_produtos';
 
 function _prodSave() {
-  localStorage.setItem(ORC_PROD_KEY, JSON.stringify(ORC_PRODUTOS));
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_orc_produtos', ORC_PRODUTOS);
 }
 
 function cfgRenderProdutos() {
@@ -15011,7 +14969,7 @@ function planProdSalvar() {
   // Também adicionar à lista ORC_PRODUTOS se não estiver lá
   if(ORC_PRODUTOS.indexOf(nome.trim())<0) {
     ORC_PRODUTOS.push(nome.trim());
-    try{ localStorage.setItem(ORC_PROD_KEY, JSON.stringify(ORC_PRODUTOS)); }catch(ex){}
+    if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_orc_produtos', ORC_PRODUTOS);
   }
 
   planProdFechar();
@@ -15570,10 +15528,9 @@ function comissaoRender() {
 // ==========================================
 // CRM SITE LEADS (Vitre Decor / Shopify)
 // ==========================================
-var SITE_LEADS = JSON.parse(localStorage.getItem('crm_site_leads') || '[]');
+
 
 function siteSaveLeads() {
-  localStorage.setItem('crm_site_leads', JSON.stringify(SITE_LEADS));
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_site_leads', SITE_LEADS);
 }
 
@@ -15770,15 +15727,14 @@ function siteShopifyPanel() {
   if(!p) return;
   p.style.display = p.style.display==='none' ? '' : 'none';
   // Load saved config
-  var cfg = JSON.parse(localStorage.getItem('shopify_cfg')||'{}');
-  if(cfg.url) document.getElementById('shopifyStoreUrl').value = cfg.url;
-  if(cfg.token) document.getElementById('shopifyToken').value = cfg.token;
+  if(_SHOPIFY_CFG.url) document.getElementById('shopifyStoreUrl').value = _SHOPIFY_CFG.url;
+  if(_SHOPIFY_CFG.token) document.getElementById('shopifyToken').value = _SHOPIFY_CFG.token;
 }
 
 function siteSalvarConfig() {
   var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
   var token = (document.getElementById('shopifyToken').value||'').trim();
-  localStorage.setItem('shopify_cfg', JSON.stringify({url:url,token:token}));
+  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
   showToast('Configuração salva!','ok');
 }
 
@@ -15787,7 +15743,7 @@ function siteShopifySync() {
   var token = (document.getElementById('shopifyToken').value||'').trim();
   if(!url || !token){ showToast('Preencha URL e Token antes de sincronizar.','warn'); return; }
   // Save config
-  localStorage.setItem('shopify_cfg', JSON.stringify({url:url,token:token}));
+  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
   var stEl = document.getElementById('shopifySyncStatus');
   if(stEl) stEl.textContent = '⏳ Sincronizando...';
 
