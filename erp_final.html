@@ -6442,19 +6442,17 @@ function orcItemExtras(ri) {
   }
 
   ov.innerHTML=
-  '<div style="background:var(--bg);border-radius:16px;padding:20px;width:min(740px,98vw);box-shadow:0 24px 72px rgba(0,0,0,.4);margin:auto">'
+  '<div style="background:var(--bg);border-radius:16px;padding:20px;width:min(720px,98vw);box-shadow:0 24px 72px rgba(0,0,0,.4);margin:auto">'
   // Header
   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
   +'<div style="font-size:15px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
   +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1">×</button>'
   +'</div>'
-  // Body: 2 colunas
+  // Body: col esquerda (Extras) | col direita (Máquinas + Consumíveis + Parâmetros)
   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">'
 
-  // ── Coluna Esquerda ──
-  +'<div style="display:flex;flex-direction:column;gap:12px">'
-
-  // Bloco: Extras do Item
+  // ── Coluna Esquerda: Extras do Item ──
+  +'<div>'
   +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
   +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">➕ Extras deste Item</div>'
   +'<div style="'+ROW+';padding-top:0">'
@@ -6479,66 +6477,64 @@ function orcItemExtras(ri) {
   +'<div style="margin-top:8px"><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Descrição opcional..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)"></div>'
   +'<div id="exPreview" style="margin-top:6px;font-size:11px;color:var(--brand-mid);font-weight:700;min-height:16px"></div>'
   +'</div>'
+  +'</div>'
+
+  // ── Coluna Direita: Máquinas → Consumíveis → Parâmetros ──
+  +'<div style="display:flex;flex-direction:column;gap:10px">'
 
   // Bloco: Máquinas
   +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (minutos)</div>'
-  +'<div style="display:flex;gap:6px">'
+  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (min)</div>'
+  +'<div style="display:flex;gap:5px">'
   +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:3px 6px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
   +'<button onclick="orcSalvarPreset()" style="padding:3px 7px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:6px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
   +'</div></div>'
-  +[['⚡','Laser','×R$0,10/min','m_laser','ocv_laser',true],
-    ['📐','Dobra','×R$0,01/min','m_dobra','ocv_dobra',false],
-    ['✨','Politrix','×R$0,02/min','m_pol','ocv_pol',false],
-    ['☀️','UV','×R$0,002/min','m_uv','ocv_uv',false],
-    ['🔧','Lixadeira','×R$0,005/min','m_lixa','ocv_lixa',false],
-    ['🔩','Tupia','×R$0,01/min','m_tupia','ocv_tupia',false]
+  +[['⚡','Laser','×R$0,10/min','m_laser',true],
+    ['📐','Dobra','×R$0,01/min','m_dobra',false],
+    ['✨','Politrix','×R$0,02/min','m_pol',false],
+    ['☀️','UV','×R$0,002/min','m_uv',false],
+    ['🔧','Lixadeira','×R$0,005/min','m_lixa',false],
+    ['🔩','Tupia','×R$0,01/min','m_tupia',false]
   ].map(function(r){
     var realId = r[3].replace('m_','om_');
     var curVal = g(realId);
     return '<div style="'+ROW+'">'
-      +'<span style="font-size:14px;width:20px">'+r[0]+'</span>'
+      +'<span style="font-size:13px;width:18px">'+r[0]+'</span>'
       +'<span style="'+RNAME+'">'+r[1]+'</span>'
       +'<span style="'+RRATE+'">'+r[2]+'</span>'
       +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
-      +(r[5]?'<button onclick="orcExtrasAutoLaser()" title="Auto" style="padding:3px 6px;background:var(--brand-mid);color:#fff;border:none;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
+      +(r[4]?'<button onclick="orcExtrasAutoLaser()" style="padding:2px 6px;background:var(--brand-mid);color:#fff;border:none;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
       +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
   }).join('')
   +'</div>'
-  +'</div>' // fim coluna esquerda
 
-  // ── Coluna Direita ──
-  +'<div style="display:flex;flex-direction:column;gap:12px">'
-
-  // Bloco: Só Corte + Consumíveis
+  // Bloco: Consumíveis (abaixo de Máquinas)
   +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🧴 Consumíveis</div>'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧴 Consumíveis</div>'
   // Só Corte
-  +'<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border);margin-bottom:8px">'
-  +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:15px;height:15px;cursor:pointer">'
+  +'<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border);margin-bottom:7px">'
+  +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:14px;height:14px;cursor:pointer">'
   +'<div style="flex:1"><div style="font-size:11px;font-weight:800">✂️ Só Corte — R$130/h</div>'
-  +'<div style="font-size:10px;color:var(--muted)">Cliente traz o próprio material</div></div>'
-  +'<div id="m_soCortePanel" style="display:'+(soCorte?'flex':'none')+';align-items:center;gap:5px">'
-  +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:52px">'
+  +'<div style="font-size:9px;color:var(--muted)">Cliente traz o material</div></div>'
+  +'<div id="m_soCortePanel" style="display:'+(soCorte?'flex':'none')+';align-items:center;gap:4px">'
+  +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:48px">'
   +'<span style="font-size:10px;color:var(--muted)">min</span>'
   +'</div></div>'
-  // Consumíveis rows
   +[['🩹','Adesivo','R$0,0056/cm²','m_adh','oc_adh',true],
     ['⬜','Adh. Branco','R$0,0011/cm²','m_adhb','oc_adhb',true],
-    ['🖨️','Impressão Digital','R$ fixo','m_imp','oc_imp',false],
+    ['🖨️','Impressão','R$ fixo','m_imp','oc_imp',false],
     ['🎨','Spray (un)','×R$16','m_spray','oc_spray',false],
     ['➕','Extra','R$ fixo','m_extra','oc_extra',false]
   ].map(function(r){
-    var realId = r[4];
-    var curVal = g(realId);
+    var curVal = g(r[4]);
     if(r[5]){
       return '<div style="'+ROW+'">'
-        +'<span style="font-size:13px;width:20px">'+r[0]+'</span>'
+        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
         +'<span style="'+RNAME+'">'+r[1]+'</span>'
         +'<span style="'+RRATE+'">'+r[2]+'</span>'
-        +'<select id="'+r[3]+'" style="'+SEL+';width:56px">'
+        +'<select id="'+r[3]+'" style="'+SEL+';width:54px">'
         +'<option value="nao"'+(curVal==='nao'?' selected':'')+'>Não</option>'
         +'<option value="sim"'+(curVal==='sim'?' selected':'')+'>Sim</option>'
         +'</select>'
@@ -6546,7 +6542,7 @@ function orcItemExtras(ri) {
         +'</div>';
     } else {
       return '<div style="'+ROW+'">'
-        +'<span style="font-size:13px;width:20px">'+r[0]+'</span>'
+        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
         +'<span style="'+RNAME+'">'+r[1]+'</span>'
         +'<span style="'+RRATE+'">'+r[2]+'</span>'
         +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" style="'+INP+'">'
@@ -6558,14 +6554,14 @@ function orcItemExtras(ri) {
 
   // Bloco: Parâmetros
   +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">⚙️ Parâmetros da Ordem</div>'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚙️ Parâmetros da Ordem</div>'
   +[['Desconto','m_desc','orcDesc','m_descTipo','orcDescTipo',descTipo],
     ['Acréscimo','m_acres','orcAcres','m_acresTipo','orcAcresTipo',acresTipo]
   ].map(function(r){
     return '<div style="'+ROW+'">'
       +'<span style="'+RNAME+'">'+r[0]+'</span>'
       +'<input type="number" id="'+r[1]+'" value="'+g(r[2])+'" min="0" step="1" style="'+INP+'">'
-      +'<select id="'+r[3]+'" style="'+SEL+';width:52px">'
+      +'<select id="'+r[3]+'" style="'+SEL+';width:50px">'
       +'<option value="pct"'+(r[5]==='pct'?' selected':'')+'>%</option>'
       +'<option value="rs"'+(r[5]==='rs'?' selected':'')+'>R$</option>'
       +'</select></div>';
