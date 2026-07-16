@@ -2159,7 +2159,6 @@ firebase.auth().signInAnonymously().then(function(){
             </div>
             <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
               <button class="topbar-btn" style="width:100%" onclick="orcStep(4)">Ver Resumo →</button>
-              <button class="topbar-btn ghost" style="width:100%;font-size:11px" onclick="orcCustosToggle()" id="orcCustosToggleBtn">⚙️ Custos Avançados</button>
               <button class="topbar-btn ghost" style="width:100%;font-size:11px" onclick="orcStep(1)">← Voltar</button>
             </div>
           </div>
@@ -2170,10 +2169,10 @@ firebase.auth().signInAnonymously().then(function(){
 
       </div>
 
-      <!-- ── STEP 3: CUSTOS AVANÇADOS (conteúdo movido para inline no Step 2) ── -->
+      <!-- ── STEP 3: CUSTOS AVANÇADOS (conteúdo acessível via modal ➕) ── -->
       <div id="opg3" class="orc-pg" style="display:none">
-        <div style="display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start">
-          <div style="display:flex;flex-direction:column;gap:12px">
+        <div id="opg3grid" style="display:grid;grid-template-columns:1fr 260px;gap:12px;align-items:start">
+          <div id="opg3inner" style="display:flex;flex-direction:column;gap:12px">
 
             <!-- Máquinas & Consumíveis -->
             <div class="card">
@@ -6404,47 +6403,77 @@ var ORC_ITEM_EXTRAS = {};
 function orcItemExtras(ri) {
   var ex = ORC_ITEM_EXTRAS[ri] || {};
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
-  // Compute item area same way orcRecalc does (cm²)
   var row  = document.getElementById('oir_'+ri);
   var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
   var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
   var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
   var planArea = parseFloat(row && row.dataset.planArea)||0;
-  var useArea  = planArea > 0 ? planArea : (larg*alt); // cm²
-  var areaCm2  = useArea * qty;
-  var adhCalc  = areaCm2 * 0.0056;
-  var adhFmt   = adhCalc.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  var areaCm2  = (planArea > 0 ? planArea : (larg*alt)) * qty;
+  var adhFmt   = (areaCm2*0.0056).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  var adSim = ex.adesivoSim ? 'sim' : 'nao';
+
   var ov = document.getElementById('orcItemExtrasOverlay');
   if(!ov){
     ov=document.createElement('div'); ov.id='orcItemExtrasOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
-    ov.onclick=function(e){if(e.target===ov)ov.style.display='none';};
+    ov.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:20px 0;overflow-y:auto';
+    ov.onclick=function(e){if(e.target===ov){ orcItemExtrasFechar(); }};
     document.body.appendChild(ov);
   }
-  var adSim = ex.adesivoSim ? 'sim' : 'nao';
-  ov.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(420px,95vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
-    +'<div style="font-size:14px;font-weight:800;margin-bottom:14px">➕ Custos Extras — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
-    +'<div style="display:grid;gap:10px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--surface);border-radius:8px">'
+
+  ov.innerHTML=
+    '<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(700px,97vw);box-shadow:0 20px 60px rgba(0,0,0,.35);margin:auto">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+    +'<div style="font-size:14px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
+    +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button>'
+    +'</div>'
+    // ─── SEÇÃO 1: Extras do item ───
+    +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
+    +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">➕ Extras deste Item</div>'
+    +'<div style="display:grid;gap:8px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--bg);border-radius:8px">'
     +'<div><div style="font-size:11px;font-weight:700">Adesivo / Vinil</div>'
     +'<div id="exAdhPreview" style="font-size:10px;color:var(--brand-mid)">= R$ '+adhFmt+'</div></div>'
-    +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-weight:700">'
+    +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-weight:700;background:var(--bg);color:var(--text)">'
     +'<option value="nao"'+(adSim==='nao'?' selected':'')+'>Não</option>'
     +'<option value="sim"'+(adSim==='sim'?' selected':'')+'>Sim</option>'
     +'</select></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Acabamento / Fita (R$)</label><input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Instalação (R$)</label><input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Outros (R$)</label><input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Descrição (opcional)</label><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Ex: Adesivo recorte + instalação" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;font-size:12px"></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Acabamento / Fita (R$)</label><input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Instalação (R$)</label><input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Outros (R$)</label><input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
+    +'<div class="fg" style="margin:0"><label style="font-size:10px">Descrição (opcional)</label><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Ex: Adesivo recorte + instalação" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)"></div>'
     +'</div>'
-    +'<div id="exPreview" style="margin-top:10px;font-size:11px;color:var(--brand-mid);font-weight:700"></div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">'
-    +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcItemExtrasOverlay\').style.display=\'none\'">Cancelar</button>'
+    +'<div id="exPreview" style="margin-top:6px;font-size:11px;color:var(--brand-mid);font-weight:700"></div>'
+    +'</div></div>'
+    // ─── SEÇÃO 2: Custos globais da ordem (DOM transfer slot) ───
+    +'<div style="background:var(--surface);border:1.5px solid var(--brand-mid);border-radius:10px;padding:14px;margin-bottom:14px">'
+    +'<div style="font-size:10px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">⚙️ Máquinas, Consumíveis & Precificação da Ordem</div>'
+    +'<div id="opg3ModalSlot"></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button class="topbar-btn ghost" onclick="orcItemExtrasFechar()">Cancelar</button>'
     +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
     +'</div>'
     +'</div>';
+
+  // Transferir conteúdo real do Step 3 para o slot (mantém IDs e event handlers intactos)
+  var inner = document.getElementById('opg3inner');
+  var slot  = document.getElementById('opg3ModalSlot');
+  if(inner && slot) { slot.appendChild(inner); }
+  try{ if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); }catch(e){}
+
   ov.style.display='flex';
   orcItemExtraPreview(ri);
+}
+
+function orcItemExtrasFechar() {
+  // Devolver conteúdo do Step 3 de volta para opg3
+  var inner = document.getElementById('opg3inner');
+  var pg3   = document.getElementById('opg3grid');
+  var slot  = document.getElementById('opg3ModalSlot');
+  if(inner && pg3 && slot && slot.contains(inner)) { pg3.insertBefore(inner, pg3.firstChild); }
+  var ov = document.getElementById('orcItemExtrasOverlay');
+  if(ov) ov.style.display='none';
 }
 function orcItemExtraPreview(ri){
   var row  = document.getElementById('oir_'+ri);
@@ -6484,7 +6513,7 @@ function orcItemExtrasSalvar(ri){
     outros:     parseFloat((document.getElementById('exOutros')||{}).value)||0,
     descricao:  (document.getElementById('exDesc')||{}).value||''
   };
-  document.getElementById('orcItemExtrasOverlay').style.display='none';
+  orcItemExtrasFechar();
   var btn=document.querySelector('#oir_'+ri+' .plan-icon-btn[onclick*="orcItemExtras"]');
   var ex=ORC_ITEM_EXTRAS[ri];
   var total=ex.adesivo+ex.acabamento+ex.instalacao+ex.outros;
@@ -16556,22 +16585,4 @@ setTimeout(function(){
     <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
     <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
     <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
-    <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
-    <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
-    <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
-    <div class="mdrw-section">Financeiro</div>
-    <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
-    <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
-    <div class="mdrw-section">Admin</div>
-    <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
-    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📏</span> Produtos / Planif.</div>
-    <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
-    <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
-  </div>
-</div>
-
-
-<!-- ══ CLIENT IMPORT OVERLAY ══ -->
-<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
-  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <div st
+    <div class="mdrw-item" id="msp
