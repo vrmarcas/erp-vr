@@ -1202,7 +1202,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
-    _cloudWatch("stock", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ if(STOCK[k]){ STOCK[k].qty=d[k].qty||STOCK[k].qty; } else { STOCK[k]=d[k]; } }); try{ var pg=document.getElementById('pg-estoque'); if(pg&&pg.style.display!=='none'){ stockRenderItems(); stockRenderHistorico(); } }catch(e){} } });
+    _cloudWatch("stock", function(d){ if(d&&typeof d==="object"&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); try{ var pg=document.getElementById('pg-estoque'); if(pg&&pg.style.display!=='none'){ stockRenderItems(); stockRenderHistorico(); } }catch(e){} } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
@@ -1275,7 +1275,7 @@ function _cloudLoadAll() {
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
-  _cloudLoad("stock", function(d){ if(d){ Object.keys(d).forEach(function(k){ if(STOCK[k]){ STOCK[k].qty=d[k].qty||STOCK[k].qty; } else { STOCK[k]=d[k]; } }); } done(); });
+  _cloudLoad("stock", function(d){ if(d&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){
@@ -16574,4 +16574,4 @@ setTimeout(function(){
 <!-- ══ CLIENT IMPORT OVERLAY ══ -->
 <div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
   <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <div style="padding:18px 22px;border-bottom:1px sol
+    <div st
