@@ -6442,53 +6442,71 @@ function orcItemExtras(ri) {
   }
 
   ov.innerHTML=
-  '<div style="background:var(--bg);border-radius:16px;width:min(480px,98vw);max-height:calc(100vh - 24px);display:flex;flex-direction:column;box-shadow:0 24px 72px rgba(0,0,0,.4)">'
-  // Header fixo
-  +'<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1.5px solid var(--border);flex-shrink:0">'
-  +'<div style="font-size:15px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
-  +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1">×</button>'
+  // Modal: 2 colunas, cabe na tela sem scroll
+  '<div style="background:var(--bg);border-radius:16px;width:min(760px,98vw);max-height:calc(100vh - 24px);display:flex;flex-direction:column;box-shadow:0 24px 72px rgba(0,0,0,.4)">'
+  // Header
+  +'<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1.5px solid var(--border);flex-shrink:0">'
+  +'<div style="font-size:14px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
+  +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1">×</button>'
   +'</div>'
-  // Body com scroll interno
-  +'<div style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px">'
+  // Body: 2 colunas
+  +'<div style="flex:1;overflow:hidden;display:grid;grid-template-columns:1fr 1fr;gap:0">'
 
-  // ── Extras do Item ──
-  +'<div>'
-  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">➕ Extras deste Item</div>'
+  // ── Coluna esquerda: Extras + Parâmetros ──
+  +'<div style="padding:12px 14px;border-right:1.5px solid var(--border);display:flex;flex-direction:column;gap:8px;overflow-y:auto">'
+
+  // Extras
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">➕ Extras deste Item</div>'
   +'<div style="'+ROW+';padding-top:0">'
   +'<span style="'+RNAME+'">Adesivo / Vinil</span>'
   +'<span id="exAdhPreview" style="font-size:10px;color:var(--brand-mid)">= R$ '+adhFmt+'</span>'
-  +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';width:64px">'
+  +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';width:60px">'
   +'<option value="nao"'+(adSim==='nao'?' selected':'')+'>Não</option>'
   +'<option value="sim"'+(adSim==='sim'?' selected':'')+'>Sim</option>'
   +'</select></div>'
-  +'<div style="'+ROW+'">'
-  +'<span style="'+RNAME+'">Acabamento / Fita</span>'
-  +'<span style="'+LBL+'">R$</span>'
+  +'<div style="'+ROW+'"><span style="'+RNAME+'">Acabamento / Fita</span><span style="'+LBL+'">R$</span>'
   +'<input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
-  +'<div style="'+ROW+'">'
-  +'<span style="'+RNAME+'">Instalação</span>'
-  +'<span style="'+LBL+'">R$</span>'
+  +'<div style="'+ROW+'"><span style="'+RNAME+'">Instalação</span><span style="'+LBL+'">R$</span>'
   +'<input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
-  +'<div style="'+ROW+'">'
-  +'<span style="'+RNAME+'">Outros</span>'
-  +'<span style="'+LBL+'">R$</span>'
+  +'<div style="'+ROW+'"><span style="'+RNAME+'">Outros</span><span style="'+LBL+'">R$</span>'
   +'<input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
-  +'<div style="margin-top:8px"><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Descrição opcional..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)"></div>'
-  +'<div id="exPreview" style="margin-top:6px;font-size:11px;color:var(--brand-mid);font-weight:700;min-height:16px"></div>'
-  +'</div>'
+  +'<input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Descrição opcional..." style="width:100%;margin-top:6px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)">'
+  +'<div id="exPreview" style="margin-top:5px;font-size:11px;color:var(--brand-mid);font-weight:700;min-height:14px"></div>'
   +'</div>'
 
-  // ── Máquinas → Consumíveis → Parâmetros ──
-  +'<div style="display:flex;flex-direction:column;gap:10px">'
+  // Parâmetros
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚙️ Parâmetros da Ordem</div>'
+  +[['Desconto','m_desc','orcDesc','m_descTipo','orcDescTipo',descTipo],
+    ['Acréscimo','m_acres','orcAcres','m_acresTipo','orcAcresTipo',acresTipo]
+  ].map(function(r){
+    return '<div style="'+ROW+'">'
+      +'<span style="'+RNAME+'">'+r[0]+'</span>'
+      +'<input type="number" id="'+r[1]+'" value="'+g(r[2])+'" min="0" step="1" style="'+INP+'">'
+      +'<select id="'+r[3]+'" style="'+SEL+';width:48px">'
+      +'<option value="pct"'+(r[5]==='pct'?' selected':'')+'>%</option>'
+      +'<option value="rs"'+(r[5]==='rs'?' selected':'')+'>R$</option>'
+      +'</select></div>';
+  }).join('')
+  +'<div style="'+ROW+'"><span style="'+RNAME+'">Montagem</span><span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="m_mont" value="'+g('orcMontagem')+'" min="0" style="'+INP+'"></div>'
+  +'<div style="'+ROW+';border-bottom:none"><span style="'+RNAME+'">Deslocamento</span><span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="m_desl" value="'+g('orcDesl')+'" min="0" style="'+INP+'"></div>'
+  +'</div>'
 
-  // Bloco: Máquinas
-  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
+  +'</div>' // fim col esquerda
+
+  // ── Coluna direita: Máquinas + Consumíveis ──
+  +'<div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto">'
+
+  // Máquinas
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (min)</div>'
-  +'<div style="display:flex;gap:5px">'
-  +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:3px 6px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
-  +'<button onclick="orcSalvarPreset()" style="padding:3px 7px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:6px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (min)</div>'
+  +'<div style="display:flex;gap:4px">'
+  +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:2px 5px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
+  +'<button onclick="orcSalvarPreset()" style="padding:2px 6px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
   +'</div></div>'
   +[['⚡','Laser','×R$0,10/min','m_laser',true],
     ['📐','Dobra','×R$0,01/min','m_dobra',false],
@@ -6497,30 +6515,28 @@ function orcItemExtras(ri) {
     ['🔧','Lixadeira','×R$0,005/min','m_lixa',false],
     ['🔩','Tupia','×R$0,01/min','m_tupia',false]
   ].map(function(r){
-    var realId = r[3].replace('m_','om_');
-    var curVal = g(realId);
+    var curVal = g(r[3].replace('m_','om_'));
     return '<div style="'+ROW+'">'
-      +'<span style="font-size:13px;width:18px">'+r[0]+'</span>'
+      +'<span style="font-size:12px;width:16px">'+r[0]+'</span>'
       +'<span style="'+RNAME+'">'+r[1]+'</span>'
       +'<span style="'+RRATE+'">'+r[2]+'</span>'
       +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
-      +(r[4]?'<button onclick="orcExtrasAutoLaser()" style="padding:2px 6px;background:var(--brand-mid);color:#fff;border:none;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
+      +(r[4]?'<button onclick="orcExtrasAutoLaser()" style="padding:2px 5px;background:var(--brand-mid);color:#fff;border:none;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
       +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
   }).join('')
   +'</div>'
 
-  // Bloco: Consumíveis (abaixo de Máquinas)
-  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧴 Consumíveis</div>'
-  // Só Corte
-  +'<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border);margin-bottom:7px">'
-  +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:14px;height:14px;cursor:pointer">'
-  +'<div style="flex:1"><div style="font-size:11px;font-weight:800">✂️ Só Corte — R$130/h</div>'
+  // Consumíveis
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧴 Consumíveis</div>'
+  +'<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bg2);border-radius:7px;border:1.5px solid var(--border);margin-bottom:6px">'
+  +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:13px;height:13px;cursor:pointer">'
+  +'<div style="flex:1"><div style="font-size:10px;font-weight:800">✂️ Só Corte — R$130/h</div>'
   +'<div style="font-size:9px;color:var(--muted)">Cliente traz o material</div></div>'
-  +'<div id="m_soCortePanel" style="display:'+(soCorte?'flex':'none')+';align-items:center;gap:4px">'
-  +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:48px">'
-  +'<span style="font-size:10px;color:var(--muted)">min</span>'
+  +'<div id="m_soCortePanel" style="display:'+(soCorte?'flex':'none')+';align-items:center;gap:3px">'
+  +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:45px">'
+  +'<span style="font-size:9px;color:var(--muted)">min</span>'
   +'</div></div>'
   +[['🩹','Adesivo','R$0,0056/cm²','m_adh','oc_adh',true],
     ['⬜','Adh. Branco','R$0,0011/cm²','m_adhb','oc_adhb',true],
@@ -6531,10 +6547,10 @@ function orcItemExtras(ri) {
     var curVal = g(r[4]);
     if(r[5]){
       return '<div style="'+ROW+'">'
-        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
+        +'<span style="font-size:11px;width:16px">'+r[0]+'</span>'
         +'<span style="'+RNAME+'">'+r[1]+'</span>'
         +'<span style="'+RRATE+'">'+r[2]+'</span>'
-        +'<select id="'+r[3]+'" style="'+SEL+';width:54px">'
+        +'<select id="'+r[3]+'" style="'+SEL+';width:52px">'
         +'<option value="nao"'+(curVal==='nao'?' selected':'')+'>Não</option>'
         +'<option value="sim"'+(curVal==='sim'?' selected':'')+'>Sim</option>'
         +'</select>'
@@ -6542,7 +6558,7 @@ function orcItemExtras(ri) {
         +'</div>';
     } else {
       return '<div style="'+ROW+'">'
-        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
+        +'<span style="font-size:11px;width:16px">'+r[0]+'</span>'
         +'<span style="'+RNAME+'">'+r[1]+'</span>'
         +'<span style="'+RRATE+'">'+r[2]+'</span>'
         +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" style="'+INP+'">'
@@ -6552,39 +6568,13 @@ function orcItemExtras(ri) {
   }).join('')
   +'</div>'
 
-  // Bloco: Parâmetros
-  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
-  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚙️ Parâmetros da Ordem</div>'
-  +[['Desconto','m_desc','orcDesc','m_descTipo','orcDescTipo',descTipo],
-    ['Acréscimo','m_acres','orcAcres','m_acresTipo','orcAcresTipo',acresTipo]
-  ].map(function(r){
-    return '<div style="'+ROW+'">'
-      +'<span style="'+RNAME+'">'+r[0]+'</span>'
-      +'<input type="number" id="'+r[1]+'" value="'+g(r[2])+'" min="0" step="1" style="'+INP+'">'
-      +'<select id="'+r[3]+'" style="'+SEL+';width:50px">'
-      +'<option value="pct"'+(r[5]==='pct'?' selected':'')+'>%</option>'
-      +'<option value="rs"'+(r[5]==='rs'?' selected':'')+'>R$</option>'
-      +'</select></div>';
-  }).join('')
-  +'<div style="'+ROW+'">'
-  +'<span style="'+RNAME+'">Montagem</span>'
-  +'<span style="'+LBL+'">R$</span>'
-  +'<input type="number" id="m_mont" value="'+g('orcMontagem')+'" min="0" style="'+INP+'">'
-  +'</div>'
-  +'<div style="'+ROW+';border-bottom:none">'
-  +'<span style="'+RNAME+'">Deslocamento</span>'
-  +'<span style="'+LBL+'">R$</span>'
-  +'<input type="number" id="m_desl" value="'+g('orcDesl')+'" min="0" style="'+INP+'">'
-  +'</div>'
-  +'</div>'
+  +'</div>' // fim col direita
+  +'</div>' // fim grid body
 
-  +'</div>' // fim coluna direita
-  +'</div>' // fim body scroll
-
-  // Footer fixo
-  +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1.5px solid var(--border);flex-shrink:0">'
+  // Footer
+  +'<div style="display:flex;gap:8px;justify-content:flex-end;padding:10px 18px;border-top:1.5px solid var(--border);flex-shrink:0">'
   +'<button class="topbar-btn ghost" onclick="orcItemExtrasFechar()">Cancelar</button>'
-  +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
+  +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 18px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
   +'</div>'
   +'</div>';
 
@@ -16595,5 +16585,4 @@ function siteCreateOverlay() {
 
 
 function siteLeadSalvar() {
-  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return;
-  l.status = document.getElementById('slS
+  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return
