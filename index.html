@@ -6401,77 +6401,240 @@ function orcRecalc() {
 var ORC_ITEM_EXTRAS = {};
 
 function orcItemExtras(ri) {
-  var ex = ORC_ITEM_EXTRAS[ri] || {};
+  var ex   = ORC_ITEM_EXTRAS[ri] || {};
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
   var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
   var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
   var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
   var planArea = parseFloat(row && row.dataset.planArea)||0;
-  var areaCm2  = (planArea > 0 ? planArea : (larg*alt)) * qty;
+  var areaCm2  = (planArea>0 ? planArea : (larg*alt)) * qty;
   var adhFmt   = (areaCm2*0.0056).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   var adSim = ex.adesivoSim ? 'sim' : 'nao';
+
+  // Ler valores atuais dos inputs do Step 3
+  var g = function(id){ return (document.getElementById(id)||{}).value||'0'; };
+  var gChk = function(id){ return !!(document.getElementById(id)||{}).checked; };
+  var soCorte = gChk('orcSoCorte');
+  var soCorteMin = g('orcSoCorteMin')||'30';
+
+  // Preset options
+  var presetOpts = '<option value="">⏱️ Aplicar Preset...</option>';
+  if(typeof _MACH_PRESETS!=='undefined') _MACH_PRESETS.forEach(function(p,i){ presetOpts+='<option value="'+i+'">'+p.nome+'</option>'; });
+
+  var INP = 'padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;width:58px;text-align:center;background:var(--bg);color:var(--text);font-size:12px;font-weight:700';
+  var SEL = 'padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-weight:700';
+  var LBL = 'font-size:10px;color:var(--muted);font-weight:600';
+  var ROW = 'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)';
+  var RNAME = 'flex:1;font-size:11px;font-weight:700';
+  var RRATE = 'font-size:10px;color:var(--muted);min-width:72px';
+  var RVAL  = 'font-size:11px;font-weight:800;color:var(--brand-mid);min-width:44px;text-align:right';
+
+  var descTipo = (document.getElementById('orcDescTipo')||{}).value||'pct';
+  var acresTipo = (document.getElementById('orcAcresTipo')||{}).value||'pct';
 
   var ov = document.getElementById('orcItemExtrasOverlay');
   if(!ov){
     ov=document.createElement('div'); ov.id='orcItemExtrasOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;padding:20px 0;overflow-y:auto';
-    ov.onclick=function(e){if(e.target===ov){ orcItemExtrasFechar(); }};
+    ov.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:16px 8px;overflow-y:auto';
+    ov.onclick=function(e){if(e.target===ov) orcItemExtrasFechar();};
     document.body.appendChild(ov);
   }
 
   ov.innerHTML=
-    '<div style="background:var(--bg);border-radius:14px;padding:22px;width:min(700px,97vw);box-shadow:0 20px 60px rgba(0,0,0,.35);margin:auto">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div style="font-size:14px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
-    +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button>'
-    +'</div>'
-    // ─── SEÇÃO 1: Extras do item ───
-    +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">'
-    +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">➕ Extras deste Item</div>'
-    +'<div style="display:grid;gap:8px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--bg);border-radius:8px">'
-    +'<div><div style="font-size:11px;font-weight:700">Adesivo / Vinil</div>'
-    +'<div id="exAdhPreview" style="font-size:10px;color:var(--brand-mid)">= R$ '+adhFmt+'</div></div>'
-    +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;font-weight:700;background:var(--bg);color:var(--text)">'
-    +'<option value="nao"'+(adSim==='nao'?' selected':'')+'>Não</option>'
-    +'<option value="sim"'+(adSim==='sim'?' selected':'')+'>Sim</option>'
-    +'</select></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Acabamento / Fita (R$)</label><input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Instalação (R$)</label><input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Outros (R$)</label><input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;background:var(--bg);color:var(--text)"></div>'
-    +'<div class="fg" style="margin:0"><label style="font-size:10px">Descrição (opcional)</label><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Ex: Adesivo recorte + instalação" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)"></div>'
-    +'</div>'
-    +'<div id="exPreview" style="margin-top:6px;font-size:11px;color:var(--brand-mid);font-weight:700"></div>'
-    +'</div></div>'
-    // ─── SEÇÃO 2: Custos globais da ordem (DOM transfer slot) ───
-    +'<div style="background:var(--surface);border:1.5px solid var(--brand-mid);border-radius:10px;padding:14px;margin-bottom:14px">'
-    +'<div style="font-size:10px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">⚙️ Máquinas, Consumíveis & Precificação da Ordem</div>'
-    +'<div id="opg3ModalSlot"></div>'
-    +'</div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
-    +'<button class="topbar-btn ghost" onclick="orcItemExtrasFechar()">Cancelar</button>'
-    +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
-    +'</div>'
-    +'</div>';
+  '<div style="background:var(--bg);border-radius:16px;padding:20px;width:min(720px,98vw);box-shadow:0 24px 72px rgba(0,0,0,.4);margin:auto">'
+  // Header
+  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+  +'<div style="font-size:15px;font-weight:800">⚙️ Custos — <span style="color:var(--brand-mid)">'+prod+'</span></div>'
+  +'<button onclick="orcItemExtrasFechar()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1">×</button>'
+  +'</div>'
+  // Body: col esquerda (Extras) | col direita (Máquinas + Consumíveis + Parâmetros)
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">'
 
-  // Transferir conteúdo real do Step 3 para o slot (mantém IDs e event handlers intactos)
-  var inner = document.getElementById('opg3inner');
-  var slot  = document.getElementById('opg3ModalSlot');
-  if(inner && slot) { slot.appendChild(inner); }
-  try{ if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); }catch(e){}
+  // ── Coluna Esquerda: Extras do Item ──
+  +'<div>'
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">➕ Extras deste Item</div>'
+  +'<div style="'+ROW+';padding-top:0">'
+  +'<span style="'+RNAME+'">Adesivo / Vinil</span>'
+  +'<span id="exAdhPreview" style="font-size:10px;color:var(--brand-mid)">= R$ '+adhFmt+'</span>'
+  +'<select id="exAdesivoSim" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';width:64px">'
+  +'<option value="nao"'+(adSim==='nao'?' selected':'')+'>Não</option>'
+  +'<option value="sim"'+(adSim==='sim'?' selected':'')+'>Sim</option>'
+  +'</select></div>'
+  +'<div style="'+ROW+'">'
+  +'<span style="'+RNAME+'">Acabamento / Fita</span>'
+  +'<span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="exAcabamento" value="'+(ex.acabamento||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
+  +'<div style="'+ROW+'">'
+  +'<span style="'+RNAME+'">Instalação</span>'
+  +'<span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="exInstalacao" value="'+(ex.instalacao||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
+  +'<div style="'+ROW+'">'
+  +'<span style="'+RNAME+'">Outros</span>'
+  +'<span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
+  +'<div style="margin-top:8px"><input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Descrição opcional..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)"></div>'
+  +'<div id="exPreview" style="margin-top:6px;font-size:11px;color:var(--brand-mid);font-weight:700;min-height:16px"></div>'
+  +'</div>'
+  +'</div>'
+
+  // ── Coluna Direita: Máquinas → Consumíveis → Parâmetros ──
+  +'<div style="display:flex;flex-direction:column;gap:10px">'
+
+  // Bloco: Máquinas
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
+  +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (min)</div>'
+  +'<div style="display:flex;gap:5px">'
+  +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:3px 6px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
+  +'<button onclick="orcSalvarPreset()" style="padding:3px 7px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:6px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
+  +'</div></div>'
+  +[['⚡','Laser','×R$0,10/min','m_laser',true],
+    ['📐','Dobra','×R$0,01/min','m_dobra',false],
+    ['✨','Politrix','×R$0,02/min','m_pol',false],
+    ['☀️','UV','×R$0,002/min','m_uv',false],
+    ['🔧','Lixadeira','×R$0,005/min','m_lixa',false],
+    ['🔩','Tupia','×R$0,01/min','m_tupia',false]
+  ].map(function(r){
+    var realId = r[3].replace('m_','om_');
+    var curVal = g(realId);
+    return '<div style="'+ROW+'">'
+      +'<span style="font-size:13px;width:18px">'+r[0]+'</span>'
+      +'<span style="'+RNAME+'">'+r[1]+'</span>'
+      +'<span style="'+RRATE+'">'+r[2]+'</span>'
+      +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
+      +(r[4]?'<button onclick="orcExtrasAutoLaser()" style="padding:2px 6px;background:var(--brand-mid);color:#fff;border:none;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
+      +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
+      +'</div>';
+  }).join('')
+  +'</div>'
+
+  // Bloco: Consumíveis (abaixo de Máquinas)
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧴 Consumíveis</div>'
+  // Só Corte
+  +'<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border);margin-bottom:7px">'
+  +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:14px;height:14px;cursor:pointer">'
+  +'<div style="flex:1"><div style="font-size:11px;font-weight:800">✂️ Só Corte — R$130/h</div>'
+  +'<div style="font-size:9px;color:var(--muted)">Cliente traz o material</div></div>'
+  +'<div id="m_soCortePanel" style="display:'+(soCorte?'flex':'none')+';align-items:center;gap:4px">'
+  +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:48px">'
+  +'<span style="font-size:10px;color:var(--muted)">min</span>'
+  +'</div></div>'
+  +[['🩹','Adesivo','R$0,0056/cm²','m_adh','oc_adh',true],
+    ['⬜','Adh. Branco','R$0,0011/cm²','m_adhb','oc_adhb',true],
+    ['🖨️','Impressão','R$ fixo','m_imp','oc_imp',false],
+    ['🎨','Spray (un)','×R$16','m_spray','oc_spray',false],
+    ['➕','Extra','R$ fixo','m_extra','oc_extra',false]
+  ].map(function(r){
+    var curVal = g(r[4]);
+    if(r[5]){
+      return '<div style="'+ROW+'">'
+        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
+        +'<span style="'+RNAME+'">'+r[1]+'</span>'
+        +'<span style="'+RRATE+'">'+r[2]+'</span>'
+        +'<select id="'+r[3]+'" style="'+SEL+';width:54px">'
+        +'<option value="nao"'+(curVal==='nao'?' selected':'')+'>Não</option>'
+        +'<option value="sim"'+(curVal==='sim'?' selected':'')+'>Sim</option>'
+        +'</select>'
+        +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
+        +'</div>';
+    } else {
+      return '<div style="'+ROW+'">'
+        +'<span style="font-size:12px;width:18px">'+r[0]+'</span>'
+        +'<span style="'+RNAME+'">'+r[1]+'</span>'
+        +'<span style="'+RRATE+'">'+r[2]+'</span>'
+        +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" style="'+INP+'">'
+        +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
+        +'</div>';
+    }
+  }).join('')
+  +'</div>'
+
+  // Bloco: Parâmetros
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px">'
+  +'<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚙️ Parâmetros da Ordem</div>'
+  +[['Desconto','m_desc','orcDesc','m_descTipo','orcDescTipo',descTipo],
+    ['Acréscimo','m_acres','orcAcres','m_acresTipo','orcAcresTipo',acresTipo]
+  ].map(function(r){
+    return '<div style="'+ROW+'">'
+      +'<span style="'+RNAME+'">'+r[0]+'</span>'
+      +'<input type="number" id="'+r[1]+'" value="'+g(r[2])+'" min="0" step="1" style="'+INP+'">'
+      +'<select id="'+r[3]+'" style="'+SEL+';width:50px">'
+      +'<option value="pct"'+(r[5]==='pct'?' selected':'')+'>%</option>'
+      +'<option value="rs"'+(r[5]==='rs'?' selected':'')+'>R$</option>'
+      +'</select></div>';
+  }).join('')
+  +'<div style="'+ROW+'">'
+  +'<span style="'+RNAME+'">Montagem</span>'
+  +'<span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="m_mont" value="'+g('orcMontagem')+'" min="0" style="'+INP+'">'
+  +'</div>'
+  +'<div style="'+ROW+';border-bottom:none">'
+  +'<span style="'+RNAME+'">Deslocamento</span>'
+  +'<span style="'+LBL+'">R$</span>'
+  +'<input type="number" id="m_desl" value="'+g('orcDesl')+'" min="0" style="'+INP+'">'
+  +'</div>'
+  +'</div>'
+
+  +'</div>' // fim coluna direita
+  +'</div>' // fim grid
+
+  // Footer
+  +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;padding-top:12px;border-top:1.5px solid var(--border)">'
+  +'<button class="topbar-btn ghost" onclick="orcItemExtrasFechar()">Cancelar</button>'
+  +'<button onclick="orcItemExtrasSalvar('+ri+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
+  +'</div>'
+  +'</div>';
 
   ov.style.display='flex';
   orcItemExtraPreview(ri);
+  orcExtrasCalcMaq();
+}
+
+// Helpers do modal de custos
+function orcExtrasCalcMaq(){
+  var rates={m_laser:0.10,m_dobra:0.01,m_pol:0.02,m_uv:0.002,m_lixa:0.005,m_tupia:0.01};
+  Object.keys(rates).forEach(function(k){
+    var v=parseFloat((document.getElementById(k)||{}).value)||0;
+    var val=v*rates[k];
+    var el=document.getElementById(k+'_v');
+    if(el) el.textContent='R$'+val.toFixed(2).replace('.',',');
+  });
+  // Só corte
+  var sc=!!(document.getElementById('m_soCorte')||{}).checked;
+  var scMin=parseFloat((document.getElementById('m_soCorteMin')||{}).value)||30;
+  var scVal=sc?Math.max(30,scMin)/60*130:0;
+  var scEl=document.getElementById('m_soCorte_v');
+  if(scEl) scEl.textContent='R$'+scVal.toFixed(2).replace('.',',');
+}
+function orcExtrasCorteChange(){
+  var chk=!!(document.getElementById('m_soCorte')||{}).checked;
+  var panel=document.getElementById('m_soCortePanel');
+  if(panel) panel.style.display=chk?'flex':'none';
+  orcExtrasCalcMaq();
+}
+function orcExtrasAplicarPreset(idx){
+  if(idx===''||typeof _MACH_PRESETS==='undefined') return;
+  var p=_MACH_PRESETS[parseInt(idx)];
+  if(!p) return;
+  ['laser','dobra','pol','uv','lixa','tupia'].forEach(function(k){
+    var el=document.getElementById('m_'+k); if(el&&p[k]!==undefined) el.value=p[k];
+  });
+  orcExtrasCalcMaq();
+}
+function orcExtrasAutoLaser(){
+  // lê espessura do material do item aberto
+  var matSel=document.querySelector('#orcItemBody select[id^="oi_mat_"]');
+  var esp=3;
+  if(matSel){ var opt=matSel.options[matSel.selectedIndex]; if(opt) esp=parseFloat(opt.dataset.esp)||3; }
+  var min=Math.round(esp*2.5);
+  var el=document.getElementById('m_laser'); if(el) el.value=min;
+  orcExtrasCalcMaq();
 }
 
 function orcItemExtrasFechar() {
-  // Devolver conteúdo do Step 3 de volta para opg3
-  var inner = document.getElementById('opg3inner');
-  var pg3   = document.getElementById('opg3grid');
-  var slot  = document.getElementById('opg3ModalSlot');
-  if(inner && pg3 && slot && slot.contains(inner)) { pg3.insertBefore(inner, pg3.firstChild); }
   var ov = document.getElementById('orcItemExtrasOverlay');
   if(ov) ov.style.display='none';
 }
@@ -6513,13 +6676,36 @@ function orcItemExtrasSalvar(ri){
     outros:     parseFloat((document.getElementById('exOutros')||{}).value)||0,
     descricao:  (document.getElementById('exDesc')||{}).value||''
   };
+  // Escrever valores de máquinas + consumíveis + parâmetros de volta nos inputs do Step 3
+  var ws=function(id,val){var el=document.getElementById(id);if(el)el.value=val;};
+  var wc=function(id,val){var el=document.getElementById(id);if(el)el.checked=!!val;};
+  ws('om_laser',  (document.getElementById('m_laser')||{}).value||0);
+  ws('om_dobra',  (document.getElementById('m_dobra')||{}).value||0);
+  ws('om_pol',    (document.getElementById('m_pol')||{}).value||0);
+  ws('om_uv',     (document.getElementById('m_uv')||{}).value||0);
+  ws('om_lixa',   (document.getElementById('m_lixa')||{}).value||0);
+  ws('om_tupia',  (document.getElementById('m_tupia')||{}).value||0);
+  ws('oc_adh',    (document.getElementById('m_adh')||{}).value||'nao');
+  ws('oc_adhb',   (document.getElementById('m_adhb')||{}).value||'nao');
+  ws('oc_imp',    (document.getElementById('m_imp')||{}).value||0);
+  ws('oc_spray',  (document.getElementById('m_spray')||{}).value||0);
+  ws('oc_extra',  (document.getElementById('m_extra')||{}).value||0);
+  ws('orcDesc',   (document.getElementById('m_desc')||{}).value||0);
+  ws('orcDescTipo',(document.getElementById('m_descTipo')||{}).value||'pct');
+  ws('orcAcres',  (document.getElementById('m_acres')||{}).value||0);
+  ws('orcAcresTipo',(document.getElementById('m_acresTipo')||{}).value||'pct');
+  ws('orcMontagem',(document.getElementById('m_mont')||{}).value||0);
+  ws('orcDesl',   (document.getElementById('m_desl')||{}).value||0);
+  wc('orcSoCorte', !!(document.getElementById('m_soCorte')||{}).checked);
+  ws('orcSoCorteMin',(document.getElementById('m_soCorteMin')||{}).value||30);
+
   orcItemExtrasFechar();
   var btn=document.querySelector('#oir_'+ri+' .plan-icon-btn[onclick*="orcItemExtras"]');
   var ex=ORC_ITEM_EXTRAS[ri];
   var total=ex.adesivo+ex.acabamento+ex.instalacao+ex.outros;
   if(btn) { btn.style.background=total>0?'#7C3AED':'var(--surface)'; btn.style.color=total>0?'#fff':'var(--text)'; btn.title=total>0?'Extras: R$'+total.toFixed(2):'Custos extras'; }
   orcRecalc();
-  showToast('Custos extras do item salvos!','ok');
+  showToast('Custos salvos!','ok');
 }
 
 function orcGetItemExtrasTotal(){
@@ -16410,179 +16596,4 @@ function siteCreateOverlay() {
 
 function siteLeadSalvar() {
   var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return;
-  l.status = document.getElementById('slStatus').value;
-  l.notas = document.getElementById('slNotas').value;
-  siteSaveLeads(); siteLeadRender(); siteKpiRender();
-  document.getElementById('siteLeadOverlay').style.display = 'none';
-  showToast('Lead atualizado!','ok');
-}
-
-// ── Novo Lead manual ──
-function siteLeadNovoModal() {
-  var nome = prompt('Nome do cliente:'); if(!nome) return;
-  var email = prompt('Email:') || '';
-  var tel = prompt('Telefone (opcional):') || '';
-  var origem = 'manual';
-  var lead = {
-    id: 'sl'+Date.now(), nome: nome.trim(), email: email.trim(), tel: tel.trim(),
-    origem: origem, status: 'novo', dataCad: new Date().toISOString(), notas: ''
-  };
-  SITE_LEADS.unshift(lead);
-  siteSaveLeads(); siteLeadRender(); siteKpiRender();
-  showToast('Lead adicionado!','ok');
-}
-
-// ── Shopify Sync ──
-function siteShopifyPanel() {
-  var p = document.getElementById('siteShopifyPanelDiv');
-  if(!p) return;
-  p.style.display = p.style.display==='none' ? '' : 'none';
-  // Load saved config
-  if(_SHOPIFY_CFG.url) document.getElementById('shopifyStoreUrl').value = _SHOPIFY_CFG.url;
-  if(_SHOPIFY_CFG.token) document.getElementById('shopifyToken').value = _SHOPIFY_CFG.token;
-}
-
-function siteSalvarConfig() {
-  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
-  var token = (document.getElementById('shopifyToken').value||'').trim();
-  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
-  showToast('Configuração salva!','ok');
-}
-
-function siteShopifySync() {
-  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
-  var token = (document.getElementById('shopifyToken').value||'').trim();
-  if(!url || !token){ showToast('Preencha URL e Token antes de sincronizar.','warn'); return; }
-  // Save config
-  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
-  var stEl = document.getElementById('shopifySyncStatus');
-  if(stEl) stEl.textContent = '⏳ Sincronizando...';
-
-  // Shopify Admin API - customers endpoint
-  var shopUrl = url.replace(/\/$/, '');
-  if(!shopUrl.includes('.myshopify.com')) shopUrl = shopUrl+'.myshopify.com';
-  var apiUrl = 'https://'+shopUrl+'/admin/api/2024-01/customers.json?limit=250';
-
-  fetch(apiUrl, {
-    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }
-  }).then(function(r){
-    if(!r.ok) throw new Error('HTTP '+r.status+' - verifique o token e a URL da loja.');
-    return r.json();
-  }).then(function(data){
-    var customers = data.customers || [];
-    var added = 0, updated = 0;
-    customers.forEach(function(c){
-      var existIdx = SITE_LEADS.findIndex(function(l){ return l.shopifyId===String(c.id); });
-      var lead = {
-        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+c.id,
-        shopifyId: String(c.id),
-        nome: (c.first_name||'') + ' ' + (c.last_name||''),
-        email: c.email||'',
-        tel: c.phone||'',
-        cidade: (c.default_address&&c.default_address.city)||'',
-        dataCad: c.created_at||new Date().toISOString(),
-        origem: c.orders_count > 0 ? 'compra' : 'cadastro',
-        qtdPedidos: c.orders_count||0,
-        totalPedidos: parseFloat(c.total_spent||'0'),
-        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
-        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
-      };
-      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
-      else { SITE_LEADS.unshift(lead); added++; }
-    });
-    siteSaveLeads(); siteLeadRender(); siteKpiRender();
-    if(stEl) stEl.textContent = '✅ '+added+' novos · '+updated+' atualizados ('+customers.length+' total)';
-    showToast(customers.length+' clientes sincronizados!','ok');
-  }).catch(function(err){
-    if(stEl) stEl.textContent = '❌ Erro: '+err.message;
-    var msg = err.message||'';
-    if(msg.toLowerCase().includes('failed to fetch')||msg.toLowerCase().includes('cors')){
-      showToast('CORS bloqueado - use o Shopify Proxy App ou importe via CSV','warn');
-      if(stEl) stEl.innerHTML = '❌ CORS bloqueado pelo Shopify.<br><small>Solução: No Shopify Admin → Aplicativos → Criar app → ative CORS para o seu domínio, ou importe o CSV de clientes abaixo.</small>';
-    } else {
-      showToast('Erro ao sincronizar: '+err.message,'err');
-    }
-  });
-}
-
-// ── CSV Import (Shopify customer export) ──
-function siteImportCSV() {
-  var p = document.getElementById('siteShopifyPanelDiv');
-  if(p){ p.style.display=''; }
-  var inp = document.getElementById('siteCSVInput');
-  if(inp){ setTimeout(function(){ inp.scrollIntoView({behavior:'smooth'}); inp.click(); }, 200); }
-}
-
-function siteParseCSV(input) {
-  var file = input.files[0]; if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(e){
-    var lines = e.target.result.split('\n')
-    var headers = lines[0].split(',').map(function(h){ return h.replace(/"/g,'').trim().toLowerCase(); });
-    var added=0, updated=0;
-    for(var i=1;i<lines.length;i++){
-      var cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
-      cols = cols.map(function(c){ return c.replace(/^"|"$/g,'').trim(); });
-      if(cols.length<3) continue;
-      var get = function(name){ var idx=headers.indexOf(name); return idx>=0?cols[idx]||'':''; };
-      var email = get('email');
-      if(!email) continue;
-      var shopifyId = get('id')||get('customer id');
-      var existIdx = SITE_LEADS.findIndex(function(l){ return l.email===email; });
-      var nome = (get('first name')||get('nome'))+' '+(get('last name')||'');
-      var orders = parseInt(get('total orders')||get('orders count')||'0')||0;
-      var spent = parseFloat((get('total spent')||get('total amount spent')||'0').replace('R$','').replace(',','.'))||0;
-      var lead = {
-        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+Date.now()+'_'+i,
-        shopifyId: shopifyId,
-        nome: nome.trim()||email,
-        email: email,
-        tel: get('phone')||get('telefone')||'',
-        cidade: get('city')||get('billing city')||'',
-        dataCad: get('created at')||get('customer since')||new Date().toISOString(),
-        origem: orders>0 ? 'compra' : 'cadastro',
-        qtdPedidos: orders,
-        totalPedidos: spent,
-        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
-        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
-      };
-      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
-      else { SITE_LEADS.push(lead); added++; }
-    }
-    siteSaveLeads(); siteLeadRender(); siteKpiRender();
-    showToast(added+' leads importados · '+updated+' atualizados do CSV','ok');
-    input.value='';
-  };
-  reader.readAsText(file, 'utf-8');
-}
-
-function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-// Init site leads on CRM open
-setTimeout(function(){
-  siteUpdateCount();
-}, 1200);
-
-</script>
-
-<!-- ══ MOBILE SIDE PANEL ══ -->
-<div id="mobileOverlayBg" onclick="mobilePanelClose()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;opacity:0;transition:opacity .28s"></div>
-<div id="mobileSidePanel">
-  <div style="padding:16px 14px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between">
-    <div style="color:#fff;font-weight:800;font-size:15px">📊 ERP Marcas</div>
-    <button onclick="mobilePanelClose()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:20px;cursor:pointer;padding:2px 6px">✕</button>
-  </div>
-  <div>
-    <div class="mdrw-section">Principal</div>
-    <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
-    <div class="mdrw-section">Operação</div>
-    <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS</div>
-    <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
-    <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque</div>
-    <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
-    <div class="mdrw-section">Comercial</div>
-    <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
-    <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
-    <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
-    <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
-    <div class="mdrw-item" id="msp
+  l.status = document.getElementById('slStatus').valu
