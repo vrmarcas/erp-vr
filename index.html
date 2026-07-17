@@ -1215,8 +1215,16 @@ function _cloudLoadAll() {
         local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
         try{ }catch(e){}
         try{ usrRender(); }catch(e){}
+        try{ orcPopulateVendedores(); }catch(e){}
+        try{ vendedoresRender(); }catch(e){}
         var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none';
       }
+    });
+    _cloudWatch("erp_vendedores", function(d){
+      if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} }
+    });
+    _cloudWatch("erp_metas_vendedor", function(d){
+      if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; }
     });
     _cloudWatch("erp_config", function(d){
       if(d && typeof d==='object'){
@@ -1279,6 +1287,8 @@ function _cloudLoadAll() {
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
   _cloudLoad("stock", function(d){ if(d&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
+  _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
+  _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){
     if(d&&typeof d==='object'&&Object.keys(d).length){
@@ -2104,7 +2114,7 @@ firebase.auth().signInAnonymously().then(function(){
             </div>
             <div class="fg-row">
               <div class="fg"><label>Cidade</label><input type="text" id="orcClientCidade" placeholder="São Carlos"></div>
-              <div class="fg"><label>Vendedor</label><select id="orcClientVendedor"><option>RONALDO</option><option>CARLOS</option><option>Outro</option></select></div>
+              <div class="fg"><label>Vendedor</label><select id="orcClientVendedor"><option value="">— Selecione —</option></select></div>
             </div>
             <div class="fg-row">
               <div class="fg"><label>📅 Cliente solicitou em</label><input type="date" id="orcDataPedido" style="font-size:12px"></div>
@@ -2676,6 +2686,7 @@ firebase.auth().signInAnonymously().then(function(){
         <button class="intel-tab on" id="intelTab1" onclick="intelTabSwitch('funil',this)">📊 Funil & Métricas</button>
         <button class="intel-tab" id="intelTab2" onclick="intelTabSwitch('cadencia',this)">📨 Cadência</button>
         <button class="intel-tab" id="intelTab3" onclick="intelTabSwitch('insights',this)">💡 Insights</button>
+        <button class="intel-tab" id="intelTab4" onclick="intelTabSwitch('comissao',this)">💰 Comissão</button>
       </div>
 
       <!-- FUNIL -->
@@ -2796,6 +2807,38 @@ firebase.auth().signInAnonymously().then(function(){
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- COMISSÃO POR VENDEDOR -->
+      <div id="intelPanelComissao" style="display:none">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:800">📅 Período:</div>
+          <select id="comissaoMesSel" onchange="comissaoRender()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);font-size:12px"></select>
+          <button onclick="comissaoModalMeta()" style="margin-left:auto;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">🎯 Definir Metas</button>
+        </div>
+        <div class="ekpi-grid" style="margin-bottom:16px">
+          <div class="ekpi"><div class="ekpi-ico">💰</div><div class="ekpi-lbl">Total Faturado (mês)</div><div class="ekpi-val" id="comissaoTotalMes">—</div><div class="ekpi-trend" id="comissaoTotalSub">orçamentos aprovados</div></div>
+          <div class="ekpi"><div class="ekpi-ico">🏷️</div><div class="ekpi-lbl">Total Comissões</div><div class="ekpi-val" id="comissaoTotalComissao">—</div><div class="ekpi-trend">soma das comissões do mês</div></div>
+          <div class="ekpi"><div class="ekpi-ico">🎯</div><div class="ekpi-lbl">Meta do Mês</div><div class="ekpi-val" id="comissaoMetaMes">—</div><div class="ekpi-trend" id="comissaoMetaSub">total da equipe</div></div>
+          <div class="ekpi"><div class="ekpi-ico">📋</div><div class="ekpi-lbl">Orç. Aprovados</div><div class="ekpi-val" id="comissaoQtdAprov">—</div><div class="ekpi-trend">no período</div></div>
+        </div>
+        <div id="comissaoVendedoresGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-bottom:16px"></div>
+        <div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+          <div style="font-size:13px;font-weight:800;margin-bottom:14px">📋 Orçamentos Aprovados no Período</div>
+          <div id="comissaoTabela" style="overflow-x:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal metas de vendedor -->
+    <div id="comissaoMetaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:3000;align-items:center;justify-content:center">
+      <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:480px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:15px;font-weight:800;margin-bottom:16px">🎯 Metas por Vendedor</div>
+        <div id="comissaoMetaForm"></div>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button onclick="comissaoSalvarMetas()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">💾 Salvar Metas</button>
+          <button onclick="document.getElementById('comissaoMetaModal').style.display='none'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
         </div>
       </div>
     </div>
@@ -4358,6 +4401,19 @@ firebase.auth().signInAnonymously().then(function(){
           </div>
         </div>
 
+        <!-- Vendedores -->
+        <div class="card" style="margin-top:14px">
+          <div class="card-h">
+            <div class="card-h-left">🏷️ Vendedores</div>
+          </div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px 0">Usuários com função <strong>Comercial</strong> aparecem automaticamente. Adicione vendedores avulsos abaixo.</p>
+          <div id="vendedoresLista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+          <div style="display:flex;gap:8px">
+            <input id="vendedorNovoNome" type="text" placeholder="Nome do vendedor" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+            <button class="topbar-btn" onclick="vendedorAdicionar()">+ Adicionar</button>
+          </div>
+        </div>
+
       </div>
     </div><!-- /pg-config-usr -->
 
@@ -5595,7 +5651,7 @@ function nav(page, el) {
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
   // Ao entrar no orçamento, sempre resetar para step 1
-  if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); }, 0); }
+  if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){} }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); }
   // Ao entrar no Financeiro, renderizar todos os painéis
@@ -5605,7 +5661,7 @@ function nav(page, el) {
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-plan') { setTimeout(function(){ planProdRender(); }, 0); }
-  if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); }, 0); }
+  if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); try{vendedoresRender();}catch(e){} }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
@@ -10850,7 +10906,7 @@ var _lastOsId = null;
     var telCliente=(document.getElementById('orcClientTel')||{}).value||'';
     var cidadeCliente=(document.getElementById('orcClientCidade')||{}).value||'';
     var vendedorEl=document.getElementById('orcClientVendedor');
-    var vendedor=vendedorEl?vendedorEl.value:'RONALDO';
+    var vendedor=vendedorEl?vendedorEl.value:'';
     // Forma de pagamento lida do Step 5 (orcSimMetodo)
     var simMetodoEl=document.getElementById('orcSimMetodo');
     var formaPgtoMap={pix:'PIX',cartao:'Cartão de Crédito','50_50':'50% Entrada + 50% Retirada',link:'Link de Pagamento',dinheiro:'Dinheiro'};
@@ -11026,7 +11082,7 @@ function osImprimirPDF(id) {
   var telCliente = os ? (os.clientTel||'') : '';
   var emailCliente = os ? (os.clientEmail||'') : '';
   var cidadeCliente = os ? (os.clientCidade||'') : '';
-  var vendedor = os ? (os.vendedor||'RONALDO') : 'RONALDO';
+  var vendedor = os ? (os.vendedor||'') : '';
   var formaPgto = os ? (os.formaPgto||'PIX') : 'PIX';
   var dataOS = os ? (os.dataOS||'') : '';
   var obs = os ? (os.obs||'') : '';
@@ -12456,6 +12512,8 @@ var _POSV_DATA = {};
 var _MACH_PRESETS = [];
 var _MAT_PRICES = {};
 var _USR_DATA = [];
+var _VENDEDORES_EXTRA = [];
+var _METAS_VENDEDOR = {};
 var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
@@ -13855,6 +13913,251 @@ function usrRedefinirSenha(idx) {
 function usrNovoOpen(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='flex'; }
 function usrNovoClose(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='none'; }
 
+
+// ── Comissão por Vendedor ────────────────────────────────────────────────
+var _METAS_VENDEDOR = {}; // { 'MM/YYYY': { 'Nome': metaValor, ... }, _geral: valor }
+
+function comissaoInit() {
+  // Populate month selector with last 6 months
+  var sel = document.getElementById('comissaoMesSel');
+  if(!sel) return;
+  var opts = '';
+  var now = new Date();
+  for(var i=0;i<12;i++){
+    var d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    var mm = String(d.getMonth()+1).padStart(2,'0');
+    var yyyy = d.getFullYear();
+    var lbl = d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    opts += '<option value="'+mm+'/'+yyyy+'"'+(i===0?' selected':'')+'>'+lbl.charAt(0).toUpperCase()+lbl.slice(1)+'</option>';
+  }
+  sel.innerHTML = opts;
+}
+
+function comissaoRender() {
+  comissaoInit();
+  var sel = document.getElementById('comissaoMesSel');
+  var mes = sel ? sel.value : (function(){ var d=new Date(); return String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); })();
+  var partes = mes.split('/'); var mm=partes[0]; var yyyy=partes[1];
+
+  var envList = typeof orcGetEnviados==='function' ? orcGetEnviados() : [];
+  var fmtBRL = function(v){ return 'R$ '+Math.round(v||0).toLocaleString('pt-BR'); };
+
+  // Filter approved in this month
+  var aprov = envList.filter(function(o){
+    if(o.status !== 'aprovado') return false;
+    // Use dataSalvo or dataPedido
+    var ds = o.dataSalvo||o.dataPedido||'';
+    // dataSalvo format: "DD/MM/YYYY HH:MM" or dataPedido: "YYYY-MM-DD"
+    var m, y;
+    if(ds.indexOf('/')>0){
+      var parts = ds.split(' ')[0].split('/');
+      if(parts.length===3){ m=parts[1]; y=parts[2]; }
+    } else if(ds.indexOf('-')>0){
+      var parts2 = ds.split('-');
+      if(parts2.length===3){ m=parts2[1]; y=parts2[0]; }
+    }
+    return m===mm && y===yyyy;
+  });
+
+  // Aggregate by vendedor
+  var vMap = {};
+  aprov.forEach(function(o){
+    var v = o.vendedor||'Sem vendedor';
+    var val = parseFloat(o.valorFinal||o.valorBase)||0;
+    var pct = parseFloat(o.comissaoPct||o.comissao)||0;
+    var comVal = val * pct / 100;
+    if(!vMap[v]) vMap[v] = {nome:v, faturado:0, comissao:0, qtd:0, orcamentos:[]};
+    vMap[v].faturado += val;
+    vMap[v].comissao += comVal;
+    vMap[v].qtd++;
+    vMap[v].orcamentos.push(o);
+  });
+
+  var vList = Object.values(vMap).sort(function(a,b){ return b.faturado-a.faturado; });
+  var totalFat = vList.reduce(function(s,v){return s+v.faturado;},0);
+  var totalCom = vList.reduce(function(s,v){return s+v.comissao;},0);
+  var metaGeral = (_METAS_VENDEDOR[mes]||{})._geral || 0;
+
+  // KPIs
+  var el = function(id){ return document.getElementById(id); };
+  if(el('comissaoTotalMes')) el('comissaoTotalMes').textContent = fmtBRL(totalFat);
+  if(el('comissaoTotalSub')) el('comissaoTotalSub').textContent = aprov.length+' orç. aprovados no mês';
+  if(el('comissaoTotalComissao')) el('comissaoTotalComissao').textContent = fmtBRL(totalCom);
+  if(el('comissaoQtdAprov')) el('comissaoQtdAprov').textContent = aprov.length;
+  if(el('comissaoMetaMes')){
+    el('comissaoMetaMes').textContent = metaGeral ? fmtBRL(metaGeral) : '— (definir)';
+    var pctMeta = metaGeral ? Math.round(totalFat/metaGeral*100) : null;
+    if(el('comissaoMetaSub')) el('comissaoMetaSub').textContent = pctMeta!==null ? pctMeta+'% atingido' : 'clique em Definir Metas';
+  }
+
+  // Vendedor cards
+  var paleta = ['#7C3AED','#BE185D','#059669','#D97706','#2563EB','#0891B2'];
+  var grid = el('comissaoVendedoresGrid');
+  if(grid){
+    if(!vList.length){
+      grid.innerHTML='<div style="color:var(--muted);font-size:12px;padding:16px">Nenhum orçamento aprovado neste período com vendedor informado.</div>';
+    } else {
+      grid.innerHTML = vList.map(function(v,i){
+        var col = paleta[i%paleta.length];
+        var meta = (_METAS_VENDEDOR[mes]||{})[v.nome] || 0;
+        var pctMeta = meta ? Math.round(v.faturado/meta*100) : null;
+        var metaBar = meta ? Math.min(100, Math.round(v.faturado/meta*100)) : 0;
+        var metaCor = !meta ? '#9ca3af' : pctMeta>=100 ? '#059669' : pctMeta>=70 ? '#D97706' : '#DC2626';
+        return '<div style="background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px;border-top:3px solid '+col+'">'
+          +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+          +'<div style="width:36px;height:36px;border-radius:50%;background:'+col+';color:#fff;font-size:16px;font-weight:900;display:flex;align-items:center;justify-content:center">'+v.nome.charAt(0)+'</div>'
+          +'<div><div style="font-size:13px;font-weight:800">'+v.nome+'</div>'
+          +'<div style="font-size:11px;color:var(--muted)">'+v.qtd+' orç. aprovado'+(v.qtd!==1?'s':'')+'</div></div></div>'
+          +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
+          +'<div style="background:var(--bg2);border-radius:8px;padding:8px;text-align:center">'
+          +'<div style="font-size:10px;color:var(--muted);font-weight:700">FATURADO</div>'
+          +'<div style="font-size:15px;font-weight:900;color:'+col+'">'+fmtBRL(v.faturado)+'</div></div>'
+          +'<div style="background:var(--bg2);border-radius:8px;padding:8px;text-align:center">'
+          +'<div style="font-size:10px;color:var(--muted);font-weight:700">COMISSÃO</div>'
+          +'<div style="font-size:15px;font-weight:900;color:#059669">'+fmtBRL(v.comissao)+'</div></div></div>'
+          +(meta ? '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px"><span style="color:var(--muted)">Meta: '+fmtBRL(meta)+'</span><span style="font-weight:700;color:'+metaCor+'">'+pctMeta+'%</span></div>'
+            +'<div style="height:6px;background:var(--border);border-radius:3px"><div style="height:6px;border-radius:3px;background:'+metaCor+';width:'+metaBar+'%"></div></div></div>'
+            : '<div style="font-size:11px;color:var(--muted);font-style:italic">Meta não definida</div>')
+          +'</div>';
+      }).join('');
+    }
+  }
+
+  // Detail table
+  var tab = el('comissaoTabela');
+  if(tab){
+    if(!aprov.length){
+      tab.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum registro.</div>';
+    } else {
+      tab.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        +'<thead><tr style="border-bottom:2px solid var(--border)">'
+        +'<th style="text-align:left;padding:6px 8px">Orçamento</th>'
+        +'<th style="text-align:left;padding:6px 8px">Cliente</th>'
+        +'<th style="text-align:left;padding:6px 8px">Vendedor</th>'
+        +'<th style="text-align:right;padding:6px 8px">Valor</th>'
+        +'<th style="text-align:right;padding:6px 8px">% Com.</th>'
+        +'<th style="text-align:right;padding:6px 8px">Comissão R$</th>'
+        +'</tr></thead><tbody>'
+        +aprov.map(function(o){
+          var val=parseFloat(o.valorFinal||o.valorBase)||0;
+          var pct=parseFloat(o.comissaoPct||o.comissao)||0;
+          return '<tr style="border-bottom:1px solid var(--border)">'
+            +'<td style="padding:6px 8px;font-weight:700;color:var(--brand)">'+(o.numero||o.id||'—')+'</td>'
+            +'<td style="padding:6px 8px">'+(o.clienteNome||o.cliente||'—')+'</td>'
+            +'<td style="padding:6px 8px">'+(o.vendedor||'—')+'</td>'
+            +'<td style="padding:6px 8px;text-align:right;font-weight:700">'+fmtBRL(val)+'</td>'
+            +'<td style="padding:6px 8px;text-align:right;color:var(--muted)">'+pct+'%</td>'
+            +'<td style="padding:6px 8px;text-align:right;font-weight:700;color:#059669">'+fmtBRL(val*pct/100)+'</td>'
+            +'</tr>';
+        }).join('')
+        +'</tbody></table>';
+    }
+  }
+}
+
+function comissaoModalMeta() {
+  var sel = document.getElementById('comissaoMesSel');
+  var mes = sel ? sel.value : '';
+  var vendedores = [];
+  (_USR_DATA||[]).forEach(function(u){ if(u.funcao==='comercial'&&u.nome) vendedores.push(u.nome); });
+  (_VENDEDORES_EXTRA||[]).forEach(function(v){ if(v&&vendedores.indexOf(v)<0) vendedores.push(v); });
+  var metas = _METAS_VENDEDOR[mes]||{};
+  var form = document.getElementById('comissaoMetaForm');
+  if(!form) return;
+  form.innerHTML = '<div style="margin-bottom:14px">'
+    +'<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px">🏢 Meta Geral da Equipe (R$)</label>'
+    +'<input id="metaGeral" type="number" min="0" step="100" value="'+(metas._geral||'')+'" placeholder="Ex: 50000" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);box-sizing:border-box">'
+    +'</div>'
+    +(vendedores.length ? '<div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--muted)">META INDIVIDUAL POR VENDEDOR</div>'
+      +vendedores.map(function(v){
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+          +'<div style="width:28px;height:28px;border-radius:50%;background:var(--brand-mid);color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+v.charAt(0)+'</div>'
+          +'<label style="font-size:12px;font-weight:700;min-width:90px">'+v+'</label>'
+          +'<input data-vend="'+v+'" type="number" min="0" step="100" value="'+(metas[v]||'')+'" placeholder="Meta R$" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">'
+          +'</div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--muted)">Cadastre usuários Comerciais ou Vendedores Avulsos para definir metas individuais.</div>');
+  document.getElementById('comissaoMetaModal').style.display='flex';
+}
+
+function comissaoSalvarMetas() {
+  var sel = document.getElementById('comissaoMesSel');
+  var mes = sel ? sel.value : '';
+  if(!_METAS_VENDEDOR[mes]) _METAS_VENDEDOR[mes]={};
+  var geral = parseFloat((document.getElementById('metaGeral')||{}).value)||0;
+  if(geral) _METAS_VENDEDOR[mes]._geral = geral;
+  document.querySelectorAll('#comissaoMetaForm [data-vend]').forEach(function(inp){
+    var v = inp.getAttribute('data-vend');
+    var val = parseFloat(inp.value)||0;
+    if(val) _METAS_VENDEDOR[mes][v]=val; else delete _METAS_VENDEDOR[mes][v];
+  });
+  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_metas_vendedor', _METAS_VENDEDOR);
+  document.getElementById('comissaoMetaModal').style.display='none';
+  comissaoRender();
+  showToast('Metas salvas!','ok');
+}
+// ────────────────────────────────────────────────────────────────────────
+
+
+// ── Vendedores ──────────────────────────────────────────────────────────
+function orcPopulateVendedores() {
+  var sel = document.getElementById('orcClientVendedor');
+  if(!sel) return;
+  var nomes = [];
+  // master
+  var masterName = (function(){ try{ var m=JSON.parse(localStorage.getItem('erp_master_usr')||'null'); return m&&m.nome?m.nome:''; }catch(e){ return ''; } })();
+  if(masterName) nomes.push(masterName);
+  // comerciais
+  (_USR_DATA||[]).forEach(function(u){ if(u.funcao==='comercial'&&u.nome&&nomes.indexOf(u.nome)<0) nomes.push(u.nome); });
+  // extra
+  (_VENDEDORES_EXTRA||[]).forEach(function(v){ if(v&&nomes.indexOf(v)<0) nomes.push(v); });
+  var prev = sel.value;
+  sel.innerHTML = '<option value="">— Selecione —</option>' +
+    nomes.map(function(n){ return '<option value="'+n+'">'+n+'</option>'; }).join('') +
+    '<option value="Outro">Outro</option>';
+  if(prev) sel.value = prev;
+}
+
+function vendedoresRender() {
+  var el = document.getElementById('vendedoresLista');
+  if(!el) return;
+  var nomes = [];
+  (_USR_DATA||[]).forEach(function(u){ if(u.funcao==='comercial'&&u.nome) nomes.push({nome:u.nome,tipo:'comercial'}); });
+  (_VENDEDORES_EXTRA||[]).forEach(function(v){ if(v) nomes.push({nome:v,tipo:'extra'}); });
+  if(!nomes.length){ el.innerHTML='<span style="font-size:12px;color:var(--muted)">Nenhum vendedor cadastrado.</span>'; return; }
+  el.innerHTML = nomes.map(function(v){
+    var safeName = v.nome.replace(/"/g,'&quot;');
+    var badge = v.tipo==='comercial'
+      ? '<span style="font-size:10px;background:var(--brand-bg);color:var(--brand);padding:1px 6px;border-radius:10px;margin-left:4px">Comercial</span>'
+      : '<button onclick="vendedorRemover(this)" data-vname="'+safeName+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;margin-left:4px" title="Remover">✕</button>';
+    return '<span style="display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px">'+v.nome+badge+'</span>';
+  }).join('');
+}
+
+function vendedorAdicionar() {
+  var inp = document.getElementById('vendedorNovoNome');
+  if(!inp) return;
+  var nome = (inp.value||'').trim();
+  if(!nome){ showToast('Informe o nome','err'); return; }
+  if((_VENDEDORES_EXTRA||[]).indexOf(nome)>=0){ showToast('Vendedor já cadastrado','err'); return; }
+  _VENDEDORES_EXTRA = (_VENDEDORES_EXTRA||[]).concat([nome]);
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_vendedores', _VENDEDORES_EXTRA);
+  inp.value='';
+  vendedoresRender();
+  orcPopulateVendedores();
+  showToast('Vendedor "'+nome+'" adicionado','ok');
+}
+
+function vendedorRemover(btn) {
+  var nome = btn ? btn.getAttribute("data-vname") : "";
+  _VENDEDORES_EXTRA = (_VENDEDORES_EXTRA||[]).filter(function(v){ return v!==nome; });
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_vendedores', _VENDEDORES_EXTRA);
+  vendedoresRender();
+  orcPopulateVendedores();
+  showToast('Vendedor "'+nome+'" removido','warn');
+}
+// ────────────────────────────────────────────────────────────────────────
+
 function usrSalvar() {
   var nome = (document.getElementById('usrNome')||{}).value||'';
   var email = ((document.getElementById('usrEmail')||{}).value||'').trim().toLowerCase();
@@ -13878,6 +14181,8 @@ function usrSalvar() {
   }
   usrNovoClose();
   usrRender();
+  try{orcPopulateVendedores();}catch(e){}
+  try{vendedoresRender();}catch(e){}
 }
 
 function usrDel(idx) {
@@ -13889,6 +14194,8 @@ function usrDel(idx) {
   showToast('Usuário "'+nome+'" removido','warn');
   if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário removido: '+nome);
   usrRender();
+  try{orcPopulateVendedores();}catch(e){}
+  try{vendedoresRender();}catch(e){}
 }
 
 
@@ -16124,12 +16431,13 @@ function painelStartTimer() {
 // INTELIGÊNCIA COMERCIAL
 // ============================================================
 function intelTabSwitch(id, btn) {
-  ['funil','cadencia','insights'].forEach(function(p){
+  ['funil','cadencia','insights','comissao'].forEach(function(p){
     var el = document.getElementById('intelPanel'+p.charAt(0).toUpperCase()+p.slice(1));
     if(el) el.style.display = (p===id) ? '' : 'none';
   });
   document.querySelectorAll('.intel-tab').forEach(function(b){ b.classList.remove('on'); });
   if(btn) btn.classList.add('on');
+  if(id==='comissao') { try{ comissaoInit(); comissaoRender(); }catch(e){} }
 }
 
 function intelRender() {
@@ -16920,12 +17228,4 @@ setTimeout(function(){
         ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
         ondragleave="this.style.borderColor='var(--border)'"
         ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
-        <div style="font-size:36px;margin-bottom:8px">📊</div>
-        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:4px">Arraste a planilha aqui</div>
-        <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
-        <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
-        <span style="font-size:14px">💡</span>
-        <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
-        <button onclick="cliImportDownloadTemplate()" style="margin-
+        <div style="font-size:36px;margin
