@@ -1191,6 +1191,8 @@ function _cloudLoadAll() {
     var cd=document.getElementById("cloudDot"), ct=document.getElementById("cloudTxt");
     if(cd){ cd.style.background="#4ADE80"; cd.style.animation="painelPulse 3s infinite"; }
     if(ct){ ct.textContent="nuvem ativa"; ct.style.color="#059669"; }
+    // Backup automático diário (salva no Firebase em erp_backups/YYYY-MM-DD)
+    setTimeout(function(){ try{ erpBackupAutomatico(); }catch(e){} }, 3000);
     // Listeners em tempo real
     _cloudWatch("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; try{finCRRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
@@ -3987,6 +3989,7 @@ firebase.auth().signInAnonymously().then(function(){
           <button class="cfg-tab" id="cfgTab6" onclick="cfgTab(6)">💳 Parcelamento</button>
           <button class="cfg-tab" id="cfgTab7" onclick="cfgTab(7)">🏦 Dados Bancários</button>
           <button class="cfg-tab" id="cfgTab8" onclick="cfgTab(8)">🗂️ Produtos</button>
+          <button class="topbar-btn" onclick="erpBackupExportar()" style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Backup JSON</button>
         </div>
 
         <!-- ── ABA 1: MATERIAIS ── -->
@@ -13258,7 +13261,16 @@ var CFG_DEFAULT = {
 };
 
 function cfgLoad() {
-  if(_cfgData){ return _cfgData; }
+  if(_cfgData){
+    // Garantir que os arrays sempre existam para evitar erros de .push()
+    if(!Array.isArray(_cfgData.materiais) || !_cfgData.materiais.length)
+      _cfgData.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+    if(!Array.isArray(_cfgData.maquinas) || !_cfgData.maquinas.length)
+      _cfgData.maquinas = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
+    if(!Array.isArray(_cfgData.maodeobra) || !_cfgData.maodeobra.length)
+      _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
+    return _cfgData;
+  }
   return JSON.parse(JSON.stringify(CFG_DEFAULT));
 }
 function cfgSave(d) {
@@ -13272,6 +13284,52 @@ function cfgSave(d) {
     }
     _cloudSave('erp_config', toSave);
   }
+}
+
+// ── BACKUP ────────────────────────────────────────────────────────────────────
+var _BACKUP_KEYS = ['erp_config','stock','erp_stock_log','orcamentos','clientes','crm_leads','fin_cr','fin_cp','erp_fornecedores','retalhos','erp_bank_config','erp_mat_prices'];
+
+function erpBackupExportar() {
+  if(!_db){ showToast('Firebase não conectado','warn'); return; }
+  showToast('Gerando backup…','info');
+  var result = {}; var done = 0; var total = _BACKUP_KEYS.length;
+  _BACKUP_KEYS.forEach(function(key){
+    _db.collection(_COL).doc(key).get().then(function(doc){
+      if(doc.exists && doc.data() && doc.data().data){
+        try{ result[key] = JSON.parse(doc.data().data); }catch(e){ result[key]=null; }
+      }
+      done++;
+      if(done >= total){
+        var blob = new Blob([JSON.stringify({backup_date: new Date().toISOString(), data: result}, null, 2)], {type:'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'erp_backup_' + new Date().toISOString().slice(0,10) + '.json';
+        a.click();
+        showToast('Backup baixado com sucesso!','ok');
+      }
+    }).catch(function(){ done++; if(done>=total) showToast('Backup parcial gerado','warn'); });
+  });
+}
+
+function erpBackupAutomatico() {
+  if(!_db || !_cloudReady) return;
+  var hoje = new Date().toISOString().slice(0,10);
+  var ultimoBackup = localStorage.getItem('_erp_last_backup');
+  if(ultimoBackup === hoje) return; // já fez backup hoje
+  var result = {}; var done = 0; var total = _BACKUP_KEYS.length;
+  _BACKUP_KEYS.forEach(function(key){
+    _db.collection(_COL).doc(key).get().then(function(doc){
+      if(doc.exists && doc.data() && doc.data().data){
+        try{ result[key] = JSON.parse(doc.data().data); }catch(e){}
+      }
+      done++;
+      if(done >= total){
+        _db.collection('erp_backups').doc(hoje).set({ data: JSON.stringify(result), ts: Date.now() })
+          .then(function(){ localStorage.setItem('_erp_last_backup', hoje); console.log('[Backup] Backup diário salvo:', hoje); })
+          .catch(function(e){ console.warn('[Backup] Falhou:', e); });
+      }
+    }).catch(function(){ done++; });
+  });
 }
 
 var BANK_KEY = 'erp_bank_config';
@@ -13553,6 +13611,9 @@ function cfgCell(tipo,idx,campo,val) {
 
 function cfgAddRow(tableId, tipo) {
   if(!_cfgData) _cfgData = cfgLoad();
+  if(!Array.isArray(_cfgData.materiais)) _cfgData.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+  if(!Array.isArray(_cfgData.maquinas))  _cfgData.maquinas  = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
+  if(!Array.isArray(_cfgData.maodeobra)) _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
   if(tipo==='mat'){ _cfgData.materiais.push({nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
   else if(tipo==='maq'){ _cfgData.maquinas.push({nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
   else if(tipo==='mob'){ _cfgData.maodeobra.push({nome:'Novo serviço',unidade:'hora',valor:0,obs:''}); }
@@ -16549,41 +16610,4 @@ function siteLeadAbrir(id) {
   document.getElementById('slEmail').textContent = l.email||'-';
   document.getElementById('slTel').textContent = l.tel||'-';
   document.getElementById('slOrigem').textContent = SITE_ORIGEM_LABELS[l.origem]||l.origem||'-';
-  document.getElementById('slDataCad').textContent = l.dataCad ? l.dataCad.slice(0,10).split('-').reverse().join('/') : '-';
-  document.getElementById('slCidade').textContent = l.cidade||'-';
-  document.getElementById('slPedidos').textContent = l.qtdPedidos ? l.qtdPedidos+' pedido(s) · R$ '+(l.totalPedidos||0).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-';
-  document.getElementById('slStatus').value = l.status||'novo';
-  document.getElementById('slNotas').value = l.notas||'';
-  overlay.style.display = 'flex';
-}
-
-function siteCreateOverlay() {
-  var div = document.createElement('div');
-  div.id = 'siteLeadOverlay';
-  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9100;display:none;align-items:center;justify-content:center';
-  div.onclick = function(e){ if(e.target===div) div.style.display='none'; };
-  var stOpts = Object.keys(SITE_STATUS_LABELS).map(function(s){ return '<option value="'+s+'">'+SITE_STATUS_LABELS[s]+'</option>'; }).join('');
-  div.innerHTML = '<div style="background:var(--surface);border-radius:14px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-      +'<div style="font-size:16px;font-weight:800" id="slNome">-</div>'
-      +'<button id="slCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">x</button>'
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Email</div><div style="font-size:12px;font-weight:600" id="slEmail">-</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Telefone</div><div style="font-size:12px;font-weight:600" id="slTel">-</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Origem</div><div style="font-size:12px" id="slOrigem">-</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cadastro</div><div style="font-size:12px" id="slDataCad">-</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cidade</div><div style="font-size:12px" id="slCidade">-</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Pedidos</div><div style="font-size:12px" id="slPedidos">-</div></div>'
-    +'</div>'
-    +'<div style="margin-bottom:12px">'
-      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Status</label>'
-      +'<select id="slStatus" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px">'+stOpts+'</select>'
-    +'</div>'
-    +'<div style="margin-bottom:16px">'
-      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Anotacoes</label>'
-      +'<textarea id="slNotas" rows="4" placeholder="Observacoes sobre este lead..." style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box"></textarea>'
-    +'</div>'
-    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
-      +'<button id="slCancelBtn" style="padding:9px 16px;background:none;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text)">Cancelar</button>'
-      +'<button onclick="siteLeadSalvar()" 
+  document.getElementB
