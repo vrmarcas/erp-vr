@@ -1198,7 +1198,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'vr');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -3147,18 +3147,8 @@ firebase.auth().signInAnonymously().then(function(){
 
       <!-- Tab bar + actions -->
       <div style="display:flex;align-items:center;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
-        <button id="crmTabVR" onclick="crmSetBrand('vr')"
-          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:800;cursor:pointer;border-bottom:3px solid #7C3AED;margin-bottom:-2px;color:#4C1D95;display:flex;align-items:center;gap:6px">
-          <span style="width:8px;height:8px;border-radius:50%;background:#7C3AED;display:inline-block"></span>
-          VR Marcas <span style="background:#EDE9FE;color:#4C1D95;border-radius:20px;padding:1px 7px;font-size:10px" id="crmVRcount">0</span>
-        </button>
-        <button id="crmTabVT" onclick="crmSetBrand('vitre')"
-          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
-          <span style="width:8px;height:8px;border-radius:50%;background:#BE185D;display:inline-block"></span>
-          Vitre <span style="background:#FCE7F3;color:#831843;border-radius:20px;padding:1px 7px;font-size:10px" id="crmVTcount">0</span>
-        </button>
         <button id="crmTabSite" onclick="crmSetBrand('site')"
-          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:800;cursor:pointer;border-bottom:3px solid #059669;margin-bottom:-2px;color:#065F46;display:flex;align-items:center;gap:6px">
           🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px" id="crmSiteCount">0</span>
         </button>
         <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
@@ -3167,7 +3157,7 @@ firebase.auth().signInAnonymously().then(function(){
         </button>
         <button id="crmTabProsp" onclick="crmSetBrand('prosp')"
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
-          🎯 Prospects <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
+          ✨ Novo <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
         </button>
         <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
@@ -3282,6 +3272,12 @@ firebase.auth().signInAnonymously().then(function(){
       <div id="crmBrandReativ" style="display:none">
         <!-- KPIs -->
         <div id="crmReativKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+        <!-- Filtro VR / Vitre -->
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <button id="reativBtnAll" onclick="crmBaseSetMarca('reativ','all')" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--brand-mid);color:#fff">Todas</button>
+          <button id="reativBtnVR"  onclick="crmBaseSetMarca('reativ','vr')"  style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text)">🟣 VR Marcas</button>
+          <button id="reativBtnVit" onclick="crmBaseSetMarca('reativ','vitre')" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text)">🌸 Vitre</button>
+        </div>
         <!-- Toolbar -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <input id="reativSearch" type="text" placeholder="🔍 Nome, telefone ou cidade..."
@@ -3299,7 +3295,7 @@ firebase.auth().signInAnonymously().then(function(){
             style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
             <option value="">Todos os produtos</option>
           </select>
-          <button class="topbar-btn" onclick="crmBaseImportModal()" style="font-size:11px">📥 Importar Excel</button>
+          <button class="topbar-btn" onclick="crmBaseImportModal('reativ')" style="font-size:11px">📥 Importar Excel</button>
           <button class="topbar-btn ghost" onclick="crmBaseNovoContato('cliente')" style="font-size:11px">+ Novo Cliente</button>
         </div>
         <!-- Lista paginada -->
@@ -3315,6 +3311,12 @@ firebase.auth().signInAnonymously().then(function(){
       <div id="crmBrandProsp" style="display:none">
         <!-- KPIs -->
         <div id="crmProspKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+        <!-- Filtro VR / Vitre -->
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <button id="prospBtnAll" onclick="crmBaseSetMarca('prosp','all')" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--brand-mid);color:#fff">Todas</button>
+          <button id="prospBtnVR"  onclick="crmBaseSetMarca('prosp','vr')"  style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text)">🟣 VR Marcas</button>
+          <button id="prospBtnVit" onclick="crmBaseSetMarca('prosp','vitre')" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text)">🌸 Vitre</button>
+        </div>
         <!-- Toolbar -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
           <input id="prospSearch" type="text" placeholder="🔍 Nome, telefone ou cidade..."
@@ -3323,14 +3325,14 @@ firebase.auth().signInAnonymously().then(function(){
           <select id="prospFiltroCol" onchange="crmBaseRender('prosp')"
             style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
             <option value="">Todos os status</option>
-            <option value="novo">🆕 Novo</option>
+            <option value="novo">✨ Novo</option>
             <option value="contactado">📞 Contactado</option>
             <option value="orc_enviado">📋 Orç. Enviado</option>
             <option value="fechado">✅ Fechado</option>
             <option value="perdido">❌ Perdido</option>
           </select>
-          <button class="topbar-btn" onclick="crmBaseImportModal()" style="font-size:11px">📥 Importar Excel</button>
-          <button class="topbar-btn ghost" onclick="crmBaseNovoContato('prospect')" style="font-size:11px">+ Novo Prospect</button>
+          <button class="topbar-btn" onclick="crmBaseImportModal('prosp')" style="font-size:11px">📥 Importar Excel</button>
+          <button class="topbar-btn ghost" onclick="crmBaseNovoContato('prospect')" style="font-size:11px">+ Novo</button>
         </div>
         <!-- Lista paginada -->
         <div id="crmProspLista" style="display:flex;flex-direction:column;gap:6px"></div>
@@ -3344,8 +3346,29 @@ firebase.auth().signInAnonymously().then(function(){
       <!-- Modal importação Excel base -->
       <div id="crmBaseImportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3100;align-items:center;justify-content:center">
         <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto">
-          <div style="font-size:15px;font-weight:800;margin-bottom:4px">📥 Importar Base de Contatos</div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Excel com colunas: Nome, Telefone, Cidade, Produto (quem tem produto = Cliente, vazio = Prospect)</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <div style="font-size:15px;font-weight:800">📥 Importar Base de Contatos</div>
+            <button onclick="crmBaseDownloadTemplate()" style="background:none;border:1.5px solid var(--border);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;color:var(--text)">📄 Baixar Modelo Excel</button>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Colunas esperadas: Nome, Telefone, Cidade, Produto, Marca (VR ou Vitre). Quem tem produto = Reativação, vazio = Novo.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div>
+              <label style="font-size:10px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">IMPORTAR PARA</label>
+              <select id="crmImportDestino" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+                <option value="auto">Automático (detectar pelo produto)</option>
+                <option value="reativ">🔄 Reativação (clientes)</option>
+                <option value="prosp">✨ Novo (prospects)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">MARCA PADRÃO</label>
+              <select id="crmImportMarca" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+                <option value="vr">🟣 VR Marcas</option>
+                <option value="vitre">🌸 Vitre</option>
+                <option value="col">Da coluna Marca no arquivo</option>
+              </select>
+            </div>
+          </div>
           <!-- Step 1: upload -->
           <div id="crmImportStep1">
             <label style="display:block;border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;margin-bottom:14px">
@@ -5829,7 +5852,7 @@ function nav(page, el) {
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
-  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'vr'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); try{if(!_CRM_BASE_IDX.length) crmBaseInit();}catch(e){} }, 100); }
+  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'site'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); try{if(!_CRM_BASE_IDX.length) crmBaseInit();}catch(e){} }, 100); }
   if (page === 'tarefas')    { setTimeout(function(){ if(typeof tarefasRender==='function') tarefasRender(); }, 80); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
@@ -7489,8 +7512,8 @@ function crmSetBrand(b) {
   const isVR = b === 'vr';
   const isSite = b === 'site';
   const isDia = b === 'dia';
-  document.getElementById('crmBrandVR').style.display = isVR ? '' : 'none';
-  document.getElementById('crmBrandVT').style.display = (!isVR&&!isSite&&!isDia) ? '' : 'none';
+  document.getElementById('crmBrandVR').style.display = 'none';
+  document.getElementById('crmBrandVT').style.display = 'none';
   var siteBrand=document.getElementById('crmBrandSite'); if(siteBrand) siteBrand.style.display=isSite?'':'none';
   var diaBrand=document.getElementById('crmBrandDia'); if(diaBrand) diaBrand.style.display=isDia?'':'none';
   if(isVR) crmRenderBoard('vr'); else if(isDia) crmRenderDia(); else if(!isSite) crmRenderBoard('vitre'); else { siteLeadRender(); siteKpiRender(); var _sp=document.getElementById('siteShopifyPanelDiv'); if(_sp&&SITE_LEADS.length===0) _sp.style.display=''; }
@@ -7509,6 +7532,7 @@ function crmSetBrand(b) {
   if(tabProsp){tabProsp.style.borderBottomColor=isProsp?'#6366F1':'transparent';tabProsp.style.color=isProsp?'#3730A3':'var(--muted)';tabProsp.style.fontWeight=isProsp?'800':'700';}
   var tabSite=document.getElementById('crmTabSite');
   if(tabSite){tabSite.style.borderBottomColor=isSite?'#059669':'transparent';
+  tabSite.style.fontWeight=isSite?'800':'700';
   tabSite.style.color=isSite?'#065F46':'var(--muted)';
   tabSite.style.fontWeight=isSite?'800':'700';}
   var tabDia2=document.getElementById('crmTabDia');
@@ -14091,6 +14115,7 @@ var _CRM_BASE_IDX = [];                  // Índice leve: [{id,nome,tel,cidade,t
 var _CRM_BASE_IMPORT_ROWS = [];          // Linhas do Excel em pré-visualização
 var _CRM_BASE_IMPORT_COLS = {};          // Mapeamento colunas {nome,tel,cidade,produto}
 var _CRM_BASE_PERFIL_ATUAL = null;       // Contato aberto no modal
+var _CRM_BASE_MARCA = { reativ: 'all', prosp: 'all' }; // Filtro de marca ativo
 
 // Paginação por tipo
 var _CRM_BASE_PAG = { reativ: 0, prosp: 0 };
@@ -14144,6 +14169,23 @@ function crmBaseLoadDoc(id, cb) {
   }).catch(function(){ if(cb) cb(null); });
 }
 
+
+function crmBaseSetMarca(tipo, marca) {
+  _CRM_BASE_MARCA[tipo] = marca;
+  // Update button styles
+  var prefix = tipo==='reativ' ? 'reativ' : 'prosp';
+  ['All','VR','Vit'].forEach(function(s){
+    var btn = document.getElementById(prefix+'Btn'+s);
+    if(!btn) return;
+    var active = (marca==='all'&&s==='All') || (marca==='vr'&&s==='VR') || (marca==='vitre'&&s==='Vit');
+    btn.style.background = active ? 'var(--brand-mid)' : 'var(--surface)';
+    btn.style.color = active ? '#fff' : 'var(--text)';
+  });
+  _CRM_BASE_PAG[tipo] = 0;
+  crmBaseRender(tipo);
+  crmBaseKpisRender(tipo);
+}
+
 // ── Render listas paginadas ──────────────────────────────────────────────
 function crmBaseRender(tipo) {
   var lista = document.getElementById(tipo==='reativ' ? 'crmReativLista' : 'crmProspLista');
@@ -14156,8 +14198,10 @@ function crmBaseRender(tipo) {
   var tipoFiltro = tipo==='reativ' ? 'cliente' : 'prospect';
   var q = search.toLowerCase();
 
+  var marcaFiltro = _CRM_BASE_MARCA[tipo] || 'all';
   var todos = _CRM_BASE_IDX.filter(function(c){
     if(c.tipo !== tipoFiltro) return false;
+    if(marcaFiltro !== 'all' && c.marca !== marcaFiltro) return false;
     if(q && !(c.nome.toLowerCase().includes(q) || (c.tel||'').includes(q) || (c.cidade||'').toLowerCase().includes(q))) return false;
     if(filtroCol && c.coluna !== filtroCol) return false;
     if(filtroProd && !( (c.produtos||[]).some(function(p){ return (p||'').toLowerCase().includes(filtroProd.toLowerCase()); }) )) return false;
@@ -14413,10 +14457,36 @@ function crmBaseNovoContato(tipo) {
 }
 
 // ── Importação Excel ──────────────────────────────────────────────────────
-function crmBaseImportModal() {
+
+function crmBaseDownloadTemplate() {
+  if(typeof XLSX === 'undefined') {
+    // Fallback: download CSV
+    var csv = 'Nome,Telefone,Cidade,Produto,Marca\nJoão Silva,(11) 99999-0001,São Paulo,Display Acrílico,VR\nMaria Santos,(16) 98888-0002,Araraquara,,Vitre\n';
+    var a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+    a.download = 'modelo_importacao_crm.csv';
+    a.click();
+    return;
+  }
+  var wb = XLSX.utils.book_new();
+  var ws = XLSX.utils.aoa_to_sheet([
+    ['Nome','Telefone','Cidade','Produto','Marca'],
+    ['João Silva','(11) 99999-0001','São Paulo','Display Acrílico 3mm','VR'],
+    ['Maria Santos','(16) 98888-0002','Araraquara','','Vitre'],
+    ['Carlos Pereira','(19) 97777-0003','Campinas','Letreiro LED','VR'],
+    ['Ana Lima','(16) 96666-0004','São Carlos','','VR'],
+  ]);
+  ws['!cols'] = [{wch:25},{wch:18},{wch:20},{wch:30},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+  XLSX.writeFile(wb, 'modelo_importacao_crm.xlsx');
+}
+
+function crmBaseImportModal(tipoDestino) { if(tipoDestino) window._crmImportTipoDestino = tipoDestino;
   var m = document.getElementById('crmBaseImportModal');
   if(!m) return;
   // Reset state
+  var dest=document.getElementById('crmImportDestino');
+  if(dest&&window._crmImportTipoDestino){dest.value=window._crmImportTipoDestino;}
   document.getElementById('crmImportStep1').style.display='';
   document.getElementById('crmImportProgress').style.display='none';
   document.getElementById('crmImportDone').style.display='none';
@@ -14475,11 +14545,13 @@ function _crmBaseShowColMap(headers) {
   var autoCid  = autoDetect(['cidade','city','municipio']);
   var autoProd = autoDetect(['produto','compra','item','pedido','product']);
 
+  var autoMarca = autoDetect(['marca','brand','empresa']);
   mapEl.innerHTML = [
     { label:'Nome *', key:'nome', auto:autoNome },
     { label:'Telefone', key:'tel', auto:autoTel },
     { label:'Cidade', key:'cidade', auto:autoCid },
-    { label:'Produto Comprado', key:'produto', auto:autoProd }
+    { label:'Produto Comprado', key:'produto', auto:autoProd },
+    { label:'Marca (VR/Vitre)', key:'marca', auto:autoMarca }
   ].map(function(f){
     var sel='<select id="colMap_'+f.key+'" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);font-size:11px">'+opts+'</select>';
     return '<div><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px">'+f.label+'</div>'+sel+'</div>';
@@ -14507,10 +14579,13 @@ function _crmBaseShowColMap(headers) {
 }
 
 function crmBaseExecuteImport() {
-  var colNome = (document.getElementById('colMap_nome')||{}).value||'';
-  var colTel  = (document.getElementById('colMap_tel')||{}).value||'';
-  var colCid  = (document.getElementById('colMap_cidade')||{}).value||'';
-  var colProd = (document.getElementById('colMap_produto')||{}).value||'';
+  var colNome   = (document.getElementById('colMap_nome')||{}).value||'';
+  var colTel    = (document.getElementById('colMap_tel')||{}).value||'';
+  var colCid    = (document.getElementById('colMap_cidade')||{}).value||'';
+  var colProd   = (document.getElementById('colMap_produto')||{}).value||'';
+  var colMarcaX = (document.getElementById('colMap_marca')||{}).value||'';
+  var destino   = (document.getElementById('crmImportDestino')||{}).value||'auto';
+  var marcaPad  = (document.getElementById('crmImportMarca')||{}).value||'vr';
 
   if(!colNome) { showToast('Selecione a coluna de Nome','err'); return; }
 
@@ -14541,13 +14616,16 @@ function crmBaseExecuteImport() {
       var tel  = colTel  ? (r[colTel]||'').toString().trim() : '';
       var cid  = colCid  ? (r[colCid]||'').toString().trim() : '';
       var prod = colProd ? (r[colProd]||'').toString().trim() : '';
-      var tipo = prod ? 'cliente' : 'prospect';
+      var marcaVal = marcaPad==='col' ? ((colMarcaX && r[colMarcaX] ? r[colMarcaX].toString().trim().toLowerCase() : 'vr')) : marcaPad;
+      if(marcaVal.includes('vit')||marcaVal.includes('vit')) marcaVal='vitre'; else marcaVal='vr';
+      var tipoAuto = prod ? 'cliente' : 'prospect';
+      var tipo = destino==='auto' ? tipoAuto : (destino==='reativ' ? 'cliente' : 'prospect');
       var id = 'cb_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'_'+(done+batch.indexOf(r));
-      var contato = { id:id, nome:nome, tel:tel, cidade:cid,
+      var contato = { id:id, nome:nome, tel:tel, cidade:cid, marca:marcaVal,
         tipo:tipo, produtos:prod?[prod]:[], coluna:tipo==='cliente'?'ativo':'novo',
         ultimoContato:'', ts:Date.now() };
       // Add to index
-      _CRM_BASE_IDX.push({ id:id, nome:nome, tel:tel, cidade:cid, tipo:tipo,
+      _CRM_BASE_IDX.push({ id:id, nome:nome, tel:tel, cidade:cid, tipo:tipo, marca:marcaVal,
         produtos:prod?[prod]:[], coluna:contato.coluna, ultimoContato:'', ts:contato.ts });
       fsBatch.set(_db.collection(_CRM_BASE_COL).doc(id), contato);
       if(tipo==='cliente') clientes++; else prospects++;
