@@ -1288,6 +1288,7 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ if(d&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); } done(); });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
+  _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); });
   _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){
@@ -3160,6 +3161,14 @@ firebase.auth().signInAnonymously().then(function(){
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
           🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px" id="crmSiteCount">0</span>
         </button>
+        <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          🔄 Reativação <span style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:1px 7px;font-size:10px" id="crmReativCount">0</span>
+        </button>
+        <button id="crmTabProsp" onclick="crmSetBrand('prosp')"
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          🎯 Prospects <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
+        </button>
         <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmOpenImport()">📥 Importar</button>
@@ -3266,6 +3275,128 @@ firebase.auth().signInAnonymously().then(function(){
               </td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- ── BASE DE CLIENTES — Reativação ── -->
+      <div id="crmBrandReativ" style="display:none">
+        <!-- KPIs -->
+        <div id="crmReativKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+        <!-- Toolbar -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <input id="reativSearch" type="text" placeholder="🔍 Nome, telefone ou cidade..."
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
+            oninput="crmBaseRender('reativ')">
+          <select id="reativFiltroCol" onchange="crmBaseRender('reativ')"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os status</option>
+            <option value="ativo">✅ Ativo</option>
+            <option value="inativo90">⚠️ Inativo 90d</option>
+            <option value="inativo180">🔴 Inativo 180d</option>
+            <option value="perdido">❌ Perdido</option>
+          </select>
+          <select id="reativFiltroProd" onchange="crmBaseRender('reativ')"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os produtos</option>
+          </select>
+          <button class="topbar-btn" onclick="crmBaseImportModal()" style="font-size:11px">📥 Importar Excel</button>
+          <button class="topbar-btn ghost" onclick="crmBaseNovoContato('cliente')" style="font-size:11px">+ Novo Cliente</button>
+        </div>
+        <!-- Lista paginada -->
+        <div id="crmReativLista" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div style="display:flex;justify-content:center;gap:10px;margin-top:14px">
+          <button id="crmReativPrevBtn" onclick="crmBasePrev('reativ')" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:7px 18px;font-size:12px;cursor:pointer">← Anterior</button>
+          <span id="crmReativPagInfo" style="font-size:11px;color:var(--muted);align-self:center"></span>
+          <button id="crmReativNextBtn" onclick="crmBaseNext('reativ')" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:7px 18px;font-size:12px;cursor:pointer">Próxima →</button>
+        </div>
+      </div>
+
+      <!-- ── BASE DE PROSPECTS ── -->
+      <div id="crmBrandProsp" style="display:none">
+        <!-- KPIs -->
+        <div id="crmProspKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
+        <!-- Toolbar -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <input id="prospSearch" type="text" placeholder="🔍 Nome, telefone ou cidade..."
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
+            oninput="crmBaseRender('prosp')">
+          <select id="prospFiltroCol" onchange="crmBaseRender('prosp')"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os status</option>
+            <option value="novo">🆕 Novo</option>
+            <option value="contactado">📞 Contactado</option>
+            <option value="orc_enviado">📋 Orç. Enviado</option>
+            <option value="fechado">✅ Fechado</option>
+            <option value="perdido">❌ Perdido</option>
+          </select>
+          <button class="topbar-btn" onclick="crmBaseImportModal()" style="font-size:11px">📥 Importar Excel</button>
+          <button class="topbar-btn ghost" onclick="crmBaseNovoContato('prospect')" style="font-size:11px">+ Novo Prospect</button>
+        </div>
+        <!-- Lista paginada -->
+        <div id="crmProspLista" style="display:flex;flex-direction:column;gap:6px"></div>
+        <div style="display:flex;justify-content:center;gap:10px;margin-top:14px">
+          <button id="crmProspPrevBtn" onclick="crmBasePrev('prosp')" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:7px 18px;font-size:12px;cursor:pointer">← Anterior</button>
+          <span id="crmProspPagInfo" style="font-size:11px;color:var(--muted);align-self:center"></span>
+          <button id="crmProspNextBtn" onclick="crmBaseNext('prosp')" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:7px 18px;font-size:12px;cursor:pointer">Próxima →</button>
+        </div>
+      </div>
+
+      <!-- Modal importação Excel base -->
+      <div id="crmBaseImportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3100;align-items:center;justify-content:center">
+        <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto">
+          <div style="font-size:15px;font-weight:800;margin-bottom:4px">📥 Importar Base de Contatos</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Excel com colunas: Nome, Telefone, Cidade, Produto (quem tem produto = Cliente, vazio = Prospect)</div>
+          <!-- Step 1: upload -->
+          <div id="crmImportStep1">
+            <label style="display:block;border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;margin-bottom:14px">
+              <div style="font-size:28px;margin-bottom:6px">📊</div>
+              <div style="font-size:13px;font-weight:700">Arraste o Excel aqui ou clique para selecionar</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">.xlsx ou .csv</div>
+              <input type="file" id="crmBaseFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="crmBasePreviewFile(this)">
+            </label>
+            <div id="crmImportPreview" style="display:none">
+              <div style="font-size:12px;font-weight:700;margin-bottom:8px">🗂️ Mapeie as colunas do seu arquivo:</div>
+              <div id="crmImportColMap" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"></div>
+              <div id="crmImportStats" style="background:var(--bg2);border-radius:8px;padding:10px;font-size:12px;margin-bottom:14px"></div>
+              <div style="display:flex;gap:8px">
+                <button onclick="crmBaseExecuteImport()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">🚀 Importar</button>
+                <button onclick="document.getElementById('crmBaseImportModal').style.display='none'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
+              </div>
+            </div>
+          </div>
+          <!-- Progress -->
+          <div id="crmImportProgress" style="display:none;text-align:center;padding:20px 0">
+            <div style="font-size:28px;margin-bottom:10px">⏳</div>
+            <div id="crmImportProgressText" style="font-size:13px;font-weight:700;margin-bottom:10px">Importando...</div>
+            <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden">
+              <div id="crmImportProgressBar" style="height:8px;background:var(--brand-mid);border-radius:4px;width:0%;transition:width .3s"></div>
+            </div>
+            <div id="crmImportProgressSub" style="font-size:11px;color:var(--muted);margin-top:8px"></div>
+          </div>
+          <!-- Done -->
+          <div id="crmImportDone" style="display:none;text-align:center;padding:20px 0">
+            <div style="font-size:40px;margin-bottom:10px">✅</div>
+            <div id="crmImportDoneText" style="font-size:14px;font-weight:800;margin-bottom:6px"></div>
+            <div id="crmImportDoneSub" style="font-size:12px;color:var(--muted);margin-bottom:16px"></div>
+            <button onclick="document.getElementById('crmBaseImportModal').style.display='none';crmBaseRender('reativ');crmBaseRender('prosp');" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Base</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal perfil contato base -->
+      <div id="crmBasePerfilModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3100;align-items:center;justify-content:center">
+        <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:540px;max-height:90vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div style="font-size:15px;font-weight:800" id="crmBasePerfilNome"></div>
+            <button onclick="document.getElementById('crmBasePerfilModal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
+          </div>
+          <div id="crmBasePerfilContent"></div>
+          <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+            <button id="crmBasePerfilOrcBtn" onclick="crmBaseAbrirOrcamento()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:12px;font-weight:700;cursor:pointer">📋 Novo Orçamento</button>
+            <button id="crmBasePerfilWaBtn" onclick="crmBaseAbrirWhatsApp()" style="background:#25d366;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">💬 WhatsApp</button>
+            <button id="crmBasePerfilIABtn" onclick="crmBaseGerarMsgIA()" style="background:linear-gradient(135deg,#7c3aed,#be185d);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">🤖 IA: Gerar Msg</button>
+          </div>
+          <div id="crmBaseIAOutput" style="display:none;margin-top:12px;background:var(--bg2);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text)"></div>
         </div>
       </div>
     </div><!-- /pg-crm -->
@@ -4398,6 +4529,36 @@ firebase.auth().signInAnonymously().then(function(){
           </div>
           <div style="text-align:right;margin-top:12px">
             <button class="topbar-btn" onclick="usrSalvarPerms()">💾 Salvar Permissões</button>
+          </div>
+        </div>
+
+        <!-- IA Config -->
+        <div class="card" style="margin-top:14px">
+          <div class="card-h"><div class="card-h-left">🤖 Configuração de IA</div></div>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px 0">Configure a IA para geração de mensagens no CRM. Você pode escolher o provedor depois.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">PROVEDOR</label>
+              <select id="iaProvedor" onchange="iaCfgSalvar()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+                <option value="">— Definir depois —</option>
+                <option value="gemini">Gemini (Google) — Grátis</option>
+                <option value="claude">Claude Haiku (Anthropic)</option>
+                <option value="openai">GPT-4o mini (OpenAI)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">MODELO</label>
+              <input id="iaModelo" type="text" placeholder="Ex: gemini-1.5-flash" onchange="iaCfgSalvar()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box">
+            </div>
+          </div>
+          <div style="margin-bottom:10px">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">CHAVE DE API</label>
+            <input id="iaApiKey" type="password" placeholder="Cole sua chave aqui" onchange="iaCfgSalvar()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box">
+          </div>
+          <div style="font-size:11px;color:var(--muted)">
+            Gemini: <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--brand)">aistudio.google.com</a> ·
+            Claude: <a href="https://console.anthropic.com" target="_blank" style="color:var(--brand)">console.anthropic.com</a> ·
+            OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--brand)">platform.openai.com</a>
           </div>
         </div>
 
@@ -5661,14 +5822,14 @@ function nav(page, el) {
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-plan') { setTimeout(function(){ planProdRender(); }, 0); }
-  if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); try{vendedoresRender();}catch(e){} }, 0); }
+  if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); try{vendedoresRender();}catch(e){} try{iaCfgLoad();}catch(e){} }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
-  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'vr'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
+  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'vr'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); try{if(!_CRM_BASE_IDX.length) crmBaseInit();}catch(e){} }, 100); }
   if (page === 'tarefas')    { setTimeout(function(){ if(typeof tarefasRender==='function') tarefasRender(); }, 80); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
@@ -7338,10 +7499,14 @@ function crmSetBrand(b) {
   tabVR.style.borderBottomColor = isVR ? '#7C3AED' : 'transparent';
   tabVR.style.color = isVR ? '#4C1D95' : 'var(--muted)';
   tabVR.style.fontWeight = isVR ? '800' : '700';
-  var isVT = !isVR&&!isSite&&!isDia;
+  var isVT = !isVR&&!isSite&&!isDia&&!isReativ&&!isProsp;
   tabVT.style.borderBottomColor = isVT ? '#BE185D' : 'transparent';
   tabVT.style.color = isVT ? '#831843' : 'var(--muted)';
   tabVT.style.fontWeight = isVT ? '800' : '700';
+  var tabReativ=document.getElementById('crmTabReativ');
+  if(tabReativ){tabReativ.style.borderBottomColor=isReativ?'#059669':'transparent';tabReativ.style.color=isReativ?'#065F46':'var(--muted)';tabReativ.style.fontWeight=isReativ?'800':'700';}
+  var tabProsp=document.getElementById('crmTabProsp');
+  if(tabProsp){tabProsp.style.borderBottomColor=isProsp?'#6366F1':'transparent';tabProsp.style.color=isProsp?'#3730A3':'var(--muted)';tabProsp.style.fontWeight=isProsp?'800':'700';}
   var tabSite=document.getElementById('crmTabSite');
   if(tabSite){tabSite.style.borderBottomColor=isSite?'#059669':'transparent';
   tabSite.style.color=isSite?'#065F46':'var(--muted)';
@@ -13912,6 +14077,537 @@ function usrRedefinirSenha(idx) {
 
 function usrNovoOpen(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='flex'; }
 function usrNovoClose(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='none'; }
+
+
+
+// ════════════════════════════════════════════════════════════════════════
+// CRM BASE — Reativação (clientes) + Prospects
+// Coleção Firestore: crm_base  (1 doc por contato, sem limite de volume)
+// ════════════════════════════════════════════════════════════════════════
+
+var _CRM_BASE_COL = 'crm_base';          // Coleção Firestore separada
+var _CRM_BASE_CACHE = {};                 // Cache local de contatos carregados
+var _CRM_BASE_IDX = [];                  // Índice leve: [{id,nome,tel,cidade,tipo,produtos,coluna,ultimoContato}]
+var _CRM_BASE_IMPORT_ROWS = [];          // Linhas do Excel em pré-visualização
+var _CRM_BASE_IMPORT_COLS = {};          // Mapeamento colunas {nome,tel,cidade,produto}
+var _CRM_BASE_PERFIL_ATUAL = null;       // Contato aberto no modal
+
+// Paginação por tipo
+var _CRM_BASE_PAG = { reativ: 0, prosp: 0 };
+var _CRM_BASE_PER_PAG = 40;
+
+// ── IA config (plug-in futuro) ──────────────────────────────────────────
+var _IA_CONFIG = { provider: '', key: '', model: '' }; // preenchido via Config → IA
+
+// ── Helpers Firestore crm_base ──────────────────────────────────────────
+function crmBaseDoc(id) {
+  return _db.collection(_CRM_BASE_COL).doc(id);
+}
+
+function crmBaseSave(contato) {
+  if(!contato || !contato.id) return;
+  _CRM_BASE_CACHE[contato.id] = contato;
+  // Atualiza índice leve
+  var idx = _CRM_BASE_IDX.findIndex(function(x){ return x.id===contato.id; });
+  var entry = { id:contato.id, nome:contato.nome||'', tel:contato.tel||'', cidade:contato.cidade||'',
+    tipo:contato.tipo||'prospect', produtos:contato.produtos||[], coluna:contato.coluna||'novo',
+    ultimoContato:contato.ultimoContato||'', ts:contato.ts||Date.now() };
+  if(idx>=0) _CRM_BASE_IDX[idx]=entry; else _CRM_BASE_IDX.push(entry);
+  // Salva doc individual no Firestore
+  if(typeof _db!=='undefined' && _cloudReady) {
+    crmBaseDoc(contato.id).set(Object.assign({}, contato, { _ts: Date.now() })).catch(function(e){ console.warn('[CRM_BASE] save error', e); });
+  }
+  // Salva índice leve no erp_vr
+  _crmBaseSaveIdx();
+}
+
+function _crmBaseSaveIdx() {
+  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_base_idx', _CRM_BASE_IDX);
+}
+
+function crmBaseLoadIdx(cb) {
+  if(typeof _cloudLoad==='function') {
+    _cloudLoad('crm_base_idx', function(d){
+      if(d && Array.isArray(d)) { _CRM_BASE_IDX = d; }
+      if(cb) cb();
+    });
+  }
+}
+
+function crmBaseLoadDoc(id, cb) {
+  if(_CRM_BASE_CACHE[id]) { if(cb) cb(_CRM_BASE_CACHE[id]); return; }
+  if(typeof _db==='undefined') { if(cb) cb(null); return; }
+  crmBaseDoc(id).get().then(function(doc){
+    var data = doc.exists ? doc.data() : null;
+    if(data) _CRM_BASE_CACHE[id] = data;
+    if(cb) cb(data);
+  }).catch(function(){ if(cb) cb(null); });
+}
+
+// ── Render listas paginadas ──────────────────────────────────────────────
+function crmBaseRender(tipo) {
+  var lista = document.getElementById(tipo==='reativ' ? 'crmReativLista' : 'crmProspLista');
+  if(!lista) return;
+
+  var search = (document.getElementById(tipo==='reativ' ? 'reativSearch' : 'prospSearch')||{}).value||'';
+  var filtroCol = (document.getElementById(tipo==='reativ' ? 'reativFiltroCol' : 'prospFiltroCol')||{}).value||'';
+  var filtroProd = (document.getElementById('reativFiltroProd')||{}).value||'';
+
+  var tipoFiltro = tipo==='reativ' ? 'cliente' : 'prospect';
+  var q = search.toLowerCase();
+
+  var todos = _CRM_BASE_IDX.filter(function(c){
+    if(c.tipo !== tipoFiltro) return false;
+    if(q && !(c.nome.toLowerCase().includes(q) || (c.tel||'').includes(q) || (c.cidade||'').toLowerCase().includes(q))) return false;
+    if(filtroCol && c.coluna !== filtroCol) return false;
+    if(filtroProd && !( (c.produtos||[]).some(function(p){ return (p||'').toLowerCase().includes(filtroProd.toLowerCase()); }) )) return false;
+    return true;
+  });
+
+  // Sort: mais recente primeiro
+  todos.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+
+  var pag = _CRM_BASE_PAG[tipo] || 0;
+  var total = todos.length;
+  var start = pag * _CRM_BASE_PER_PAG;
+  var page = todos.slice(start, start + _CRM_BASE_PER_PAG);
+
+  // Update badge
+  var badge = document.getElementById(tipo==='reativ' ? 'crmReativCount' : 'crmProspCount');
+  if(badge) badge.textContent = total;
+
+  // Pagination controls
+  var prevBtn = document.getElementById(tipo==='reativ' ? 'crmReativPrevBtn' : 'crmProspPrevBtn');
+  var nextBtn = document.getElementById(tipo==='reativ' ? 'crmReativNextBtn' : 'crmProspNextBtn');
+  var pagInfo = document.getElementById(tipo==='reativ' ? 'crmReativPagInfo' : 'crmProspPagInfo');
+  if(prevBtn) prevBtn.style.display = pag>0 ? '' : 'none';
+  if(nextBtn) nextBtn.style.display = (start + _CRM_BASE_PER_PAG < total) ? '' : 'none';
+  if(pagInfo) pagInfo.textContent = total ? (start+1)+'-'+Math.min(start+_CRM_BASE_PER_PAG,total)+' de '+total : '0 registros';
+
+  if(!page.length) {
+    lista.innerHTML = '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">'
+      + (total===0 && !q ? '📥 Base vazia. Importe seu Excel para começar.' : '🔍 Nenhum resultado.')
+      + '</div>';
+    return;
+  }
+
+  var colCores = { ativo:'#059669', inativo90:'#D97706', inativo180:'#DC2626', perdido:'#6B7280',
+    novo:'#6366F1', contactado:'#0891B2', orc_enviado:'#7C3AED', fechado:'#059669' };
+  var colLabels = { ativo:'Ativo', inativo90:'Inativo 90d', inativo180:'Inativo 180d', perdido:'Perdido',
+    novo:'Novo', contactado:'Contactado', orc_enviado:'Orç. Enviado', fechado:'Fechado' };
+
+  lista.innerHTML = page.map(function(c){
+    var cor = colCores[c.coluna] || '#6B7280';
+    var label = colLabels[c.coluna] || c.coluna || '—';
+    var prods = (c.produtos||[]).slice(0,3).join(', ') + ((c.produtos||[]).length>3?'…':'');
+    return '<div onclick="crmBaseAbrirPerfil(\''+c.id+'\')" style="display:flex;align-items:center;gap:12px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'var(--brand-mid)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
+      +'<div style="width:36px;height:36px;border-radius:50%;background:'+cor+';color:#fff;font-size:15px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+((c.nome||'?').charAt(0).toUpperCase())+'</div>'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+cfgEsc(c.nome||'Sem nome')+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">'+(c.tel||'—')+' · '+(c.cidade||'—')+'</div>'
+        +(prods?'<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🛒 '+cfgEsc(prods)+'</div>':'')
+      +'</div>'
+      +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">'
+        +'<span style="background:'+cor+'22;color:'+cor+';border-radius:20px;padding:2px 10px;font-size:10px;font-weight:700">'+label+'</span>'
+        +(c.ultimoContato?'<span style="font-size:10px;color:var(--muted)">'+c.ultimoContato+'</span>':'')
+      +'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function crmBasePrev(tipo) { if(_CRM_BASE_PAG[tipo]>0){ _CRM_BASE_PAG[tipo]--; crmBaseRender(tipo); } }
+function crmBaseNext(tipo) { _CRM_BASE_PAG[tipo]++; crmBaseRender(tipo); }
+
+// ── KPIs ─────────────────────────────────────────────────────────────────
+function crmBaseKpisRender(tipo) {
+  var el = document.getElementById(tipo==='reativ' ? 'crmReativKpis' : 'crmProspKpis');
+  if(!el) return;
+  var tipoFiltro = tipo==='reativ' ? 'cliente' : 'prospect';
+  var lista = _CRM_BASE_IDX.filter(function(c){ return c.tipo===tipoFiltro; });
+  var total = lista.length;
+
+  if(tipo==='reativ') {
+    var ativos   = lista.filter(function(c){ return c.coluna==='ativo'; }).length;
+    var in90     = lista.filter(function(c){ return c.coluna==='inativo90'; }).length;
+    var in180    = lista.filter(function(c){ return c.coluna==='inativo180'; }).length;
+    var perdidos = lista.filter(function(c){ return c.coluna==='perdido'; }).length;
+    el.innerHTML = [
+      { ico:'👥', lbl:'Total Clientes', val:total, cor:'#7C3AED' },
+      { ico:'✅', lbl:'Ativos', val:ativos, cor:'#059669' },
+      { ico:'⚠️', lbl:'Inativos 90d', val:in90, cor:'#D97706' },
+      { ico:'🔴', lbl:'Inativos 180d', val:in180, cor:'#DC2626' },
+      { ico:'❌', lbl:'Perdidos', val:perdidos, cor:'#6B7280' }
+    ].map(function(k){
+      return '<div style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;min-width:100px">'
+        +'<div style="font-size:16px">'+k.ico+'</div>'
+        +'<div style="font-size:18px;font-weight:900;color:'+k.cor+'">'+k.val+'</div>'
+        +'<div style="font-size:10px;color:var(--muted)">'+k.lbl+'</div></div>';
+    }).join('');
+  } else {
+    var novos  = lista.filter(function(c){ return c.coluna==='novo'||!c.coluna; }).length;
+    var cont   = lista.filter(function(c){ return c.coluna==='contactado'; }).length;
+    var orcEnv = lista.filter(function(c){ return c.coluna==='orc_enviado'; }).length;
+    var fech   = lista.filter(function(c){ return c.coluna==='fechado'; }).length;
+    var conv   = total ? Math.round(fech/total*100) : 0;
+    el.innerHTML = [
+      { ico:'🎯', lbl:'Total Prospects', val:total, cor:'#6366F1' },
+      { ico:'🆕', lbl:'Novos', val:novos, cor:'#6366F1' },
+      { ico:'📞', lbl:'Contactados', val:cont, cor:'#0891B2' },
+      { ico:'📋', lbl:'Orç. Enviado', val:orcEnv, cor:'#7C3AED' },
+      { ico:'✅', lbl:'Fechados', val:fech, cor:'#059669' },
+      { ico:'📈', lbl:'Conversão', val:conv+'%', cor:'#059669' }
+    ].map(function(k){
+      return '<div style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;min-width:100px">'
+        +'<div style="font-size:16px">'+k.ico+'</div>'
+        +'<div style="font-size:18px;font-weight:900;color:'+k.cor+'">'+k.val+'</div>'
+        +'<div style="font-size:10px;color:var(--muted)">'+k.lbl+'</div></div>';
+    }).join('');
+  }
+}
+
+// ── Perfil do contato ─────────────────────────────────────────────────────
+function crmBaseAbrirPerfil(id) {
+  var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
+  if(!idx) return;
+  _CRM_BASE_PERFIL_ATUAL = idx;
+  document.getElementById('crmBasePerfilNome').textContent = idx.nome || 'Sem nome';
+  document.getElementById('crmBaseIAOutput').style.display='none';
+  var content = document.getElementById('crmBasePerfilContent');
+
+  // Load full doc for notes/history
+  crmBaseLoadDoc(id, function(doc){
+    var d = doc || idx;
+    var colLabels = { ativo:'Ativo', inativo90:'Inativo 90d', inativo180:'Inativo 180d', perdido:'Perdido',
+      novo:'Novo', contactado:'Contactado', orc_enviado:'Orç. Enviado', fechado:'Fechado' };
+    var colOpts = d.tipo==='cliente'
+      ? '<option value="ativo">✅ Ativo</option><option value="inativo90">⚠️ Inativo 90d</option><option value="inativo180">🔴 Inativo 180d</option><option value="perdido">❌ Perdido</option>'
+      : '<option value="novo">🆕 Novo</option><option value="contactado">📞 Contactado</option><option value="orc_enviado">📋 Orç. Enviado</option><option value="fechado">✅ Fechado</option><option value="perdido">❌ Perdido</option>';
+    content.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">TELEFONE</div><div style="font-size:13px;font-weight:700">'+(d.tel||'—')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">CIDADE</div><div style="font-size:13px;font-weight:700">'+(d.cidade||'—')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">TIPO</div><div style="font-size:13px;font-weight:700">'+(d.tipo==='cliente'?'🔄 Cliente':'🎯 Prospect')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">ÚLTIMO CONTATO</div><div style="font-size:13px;font-weight:700">'+(d.ultimoContato||'—')+'</div></div>'
+      +'</div>'
+      +((d.produtos&&d.produtos.length)?'<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">PRODUTOS COMPRADOS</div>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:4px">'+d.produtos.map(function(p){ return '<span style="background:var(--bg2);border-radius:20px;padding:2px 10px;font-size:11px">'+cfgEsc(p)+'</span>'; }).join('')+'</div></div>':'')
+      +'<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">STATUS</div>'
+        +'<select onchange="crmBaseAlterarColuna(\''+id+'\',this.value)" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);font-size:12px;width:100%">'
+        +colOpts+'</select></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">NOTAS</div>'
+        +'<textarea id="crmBasePerfilNotas" rows="3" placeholder="Anotações sobre o contato..." style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box">'+(d.notas||'')+'</textarea>'
+        +'<button onclick="crmBaseSalvarNotas(\''+id+'\')" style="margin-top:6px;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;color:var(--text)">💾 Salvar nota</button></div>';
+    // Set select value
+    setTimeout(function(){
+      var sel = content.querySelector('select');
+      if(sel && d.coluna) sel.value = d.coluna;
+    }, 50);
+  });
+  document.getElementById('crmBasePerfilModal').style.display='flex';
+}
+
+function crmBaseAlterarColuna(id, coluna) {
+  var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
+  if(idx) idx.coluna = coluna;
+  if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].coluna = coluna;
+  crmBaseDoc(id).update({ coluna: coluna, _ts: Date.now() }).catch(function(){});
+  _crmBaseSaveIdx();
+}
+
+function crmBaseSalvarNotas(id) {
+  var notas = (document.getElementById('crmBasePerfilNotas')||{}).value||'';
+  if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].notas = notas;
+  crmBaseDoc(id).update({ notas: notas, _ts: Date.now() }).catch(function(){});
+  showToast('Nota salva','ok');
+}
+
+// ── Abrir orçamento com dados do contato ─────────────────────────────────
+function crmBaseAbrirOrcamento() {
+  var c = _CRM_BASE_PERFIL_ATUAL;
+  if(!c) return;
+  document.getElementById('crmBasePerfilModal').style.display='none';
+  nav('orcamento', null);
+  setTimeout(function(){
+    var nomeEl = document.getElementById('orcClientNome');
+    var telEl  = document.getElementById('orcClientTel');
+    var cidEl  = document.getElementById('orcClientCidade');
+    if(nomeEl) nomeEl.value = c.nome||'';
+    if(telEl)  telEl.value  = c.tel||'';
+    if(cidEl)  cidEl.value  = c.cidade||'';
+    showToast('Dados do cliente carregados no orçamento','ok');
+  }, 300);
+}
+
+function crmBaseAbrirWhatsApp() {
+  var c = _CRM_BASE_PERFIL_ATUAL;
+  if(!c || !c.tel) { showToast('Telefone não cadastrado','err'); return; }
+  var tel = c.tel.replace(/\D/g,'');
+  if(tel.length===11) tel='55'+tel;
+  window.open('https://wa.me/'+tel,'_blank');
+}
+
+// ── IA — slot plugável ────────────────────────────────────────────────────
+function crmBaseGerarMsgIA() {
+  var c = _CRM_BASE_PERFIL_ATUAL;
+  if(!c) return;
+  var out = document.getElementById('crmBaseIAOutput');
+  if(!_IA_CONFIG.key) {
+    out.style.display='';
+    out.innerHTML='<strong>⚙️ IA não configurada ainda.</strong><br>Vá em <strong>Config → IA</strong> para adicionar sua chave de API (Gemini, Claude ou OpenAI). Depois a IA gerará mensagens personalizadas baseadas no histórico deste contato.';
+    return;
+  }
+  out.style.display='';
+  out.innerHTML='⏳ Gerando mensagem personalizada...';
+  var prods = (c.produtos||[]).join(', ')||'produtos da empresa';
+  var prompt = c.tipo==='cliente'
+    ? 'Crie uma mensagem de reativação curta e personalizada no WhatsApp para o cliente '+c.nome+' de '+c.cidade+' que já comprou: '+prods+'. Tom: amigável, direto, máximo 3 linhas.'
+    : 'Crie uma mensagem de primeiro contato para o prospect '+c.nome+' de '+c.cidade+'. A empresa vende displays e letreiros em acrílico. Tom: profissional, curto, máximo 2 linhas.';
+  _crmBaseCallIA(prompt, function(resp){
+    out.innerHTML='<strong>💬 Sugestão da IA:</strong><br><br>'+cfgEsc(resp)
+      +'<br><br><button onclick="navigator.clipboard.writeText('+JSON.stringify(resp)+')" style="background:var(--brand-mid);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:11px;cursor:pointer">📋 Copiar</button>';
+  });
+}
+
+function _crmBaseCallIA(prompt, cb) {
+  var cfg = _IA_CONFIG;
+  if(cfg.provider==='gemini') {
+    var url='https://generativelanguage.googleapis.com/v1beta/models/'+(cfg.model||'gemini-1.5-flash')+':generateContent?key='+cfg.key;
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})})
+      .then(function(r){return r.json();}).then(function(d){
+        var txt=(((d.candidates||[])[0]||{}).content||{}).parts;
+        cb(txt&&txt[0]?txt[0].text:'Sem resposta');
+      }).catch(function(e){ cb('Erro: '+e.message); });
+  } else if(cfg.provider==='claude') {
+    fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'x-api-key':cfg.key,'anthropic-version':'2023-06-01','content-type':'application/json'},
+      body:JSON.stringify({model:cfg.model||'claude-haiku-4-5-20251001',max_tokens:300,messages:[{role:'user',content:prompt}]})})
+      .then(function(r){return r.json();}).then(function(d){ cb(((d.content||[])[0]||{}).text||'Sem resposta'); })
+      .catch(function(e){ cb('Erro: '+e.message); });
+  } else if(cfg.provider==='openai') {
+    fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Authorization':'Bearer '+cfg.key,'Content-Type':'application/json'},
+      body:JSON.stringify({model:cfg.model||'gpt-4o-mini',messages:[{role:'user',content:prompt}],max_tokens:200})})
+      .then(function(r){return r.json();}).then(function(d){ cb(((d.choices||[])[0]||{}).message&&d.choices[0].message.content||'Sem resposta'); })
+      .catch(function(e){ cb('Erro: '+e.message); });
+  } else {
+    cb('Provedor de IA não configurado. Vá em Config → IA.');
+  }
+}
+
+// ── Novo contato manual ───────────────────────────────────────────────────
+function crmBaseNovoContato(tipo) {
+  var nome = prompt('Nome do '+(tipo==='cliente'?'cliente':'prospect')+':');
+  if(!nome || !nome.trim()) return;
+  var tel  = prompt('Telefone (opcional):') || '';
+  var cid  = prompt('Cidade (opcional):')   || '';
+  var prod = '';
+  if(tipo==='cliente') prod = prompt('Produto comprado (opcional):') || '';
+  var id = 'cb_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  var contato = { id:id, nome:nome.trim(), tel:tel.trim(), cidade:cid.trim(),
+    tipo:tipo==='cliente'?'cliente':'prospect',
+    produtos: prod.trim() ? [prod.trim()] : [],
+    coluna: tipo==='cliente' ? 'ativo' : 'novo',
+    ultimoContato: new Date().toLocaleDateString('pt-BR'),
+    ts: Date.now() };
+  crmBaseSave(contato);
+  crmBaseRender(tipo==='cliente'?'reativ':'prosp');
+  crmBaseKpisRender(tipo==='cliente'?'reativ':'prosp');
+  showToast('Contato adicionado','ok');
+}
+
+// ── Importação Excel ──────────────────────────────────────────────────────
+function crmBaseImportModal() {
+  var m = document.getElementById('crmBaseImportModal');
+  if(!m) return;
+  // Reset state
+  document.getElementById('crmImportStep1').style.display='';
+  document.getElementById('crmImportProgress').style.display='none';
+  document.getElementById('crmImportDone').style.display='none';
+  document.getElementById('crmImportPreview').style.display='none';
+  _CRM_BASE_IMPORT_ROWS = [];
+  _CRM_BASE_IMPORT_COLS = {};
+  var fi = document.getElementById('crmBaseFileInput');
+  if(fi) fi.value='';
+  m.style.display='flex';
+}
+
+function crmBasePreviewFile(input) {
+  var file = input.files[0];
+  if(!file) return;
+  var isCsv = file.name.toLowerCase().endsWith('.csv');
+  if(isCsv) {
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var lines = e.target.result.split('\n').filter(function(l){ return l.trim(); });
+      var headers = lines[0].split(',').map(function(h){ return h.replace(/"/g,'').trim(); });
+      _CRM_BASE_IMPORT_ROWS = lines.slice(1).map(function(l){
+        var vals = l.split(',').map(function(v){ return v.replace(/"/g,'').trim(); });
+        var obj={};
+        headers.forEach(function(h,i){ obj[h]=vals[i]||''; });
+        return obj;
+      });
+      _crmBaseShowColMap(headers);
+    };
+    reader.readAsText(file, 'UTF-8');
+  } else {
+    // xlsx via SheetJS
+    if(typeof XLSX==='undefined'){ showToast('SheetJS não carregado','err'); return; }
+    var reader2 = new FileReader();
+    reader2.onload = function(e){
+      var wb = XLSX.read(e.target.result, {type:'array'});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var json = XLSX.utils.sheet_to_json(ws, {defval:''});
+      _CRM_BASE_IMPORT_ROWS = json;
+      var headers = json.length ? Object.keys(json[0]) : [];
+      _crmBaseShowColMap(headers);
+    };
+    reader2.readAsArrayBuffer(file);
+  }
+}
+
+function _crmBaseShowColMap(headers) {
+  var mapEl = document.getElementById('crmImportColMap');
+  if(!mapEl) return;
+  var opts = '<option value="">— ignorar —</option>'+headers.map(function(h){ return '<option value="'+h+'">'+h+'</option>'; }).join('');
+  // Auto-detect common column names
+  function autoDetect(keywords) {
+    return headers.find(function(h){ return keywords.some(function(k){ return h.toLowerCase().includes(k); }); })||'';
+  }
+  var autoNome = autoDetect(['nome','name','cliente','contato']);
+  var autoTel  = autoDetect(['tel','fone','whats','celular','phone']);
+  var autoCid  = autoDetect(['cidade','city','municipio']);
+  var autoProd = autoDetect(['produto','compra','item','pedido','product']);
+
+  mapEl.innerHTML = [
+    { label:'Nome *', key:'nome', auto:autoNome },
+    { label:'Telefone', key:'tel', auto:autoTel },
+    { label:'Cidade', key:'cidade', auto:autoCid },
+    { label:'Produto Comprado', key:'produto', auto:autoProd }
+  ].map(function(f){
+    var sel='<select id="colMap_'+f.key+'" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);font-size:11px">'+opts+'</select>';
+    return '<div><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px">'+f.label+'</div>'+sel+'</div>';
+  }).join('');
+
+  // Set auto-detected values
+  setTimeout(function(){
+    var fields = {nome:autoNome, tel:autoTel, cidade:autoCid, produto:autoProd};
+    Object.keys(fields).forEach(function(k){
+      var sel=document.getElementById('colMap_'+k);
+      if(sel && fields[k]) sel.value=fields[k];
+    });
+    // Stats
+    var clientes = _CRM_BASE_IMPORT_ROWS.filter(function(r){
+      var pc=document.getElementById('colMap_produto');
+      return pc && pc.value && r[pc.value] && r[pc.value].toString().trim();
+    }).length;
+    document.getElementById('crmImportStats').innerHTML =
+      '<strong>'+_CRM_BASE_IMPORT_ROWS.length+'</strong> linhas encontradas · '
+      +'<span style="color:#059669">'+clientes+' clientes</span> (têm produto) · '
+      +'<span style="color:#6366F1">'+(_CRM_BASE_IMPORT_ROWS.length-clientes)+' prospects</span>';
+  }, 100);
+
+  document.getElementById('crmImportPreview').style.display='';
+}
+
+function crmBaseExecuteImport() {
+  var colNome = (document.getElementById('colMap_nome')||{}).value||'';
+  var colTel  = (document.getElementById('colMap_tel')||{}).value||'';
+  var colCid  = (document.getElementById('colMap_cidade')||{}).value||'';
+  var colProd = (document.getElementById('colMap_produto')||{}).value||'';
+
+  if(!colNome) { showToast('Selecione a coluna de Nome','err'); return; }
+
+  document.getElementById('crmImportStep1').style.display='none';
+  document.getElementById('crmImportProgress').style.display='';
+
+  var rows = _CRM_BASE_IMPORT_ROWS.filter(function(r){ return r[colNome]&&r[colNome].toString().trim(); });
+  var total = rows.length;
+  var done = 0;
+  var clientes = 0, prospects = 0;
+  var batchSize = 50;
+  var batches = [];
+  for(var i=0;i<rows.length;i+=batchSize) batches.push(rows.slice(i,i+batchSize));
+
+  function processBatch(bIdx) {
+    if(bIdx >= batches.length) {
+      _crmBaseSaveIdx();
+      document.getElementById('crmImportProgress').style.display='none';
+      document.getElementById('crmImportDone').style.display='';
+      document.getElementById('crmImportDoneText').textContent = total+' contatos importados!';
+      document.getElementById('crmImportDoneSub').textContent = clientes+' clientes · '+prospects+' prospects';
+      return;
+    }
+    var batch = batches[bIdx];
+    var fsBatch = _db.batch();
+    batch.forEach(function(r){
+      var nome = (r[colNome]||'').toString().trim();
+      var tel  = colTel  ? (r[colTel]||'').toString().trim() : '';
+      var cid  = colCid  ? (r[colCid]||'').toString().trim() : '';
+      var prod = colProd ? (r[colProd]||'').toString().trim() : '';
+      var tipo = prod ? 'cliente' : 'prospect';
+      var id = 'cb_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'_'+(done+batch.indexOf(r));
+      var contato = { id:id, nome:nome, tel:tel, cidade:cid,
+        tipo:tipo, produtos:prod?[prod]:[], coluna:tipo==='cliente'?'ativo':'novo',
+        ultimoContato:'', ts:Date.now() };
+      // Add to index
+      _CRM_BASE_IDX.push({ id:id, nome:nome, tel:tel, cidade:cid, tipo:tipo,
+        produtos:prod?[prod]:[], coluna:contato.coluna, ultimoContato:'', ts:contato.ts });
+      fsBatch.set(_db.collection(_CRM_BASE_COL).doc(id), contato);
+      if(tipo==='cliente') clientes++; else prospects++;
+      done++;
+    });
+    fsBatch.commit().then(function(){
+      var pct = Math.round(done/total*100);
+      var bar=document.getElementById('crmImportProgressBar');
+      var txt=document.getElementById('crmImportProgressText');
+      var sub=document.getElementById('crmImportProgressSub');
+      if(bar) bar.style.width=pct+'%';
+      if(txt) txt.textContent='Importando... '+pct+'%';
+      if(sub) sub.textContent=done+' de '+total+' contatos';
+      processBatch(bIdx+1);
+    }).catch(function(e){
+      console.warn('[CRM_BASE] batch error', e);
+      processBatch(bIdx+1); // continua mesmo com erro
+    });
+  }
+  processBatch(0);
+}
+
+// ── Inicialização ─────────────────────────────────────────────────────────
+function crmBaseInit() {
+  crmBaseLoadIdx(function(){
+    crmBaseRender('reativ');
+    crmBaseRender('prosp');
+    // Popular filtro de produto
+    var prods = {};
+    _CRM_BASE_IDX.forEach(function(c){ (c.produtos||[]).forEach(function(p){ if(p) prods[p]=1; }); });
+    var sel = document.getElementById('reativFiltroProd');
+    if(sel && Object.keys(prods).length) {
+      sel.innerHTML='<option value="">Todos os produtos</option>'
+        +Object.keys(prods).sort().map(function(p){ return '<option>'+cfgEsc(p)+'</option>'; }).join('');
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════
+
+// ── IA Config ─────────────────────────────────────────────────────────────
+function iaCfgSalvar() {
+  var p=(document.getElementById('iaProvedor')||{}).value||'';
+  var k=(document.getElementById('iaApiKey')||{}).value||'';
+  var m=(document.getElementById('iaModelo')||{}).value||'';
+  _IA_CONFIG={provider:p,key:k,model:m};
+  localStorage.setItem('erp_ia_cfg', JSON.stringify({provider:p,key:k,model:m}));
+  showToast('Config IA salva','ok');
+}
+function iaCfgLoad() {
+  try{
+    var d=JSON.parse(localStorage.getItem('erp_ia_cfg')||'{}');
+    if(d.provider) _IA_CONFIG=d;
+    var pEl=document.getElementById('iaProvedor'),kEl=document.getElementById('iaApiKey'),mEl=document.getElementById('iaModelo');
+    if(pEl&&d.provider) pEl.value=d.provider;
+    if(kEl&&d.key) kEl.value=d.key;
+    if(mEl&&d.model) mEl.value=d.model;
+  }catch(e){}
+}
+// ─────────────────────────────────────────────────────────────────────────
 
 
 // ── Comissão por Vendedor ────────────────────────────────────────────────
