@@ -1285,7 +1285,18 @@ function _cloudLoadAll() {
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
-  _cloudLoad("stock", function(d){ if(d&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); } done(); });
+  _cloudLoad("stock", function(d){
+    if(d && Object.keys(d).length){
+      // Firebase tem dados reais — usar
+      Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; });
+      Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; });
+    } else {
+      // Primeiro uso: aplicar defaults e salvar no Firebase
+      Object.assign(STOCK, JSON.parse(JSON.stringify(_STOCK_DEFAULTS)));
+      if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('stock', STOCK);
+    }
+    done();
+  });
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
   _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); });
@@ -7539,9 +7550,19 @@ function crmSetBrand(b) {
   } else if(isDia) {
     crmRenderDia();
   } else if(isReativ) {
-    try{ if(!_CRM_BASE_IDX.length) crmBaseLoadIdx(function(){ crmBaseRender('reativ'); crmBaseKpisRender('reativ'); }); else { crmBaseRender('reativ'); crmBaseKpisRender('reativ'); } }catch(e){ console.warn('[CRM] reativ render error',e); }
+    try{
+      if(!_CRM_BASE_IDX.length){
+        var _rl=document.getElementById('crmReativLista'); if(_rl) _rl.innerHTML='<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">⏳ Carregando base...</div>';
+        crmBaseLoadIdx(function(){ crmBaseRender('reativ'); crmBaseKpisRender('reativ'); });
+      } else { crmBaseRender('reativ'); crmBaseKpisRender('reativ'); }
+    }catch(e){ console.warn('[CRM] reativ render error',e); }
   } else if(isProsp) {
-    try{ if(!_CRM_BASE_IDX.length) crmBaseLoadIdx(function(){ crmBaseRender('prosp'); crmBaseKpisRender('prosp'); }); else { crmBaseRender('prosp'); crmBaseKpisRender('prosp'); } }catch(e){ console.warn('[CRM] prosp render error',e); }
+    try{
+      if(!_CRM_BASE_IDX.length){
+        var _pl=document.getElementById('crmProspLista'); if(_pl) _pl.innerHTML='<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">⏳ Carregando base...</div>';
+        crmBaseLoadIdx(function(){ crmBaseRender('prosp'); crmBaseKpisRender('prosp'); });
+      } else { crmBaseRender('prosp'); crmBaseKpisRender('prosp'); }
+    }catch(e){ console.warn('[CRM] prosp render error',e); }
   }
 
   // Highlight abas
@@ -9158,7 +9179,7 @@ var _STOCK_DEFAULTS = {
   mt2: {label:'Chapa Aço Inox 2mm',    qty:18, min:5,  max:30, esp:2,  cor:'Inox'},
   acm: {label:'ACM 3mm',              qty:25, min:10, max:50, esp:3,  cor:'Natural'}
 };
-var STOCK = JSON.parse(JSON.stringify(_STOCK_DEFAULTS));
+var STOCK = {}; // Inicia vazio — preenchido pelo Firebase. Defaults aplicados só se Firebase retornar nada.
 
 function stockSaveData() {
   if(typeof _cloudSave!=='function' || !_cloudReady) return;
@@ -10690,7 +10711,11 @@ function stockRenderItems() {
   if (!el) return;
   var keys = Object.keys(STOCK);
   if (!keys.length) {
-    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Nenhum material cadastrado. Clique em "+ Novo Material".</div>';
+    // Se Firebase ainda não carregou, mostrar loading; se já carregou e está mesmo vazio, orientar usuário
+    var msg = _cloudReady
+      ? 'Nenhum material cadastrado. Clique em "+ Novo Material".'
+      : '⏳ Carregando estoque...';
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">'+msg+'</div>';
     return;
   }
   el.innerHTML = keys.map(function(key) {
@@ -18009,15 +18034,4 @@ setTimeout(function(){
     <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
       <span style="font-size:20px">📥</span>
       <div>
-        <div style="font-weight:800;font-size:15px;color:var(--text)">Importar Clientes por Planilha</div>
-        <div style="font-size:11px;color:var(--muted)">Aceita .xlsx ou .csv — importe 50, 100, 500 clientes de uma vez</div>
-      </div>
-      <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
-    </div>
-    <div style="padding:20px 22px;overflow-y:auto;flex:1">
-      <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
-        style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
-        ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
-        ondragleave="this.style.borderColor='var(--border)'"
-        ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
-        <div style="font-size:36px;margin
+        <div style="font-weight:800;font-size:15px;c
