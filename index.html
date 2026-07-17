@@ -8695,6 +8695,7 @@ function comSetBrand(b) {
   comercialRender();
 }
 
+function setEl(id,v,cls){var el=document.getElementById(id);if(el){el.textContent=typeof v==='string'?v:finFmt(v);if(cls)el.style.color=cls;}}
 function comercialRender() {
   var bf = _comBrand;
   function matchBrand(mk) {
@@ -16590,4 +16591,318 @@ function siteLeadRender() {
       +'</td>'
       +'<td style="padding:10px 12px;font-size:11px;color:var(--muted)" onclick="siteLeadAbrir(\''+l.id+'\')">'+dataCad+'</td>'
       +'<td style="padding:10px 12px;text-align:center">'
-        +
+        +'<button onclick="siteLeadAbrir(\''+l.id+'\')" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;color:var(--text)">Ver</button> '
+        +'<button onclick="siteLeadExcluir(\''+l.id+'\')" style="background:none;border:1px solid #FECACA;border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;color:#DC2626">🗑</button>'
+      +'</td>'
+      +'</tr>';
+  }).join('');
+  siteUpdateCount();
+}
+
+
+function siteLeadStatus(id, status) {
+  var l = SITE_LEADS.find(function(x){ return x.id===id; }); if(!l) return;
+  l.status = status;
+  siteSaveLeads();
+  siteLeadRender(); siteKpiRender();
+}
+
+function siteLeadExcluir(id) {
+  if(!confirm('Excluir este lead?')) return;
+  SITE_LEADS = SITE_LEADS.filter(function(x){ return x.id!==id; });
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+}
+
+// ── Modal detalhe do lead ──
+var _siteLeadId = null;
+function siteLeadAbrir(id) {
+  var l = SITE_LEADS.find(function(x){ return x.id===id; }); if(!l) return;
+  _siteLeadId = id;
+  var overlay = document.getElementById('siteLeadOverlay');
+  if(!overlay) { siteCreateOverlay(); overlay = document.getElementById('siteLeadOverlay'); }
+  document.getElementById('slNome').textContent = l.nome||'-';
+  document.getElementById('slEmail').textContent = l.email||'-';
+  document.getElementById('slTel').textContent = l.tel||'-';
+  document.getElementById('slOrigem').textContent = SITE_ORIGEM_LABELS[l.origem]||l.origem||'-';
+  document.getElementById('slDataCad').textContent = l.dataCad ? l.dataCad.slice(0,10).split('-').reverse().join('/') : '-';
+  document.getElementById('slCidade').textContent = l.cidade||'-';
+  document.getElementById('slPedidos').textContent = l.qtdPedidos ? l.qtdPedidos+' pedido(s) · R$ '+(l.totalPedidos||0).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-';
+  document.getElementById('slStatus').value = l.status||'novo';
+  document.getElementById('slNotas').value = l.notas||'';
+  overlay.style.display = 'flex';
+}
+
+function siteCreateOverlay() {
+  var div = document.createElement('div');
+  div.id = 'siteLeadOverlay';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9100;display:none;align-items:center;justify-content:center';
+  div.onclick = function(e){ if(e.target===div) div.style.display='none'; };
+  var stOpts = Object.keys(SITE_STATUS_LABELS).map(function(s){ return '<option value="'+s+'">'+SITE_STATUS_LABELS[s]+'</option>'; }).join('');
+  div.innerHTML = '<div style="background:var(--surface);border-radius:14px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
+      +'<div style="font-size:16px;font-weight:800" id="slNome">-</div>'
+      +'<button id="slCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">x</button>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Email</div><div style="font-size:12px;font-weight:600" id="slEmail">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Telefone</div><div style="font-size:12px;font-weight:600" id="slTel">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Origem</div><div style="font-size:12px" id="slOrigem">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cadastro</div><div style="font-size:12px" id="slDataCad">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Cidade</div><div style="font-size:12px" id="slCidade">-</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Pedidos</div><div style="font-size:12px" id="slPedidos">-</div></div>'
+    +'</div>'
+    +'<div style="margin-bottom:12px">'
+      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Status</label>'
+      +'<select id="slStatus" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px">'+stOpts+'</select>'
+    +'</div>'
+    +'<div style="margin-bottom:16px">'
+      +'<label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Anotacoes</label>'
+      +'<textarea id="slNotas" rows="4" placeholder="Observacoes sobre este lead..." style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;resize:vertical;box-sizing:border-box"></textarea>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+      +'<button id="slCancelBtn" style="padding:9px 16px;background:none;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:12px;color:var(--text)">Cancelar</button>'
+      +'<button onclick="siteLeadSalvar()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">Salvar</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(div);
+  div.querySelector('#slCloseBtn').onclick = function(){ div.style.display='none'; };
+  div.querySelector('#slCancelBtn').onclick = function(){ div.style.display='none'; };
+}
+
+
+function siteLeadSalvar() {
+  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return;
+  l.status = document.getElementById('slStatus').value;
+  l.notas = document.getElementById('slNotas').value;
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+  document.getElementById('siteLeadOverlay').style.display = 'none';
+  showToast('Lead atualizado!','ok');
+}
+
+// ── Novo Lead manual ──
+function siteLeadNovoModal() {
+  var nome = prompt('Nome do cliente:'); if(!nome) return;
+  var email = prompt('Email:') || '';
+  var tel = prompt('Telefone (opcional):') || '';
+  var origem = 'manual';
+  var lead = {
+    id: 'sl'+Date.now(), nome: nome.trim(), email: email.trim(), tel: tel.trim(),
+    origem: origem, status: 'novo', dataCad: new Date().toISOString(), notas: ''
+  };
+  SITE_LEADS.unshift(lead);
+  siteSaveLeads(); siteLeadRender(); siteKpiRender();
+  showToast('Lead adicionado!','ok');
+}
+
+// ── Shopify Sync ──
+function siteShopifyPanel() {
+  var p = document.getElementById('siteShopifyPanelDiv');
+  if(!p) return;
+  p.style.display = p.style.display==='none' ? '' : 'none';
+  // Load saved config
+  if(_SHOPIFY_CFG.url) document.getElementById('shopifyStoreUrl').value = _SHOPIFY_CFG.url;
+  if(_SHOPIFY_CFG.token) document.getElementById('shopifyToken').value = _SHOPIFY_CFG.token;
+}
+
+function siteSalvarConfig() {
+  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
+  var token = (document.getElementById('shopifyToken').value||'').trim();
+  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
+  showToast('Configuração salva!','ok');
+}
+
+function siteShopifySync() {
+  var url = (document.getElementById('shopifyStoreUrl').value||'').trim();
+  var token = (document.getElementById('shopifyToken').value||'').trim();
+  if(!url || !token){ showToast('Preencha URL e Token antes de sincronizar.','warn'); return; }
+  // Save config
+  _SHOPIFY_CFG={url:url,token:token}; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('shopify_cfg',_SHOPIFY_CFG);
+  var stEl = document.getElementById('shopifySyncStatus');
+  if(stEl) stEl.textContent = '⏳ Sincronizando...';
+
+  // Shopify Admin API - customers endpoint
+  var shopUrl = url.replace(/\/$/, '');
+  if(!shopUrl.includes('.myshopify.com')) shopUrl = shopUrl+'.myshopify.com';
+  var apiUrl = 'https://'+shopUrl+'/admin/api/2024-01/customers.json?limit=250';
+
+  fetch(apiUrl, {
+    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' }
+  }).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status+' - verifique o token e a URL da loja.');
+    return r.json();
+  }).then(function(data){
+    var customers = data.customers || [];
+    var added = 0, updated = 0;
+    customers.forEach(function(c){
+      var existIdx = SITE_LEADS.findIndex(function(l){ return l.shopifyId===String(c.id); });
+      var lead = {
+        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+c.id,
+        shopifyId: String(c.id),
+        nome: (c.first_name||'') + ' ' + (c.last_name||''),
+        email: c.email||'',
+        tel: c.phone||'',
+        cidade: (c.default_address&&c.default_address.city)||'',
+        dataCad: c.created_at||new Date().toISOString(),
+        origem: c.orders_count > 0 ? 'compra' : 'cadastro',
+        qtdPedidos: c.orders_count||0,
+        totalPedidos: parseFloat(c.total_spent||'0'),
+        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
+        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
+      };
+      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
+      else { SITE_LEADS.unshift(lead); added++; }
+    });
+    siteSaveLeads(); siteLeadRender(); siteKpiRender();
+    if(stEl) stEl.textContent = '✅ '+added+' novos · '+updated+' atualizados ('+customers.length+' total)';
+    showToast(customers.length+' clientes sincronizados!','ok');
+  }).catch(function(err){
+    if(stEl) stEl.textContent = '❌ Erro: '+err.message;
+    var msg = err.message||'';
+    if(msg.toLowerCase().includes('failed to fetch')||msg.toLowerCase().includes('cors')){
+      showToast('CORS bloqueado - use o Shopify Proxy App ou importe via CSV','warn');
+      if(stEl) stEl.innerHTML = '❌ CORS bloqueado pelo Shopify.<br><small>Solução: No Shopify Admin → Aplicativos → Criar app → ative CORS para o seu domínio, ou importe o CSV de clientes abaixo.</small>';
+    } else {
+      showToast('Erro ao sincronizar: '+err.message,'err');
+    }
+  });
+}
+
+// ── CSV Import (Shopify customer export) ──
+function siteImportCSV() {
+  var p = document.getElementById('siteShopifyPanelDiv');
+  if(p){ p.style.display=''; }
+  var inp = document.getElementById('siteCSVInput');
+  if(inp){ setTimeout(function(){ inp.scrollIntoView({behavior:'smooth'}); inp.click(); }, 200); }
+}
+
+function siteParseCSV(input) {
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var lines = e.target.result.split('\n')
+    var headers = lines[0].split(',').map(function(h){ return h.replace(/"/g,'').trim().toLowerCase(); });
+    var added=0, updated=0;
+    for(var i=1;i<lines.length;i++){
+      var cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+      cols = cols.map(function(c){ return c.replace(/^"|"$/g,'').trim(); });
+      if(cols.length<3) continue;
+      var get = function(name){ var idx=headers.indexOf(name); return idx>=0?cols[idx]||'':''; };
+      var email = get('email');
+      if(!email) continue;
+      var shopifyId = get('id')||get('customer id');
+      var existIdx = SITE_LEADS.findIndex(function(l){ return l.email===email; });
+      var nome = (get('first name')||get('nome'))+' '+(get('last name')||'');
+      var orders = parseInt(get('total orders')||get('orders count')||'0')||0;
+      var spent = parseFloat((get('total spent')||get('total amount spent')||'0').replace('R$','').replace(',','.'))||0;
+      var lead = {
+        id: existIdx>=0 ? SITE_LEADS[existIdx].id : 'sl'+Date.now()+'_'+i,
+        shopifyId: shopifyId,
+        nome: nome.trim()||email,
+        email: email,
+        tel: get('phone')||get('telefone')||'',
+        cidade: get('city')||get('billing city')||'',
+        dataCad: get('created at')||get('customer since')||new Date().toISOString(),
+        origem: orders>0 ? 'compra' : 'cadastro',
+        qtdPedidos: orders,
+        totalPedidos: spent,
+        status: existIdx>=0 ? SITE_LEADS[existIdx].status : 'novo',
+        notas: existIdx>=0 ? SITE_LEADS[existIdx].notas : ''
+      };
+      if(existIdx>=0){ SITE_LEADS[existIdx]=lead; updated++; }
+      else { SITE_LEADS.push(lead); added++; }
+    }
+    siteSaveLeads(); siteLeadRender(); siteKpiRender();
+    showToast(added+' leads importados · '+updated+' atualizados do CSV','ok');
+    input.value='';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Init site leads on CRM open
+setTimeout(function(){
+  siteUpdateCount();
+}, 1200);
+
+</script>
+
+<!-- ══ MOBILE SIDE PANEL ══ -->
+<div id="mobileOverlayBg" onclick="mobilePanelClose()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;opacity:0;transition:opacity .28s"></div>
+<div id="mobileSidePanel">
+  <div style="padding:16px 14px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between">
+    <div style="color:#fff;font-weight:800;font-size:15px">📊 ERP Marcas</div>
+    <button onclick="mobilePanelClose()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:20px;cursor:pointer;padding:2px 6px">✕</button>
+  </div>
+  <div>
+    <div class="mdrw-section">Principal</div>
+    <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
+    <div class="mdrw-section">Operação</div>
+    <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS</div>
+    <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
+    <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque</div>
+    <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
+    <div class="mdrw-section">Comercial</div>
+    <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
+    <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+    <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
+    <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
+    <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+    <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
+    <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
+    <div class="mdrw-section">Financeiro</div>
+    <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
+    <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
+    <div class="mdrw-section">Admin</div>
+    <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
+    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📏</span> Produtos / Planif.</div>
+    <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
+    <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+  </div>
+</div>
+
+
+<!-- ══ CLIENT IMPORT OVERLAY ══ -->
+<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
+  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <span style="font-size:20px">📥</span>
+      <div>
+        <div style="font-weight:800;font-size:15px;color:var(--text)">Importar Clientes por Planilha</div>
+        <div style="font-size:11px;color:var(--muted)">Aceita .xlsx ou .csv — importe 50, 100, 500 clientes de uma vez</div>
+      </div>
+      <button onclick="cliImportClose()" style="margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>
+    </div>
+    <div style="padding:20px 22px;overflow-y:auto;flex:1">
+      <div id="cliImportDropZone" onclick="document.getElementById('cliImportFile').click()"
+        style="border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg)"
+        ondragover="event.preventDefault();this.style.borderColor='var(--brand-mid)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border)';cliImportHandleFile(event.dataTransfer.files[0])">
+        <div style="font-size:36px;margin-bottom:8px">📊</div>
+        <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:4px">Arraste a planilha aqui</div>
+        <div style="font-size:12px;color:var(--muted)">ou clique para selecionar — .xlsx ou .csv</div>
+        <input id="cliImportFile" type="file" accept=".xlsx,.csv" style="display:none" onchange="cliImportHandleFile(this.files[0])">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 14px;background:#EFF6FF;border-radius:8px;border:1px solid #BFDBFE">
+        <span style="font-size:14px">💡</span>
+        <span style="font-size:11px;color:#1E40AF">Colunas aceitas: <strong>Nome, Tipo, Tel, Email, Cidade, Marca</strong> (em qualquer ordem, em PT ou EN)</span>
+        <button onclick="cliImportDownloadTemplate()" style="margin-left:auto;padding:5px 12px;background:#1E40AF;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap">⬇ Baixar Modelo</button>
+      </div>
+      <div id="cliImportPreview" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13px;color:var(--text)" id="cliImportPreviewTitle">Prévia</div>
+          <span id="cliImportBadge" style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700"></span>
+        </div>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;max-height:280px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead id="cliImportThead" style="position:sticky;top:0;background:var(--bg)"></thead>
+            <tbody id="cliImportTbody"></tbody>
+          </table>
+        </div>
+        <div id="cliImportWarn" style="display:none;margin-top:8px;padding:8px 12px;background:#FEF3C7;border-radius:7px;font-size:11px;color:#92400E;border:1px solid #FDE68A"></div>
+      </div>
+    </div>
+    <div style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="cliImportClose()" style="padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:none;color:var(--text);font-size:12px;cursor:pointer">Cancelar</button>
+      <button id="cliImportBtn" onclick="cliImportConfirm()" disabled style="padding:8px 22px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:point
