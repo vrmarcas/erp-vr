@@ -1203,7 +1203,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
     _cloudWatch("stock", function(d){ if(d&&typeof d==="object"&&Object.keys(d).length){ Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; }); Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; }); try{ var pg=document.getElementById('pg-estoque'); if(pg&&pg.style.display!=='none'){ stockRenderItems(); stockRenderHistorico(); } }catch(e){} } });
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
@@ -5853,6 +5853,7 @@ function nav(page, el) {
   if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
+  if (page === 'kanban')       { setTimeout(function(){ if(typeof kbRender==='function') kbRender(); try{renderOsTable();syncSidebarBadges();}catch(e){} }, 0); }
   if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
   if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
   if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
@@ -8321,6 +8322,54 @@ function kbSaveKbos() {
     _cloudSave('kb_os', kbCopy);
   }
 }
+// ── Kanban full re-render from KB_OS ─────────────────────────────────────────
+function kbRender() {
+  var cols=['kbNovas','kbProntas','kbSeg','kbTer','kbQua','kbQui','kbSex','kbSab'];
+  cols.forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    var cards=el.querySelectorAll('.kcard');
+    cards.forEach(function(c){ c.parentNode.removeChild(c); });
+  });
+  Object.keys(KB_OS).forEach(function(k){
+    var os=KB_OS[k]; if(!os) return;
+    if(os.status==='entregue'||os.status==='cancelado') return;
+    var isVt=(os.mk==='vit'||os.marca==='Vitre');
+    var colId=(os.status==='pronta'||os.pronto)?'kbProntas':'kbNovas';
+    var col=document.getElementById(colId); if(!col) return;
+    var card=document.createElement('div');
+    card.className='kcard'; card.setAttribute('draggable','true');
+    var osId=os.id||k;
+    card.setAttribute('data-osid',osId);
+    card.dataset.brand=isVt?'vit':'vr';
+    card.style.borderColor=isVt?'#BE185D':'#7C3AED';
+    card.setAttribute('onclick',"kbOpen('"+osId+"')");
+    card.setAttribute('ondragstart','kbStart(event,this)');
+    card.setAttribute('ondragend','kbEnd(this)');
+    var prazoStr=os.entrega||os.prazo||'';
+    var prazoBadge='';
+    if(prazoStr){
+      var pd=new Date(prazoStr),td=new Date();td.setHours(0,0,0,0);
+      if(!isNaN(pd.getTime())){
+        var diff=Math.ceil((pd-td)/864e5);
+        var pc=diff<0?'#DC2626':(diff<=3?'#D97706':'#059669');
+        var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d'):(diff===0?'🔴 Entrega hoje!':('📅 '+prazoStr.split('-').reverse().join('/')));
+        prazoBadge='<div style="margin-top:5px;font-size:9px;font-weight:700;color:'+pc+';background:'+pc+'22;padding:2px 7px;border-radius:4px;display:inline-block">'+pt+'</div>';
+      }
+    }
+    var smMap={iniciada:{cls:'si',txt:'Iniciada'},em_andamento:{cls:'sp',txt:'Iniciada'},producao:{cls:'sp',txt:'Em Produção'},pronta:{cls:'sm ok',txt:'Pronta ✅'},master:{cls:'sm',txt:'Aguard. Master'},entregue:{cls:'sm ok',txt:'Entregue'}};
+    var sm=smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
+    card.innerHTML='<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
+      +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un</div>'
+      +'<div class="kcard-meta">OS #0'+(os.num||'?')+'</div>'
+      +prazoBadge
+      +'<span class="stag '+sm.cls+'" id="kstag-'+osId+'">'+sm.txt+'</span>'
+      +'<div class="prog"><div class="prog-fill" id="kprog-'+osId+'" style="width:'+(os.prog||0)+'%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
+    col.appendChild(card);
+  });
+  kbSyncCounts();
+  try{kbFilter();}catch(e){}
+}
+
 // ── OS Tabs ───────────────────────────────────────────────────────────────────
 function kbSwitchTab(tab) {
   var tabProd = document.getElementById('kbTabProd');
@@ -11265,6 +11314,7 @@ var _lastOsId = null;
       var _card=document.createElement('div');
       _card.className='kcard'; _card.setAttribute('draggable','true');
       _card.setAttribute('data-osid',newId);
+      _card.dataset.brand=isVt?'vit':'vr';
       _card.style.borderColor=isVt?'#BE185D':'#7C3AED';
       _card.setAttribute('onclick',"kbOpen('"+newId+"')");
       _card.setAttribute('ondragstart','kbStart(event,this)');
@@ -11291,7 +11341,7 @@ var _lastOsId = null;
     document.getElementById('orcOsNum').textContent='OS #0'+n;
     document.getElementById('orcOsDet').textContent=(isVt?'Vitre':'VR Marcas')+' · Iniciada no Kanban';
     document.getElementById('orcModal').classList.add('open');
-    renderOsTable(); syncSidebarBadges();
+    kbSaveKbos(); renderOsTable(); syncSidebarBadges();
     crmPushOrcamento(newId);
     showToast('OS #0'+n+' criada e adicionada ao Kanban!','ok');
     // Abrir automaticamente o modal da OS após 1.2s
@@ -18004,34 +18054,4 @@ setTimeout(function(){
     <div class="mdrw-section">Principal</div>
     <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
     <div class="mdrw-section">Operação</div>
-    <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS</div>
-    <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
-    <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque</div>
-    <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
-    <div class="mdrw-section">Comercial</div>
-    <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
-    <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
-    <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
-    <div class="mdrw-item" id="mspItem-inteligencia" onclick="mobilePanelNav('inteligencia')"><span class="mdrw-ico">🧠</span> Inteligência Comercial</div>
-    <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
-    <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
-    <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
-    <div class="mdrw-section">Financeiro</div>
-    <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelNav('financeiro')"><span class="mdrw-ico">💳</span> Financeiro</div>
-    <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
-    <div class="mdrw-section">Admin</div>
-    <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
-    <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📏</span> Produtos / Planif.</div>
-    <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
-    <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
-  </div>
-</div>
-
-
-<!-- ══ CLIENT IMPORT OVERLAY ══ -->
-<div id="cliImportOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9000;align-items:center;justify-content:center" onclick="if(event.target===this)cliImportClose()">
-  <div style="background:var(--surface);border-radius:14px;padding:0;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-      <span style="font-size:20px">📥</span>
-      <div>
-        <div style="font-weight:800;font-size:15px;c
+    <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="
