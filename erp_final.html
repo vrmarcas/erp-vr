@@ -13602,10 +13602,10 @@ function cfgCalcM2(i){
   if(area>0&&custo>0){
     var m2=(custo/area).toFixed(2);
     m2El.textContent='R$'+m2+'/m²';
-    var prices=_matPricesGet();
+    if(typeof _matPricesGet==='function'){var prices=_matPricesGet();
     var nome=(row.nome||'').toLowerCase().trim();
     var keyMap={'acrílico 3mm':'ac3','acrílico cristal 3mm':'ac3','acrílico 5mm':'ac5','acrílico cristal 5mm':'ac5','acrílico 8mm':'ac8','acrílico leitoso 5mm':'ac8','acrílico 10mm':'ac10','acrílico espelho 3mm':'ac10','ps cristal 3mm':'ps3','ps 3mm':'ps3','chapa aço inox 2mm':'mt2','metal inox 2mm':'mt2','acm 3mm':'acm'};
-    var k=keyMap[nome]; if(k){prices[k]=parseFloat(m2);_MAT_PRICES=prices;if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mat_prices', prices);}
+    var k=keyMap[nome]; if(k){prices[k]=parseFloat(m2);_MAT_PRICES=prices;if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_mat_prices', prices);}}
   } else {
     m2El.textContent='—';
   }
