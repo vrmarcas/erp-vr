@@ -1235,10 +1235,10 @@ function _cloudLoadAll() {
             if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
           });
         } else {
-          // Cloud sem materiais — preserva o local
-          merged.materiais = local.materiais;
-          merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : local.maquinas;
-          merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : local.maodeobra;
+          // Cloud sem materiais — usa local ou CFG_DEFAULT
+          merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+          merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
+          merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
         }
         // Recalcular rsm2 para todos
         (merged.materiais||[]).forEach(function(r){
@@ -1334,9 +1334,10 @@ function _cloudLoadAll() {
           if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
         });
       } else {
-        merged.materiais = local.materiais;
-        merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : local.maquinas;
-        merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : local.maodeobra;
+        // Cloud sem materiais — usa local ou CFG_DEFAULT como fallback
+        merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+        merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
+        merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
       }
       // Recalcular rsm2 para todos
       (merged.materiais||[]).forEach(function(r){
@@ -5578,7 +5579,7 @@ function nav(page, el) {
   // Ao entrar no orçamento, sempre resetar para step 1
   if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
-  if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
+  if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
   if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
@@ -16593,21 +16594,4 @@ function siteLeadStatus(id, status) {
   siteLeadRender(); siteKpiRender();
 }
 
-function siteLeadExcluir(id) {
-  if(!confirm('Excluir este lead?')) return;
-  SITE_LEADS = SITE_LEADS.filter(function(x){ return x.id!==id; });
-  siteSaveLeads(); siteLeadRender(); siteKpiRender();
-}
-
-// ── Modal detalhe do lead ──
-var _siteLeadId = null;
-function siteLeadAbrir(id) {
-  var l = SITE_LEADS.find(function(x){ return x.id===id; }); if(!l) return;
-  _siteLeadId = id;
-  var overlay = document.getElementById('siteLeadOverlay');
-  if(!overlay) { siteCreateOverlay(); overlay = document.getElementById('siteLeadOverlay'); }
-  document.getElementById('slNome').textContent = l.nome||'-';
-  document.getElementById('slEmail').textContent = l.email||'-';
-  document.getElementById('slTel').textContent = l.tel||'-';
-  document.getElementById('slOrigem').textContent = SITE_ORIGEM_LABELS[l.origem]||l.origem||'-';
-  document.getElementB
+function siteL
