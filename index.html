@@ -3157,7 +3157,7 @@ firebase.auth().signInAnonymously().then(function(){
         </button>
         <button id="crmTabProsp" onclick="crmSetBrand('prosp')"
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
-          ✨ Novo <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
+          ✨ Leads Novos <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
         </button>
         <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
@@ -3270,6 +3270,7 @@ firebase.auth().signInAnonymously().then(function(){
 
       <!-- ── BASE DE CLIENTES — Reativação ── -->
       <div id="crmBrandReativ" style="display:none">
+        <div style="font-size:14px;font-weight:800;margin-bottom:14px">🔄 Reativação — Base de Clientes</div>
         <!-- KPIs -->
         <div id="crmReativKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <!-- Filtro VR / Vitre -->
@@ -3309,6 +3310,7 @@ firebase.auth().signInAnonymously().then(function(){
 
       <!-- ── BASE DE PROSPECTS ── -->
       <div id="crmBrandProsp" style="display:none">
+        <div style="font-size:14px;font-weight:800;margin-bottom:14px">✨ Leads Novos — Prospects</div>
         <!-- KPIs -->
         <div id="crmProspKpis" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <!-- Filtro VR / Vitre -->
@@ -7509,36 +7511,52 @@ function crmDispararFollowup(id) {
 let crmActiveBrand = 'vr';
 function crmSetBrand(b) {
   crmActiveBrand = b;
-  const isVR = b === 'vr';
-  const isSite = b === 'site';
-  const isDia = b === 'dia';
-  document.getElementById('crmBrandVR').style.display = 'none';
-  document.getElementById('crmBrandVT').style.display = 'none';
-  var siteBrand=document.getElementById('crmBrandSite'); if(siteBrand) siteBrand.style.display=isSite?'':'none';
-  var diaBrand=document.getElementById('crmBrandDia'); if(diaBrand) diaBrand.style.display=isDia?'':'none';
-  if(isVR) crmRenderBoard('vr'); else if(isDia) crmRenderDia(); else if(!isSite) crmRenderBoard('vitre'); else { siteLeadRender(); siteKpiRender(); var _sp=document.getElementById('siteShopifyPanelDiv'); if(_sp&&SITE_LEADS.length===0) _sp.style.display=''; }
-  const tabVR = document.getElementById('crmTabVR');
-  const tabVT = document.getElementById('crmTabVT');
-  tabVR.style.borderBottomColor = isVR ? '#7C3AED' : 'transparent';
-  tabVR.style.color = isVR ? '#4C1D95' : 'var(--muted)';
-  tabVR.style.fontWeight = isVR ? '800' : '700';
-  var isVT = !isVR&&!isSite&&!isDia&&!isReativ&&!isProsp;
-  tabVT.style.borderBottomColor = isVT ? '#BE185D' : 'transparent';
-  tabVT.style.color = isVT ? '#831843' : 'var(--muted)';
-  tabVT.style.fontWeight = isVT ? '800' : '700';
-  var tabReativ=document.getElementById('crmTabReativ');
-  if(tabReativ){tabReativ.style.borderBottomColor=isReativ?'#059669':'transparent';tabReativ.style.color=isReativ?'#065F46':'var(--muted)';tabReativ.style.fontWeight=isReativ?'800':'700';}
-  var tabProsp=document.getElementById('crmTabProsp');
-  if(tabProsp){tabProsp.style.borderBottomColor=isProsp?'#6366F1':'transparent';tabProsp.style.color=isProsp?'#3730A3':'var(--muted)';tabProsp.style.fontWeight=isProsp?'800':'700';}
-  var tabSite=document.getElementById('crmTabSite');
-  if(tabSite){tabSite.style.borderBottomColor=isSite?'#059669':'transparent';
-  tabSite.style.fontWeight=isSite?'800':'700';
-  tabSite.style.color=isSite?'#065F46':'var(--muted)';
-  tabSite.style.fontWeight=isSite?'800':'700';}
-  var tabDia2=document.getElementById('crmTabDia');
-  if(tabDia2){tabDia2.style.borderBottomColor=isDia?'#D97706':'transparent';
-  tabDia2.style.color=isDia?'#92400E':'var(--muted)';
-  tabDia2.style.fontWeight=isDia?'800':'700';}
+  var isVR     = b === 'vr';
+  var isSite   = b === 'site';
+  var isDia    = b === 'dia';
+  var isReativ = b === 'reativ';
+  var isProsp  = b === 'prosp';
+
+  // Mostrar/ocultar painéis
+  var panels = {
+    'crmBrandVR':    false,
+    'crmBrandVT':    false,
+    'crmBrandSite':  isSite,
+    'crmBrandDia':   isDia,
+    'crmBrandReativ':isReativ,
+    'crmBrandProsp': isProsp
+  };
+  Object.keys(panels).forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.style.display = panels[id] ? '' : 'none';
+  });
+
+  // Executar render do painel ativo
+  if(isSite) {
+    siteLeadRender(); siteKpiRender();
+    var _sp=document.getElementById('siteShopifyPanelDiv');
+    if(_sp&&SITE_LEADS.length===0) _sp.style.display='';
+  } else if(isDia) {
+    crmRenderDia();
+  } else if(isReativ) {
+    try{ if(!_CRM_BASE_IDX.length) crmBaseLoadIdx(function(){ crmBaseRender('reativ'); crmBaseKpisRender('reativ'); }); else { crmBaseRender('reativ'); crmBaseKpisRender('reativ'); } }catch(e){ console.warn('[CRM] reativ render error',e); }
+  } else if(isProsp) {
+    try{ if(!_CRM_BASE_IDX.length) crmBaseLoadIdx(function(){ crmBaseRender('prosp'); crmBaseKpisRender('prosp'); }); else { crmBaseRender('prosp'); crmBaseKpisRender('prosp'); } }catch(e){ console.warn('[CRM] prosp render error',e); }
+  }
+
+  // Highlight abas
+  [
+    { id:'crmTabSite',   active:isSite,   cor:'#059669', textOn:'#065F46' },
+    { id:'crmTabReativ', active:isReativ, cor:'#059669', textOn:'#065F46' },
+    { id:'crmTabProsp',  active:isProsp,  cor:'#6366F1', textOn:'#3730A3' },
+    { id:'crmTabDia',    active:isDia,    cor:'#D97706', textOn:'#92400E' }
+  ].forEach(function(t){
+    var el=document.getElementById(t.id);
+    if(!el) return;
+    el.style.borderBottomColor = t.active ? t.cor : 'transparent';
+    el.style.color = t.active ? t.textOn : 'var(--muted)';
+    el.style.fontWeight = t.active ? '800' : '700';
+  });
 }
 function crmShowPayload()  { /* removido */ }
 function crmShowSchema()   { /* removido */ }
