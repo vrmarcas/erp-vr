@@ -5575,7 +5575,7 @@ function nav(page, el) {
   // Ao entrar no orçamento, sempre resetar para step 1
   if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
-  if (page === 'config-orc') { setTimeout(function(){ _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
+  if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
   if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
@@ -13253,9 +13253,7 @@ var CFG_DEFAULT = {
 };
 
 function cfgLoad() {
-  if(_cfgData && ((_cfgData.materiais&&_cfgData.materiais.length)||(_cfgData.maquinas&&_cfgData.maquinas.length))){
-    return _cfgData;
-  }
+  if(_cfgData){ return _cfgData; }
   return JSON.parse(JSON.stringify(CFG_DEFAULT));
 }
 function cfgSave(d) {
@@ -16585,4 +16583,6 @@ function siteCreateOverlay() {
 
 
 function siteLeadSalvar() {
-  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return
+  var l = SITE_LEADS.find(function(x){ return x.id===_siteLeadId; }); if(!l) return;
+  l.status = document.getElementById('slStatus').value;
+  l.notas = document.getElementByI
