@@ -1142,6 +1142,47 @@ if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
 var _db = firebase.firestore();
 var _COL = "erp_vr"; // coleção Firestore
 var _cloudReady = false;
+// ── TOMBSTONES DE ESTOQUE ────────────────────────────────────────────
+// Problema: clientes com versão ANTIGA do ERP aberta gravam o STOCK inteiro
+// da memória deles (desatualizada), fazendo itens excluídos "voltarem".
+// Solução: itens excluídos são registrados em um doc separado ('stock_deleted')
+// que versões antigas nunca tocam. Ao receber dados do Firebase, qualquer item
+// com lápide é removido e o doc é regravado limpo (debounced).
+var _STOCK_TOMB = {};          // { chave: timestamp da exclusão }
+var _stockTombLoaded = false;
+var _stockCleanTimer = null;
+function _stockApplyTomb() {
+  if(!_stockTombLoaded) return false;
+  var removed = false;
+  Object.keys(_STOCK_TOMB).forEach(function(k){
+    if(STOCK[k]){ delete STOCK[k]; removed = true; }
+  });
+  if(removed){
+    // Um cliente antigo regravou itens excluídos — limpar o doc no servidor (debounce 3s)
+    if(_stockCleanTimer) clearTimeout(_stockCleanTimer);
+    _stockCleanTimer = setTimeout(function(){
+      try{ stockSaveData(); }catch(e){}
+    }, 3000);
+  }
+  return removed;
+}
+function _stockTombSave() {
+  // Expirar lápides com mais de 30 dias (evita crescimento infinito)
+  var cut = Date.now() - 30*24*60*60*1000;
+  Object.keys(_STOCK_TOMB).forEach(function(k){ if(_STOCK_TOMB[k] < cut) delete _STOCK_TOMB[k]; });
+  if(typeof _cloudSave === 'function') _cloudSave('stock_deleted', _STOCK_TOMB);
+}
+_db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
+  if(doc.exists && doc.data() && doc.data().data){
+    try{
+      var d = JSON.parse(doc.data().data);
+      if(d && typeof d === 'object') _STOCK_TOMB = d;
+    }catch(e){}
+  }
+  _stockTombLoaded = true;
+  if(_stockApplyTomb()){ try{ stockRenderItems(); }catch(e){} }
+},function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; });
+
 // Listener de estoque em tempo real — registrado imediatamente, sem esperar _cloudReady
 // Isso garante que todos os usuários vejam mudanças em tempo real
 // É a ÚNICA fonte de verdade para STOCK — não há outro _cloudLoad nem _cloudWatch para stock
@@ -1152,6 +1193,7 @@ _db.collection(_COL).doc('stock').onSnapshot(function(doc){
       if(d !== null && typeof d==="object"){
         Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; });
         Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; });
+        _stockApplyTomb(); // remover itens excluídos que voltaram de clientes antigos
         try{ stockRenderItems(); stockRenderHistorico(); }catch(e){}
       }
     }catch(e){ console.warn('[Stock] onSnapshot parse erro:',e); }
@@ -10802,6 +10844,8 @@ function stockExcluirItem(key) {
   if (!STOCK[key]) return;
   if (!confirm('Remover "' + STOCK[key].label + '" do estoque?')) return;
   delete STOCK[key];
+  // Registrar lápide — impede que clientes com versão antiga "ressuscitem" o item
+  if(typeof _STOCK_TOMB !== 'undefined'){ _STOCK_TOMB[key] = Date.now(); if(typeof _stockTombSave==='function') _stockTombSave(); }
   stockSaveData();
   stockRenderItems();
   showToast('Material removido do estoque', 'info');
@@ -10846,6 +10890,8 @@ function stockSalvarNovoItem() {
     var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
     var key = baseKey; var n = 1;
     while (STOCK[key]) { key = baseKey + '_' + (n++); }
+    // Se o material está sendo recriado, remover a lápide para não ser excluído de novo
+    if(typeof _STOCK_TOMB !== 'undefined' && _STOCK_TOMB[key]){ delete _STOCK_TOMB[key]; if(typeof _stockTombSave==='function') _stockTombSave(); }
     STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
     showToast('Material "' + nome + '" adicionado ao estoque!', 'ok');
   }
