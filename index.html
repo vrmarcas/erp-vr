@@ -1300,14 +1300,14 @@ function _cloudLoadAll() {
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
   _cloudLoad("stock", function(d){
-    if(d && Object.keys(d).length){
-      // Firebase tem dados reais — usar
+    if(d !== null && typeof d === 'object'){
+      // Firebase tem documento (mesmo vazio) — respeitar dados sem restaurar defaults
       Object.keys(STOCK).forEach(function(k){ delete STOCK[k]; });
       Object.keys(d).forEach(function(k){ STOCK[k]=d[k]; });
     } else {
-      // Primeiro uso: aplicar defaults e salvar no Firebase
+      // Primeiro uso real (sem documento no Firebase) — aplicar defaults
       Object.assign(STOCK, JSON.parse(JSON.stringify(_STOCK_DEFAULTS)));
-      if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('stock', STOCK);
+      if(typeof _cloudSave==='function') _cloudSave('stock', STOCK);
     }
     done();
   });
