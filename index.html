@@ -1385,7 +1385,7 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
-  _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); });
+  if(typeof crmBaseLoadIdx==='function'){ crmBaseLoadIdx(function(){ done(); }); } else { _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); }); }
   _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){
@@ -14407,17 +14407,45 @@ function crmBaseSave(contato) {
   _crmBaseSaveIdx();
 }
 
+// Índice fragmentado em blocos de 3000 — um doc único estouraria o limite
+// de 1MB do Firestore com bases grandes (20k+ leads). O anti-eco do _cloudSave
+// garante que só blocos alterados são regravados (economia de cota).
+var _CRM_IDX_CHUNK = 3000;
 function _crmBaseSaveIdx() {
-  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_base_idx', _CRM_BASE_IDX);
+  if(typeof _cloudSave!=='function' || !_cloudReady) return;
+  var n = Math.max(1, Math.ceil(_CRM_BASE_IDX.length / _CRM_IDX_CHUNK));
+  for(var i=0;i<n;i++){
+    _cloudSave('crm_base_idx_'+i, _CRM_BASE_IDX.slice(i*_CRM_IDX_CHUNK, (i+1)*_CRM_IDX_CHUNK));
+  }
+  _cloudSave('crm_base_idx_meta', { chunks: n, total: _CRM_BASE_IDX.length });
 }
 
 function crmBaseLoadIdx(cb) {
-  if(typeof _cloudLoad==='function') {
-    _cloudLoad('crm_base_idx', function(d){
-      if(d && Array.isArray(d)) { _CRM_BASE_IDX = d; }
-      if(cb) cb();
-    });
-  }
+  if(typeof _cloudLoad!=='function'){ if(cb) cb(); return; }
+  _cloudLoad('crm_base_idx_meta', function(meta){
+    if(meta && meta.chunks){
+      // Formato novo: blocos
+      var partes = [], recebidos = 0;
+      for(var i=0;i<meta.chunks;i++){
+        (function(ix){
+          _cloudLoad('crm_base_idx_'+ix, function(d){
+            partes[ix] = (d && Array.isArray(d)) ? d : [];
+            recebidos++;
+            if(recebidos >= meta.chunks){
+              _CRM_BASE_IDX = [].concat.apply([], partes);
+              if(cb) cb();
+            }
+          });
+        })(i);
+      }
+    } else {
+      // Formato antigo: doc único (compatibilidade)
+      _cloudLoad('crm_base_idx', function(d){
+        if(d && Array.isArray(d)) { _CRM_BASE_IDX = d; }
+        if(cb) cb();
+      });
+    }
+  });
 }
 
 function crmBaseLoadDoc(id, cb) {
