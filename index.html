@@ -3427,6 +3427,13 @@ function _cloudAuthAviso(msg){
             style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
             <option value="">Todos os produtos</option>
           </select>
+          <select id="reativOrdenar" onchange="crmBaseRender('reativ')"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="valor">🏆 Maior valor</option>
+            <option value="compras">🔁 Mais compras</option>
+            <option value="data">📅 Compra recente</option>
+            <option value="recentes">🕐 Import. recente</option>
+          </select>
           <button class="topbar-btn" onclick="crmBaseImportModal('reativ')" style="font-size:11px">📥 Importar Excel</button>
           <button class="topbar-btn ghost" onclick="crmBaseNovoContato('cliente')" style="font-size:11px">+ Novo Cliente</button>
         </div>
@@ -14397,6 +14404,7 @@ function crmBaseSave(contato) {
   var idx = _CRM_BASE_IDX.findIndex(function(x){ return x.id===contato.id; });
   var entry = { id:contato.id, nome:contato.nome||'', tel:contato.tel||'', cidade:contato.cidade||'',
     tipo:contato.tipo||'prospect', produtos:contato.produtos||[], coluna:contato.coluna||'novo',
+    valor:contato.valor||0, ultCompra:contato.ultCompra||'', qtdCompras:contato.qtdCompras||0,
     ultimoContato:contato.ultimoContato||'', ts:contato.ts||Date.now() };
   if(idx>=0) _CRM_BASE_IDX[idx]=entry; else _CRM_BASE_IDX.push(entry);
   // Salva doc individual no Firestore
@@ -14497,8 +14505,12 @@ function crmBaseRender(tipo) {
     return true;
   });
 
-  // Sort: mais recente primeiro
-  todos.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+  // Ordenação: ranking por valor/compras/data ou mais recente
+  var ordem = (document.getElementById(tipo==='reativ' ? 'reativOrdenar' : 'prospOrdenar')||{}).value||'valor';
+  if(ordem==='valor')        todos.sort(function(a,b){ return (b.valor||0)-(a.valor||0); });
+  else if(ordem==='compras') todos.sort(function(a,b){ return (b.qtdCompras||0)-(a.qtdCompras||0); });
+  else if(ordem==='data')    todos.sort(function(a,b){ return String(b.ultCompra||'').localeCompare(String(a.ultCompra||'')); });
+  else                       todos.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
 
   var pag = _CRM_BASE_PAG[tipo] || 0;
   var total = todos.length;
@@ -14533,14 +14545,20 @@ function crmBaseRender(tipo) {
     var cor = colCores[c.coluna] || '#6B7280';
     var label = colLabels[c.coluna] || c.coluna || '—';
     var prods = (c.produtos||[]).slice(0,3).join(', ') + ((c.produtos||[]).length>3?'…':'');
+    var valorStr = (c.valor && c.valor > 0) ? 'R$ '+Math.round(c.valor).toLocaleString('pt-BR') : '';
+    var infoCompra = [];
+    if(c.qtdCompras) infoCompra.push(c.qtdCompras+'× compra'+(c.qtdCompras>1?'s':''));
+    if(c.ultCompra) infoCompra.push('últ. '+c.ultCompra);
     return '<div onclick="crmBaseAbrirPerfil(\''+c.id+'\')" style="display:flex;align-items:center;gap:12px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor=\'var(--brand-mid)\'" onmouseout="this.style.borderColor=\'var(--border)\'">'
       +'<div style="width:36px;height:36px;border-radius:50%;background:'+cor+';color:#fff;font-size:15px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+((c.nome||'?').charAt(0).toUpperCase())+'</div>'
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+cfgEsc(c.nome||'Sem nome')+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(c.tel||'—')+' · '+(c.cidade||'—')+'</div>'
         +(prods?'<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🛒 '+cfgEsc(prods)+'</div>':'')
+        +(infoCompra.length?'<div style="font-size:10px;color:var(--muted);margin-top:1px">📅 '+infoCompra.join(' · ')+'</div>':'')
       +'</div>'
       +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">'
+        +(valorStr?'<span style="font-size:13px;font-weight:900;color:#059669">'+valorStr+'</span>':'')
         +'<span style="background:'+cor+'22;color:'+cor+';border-radius:20px;padding:2px 10px;font-size:10px;font-weight:700">'+label+'</span>'
         +(c.ultimoContato?'<span style="font-size:10px;color:var(--muted)">'+c.ultimoContato+'</span>':'')
       +'</div>'
@@ -14564,8 +14582,16 @@ function crmBaseKpisRender(tipo) {
     var in90     = lista.filter(function(c){ return c.coluna==='inativo90'; }).length;
     var in180    = lista.filter(function(c){ return c.coluna==='inativo180'; }).length;
     var perdidos = lista.filter(function(c){ return c.coluna==='perdido'; }).length;
+    // Ranking: valor total identificado, recorrentes (2+ compras = potencial recompra) e top cliente
+    var valorTotal  = lista.reduce(function(s,c){ return s+(c.valor||0); },0);
+    var recorrentes = lista.filter(function(c){ return (c.qtdCompras||0)>1; }).length;
+    var top = lista.slice().sort(function(a,b){ return (b.valor||0)-(a.valor||0); })[0];
+    var topStr = (top && top.valor) ? (top.nome||'').slice(0,14)+' · R$ '+Math.round(top.valor).toLocaleString('pt-BR') : '—';
     el.innerHTML = [
       { ico:'👥', lbl:'Total Clientes', val:total, cor:'#7C3AED' },
+      { ico:'💰', lbl:'Valor identificado', val:'R$ '+Math.round(valorTotal).toLocaleString('pt-BR'), cor:'#059669' },
+      { ico:'🔁', lbl:'Recorrentes (2+ compras)', val:recorrentes, cor:'#0891B2' },
+      { ico:'🏆', lbl:'Top cliente', val:topStr, cor:'#D97706' },
       { ico:'✅', lbl:'Ativos', val:ativos, cor:'#059669' },
       { ico:'⚠️', lbl:'Inativos 90d', val:in90, cor:'#D97706' },
       { ico:'🔴', lbl:'Inativos 180d', val:in180, cor:'#DC2626' },
@@ -14620,6 +14646,8 @@ function crmBaseAbrirPerfil(id) {
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">CIDADE</div><div style="font-size:13px;font-weight:700">'+(d.cidade||'—')+'</div></div>'
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">TIPO</div><div style="font-size:13px;font-weight:700">'+(d.tipo==='cliente'?'🔄 Cliente':'🎯 Prospect')+'</div></div>'
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">ÚLTIMO CONTATO</div><div style="font-size:13px;font-weight:700">'+(d.ultimoContato||'—')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">💰 VALOR TOTAL</div><div style="font-size:13px;font-weight:700;color:#059669">'+((d.valor&&d.valor>0)?'R$ '+Math.round(d.valor).toLocaleString('pt-BR'):'—')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">📅 ÚLTIMA COMPRA</div><div style="font-size:13px;font-weight:700">'+(d.ultCompra||'—')+((d.qtdCompras&&d.qtdCompras>0)?' <span style="color:var(--muted);font-weight:400">('+d.qtdCompras+'× compras)</span>':'')+'</div></div>'
       +'</div>'
       +((d.produtos&&d.produtos.length)?'<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">PRODUTOS COMPRADOS</div>'
         +'<div style="display:flex;flex-wrap:wrap;gap:4px">'+d.produtos.map(function(p){ return '<span style="background:var(--bg2);border-radius:20px;padding:2px 10px;font-size:11px">'+cfgEsc(p)+'</span>'; }).join('')+'</div></div>':'')
@@ -14833,14 +14861,19 @@ function _crmBaseShowColMap(headers) {
   var autoTel  = autoDetect(['tel','fone','whats','celular','phone']);
   var autoCid  = autoDetect(['cidade','city','municipio']);
   var autoProd = autoDetect(['produto','compra','item','pedido','product']);
-
   var autoMarca = autoDetect(['marca','brand','empresa']);
+  var autoValor = autoDetect(['valor','total','faturamento','receita']);
+  var autoData  = autoDetect(['ultima_compra','ultima compra','data_da_ultima','data compra','data']);
+  var autoQtd   = autoDetect(['qtd_compras','quantidade_de_compras','qtd compras','num_compras']);
   mapEl.innerHTML = [
     { label:'Nome *', key:'nome', auto:autoNome },
     { label:'Telefone', key:'tel', auto:autoTel },
     { label:'Cidade', key:'cidade', auto:autoCid },
     { label:'Produto Comprado', key:'produto', auto:autoProd },
-    { label:'Marca (VR/Vitre)', key:'marca', auto:autoMarca }
+    { label:'Marca (VR/Vitre)', key:'marca', auto:autoMarca },
+    { label:'Valor Total (R$)', key:'valor', auto:autoValor },
+    { label:'Data Última Compra', key:'data', auto:autoData },
+    { label:'Nº de Compras', key:'qtd', auto:autoQtd }
   ].map(function(f){
     var sel='<select id="colMap_'+f.key+'" style="width:100%;padding:6px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);font-size:11px">'+opts+'</select>';
     return '<div><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px">'+f.label+'</div>'+sel+'</div>';
@@ -14848,7 +14881,7 @@ function _crmBaseShowColMap(headers) {
 
   // Set auto-detected values
   setTimeout(function(){
-    var fields = {nome:autoNome, tel:autoTel, cidade:autoCid, produto:autoProd};
+    var fields = {nome:autoNome, tel:autoTel, cidade:autoCid, produto:autoProd, valor:autoValor, data:autoData, qtd:autoQtd};
     Object.keys(fields).forEach(function(k){
       var sel=document.getElementById('colMap_'+k);
       if(sel && fields[k]) sel.value=fields[k];
@@ -14867,12 +14900,26 @@ function _crmBaseShowColMap(headers) {
   document.getElementById('crmImportPreview').style.display='';
 }
 
+// "R$ 1.060,00" → 1060 (número)
+function _crmParseValor(v){
+  if(typeof v === 'number') return v;
+  if(!v) return 0;
+  var s = String(v).replace(/[^\d.,-]/g,'').trim();
+  if(!s) return 0;
+  if(s.indexOf(',')>=0){ s = s.replace(/\./g,'').replace(',','.'); }
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
 function crmBaseExecuteImport() {
   var colNome   = (document.getElementById('colMap_nome')||{}).value||'';
   var colTel    = (document.getElementById('colMap_tel')||{}).value||'';
   var colCid    = (document.getElementById('colMap_cidade')||{}).value||'';
   var colProd   = (document.getElementById('colMap_produto')||{}).value||'';
   var colMarcaX = (document.getElementById('colMap_marca')||{}).value||'';
+  var colValor  = (document.getElementById('colMap_valor')||{}).value||'';
+  var colData   = (document.getElementById('colMap_data')||{}).value||'';
+  var colQtd    = (document.getElementById('colMap_qtd')||{}).value||'';
   var destino   = (document.getElementById('crmImportDestino')||{}).value||'auto';
   var marcaPad  = (document.getElementById('crmImportMarca')||{}).value||'vr';
 
@@ -14909,13 +14956,18 @@ function crmBaseExecuteImport() {
       if(marcaVal.includes('vit')||marcaVal.includes('vit')) marcaVal='vitre'; else marcaVal='vr';
       var tipoAuto = prod ? 'cliente' : 'prospect';
       var tipo = destino==='auto' ? tipoAuto : (destino==='reativ' ? 'cliente' : 'prospect');
+      var valor = colValor ? _crmParseValor(r[colValor]) : 0;
+      var dataC = colData  ? (r[colData]||'').toString().trim().slice(0,10) : '';
+      var qtdC  = colQtd   ? (parseInt(r[colQtd])||0) : 0;
       var id = 'cb_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'_'+(done+batch.indexOf(r));
       var contato = { id:id, nome:nome, tel:tel, cidade:cid, marca:marcaVal,
         tipo:tipo, produtos:prod?[prod]:[], coluna:tipo==='cliente'?'ativo':'novo',
+        valor:valor, ultCompra:dataC, qtdCompras:qtdC,
         ultimoContato:'', ts:Date.now() };
-      // Add to index
+      // Add to index (campos de ranking incluídos — usados no dashboard sem leitura extra)
       _CRM_BASE_IDX.push({ id:id, nome:nome, tel:tel, cidade:cid, tipo:tipo, marca:marcaVal,
-        produtos:prod?[prod]:[], coluna:contato.coluna, ultimoContato:'', ts:contato.ts });
+        produtos:prod?[prod]:[], coluna:contato.coluna, valor:valor, ultCompra:dataC, qtdCompras:qtdC,
+        ultimoContato:'', ts:contato.ts });
       fsBatch.set(_db.collection(_CRM_BASE_COL).doc(id), contato);
       if(tipo==='cliente') clientes++; else prospects++;
       done++;
