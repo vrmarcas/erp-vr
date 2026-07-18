@@ -3184,6 +3184,10 @@ firebase.auth().signInAnonymously().then(function(){
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
           ✨ Leads Novos <span style="background:#EEF2FF;color:#3730A3;border-radius:20px;padding:1px 7px;font-size:10px" id="crmProspCount">0</span>
         </button>
+        <button id="crmTabPipeline" onclick="crmSetBrand('pipeline')"
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
+          🎯 Pipeline / Kanban
+        </button>
         <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmOpenImport()">📥 Importar</button>
@@ -5880,7 +5884,7 @@ function nav(page, el) {
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
-  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'site'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); try{if(!_CRM_BASE_IDX.length) crmBaseInit();}catch(e){} }, 100); }
+  if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'pipeline'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); try{if(!_CRM_BASE_IDX.length) crmBaseInit();}catch(e){} }, 100); }
   if (page === 'tarefas')    { setTimeout(function(){ if(typeof tarefasRender==='function') tarefasRender(); }, 80); }
   // Log sensitive navigation
   if(['financeiro','config-usr','seguranca'].includes(page) && typeof secAuditLog==='function') secAuditLog('nav', titles[page]||page);
@@ -7537,15 +7541,16 @@ function crmDispararFollowup(id) {
 let crmActiveBrand = 'site';
 function crmSetBrand(b) {
   crmActiveBrand = b;
-  var isVR     = b === 'vr';
-  var isSite   = b === 'site';
-  var isDia    = b === 'dia';
-  var isReativ = b === 'reativ';
-  var isProsp  = b === 'prosp';
+  var isVR       = b === 'vr' || b === 'pipeline';
+  var isSite     = b === 'site';
+  var isDia      = b === 'dia';
+  var isReativ   = b === 'reativ';
+  var isProsp    = b === 'prosp';
+  var isPipeline = b === 'pipeline';
 
   // Mostrar/ocultar painéis
   var panels = {
-    'crmBrandVR':    false,
+    'crmBrandVR':    isVR,
     'crmBrandVT':    false,
     'crmBrandSite':  isSite,
     'crmBrandDia':   isDia,
@@ -7558,7 +7563,9 @@ function crmSetBrand(b) {
   });
 
   // Executar render do painel ativo
-  if(isSite) {
+  if(isVR) {
+    try{ crmRenderBoard('vr'); }catch(e){ console.warn('[CRM] pipeline render erro',e); }
+  } else if(isSite) {
     siteLeadRender(); siteKpiRender();
     var _sp=document.getElementById('siteShopifyPanelDiv');
     if(_sp&&SITE_LEADS.length===0) _sp.style.display='';
@@ -7582,10 +7589,11 @@ function crmSetBrand(b) {
 
   // Highlight abas
   [
-    { id:'crmTabSite',   active:isSite,   cor:'#059669', textOn:'#065F46' },
-    { id:'crmTabReativ', active:isReativ, cor:'#059669', textOn:'#065F46' },
-    { id:'crmTabProsp',  active:isProsp,  cor:'#6366F1', textOn:'#3730A3' },
-    { id:'crmTabDia',    active:isDia,    cor:'#D97706', textOn:'#92400E' }
+    { id:'crmTabSite',     active:isSite,     cor:'#059669', textOn:'#065F46' },
+    { id:'crmTabReativ',   active:isReativ,   cor:'#059669', textOn:'#065F46' },
+    { id:'crmTabProsp',    active:isProsp,    cor:'#6366F1', textOn:'#3730A3' },
+    { id:'crmTabDia',      active:isDia,      cor:'#D97706', textOn:'#92400E' },
+    { id:'crmTabPipeline', active:isPipeline, cor:'#7C3AED', textOn:'#5B21B6' }
   ].forEach(function(t){
     var el=document.getElementById(t.id);
     if(!el) return;
