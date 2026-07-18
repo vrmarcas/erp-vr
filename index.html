@@ -1169,8 +1169,13 @@ function _stockApplyTomb() {
 }
 function _stockTombSave() {
   // Expirar lápides com mais de 30 dias (evita crescimento infinito)
+  // Formatos aceitos: timestamp puro (versões anteriores) ou { ts, item } (com dados p/ lixeira)
   var cut = Date.now() - 30*24*60*60*1000;
-  Object.keys(_STOCK_TOMB).forEach(function(k){ if(_STOCK_TOMB[k] < cut) delete _STOCK_TOMB[k]; });
+  Object.keys(_STOCK_TOMB).forEach(function(k){
+    var v = _STOCK_TOMB[k];
+    var ts = (v && typeof v === 'object') ? v.ts : v;
+    if(ts && ts < cut) delete _STOCK_TOMB[k];
+  });
   if(typeof _cloudSave === 'function') _cloudSave('stock_deleted', _STOCK_TOMB);
 }
 _db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
@@ -1213,12 +1218,26 @@ _db.collection(_COL).doc('stock').onSnapshot(
   function(e){ console.warn('[Stock] onSnapshot erro:',e); }
 );
 
+// ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
+// não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza
+// drasticamente a cota de gravações do Firebase.
+var _cloudLastPayload = {};
+
 // Salvar documento no Firestore
 function _cloudSave(key, data) {
   if(!_db) return;
   try {
-    _db.collection(_COL).doc(key).set({ data: JSON.stringify(data), ts: Date.now() })
-      .catch(function(e){ console.warn("[Cloud] Erro ao salvar "+key+":", e); });
+    var payload = JSON.stringify(data);
+    if(_cloudLastPayload[key] === payload) return; // dado idêntico — nada a gravar
+    _cloudLastPayload[key] = payload;
+    _db.collection(_COL).doc(key).set({ data: payload, ts: Date.now() })
+      .catch(function(e){
+        delete _cloudLastPayload[key]; // permitir nova tentativa
+        console.warn("[Cloud] Erro ao salvar "+key+":", e);
+        if(e && (e.code==='resource-exhausted' || (e.message||'').indexOf('Quota')>=0)){
+          if(typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
+        }
+      });
   } catch(e) { console.warn("[Cloud] _cloudSave falhou:", e); }
 }
 
@@ -1227,7 +1246,11 @@ function _cloudLoad(key, cb) {
   if(!_db) { cb(null); return; }
   _db.collection(_COL).doc(key).get().then(function(doc) {
     if(doc.exists && doc.data() && doc.data().data) {
-      try { cb(JSON.parse(doc.data().data)); return; } catch(e){}
+      try {
+        var raw = doc.data().data;
+        _cloudLastPayload[key] = raw; // registrar para o anti-eco
+        cb(JSON.parse(raw)); return;
+      } catch(e){}
     }
     cb(null);
   }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); cb(null); });
@@ -1238,7 +1261,11 @@ function _cloudWatch(key, callback) {
   if(!_db) return;
   return _db.collection(_COL).doc(key).onSnapshot(function(doc) {
     if(doc.exists && doc.data() && doc.data().data) {
-      try { callback(JSON.parse(doc.data().data)); } catch(e){}
+      try {
+        var raw = doc.data().data;
+        _cloudLastPayload[key] = raw; // registrar para o anti-eco
+        callback(JSON.parse(raw));
+      } catch(e){}
     }
   }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); });
 }
@@ -1275,7 +1302,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
-    _cloudWatch("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
+    _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
@@ -1356,7 +1383,7 @@ function _cloudLoadAll() {
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
-  _cloudLoad("orcamentos", function(d){ if(d&&d.length){ orcSetEnviados(d); var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); });
+  _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
   _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); });
   _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
@@ -3688,6 +3715,7 @@ function _cloudAuthAviso(msg){
             <div style="display:flex;gap:6px">
               <button class="topbar-btn" onclick="stockOpenNovoItem()" style="background:var(--brand-mid);color:#fff;border:none">+ Novo Material</button>
               <button class="topbar-btn" onclick="stockOpenEntrada()">+ Entrada</button>
+              <button class="topbar-btn" onclick="stockLixeiraAbrir()" title="Ver itens excluídos — restaurar ou excluir de vez">🗑 Lixeira</button>
             </div>
           </div>
           <div id="stockItemsList" style="margin-top:4px">
@@ -5217,6 +5245,20 @@ function _cloudAuthAviso(msg){
 </div>
 
 <!-- OVERLAY: NOVO ITEM DE ESTOQUE -->
+<!-- Modal Lixeira do Estoque -->
+<div class="gen-overlay" id="stockLixeiraOverlay" onclick="if(event.target===this)stockLixeiraFechar()">
+  <div class="gen-modal">
+    <div class="gen-modal-hdr">
+      <div class="gen-modal-title">🗑 Lixeira do Estoque</div>
+      <button class="gen-close" onclick="stockLixeiraFechar()">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Itens excluídos ficam aqui por 30 dias. Você pode restaurá-los ou excluir definitivamente.</div>
+      <div id="stockLixeiraLista" style="max-height:320px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <div class="gen-overlay" id="stockNovoItemOverlay" onclick="if(event.target===this)stockCloseNovoItem()">
   <div class="gen-modal">
     <div class="gen-modal-hdr">
@@ -10878,13 +10920,61 @@ function stockPopulateSelects() {
 
 function stockExcluirItem(key) {
   if (!STOCK[key]) return;
-  if (!confirm('Remover "' + STOCK[key].label + '" do estoque?')) return;
+  if (!confirm('Mover "' + STOCK[key].label + '" para a lixeira?')) return;
+  var item = STOCK[key];
   delete STOCK[key];
-  // Registrar lápide — impede que clientes com versão antiga "ressuscitem" o item
-  if(typeof _STOCK_TOMB !== 'undefined'){ _STOCK_TOMB[key] = Date.now(); if(typeof _stockTombSave==='function') _stockTombSave(); }
+  // Lixeira/lápide — guarda o item para restaurar e impede que versões antigas o "ressuscitem"
+  if(typeof _STOCK_TOMB !== 'undefined'){ _STOCK_TOMB[key] = { ts: Date.now(), item: item }; if(typeof _stockTombSave==='function') _stockTombSave(); }
   stockSaveData();
   stockRenderItems();
-  showToast('Material removido do estoque', 'info');
+  showToast('🗑 Material movido para a lixeira — clique em "Lixeira" para restaurar', 'info');
+}
+
+// ── LIXEIRA DE ESTOQUE ──────────────────────────────────────────────
+function stockLixeiraAbrir(){
+  stockLixeiraRender();
+  var ov=document.getElementById('stockLixeiraOverlay'); if(ov) ov.classList.add('open');
+}
+function stockLixeiraFechar(){
+  var ov=document.getElementById('stockLixeiraOverlay'); if(ov) ov.classList.remove('open');
+}
+function stockLixeiraRender(){
+  var el=document.getElementById('stockLixeiraLista'); if(!el) return;
+  var keys = (typeof _STOCK_TOMB!=='undefined') ? Object.keys(_STOCK_TOMB) : [];
+  if(!keys.length){ el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:16px;text-align:center">Lixeira vazia.</div>'; return; }
+  el.innerHTML = keys.map(function(k){
+    var t=_STOCK_TOMB[k];
+    var isObj = t && typeof t==='object';
+    var item = isObj ? t.item : null;
+    var ts   = isObj ? t.ts : t;
+    var nome = item && item.label ? item.label + (item.cor?' — '+item.cor:'') : k;
+    var qtd  = item && typeof item.qty!=='undefined' ? item.qty+' un' : '';
+    var dt   = ts ? new Date(ts).toLocaleString('pt-BR') : '';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border)">'
+      +'<div style="flex:1"><div style="font-weight:700;font-size:12px">'+nome+'</div>'
+      +'<div style="font-size:10px;color:var(--muted)">'+(qtd?qtd+' · ':'')+'excluído em '+dt+'</div></div>'
+      +(item?'<button onclick="stockLixeiraRestaurar(&quot;'+k+'&quot;)" style="padding:5px 10px;border:1px solid #059669;background:#F0FDF4;color:#065F46;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩ Restaurar</button>':'')
+      +'<button onclick="stockLixeiraExcluirDef(&quot;'+k+'&quot;)" style="padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:7px;font-size:11px;cursor:pointer">Excluir de vez</button>'
+      +'</div>';
+  }).join('');
+}
+function stockLixeiraRestaurar(key){
+  var t=_STOCK_TOMB[key];
+  if(!t || typeof t!=='object' || !t.item){ showToast('Item sem dados para restaurar','warn'); return; }
+  STOCK[key]=t.item;
+  delete _STOCK_TOMB[key];
+  _stockTombSave();
+  stockSaveData();
+  stockRenderItems();
+  stockLixeiraRender();
+  showToast('Material "'+(t.item.label||key)+'" restaurado ao estoque','ok');
+}
+function stockLixeiraExcluirDef(key){
+  if(!confirm('Excluir definitivamente? Não será possível restaurar.')) return;
+  delete _STOCK_TOMB[key];
+  _stockTombSave();
+  stockLixeiraRender();
+  showToast('Item excluído definitivamente','info');
 }
 
 var _stockEditKey = null; // chave sendo editada (null = novo)
