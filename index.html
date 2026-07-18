@@ -1153,6 +1153,7 @@ var _stockTombLoaded = false;
 var _stockCleanTimer = null;
 function _stockApplyTomb() {
   if(!_stockTombLoaded) return false;
+  if(typeof STOCK === 'undefined') return false; // página ainda carregando
   var removed = false;
   Object.keys(_STOCK_TOMB).forEach(function(k){
     if(STOCK[k]){ delete STOCK[k]; removed = true; }
@@ -1186,7 +1187,8 @@ _db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
 // Listener de estoque em tempo real — registrado imediatamente, sem esperar _cloudReady
 // Isso garante que todos os usuários vejam mudanças em tempo real
 // É a ÚNICA fonte de verdade para STOCK — não há outro _cloudLoad nem _cloudWatch para stock
-_db.collection(_COL).doc('stock').onSnapshot(function(doc){
+function _stockAplicarSnapshot(doc){
+  if(typeof STOCK === 'undefined'){ setTimeout(function(){ _stockAplicarSnapshot(doc); }, 300); return; } // página ainda carregando — reaplicar
   if(doc.exists && doc.data() && doc.data().data){
     try{
       var d=JSON.parse(doc.data().data);
@@ -1205,7 +1207,11 @@ _db.collection(_COL).doc('stock').onSnapshot(function(doc){
       try{ stockRenderItems(); }catch(e){}
     }
   }
-},function(e){ console.warn('[Stock] onSnapshot erro:',e); });
+}
+_db.collection(_COL).doc('stock').onSnapshot(
+  function(doc){ try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); } },
+  function(e){ console.warn('[Stock] onSnapshot erro:',e); }
+);
 
 // Salvar documento no Firestore
 function _cloudSave(key, data) {
@@ -1426,8 +1432,12 @@ function _cloudLoadAll() {
   });
 }
 
-// Iniciar após login anônimo
-firebase.auth().signInAnonymously().then(function(){
+// Iniciar após login anônimo — com timeout + retry (o SDK pode travar por
+// interferência de antivírus/extensões; nesse caso tentamos de novo sem persistência)
+var _cloudIniciou = false;
+function _cloudIniciar(){
+  if(_cloudIniciou) return;
+  _cloudIniciou = true;
   // Carregar erp_config imediatamente (sem delay) para materiais disponíveis no orçamento
   _cloudLoad('erp_config', function(d){
     if(d && typeof d==='object'){
@@ -1448,7 +1458,33 @@ firebase.auth().signInAnonymously().then(function(){
   });
   setTimeout(_cloudLoadAll, 800);
   setTimeout(kbProntaSync, 600);
-}).catch(function(e){ console.warn("[Cloud] Auth falhou:", e); });
+}
+function _cloudAuthAviso(msg){
+  var ct=document.getElementById('cloudTxt');
+  if(ct){ ct.textContent = msg; ct.style.color = '#DC2626'; }
+}
+(function _cloudAuthStart(){
+  var resolveu = false;
+  firebase.auth().signInAnonymously()
+    .then(function(){ resolveu = true; _cloudIniciar(); })
+    .catch(function(e){ resolveu = true; console.warn("[Cloud] Auth falhou:", e); _cloudAuthAviso('erro de conexão'); });
+  // Fallback 1: se o login travar (>8s), tentar sem persistência (evita travas de storage)
+  setTimeout(function(){
+    if(resolveu || _cloudIniciou) return;
+    console.warn('[Cloud] Auth travado >8s — tentando fallback sem persistência');
+    try{
+      firebase.auth().setPersistence('none')
+        .then(function(){ return firebase.auth().signInAnonymously(); })
+        .then(function(){ _cloudIniciar(); })
+        .catch(function(e){ console.warn('[Cloud] Fallback auth falhou:', e); });
+    }catch(e){ console.warn('[Cloud] Fallback auth exceção:', e); }
+  }, 8000);
+  // Fallback 2: aviso ao usuário se nada conectou em 20s
+  setTimeout(function(){
+    if(_cloudIniciou) return;
+    _cloudAuthAviso('sem conexão — verifique antivírus/firewall');
+  }, 20000);
+})();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
