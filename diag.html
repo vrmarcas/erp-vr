@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>diag</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+</head><body>
+<pre id="out">carregando...</pre>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyASz1dnDw39NpIpU07cbcyR4kl2dOXCsVA",
+  authDomain: "erp-vrmarcas.firebaseapp.com",
+  projectId: "erp-vrmarcas"
+});
+var db = firebase.firestore();
+var out = document.getElementById('out');
+function show(o){ out.textContent = JSON.stringify(o, null, 2); }
+async function main(){
+  var r = { hora: new Date().toLocaleString('pt-BR') };
+  try {
+    await Promise.race([
+      firebase.auth().signInAnonymously(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('auth timeout 10s')),10000))
+    ]);
+    r.auth = 'ok';
+  } catch(e){ r.auth = 'FALHOU: '+e.message; show(r); return; }
+  try {
+    var s = await db.collection('erp_vr').doc('stock').get();
+    if(s.exists){
+      var sd = s.data();
+      var itens = JSON.parse(sd.data);
+      r.stock = { gravado_em: new Date(sd.ts).toLocaleString('pt-BR'),
+                  chaves: Object.keys(itens),
+                  resumo: Object.keys(itens).map(function(k){ return k+': '+itens[k].label+' ('+itens[k].qty+')'; }) };
+    } else r.stock = 'doc nao existe';
+  } catch(e){ r.stock = 'ERRO: '+e.message; }
+  try {
+    var t = await db.collection('erp_vr').doc('stock_deleted').get();
+    if(t.exists){
+      var td = t.data();
+      r.lixeira = { gravado_em: new Date(td.ts).toLocaleString('pt-BR'), dados: JSON.parse(td.data) };
+    } else r.lixeira = 'doc nao existe (nenhuma exclusao registrada pela versao nova)';
+  } catch(e){ r.lixeira = 'ERRO: '+e.message; }
+  show(r);
+}
+main();
+</script>
+</body></html>
