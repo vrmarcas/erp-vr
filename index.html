@@ -3091,7 +3091,7 @@ function _cloudAuthAviso(msg){
       <div class="card" style="margin-top:14px">
         <div class="card-h">
           <div class="card-h-left">💰 Comissões por Vendedor</div>
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="comissaoRender()">Atualizar</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="comissaoCardRender()">Atualizar</button>
         </div>
         <div id="comComissaoBody" style="margin-top:8px">
           <div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Carregando...</div>
@@ -3832,7 +3832,7 @@ function _cloudAuthAviso(msg){
               <option value="retalho-entrada">✂️ Retalho — Criação</option>
               <option value="retalho-saida">✂️ Retalho — Consumo</option>
             </select>
-            <button onclick="STOCK_LOG=[];stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
+            <button onclick="STOCK_LOG=[];if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('erp_stock_log',STOCK_LOG);stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
           </div>
         </div>
         <div id="stockHistBody" style="margin-top:8px">
@@ -17175,6 +17175,7 @@ function _comIntelligence() {
         +'</div>';
     }).join('');
   }
+  try{ if(typeof comissaoCardRender==='function') comissaoCardRender(); }catch(e){}
 }
 // ============================================================
 // CONFIG PRODUTOS — CRUD dinâmico
@@ -17962,8 +17963,10 @@ function mobilePanelNav(page) {
   if(el) el.classList.add('on');
 }
 
-// ══ COMISSÕES — Dashboard Comercial ══════════════════════════════════════════
-function comissaoRender() {
+// ══ COMISSÕES — Dashboard Comercial (card simples) ══════════════════════════
+// Renomeada de comissaoRender → comissaoCardRender: a declaração duplicada
+// sobrescrevia a comissaoRender do painel de metas (Inteligência Comercial)
+function comissaoCardRender() {
   var el = document.getElementById('comComissaoBody');
   if(!el) return;
   var orcs = orcGetEnviados();
