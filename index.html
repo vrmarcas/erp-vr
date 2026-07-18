@@ -3483,29 +3483,31 @@ function _cloudAuthAviso(msg){
         </div>
       </div>
 
-      <!-- Modal importação Excel base -->
-      <div id="crmBaseImportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3100;align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
-        <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:560px;max-height:90vh;overflow-y:auto">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <div style="font-size:15px;font-weight:800">📥 Importar Base de Contatos</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button onclick="crmBaseDownloadTemplate()" style="background:none;border:1.5px solid var(--border);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;color:var(--text)">📄 Baixar Modelo Excel</button>
-              <button onclick="document.getElementById('crmBaseImportModal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px">✕</button>
-            </div>
+    </div><!-- /pg-crm -->
+
+    <!-- ── Modal importação Excel base (fora do pg-crm para z-index correto) ── -->
+    <div class="crm-imp-overlay" id="crmBaseImportModal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="crm-imp-modal" style="max-width:560px">
+        <div class="crm-imp-hdr">
+          <div>
+            <div class="crm-imp-title">📥 Importar Base de Contatos</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Colunas esperadas: Nome, Telefone, Cidade, Produto, Marca (VR ou Vitre).</div>
           </div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Colunas esperadas: Nome, Telefone, Cidade, Produto, Marca (VR ou Vitre). Quem tem produto = Reativação, vazio = Novo.</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <button class="crm-imp-close" onclick="document.getElementById('crmBaseImportModal').style.display='none'">✕</button>
+        </div>
+        <div class="crm-imp-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:10px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">IMPORTAR PARA</label>
-              <select id="crmImportDestino" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+              <label class="crm-imp-lbl">Importar Para</label>
+              <select id="crmImportDestino" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
                 <option value="auto">Automático (detectar pelo produto)</option>
                 <option value="reativ">🔄 Reativação (clientes)</option>
                 <option value="prosp">✨ Novo (prospects)</option>
               </select>
             </div>
             <div>
-              <label style="font-size:10px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">MARCA PADRÃO</label>
-              <select id="crmImportMarca" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
+              <label class="crm-imp-lbl">Marca Padrão</label>
+              <select id="crmImportMarca" style="width:100%;padding:7px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);color:var(--text)">
                 <option value="vr">🟣 VR Marcas</option>
                 <option value="vitre">🌸 Vitre</option>
                 <option value="col">Da coluna Marca no arquivo</option>
@@ -3514,26 +3516,26 @@ function _cloudAuthAviso(msg){
           </div>
           <!-- Step 1: upload -->
           <div id="crmImportStep1">
-            <label style="display:block;border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;margin-bottom:14px">
-              <div style="font-size:28px;margin-bottom:6px">📊</div>
-              <div style="font-size:13px;font-weight:700">Arraste o Excel aqui ou clique para selecionar</div>
+            <label style="display:block;border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer">
+              <div style="font-size:32px;margin-bottom:6px">📊</div>
+              <div style="font-size:13px;font-weight:700;color:var(--text)">Arraste o Excel aqui ou clique para selecionar</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">.xlsx ou .csv</div>
               <input type="file" id="crmBaseFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="crmBasePreviewFile(this)">
             </label>
-            <div id="crmImportPreview" style="display:none">
+            <div id="crmImportPreview" style="display:none;margin-top:14px">
               <div style="font-size:12px;font-weight:700;margin-bottom:8px">🗂️ Mapeie as colunas do seu arquivo:</div>
               <div id="crmImportColMap" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px"></div>
               <div id="crmImportStats" style="background:var(--bg2);border-radius:8px;padding:10px;font-size:12px;margin-bottom:14px"></div>
               <div style="display:flex;gap:8px">
                 <button onclick="crmBaseExecuteImport()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">🚀 Importar</button>
-                <button onclick="document.getElementById('crmBaseImportModal').style.display='none'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
+                <button onclick="document.getElementById('crmBaseImportModal').style.display='none'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer;color:var(--text)">Cancelar</button>
               </div>
             </div>
           </div>
           <!-- Progress -->
           <div id="crmImportProgress" style="display:none;text-align:center;padding:20px 0">
-            <div style="font-size:28px;margin-bottom:10px">⏳</div>
-            <div id="crmImportProgressText" style="font-size:13px;font-weight:700;margin-bottom:10px">Importando...</div>
+            <div style="font-size:32px;margin-bottom:10px">⏳</div>
+            <div id="crmImportProgressText" style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--text)">Importando...</div>
             <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden">
               <div id="crmImportProgressBar" style="height:8px;background:var(--brand-mid);border-radius:4px;width:0%;transition:width .3s"></div>
             </div>
@@ -3542,30 +3544,36 @@ function _cloudAuthAviso(msg){
           <!-- Done -->
           <div id="crmImportDone" style="display:none;text-align:center;padding:20px 0">
             <div style="font-size:40px;margin-bottom:10px">✅</div>
-            <div id="crmImportDoneText" style="font-size:14px;font-weight:800;margin-bottom:6px"></div>
+            <div id="crmImportDoneText" style="font-size:14px;font-weight:800;margin-bottom:6px;color:var(--text)"></div>
             <div id="crmImportDoneSub" style="font-size:12px;color:var(--muted);margin-bottom:16px"></div>
             <button onclick="document.getElementById('crmBaseImportModal').style.display='none';crmBaseRender('reativ');crmBaseRender('prosp');" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:13px;font-weight:700;cursor:pointer">Ver Base</button>
           </div>
         </div>
+        <!-- Baixar modelo no rodapé -->
+        <div style="padding:10px 22px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+          <button onclick="crmBaseDownloadTemplate()" style="background:none;border:1.5px solid var(--border);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;color:var(--muted)">📄 Baixar Modelo Excel</button>
+        </div>
       </div>
+    </div>
 
-      <!-- Modal perfil contato base -->
-      <div id="crmBasePerfilModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3100;align-items:center;justify-content:center">
-        <div style="background:var(--card);border-radius:16px;padding:24px;width:90%;max-width:540px;max-height:90vh;overflow-y:auto">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <div style="font-size:15px;font-weight:800" id="crmBasePerfilNome"></div>
-            <button onclick="document.getElementById('crmBasePerfilModal').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
-          </div>
+    <!-- ── Modal perfil contato base (fora do pg-crm) ── -->
+    <div class="crm-imp-overlay" id="crmBasePerfilModal" onclick="if(event.target===this)this.style.display='none'">
+      <div class="crm-imp-modal" style="max-width:540px">
+        <div class="crm-imp-hdr">
+          <div class="crm-imp-title" id="crmBasePerfilNome"></div>
+          <button class="crm-imp-close" onclick="document.getElementById('crmBasePerfilModal').style.display='none'">✕</button>
+        </div>
+        <div class="crm-imp-body">
           <div id="crmBasePerfilContent"></div>
-          <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button id="crmBasePerfilOrcBtn" onclick="crmBaseAbrirOrcamento()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:12px;font-weight:700;cursor:pointer">📋 Novo Orçamento</button>
             <button id="crmBasePerfilWaBtn" onclick="crmBaseAbrirWhatsApp()" style="background:#25d366;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">💬 WhatsApp</button>
             <button id="crmBasePerfilIABtn" onclick="crmBaseGerarMsgIA()" style="background:linear-gradient(135deg,#7c3aed,#be185d);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">🤖 IA: Gerar Msg</button>
           </div>
-          <div id="crmBaseIAOutput" style="display:none;margin-top:12px;background:var(--bg2);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text)"></div>
+          <div id="crmBaseIAOutput" style="display:none;background:var(--bg2);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text)"></div>
         </div>
       </div>
-    </div><!-- /pg-crm -->
+    </div>
 
     <!-- ════════════════════════════════════════════════════
          PG-TAREFAS — Agenda de follow-ups por dia
