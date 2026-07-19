@@ -1854,6 +1854,16 @@ function _cloudAuthAviso(msg){
           <button class="kb-fb" id="kbViewMonth" onclick="kbSetView('month',this)" style="font-size:10px;padding:4px 8px">📆 Mês</button>
         </div>
         <button class="topbar-btn" style="font-size:12px;background:var(--brand-mid);color:#fff;font-weight:800;border:none" onclick="kbOpenNovaOS()">+ Nova OS</button>
+        <button id="kbBtnSel" class="topbar-btn" style="font-size:12px;background:#6366F1;color:#fff;font-weight:700;border:none" onclick="kbToggleSelMode(true)">☑ Selecionar</button>
+      </div>
+      <!-- Barra de seleção Kanban -->
+      <div id="kbSelBar" style="display:none;align-items:center;gap:10px;padding:8px 14px;background:rgba(99,102,241,0.10);border-bottom:1.5px solid rgba(99,102,241,0.25);flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;cursor:pointer">
+          <input type="checkbox" id="kbSelAll" onchange="kbSelectAll(this.checked)" style="width:15px;height:15px"> Selecionar tudo
+        </label>
+        <span id="kbSelCount" style="font-size:12px;color:#6366F1;font-weight:700"></span>
+        <button onclick="kbExcluirSelecionados()" style="background:#DC2626;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir Selecionados</button>
+        <button onclick="kbToggleSelMode(false)" style="background:var(--border);color:var(--text);border:none;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">✕ Cancelar</button>
       </div>
       <div class="kb-wrap">
         <div class="kb">
@@ -8476,6 +8486,48 @@ function kbPlanRemover() {
   showToast('Planificação removida','warn');
 }
 
+// ── Kanban seleção em massa ───────────────────────────────────────────────────
+var _KB_SEL = {};
+var _KB_SEL_MODE = false;
+
+function kbToggleSelMode(ativo) {
+  _KB_SEL_MODE = ativo;
+  if(!ativo) { _KB_SEL = {}; }
+  var bar = document.getElementById('kbSelBar');
+  var btn = document.getElementById('kbBtnSel');
+  var allCb = document.getElementById('kbSelAll');
+  if(bar) bar.style.display = ativo ? 'flex' : 'none';
+  if(btn) btn.style.display = ativo ? 'none' : '';
+  if(allCb) allCb.checked = false;
+  var countEl = document.getElementById('kbSelCount');
+  if(countEl) countEl.textContent = '';
+  kbRender();
+}
+function kbToggleSel(id) {
+  if(_KB_SEL[id]) delete _KB_SEL[id]; else _KB_SEL[id] = true;
+  var count = Object.keys(_KB_SEL).length;
+  var countEl = document.getElementById('kbSelCount');
+  if(countEl) countEl.textContent = count > 0 ? count+' selecionado'+(count>1?'s':'') : '';
+  kbRender();
+}
+function kbSelectAll(checked) {
+  Object.keys(KB_OS).forEach(function(k){ if(checked) _KB_SEL[k]=true; else delete _KB_SEL[k]; });
+  var count = Object.keys(_KB_SEL).length;
+  var countEl = document.getElementById('kbSelCount');
+  if(countEl) countEl.textContent = count > 0 ? count+' selecionado'+(count>1?'s':'') : '';
+  kbRender();
+}
+function kbExcluirSelecionados() {
+  var ids = Object.keys(_KB_SEL);
+  if(!ids.length){ showToast('Nenhuma OS selecionada','warn'); return; }
+  if(!confirm('Excluir '+ids.length+' OS(s) permanentemente? Esta ação não pode ser desfeita.')) return;
+  ids.forEach(function(id){ delete KB_OS[id]; });
+  kbSaveKbos();
+  kbToggleSelMode(false);
+  renderOsTable(); syncSidebarBadges();
+  showToast('🗑 '+ids.length+' OS(s) excluída(s)','ok');
+}
+
 // ── KB_OS cloud save helper ───────────────────────────────────────────────────
 function kbSaveKbos() {
   if(typeof _cloudSave==='function') {
@@ -8499,14 +8551,20 @@ function kbRender() {
     var colId=(os.status==='pronta'||os.pronto)?'kbProntas':'kbNovas';
     var col=document.getElementById(colId); if(!col) return;
     var card=document.createElement('div');
-    card.className='kcard'; card.setAttribute('draggable','true');
     var osId=os.id||k;
+    var selecionado=!!_KB_SEL[osId];
+    card.className='kcard'; card.setAttribute('draggable', _KB_SEL_MODE ? 'false' : 'true');
     card.setAttribute('data-osid',osId);
     card.dataset.brand=isVt?'vit':'vr';
-    card.style.borderColor=isVt?'#BE185D':'#7C3AED';
-    card.setAttribute('onclick',"kbOpen('"+osId+"')");
-    card.setAttribute('ondragstart','kbStart(event,this)');
-    card.setAttribute('ondragend','kbEnd(this)');
+    card.style.borderColor=selecionado?'#6366F1':(isVt?'#BE185D':'#7C3AED');
+    if(selecionado) card.style.background='rgba(99,102,241,0.09)';
+    if(_KB_SEL_MODE){
+      card.setAttribute('onclick',"kbToggleSel('"+osId+"')");
+    } else {
+      card.setAttribute('onclick',"kbOpen('"+osId+"')");
+      card.setAttribute('ondragstart','kbStart(event,this)');
+      card.setAttribute('ondragend','kbEnd(this)');
+    }
     var prazoStr=os.entrega||os.prazo||'';
     var prazoBadge='';
     if(prazoStr){
@@ -8520,7 +8578,10 @@ function kbRender() {
     }
     var smMap={iniciada:{cls:'si',txt:'Iniciada'},em_andamento:{cls:'sp',txt:'Iniciada'},producao:{cls:'sp',txt:'Em Produção'},pronta:{cls:'sm ok',txt:'Pronta ✅'},master:{cls:'sm',txt:'Aguard. Master'},entregue:{cls:'sm ok',txt:'Entregue'}};
     var sm=smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
-    card.innerHTML='<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
+    var cbHtml=_KB_SEL_MODE?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();kbToggleSel(\''+osId+'\')" style="position:absolute;top:8px;right:8px;width:17px;height:17px;cursor:pointer;accent-color:#6366F1">':'';
+    card.style.position='relative';
+    card.innerHTML=cbHtml
+      +'<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
       +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un</div>'
       +'<div class="kcard-meta">OS #0'+(os.num||'?')+'</div>'
       +prazoBadge
@@ -14625,7 +14686,7 @@ function crmBaseRender(tipo) {
           +'<span style="font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+cfgEsc(c.nome||'Sem nome')+'</span>'
           +(modoSel?'':'<button onclick="event.stopPropagation();crmBaseAbrirPerfilEditar(\''+c.id+'\')" title="Editar" style="background:none;border:none;padding:0 2px;cursor:pointer;font-size:12px;color:var(--muted);opacity:.6;flex-shrink:0">✏️</button>')
         +'</div>'
-        +'<div style="font-size:11px;color:var(--muted)">'+(c.tel||'—')+' · '+(c.cidade||'—')+'</div>'
+        +(function(){ var t=(c.tel||'').replace(/\D/g,''); var wa=t?'<a href="https://wa.me/55'+t+'" target="_blank" onclick="event.stopPropagation()" title="Abrir WhatsApp" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#25D366;color:#fff;font-size:9px;font-weight:900;text-decoration:none;flex-shrink:0;margin-right:4px">W</a>':''; return '<div style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:2px">'+wa+(c.tel||'—')+' · '+(c.cidade||'—')+'</div>'; })()
         +(prods?'<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🛒 '+cfgEsc(prods)+'</div>':'')
         +(infoCompra.length?'<div style="font-size:10px;color:var(--muted);margin-top:1px">📅 '+infoCompra.join(' · ')+'</div>':'')
       +'</div>'
