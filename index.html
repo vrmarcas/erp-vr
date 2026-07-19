@@ -3594,6 +3594,7 @@ function _cloudAuthAviso(msg){
             <button id="crmBasePerfilOrcBtn" onclick="crmBaseAbrirOrcamento()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:12px;font-weight:700;cursor:pointer">📋 Novo Orçamento</button>
             <button id="crmBasePerfilWaBtn" onclick="crmBaseAbrirWhatsApp()" style="background:#25d366;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">💬 WhatsApp</button>
             <button id="crmBasePerfilIABtn" onclick="crmBaseGerarMsgIA()" style="background:linear-gradient(135deg,#7c3aed,#be185d);color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer">🤖 IA: Gerar Msg</button>
+            <button onclick="crmBasePushKanban()" style="background:#0891B2;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer" title="Adicionar ao pipeline de vendas">📌 → Kanban</button>
           </div>
           <div id="crmBaseIAOutput" style="display:none;background:var(--bg2);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text)"></div>
         </div>
@@ -14596,7 +14597,10 @@ function crmBaseRender(tipo) {
       +(modoSel?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();crmBaseToggleSel(\''+c.id+'\',\''+tipo+'\')" style="width:16px;height:16px;flex-shrink:0;cursor:pointer">':'')
       +'<div style="width:36px;height:36px;border-radius:50%;background:'+cor+';color:#fff;font-size:15px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+((c.nome||'?').charAt(0).toUpperCase())+'</div>'
       +'<div style="flex:1;min-width:0">'
-        +'<div style="font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+cfgEsc(c.nome||'Sem nome')+'</div>'
+        +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+cfgEsc(c.nome||'Sem nome')+'</span>'
+          +(modoSel?'':'<button onclick="event.stopPropagation();crmBaseAbrirPerfilEditar(\''+c.id+'\')" title="Editar" style="background:none;border:none;padding:0 2px;cursor:pointer;font-size:12px;color:var(--muted);opacity:.6;flex-shrink:0">✏️</button>')
+        +'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(c.tel||'—')+' · '+(c.cidade||'—')+'</div>'
         +(prods?'<div style="font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🛒 '+cfgEsc(prods)+'</div>':'')
         +(infoCompra.length?'<div style="font-size:10px;color:var(--muted);margin-top:1px">📅 '+infoCompra.join(' · ')+'</div>':'')
@@ -14782,6 +14786,13 @@ function crmBaseSalvarNotas(id) {
 }
 
 // ── Editar dados do contato ────────────────────────────────────────────────
+// Abre modal e já entra em modo edição (chamado pelo ✏️ do card)
+function crmBaseAbrirPerfilEditar(id) {
+  crmBaseAbrirPerfil(id);
+  // Aguarda carregar o perfil e então abre edição
+  setTimeout(function(){ crmBaseEditarPerfil(); }, 400);
+}
+
 function crmBaseEditarPerfil() {
   var c = _CRM_BASE_PERFIL_ATUAL;
   if(!c) return;
@@ -14827,6 +14838,49 @@ function crmBaseSalvarEdicao(id) {
   showToast('✅ Contato atualizado','ok');
   crmBaseAbrirPerfil(id); // volta para a view normal
   crmBaseRender(_CRM_BASE_PERFIL_ATUAL&&_CRM_BASE_PERFIL_ATUAL.tipo==='cliente'?'reativ':'prosp');
+}
+
+// ── Enviar contato ao Kanban CRM ─────────────────────────────────────────
+function crmBasePushKanban() {
+  var c = _CRM_BASE_PERFIL_ATUAL;
+  if(!c) return;
+  if(typeof crmLeadIdCounter === 'undefined') { showToast('CRM Kanban não disponível','err'); return; }
+  // Verifica se já existe no Kanban pelo nome+tel
+  var jaExiste = Object.keys(CRM_LEADS||{}).some(function(k){
+    var l = CRM_LEADS[k];
+    return l.nome===c.nome || (c.tel && l.tel===c.tel);
+  });
+  if(jaExiste){
+    var conf = confirm('"'+c.nome+'" já existe no Kanban. Adicionar mesmo assim?');
+    if(!conf) return;
+  }
+  var isVR = (c.marca||'vr') !== 'vitre';
+  var marca = isVR ? 'vr' : 'vitre';
+  var etapa = c.tipo==='cliente' ? 'retorno' : 'contato';
+  var prods = (c.produtos||[]).join(', ') || '—';
+  var id = 'base_'+(++crmLeadIdCounter);
+  var temp = (c.valor && c.valor > 5000) ? 'quente' : (c.valor && c.valor > 1000) ? 'morno' : 'frio';
+  var cor = temp==='quente'?'#FCA5A5':temp==='morno'?'#FCD34D':'#93C5FD';
+  var tempLabel = temp==='quente'?'🔴 Quente':temp==='morno'?'🟡 Morno':'🔵 Frio';
+  CRM_LEADS[id] = {
+    nome: c.nome, tipo: isVR?'B2B':'B2C', marca: marca,
+    sub: c.tel||'—',
+    contato: c.nome, tel: c.tel||'—', email: '—',
+    temp: temp, score: temp==='quente'?75:temp==='morno'?45:20,
+    resumo_ia: 'Importado do CRM Base. Produtos: '+prods+(c.valor?' · Histórico R$ '+Math.round(c.valor).toLocaleString('pt-BR'):'')+(c.qtdCompras?' · '+c.qtdCompras+'× compras':''),
+    valor_potencial: c.valor ? 'R$ '+Math.round(c.valor/Math.max(c.qtdCompras||1,1)).toLocaleString('pt-BR') : 'A definir',
+    cor: cor, origem: 'crm_base', etapa: etapa, tempo: 'agora',
+    dores: c.produtos||[],
+    intencao: { produto: prods, material:'—', medidas:'—', quantidade:'—' }
+  };
+  // Navega para o CRM e renderiza
+  document.getElementById('crmBasePerfilModal').style.display='none';
+  if(typeof crmSaveLeads==='function') crmSaveLeads();
+  nav('crm', null);
+  setTimeout(function(){
+    if(typeof crmSetBrand==='function') crmSetBrand(marca);
+    showToast('✅ '+c.nome+' adicionado ao Kanban CRM!','ok');
+  }, 300);
 }
 
 // ── Abrir orçamento com dados do contato ─────────────────────────────────
@@ -15006,7 +15060,7 @@ function _crmBaseShowColMap(headers) {
     return headers.find(function(h){ return keywords.some(function(k){ return h.toLowerCase().includes(k); }); })||'';
   }
   var autoNome = autoDetect(['nome','name','cliente','contato']);
-  var autoTel  = autoDetect(['tel','fone','whats','celular','phone']);
+  var autoTel  = autoDetect(['telefone','tel','fone','whats','celular','phone','contato']);
   var autoCid  = autoDetect(['cidade','city','municipio']);
   var autoProd = autoDetect(['produto','compra','item','pedido','product']);
   var autoMarca = autoDetect(['marca','brand','empresa']);
@@ -15031,11 +15085,13 @@ function _crmBaseShowColMap(headers) {
 
   // Set auto-detected values
   setTimeout(function(){
-    var fields = {nome:autoNome, tel:autoTel, cidade:autoCid, produto:autoProd, valor:autoValor, data:autoData, qtd:autoQtd, hist:autoHist};
+    var fields = {nome:autoNome, tel:autoTel, cidade:autoCid, produto:autoProd, marca:autoMarca, valor:autoValor, data:autoData, qtd:autoQtd, hist:autoHist};
     Object.keys(fields).forEach(function(k){
       var sel=document.getElementById('colMap_'+k);
       if(sel && fields[k]) sel.value=fields[k];
     });
+    // Log de diagnóstico — confirma auto-mapeamento
+    console.log('[CRM Import] Auto-mapeamento:', fields);
     // Stats
     var clientes = _CRM_BASE_IMPORT_ROWS.filter(function(r){
       var pc=document.getElementById('colMap_produto');
