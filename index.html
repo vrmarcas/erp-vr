@@ -3436,6 +3436,7 @@ function _cloudAuthAviso(msg){
           </select>
           <button class="topbar-btn" onclick="crmBaseImportModal('reativ')" style="font-size:11px">📥 Importar Excel</button>
           <button class="topbar-btn ghost" onclick="crmBaseNovoContato('cliente')" style="font-size:11px">+ Novo Cliente</button>
+          <button class="topbar-btn ghost" onclick="crmBaseRecalcularStatus()" style="font-size:11px" title="Recalcular Ativo/Inativo pela data da última compra">🔄 Recalcular Status</button>
         </div>
         <!-- Barra de seleção em massa -->
         <div id="crmReativSelBar" style="display:none;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border)">
@@ -14428,6 +14429,29 @@ var _CRM_BASE_PER_PAG = 40;
 var _CRM_BASE_SEL = {}; // IDs selecionados para exclusão em massa
 var _CRM_BASE_SEL_MODE = { reativ: false, prosp: false }; // modo seleção ativo por aba
 
+// ── Cálculo automático de status pela data da última compra ──────────────────
+function _crmBaseCalcColuna(tipo, ultCompra) {
+  if(tipo !== 'cliente') return 'novo'; // prospects não têm status de inatividade
+  if(!ultCompra) return 'ativo'; // sem data, não sabemos
+  // Normaliza data: aceita 'DD/MM/YYYY', 'YYYY-MM-DD', timestamps
+  var d;
+  if(typeof ultCompra === 'number') { d = new Date(ultCompra); }
+  else {
+    var s = String(ultCompra).trim();
+    if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { // DD/MM/YYYY
+      var p = s.split('/');
+      d = new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+    } else {
+      d = new Date(s); // ISO ou qualquer formato JS
+    }
+  }
+  if(isNaN(d.getTime())) return 'ativo';
+  var diasSemCompra = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if(diasSemCompra >= 180) return 'inativo180';
+  if(diasSemCompra >= 90)  return 'inativo90';
+  return 'ativo';
+}
+
 // ── IA config (plug-in futuro) ──────────────────────────────────────────
 var _IA_CONFIG = { provider: '', key: '', model: '' }; // preenchido via Config → IA
 
@@ -14644,6 +14668,32 @@ function crmBaseSelectAll(tipo, checked) {
   if(countEl) countEl.textContent = count > 0 ? count+' selecionado'+(count>1?'s':'') : '';
   crmBaseRender(tipo);
 }
+// ── Recalcular status de todos os clientes pela data da última compra ────────
+function crmBaseRecalcularStatus() {
+  var clientes = _CRM_BASE_IDX.filter(function(c){ return c.tipo==='cliente'; });
+  if(!clientes.length){ showToast('Nenhum cliente encontrado','warn'); return; }
+  var db = (typeof firebase!=='undefined') ? firebase.firestore() : null;
+  var atualiz = 0, fsBatch = db ? db.batch() : null;
+  clientes.forEach(function(c){
+    var novaColuna = _crmBaseCalcColuna('cliente', c.ultCompra);
+    // Só atualiza se mudou — evita writes desnecessários
+    if(novaColuna !== c.coluna){
+      c.coluna = novaColuna;
+      if(_CRM_BASE_CACHE[c.id]) _CRM_BASE_CACHE[c.id].coluna = novaColuna;
+      if(db && fsBatch) fsBatch.update(db.collection(_CRM_BASE_COL).doc(c.id), { coluna: novaColuna, _ts: Date.now() });
+      atualiz++;
+    }
+  });
+  if(db && fsBatch && atualiz > 0) fsBatch.commit().catch(function(){});
+  _crmBaseSaveIdx();
+  crmBaseRender('reativ');
+  crmBaseKpisRender('reativ');
+  var msg = atualiz > 0
+    ? '✅ '+atualiz+' cliente'+(atualiz>1?'s atualizados':' atualizado')+' com status correto!'
+    : '✅ Todos os status já estavam corretos';
+  showToast(msg,'ok');
+}
+
 function crmBaseExcluirSelecionados(tipo) {
   var ids = Object.keys(_CRM_BASE_SEL);
   if(!ids.length){ showToast('Nenhum contato selecionado','warn'); return; }
@@ -15177,13 +15227,14 @@ function crmBaseExecuteImport() {
         });
       }
       var id = 'cb_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'_'+(done+batch.indexOf(r));
+      var colunaCalc = _crmBaseCalcColuna(tipo, dataC); // calcula status pela data
       var contato = { id:id, nome:nome, tel:tel, cidade:cid, marca:marcaVal,
-        tipo:tipo, produtos:prod?[prod]:[], coluna:tipo==='cliente'?'ativo':'novo',
+        tipo:tipo, produtos:prod?[prod]:[], coluna:colunaCalc,
         valor:valor, ultCompra:dataC, qtdCompras:qtdC, compras:comprasArr,
         ultimoContato:'', ts:Date.now() };
       // Add to index (campos de ranking incluídos — usados no dashboard sem leitura extra)
       _CRM_BASE_IDX.push({ id:id, nome:nome, tel:tel, cidade:cid, tipo:tipo, marca:marcaVal,
-        produtos:prod?[prod]:[], coluna:contato.coluna, valor:valor, ultCompra:dataC, qtdCompras:qtdC,
+        produtos:prod?[prod]:[], coluna:colunaCalc, valor:valor, ultCompra:dataC, qtdCompras:qtdC,
         ultimoContato:'', ts:contato.ts });
       fsBatch.set(_db.collection(_CRM_BASE_COL).doc(id), contato);
       if(tipo==='cliente') clientes++; else prospects++;
