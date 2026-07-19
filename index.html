@@ -3447,6 +3447,7 @@ function _cloudAuthAviso(msg){
           <button class="topbar-btn" onclick="crmBaseImportModal('reativ')" style="font-size:11px">📥 Importar Excel</button>
           <button class="topbar-btn ghost" onclick="crmBaseNovoContato('cliente')" style="font-size:11px">+ Novo Cliente</button>
           <button class="topbar-btn ghost" onclick="crmBaseRecalcularStatus()" style="font-size:11px" title="Recalcular Ativo/Inativo pela data da última compra">🔄 Recalcular Status</button>
+          <button class="topbar-btn" onclick="crmBaseSincronizarAtivos()" style="font-size:11px;background:#059669;color:#fff;border:none" title="Cadastrar clientes ativos (menos de 90 dias) na aba Clientes">📋 → Cadastrar Ativos</button>
         </div>
         <!-- Barra de seleção em massa -->
         <div id="crmReativSelBar" style="display:none;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:var(--bg2);border-radius:8px;border:1.5px solid var(--border)">
@@ -14753,6 +14754,55 @@ function crmBaseRecalcularStatus() {
     ? '✅ '+atualiz+' cliente'+(atualiz>1?'s atualizados':' atualizado')+' com status correto!'
     : '✅ Todos os status já estavam corretos';
   showToast(msg,'ok');
+}
+
+// ── Sincronizar clientes "ativo" (< 90 dias) para aba Clientes ──────────────
+function crmBaseSincronizarAtivos() {
+  var ativos = _CRM_BASE_IDX.filter(function(c){ return c.tipo==='cliente' && c.coluna==='ativo'; });
+  if(!ativos.length){ showToast('Nenhum cliente ativo encontrado','warn'); return; }
+
+  // Verifica duplicatas pelo telefone ou nome (normalizado)
+  var norm = function(s){ return String(s||'').toLowerCase().replace(/\D/g,''); };
+  var existTels = {};
+  var existNomes = {};
+  CLIENTES_DATA.forEach(function(cli){
+    if(cli.tel) existTels[norm(cli.tel)] = true;
+    existNomes[String(cli.nome||'').toLowerCase().trim()] = true;
+  });
+
+  var novos = 0;
+  var agora = new Date().toLocaleDateString('pt-BR');
+  ativos.forEach(function(c){
+    var telNorm = norm(c.tel);
+    var nomeNorm = String(c.nome||'').toLowerCase().trim();
+    // Pula se já existe pelo tel ou pelo nome
+    if(telNorm && existTels[telNorm]) return;
+    if(existNomes[nomeNorm]) return;
+    var newId = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+    CLIENTES_DATA.push({
+      id:           newId,
+      nome:         c.nome,
+      tipo:         'PF',
+      tel:          c.tel || '',
+      email:        '',
+      cidade:       c.cidade || '',
+      marca:        c.marca || 'vr',
+      ultimoPedido: c.ultCompra ? String(c.ultCompra) : agora,
+      os:           []
+    });
+    // Marca como adicionado para não duplicar na mesma execução
+    existTels[telNorm] = true;
+    existNomes[nomeNorm] = true;
+    novos++;
+  });
+
+  if(novos === 0){
+    showToast('Todos os clientes ativos já estão cadastrados','warn');
+    return;
+  }
+  if(typeof _cloudSave === 'function') _cloudSave('clientes', CLIENTES_DATA);
+  if(typeof renderClientes === 'function') renderClientes();
+  showToast('✅ '+novos+' cliente'+(novos>1?'s adicionados':' adicionado')+' à aba Clientes!','ok');
 }
 
 function crmBaseExcluirSelecionados(tipo) {
