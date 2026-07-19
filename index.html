@@ -1300,7 +1300,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
@@ -11347,19 +11347,57 @@ function cliOpenDetalhe(id) {
   var c=CLIENTES_DATA.find(function(x){return x.id===id;}); if(!c) return;
   document.getElementById('cliDetNome').textContent=c.nome;
   document.getElementById('cliDetSub').textContent=c.tipo+' · '+c.cidade+' · '+c.marca.toUpperCase();
-  var osItems=(c.os||[]).map(function(num){
-    var os=Object.values(KB_OS).find(function(o){return o.num===num;})||{num:num,prod:'OS #'+num,status:'entregue'};
+  // Busca OSes: primeiro pelos IDs em c.os, depois por nome/tel no KB_OS
+  var _normTel=function(s){return String(s||'').replace(/\D/g,'');};
+  var _cNome=(c.nome||'').toLowerCase();
+  var _cTel=_normTel(c.tel);
+  var _osIds=new Set((c.os||[]).map(String));
+  // Adiciona OSes encontradas no KB_OS pelo nome ou telefone
+  Object.values(KB_OS).forEach(function(o){
+    if(String(o.num) in {} || !o.num) return;
+    var oNome=(o.cliente||o.nomeCliente||'').toLowerCase();
+    var oTel=_normTel(o.tel||o.telCliente||'');
+    if((_cTel.length>=8&&oTel===_cTel)||(oNome&&oNome===_cNome)){
+      _osIds.add(String(o.num));
+      if(!(c.os||[]).includes(String(o.num))){ if(!c.os) c.os=[]; c.os.push(String(o.num)); }
+    }
+  });
+  var _allOsNums=Array.from(_osIds);
+  var osItems=_allOsNums.map(function(num){
+    var os=Object.values(KB_OS).find(function(o){return String(o.num)===String(num);})||{num:num,prod:'OS #'+num,status:'entregue'};
     var _v=typeof os.valor==='number'?'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2}):(os.valor||'—');
     var _q=os.qty||1;
     var _d=os.dataOS||os.entrega||'—';
     var _sc=os.status==='entregue'?'#059669':os.status==='producao'?'#D97706':'#7C3AED';
+    // Extrai nome do produto limpo
+    var _prod=os.prod||(os.titulo?os.titulo.split(' — ').slice(1).join(' — ')||os.titulo:'')||'OS #'+num;
     return '<div style="padding:7px 9px;background:var(--bg2);border-radius:7px;margin-bottom:5px;font-size:11px">'
       +'<div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-weight:700;color:var(--brand-mid)">#'+os.num+'</span><span style="color:'+_sc+';font-size:10px;font-weight:700">'+os.status+'</span></div>'
-      +'<div>'+(os.prod||os.titulo||'—')+'</div>'
+      +'<div>'+_prod+'</div>'
       +'<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:10px;color:var(--muted)">'
       +'<span>📅 '+_d+'</span><span>Qtd: '+_q+'</span><span style="color:#059669;font-weight:600">'+_v+'</span></div>'
       +'</div>';
   }).join('');
+  // FIN_TX: transações financeiras deste cliente
+  var _txItems='';
+  if(typeof FIN_TX!=='undefined'){
+    var _txs=FIN_TX.filter(function(t){
+      var tNome=(t.cliente||'').toLowerCase();
+      var tTel=_normTel(t.tel||'');
+      return tNome===_cNome||(_cTel.length>=8&&tTel===_cTel);
+    });
+    if(_txs.length){
+      _txItems='<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px">💳 PAGAMENTOS ('+_txs.length+')</div>'
+        +_txs.map(function(t){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;margin-bottom:3px;font-size:11px">'
+            +'<span style="color:var(--muted)">📅 '+t.data+'</span>'
+            +'<span>'+t.metodo+'</span>'
+            +'<span style="color:#059669;font-weight:700">'+finFmt(t.valor)+'</span>'
+            +'</div>';
+        }).join('')
+        +'</div>';
+    }
+  }
   var histCompras = (typeof clientHistExibir==='function') ? (clientHistExibir(c.tel, c.email)||'') : '';
   var orcItems='';
   if(c.orcamentos&&c.orcamentos.length){
@@ -11387,7 +11425,7 @@ function cliOpenDetalhe(id) {
   document.getElementById('cliDetBody').innerHTML=infoBlock
     +'<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px">📝 OBSERVAÇÕES</div>'
     +'<textarea id="cliObsTextarea" rows="2" onblur="cliSalvarObs()" placeholder="Anotações sobre este cliente..." style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;resize:vertical;font-family:inherit;background:var(--bg);color:var(--text);box-sizing:border-box">'+obsVal+'</textarea></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">HISTÓRICO DE OS ('+(c.os||[]).length+')</div>'+(osItems||'<div style="color:var(--muted);font-size:12px">Sem OS registradas</div>')+'</div>'+orcItems+histCompras;
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">HISTÓRICO DE OS ('+_allOsNums.length+')</div>'+(osItems||'<div style="color:var(--muted);font-size:12px">Sem OS registradas</div>')+'</div>'+_txItems+orcItems+histCompras;
   document.getElementById('cliDetalheOverlay').classList.add('open');
 }
 function cliCloseDetalhe(){document.getElementById('cliDetalheOverlay').classList.remove('open');}
@@ -12379,6 +12417,7 @@ function crmExcluirLead(id) {
   var cnt=document.getElementById(isVR?'crmVRcount':'crmVTcount');
   if(cnt) cnt.textContent=Math.max(0,(parseInt(cnt.textContent)||1)-1);
   crmUpdateBulkBar();
+  crmSaveLeads();
   showToast((d.nome||'Lead')+' removido do CRM','info');
 }
 
@@ -15917,18 +15956,13 @@ function secCheckLockout(){
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 function authInit(){
+  // Recarregar sempre exige login novo
+  secClearSession();
+  _currentSession=null;
   secPopulateUserSelect();
-  var sess=secGetSession();
-  if(sess&&sess.user){
-    _currentSession=sess;
-    authApplySession();
-    secStartInactivityTimer();
-    // Silent restore — no toast
-  } else {
-    var ov=document.getElementById('authOverlay');
-    if(ov) ov.classList.add('show');
-    secCheckLockout();
-  }
+  var ov=document.getElementById('authOverlay');
+  if(ov) ov.classList.add('show');
+  secCheckLockout();
 }
 
 function secPopulateUserSelect(){
