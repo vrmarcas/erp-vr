@@ -14759,51 +14759,82 @@ function crmBaseRecalcularStatus() {
 
 // ── Sincronizar clientes "ativo" (< 90 dias) para aba Clientes ──────────────
 function crmBaseSincronizarAtivos() {
-  var ativos = _CRM_BASE_IDX.filter(function(c){ return c.tipo==='cliente' && c.coluna==='ativo'; });
-  if(!ativos.length){ showToast('Nenhum cliente ativo encontrado','warn'); return; }
-
-  // Verifica duplicatas pelo telefone ou nome (normalizado)
-  var norm = function(s){ return String(s||'').toLowerCase().replace(/\D/g,''); };
-  var existTels = {};
-  var existNomes = {};
-  CLIENTES_DATA.forEach(function(cli){
-    if(cli.tel) existTels[norm(cli.tel)] = true;
-    existNomes[String(cli.nome||'').toLowerCase().trim()] = true;
-  });
-
-  var novos = 0;
-  var agora = new Date().toLocaleDateString('pt-BR');
-  ativos.forEach(function(c){
-    var telNorm = norm(c.tel);
-    var nomeNorm = String(c.nome||'').toLowerCase().trim();
-    // Pula se já existe pelo tel ou pelo nome
-    if(telNorm && existTels[telNorm]) return;
-    if(existNomes[nomeNorm]) return;
-    var newId = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-    CLIENTES_DATA.push({
-      id:           newId,
-      nome:         c.nome,
-      tipo:         'PF',
-      tel:          c.tel || '',
-      email:        '',
-      cidade:       c.cidade || '',
-      marca:        c.marca || 'vr',
-      ultimoPedido: c.ultCompra ? String(c.ultCompra) : agora,
-      os:           []
+  // Garante que o índice está carregado antes de rodar
+  function _executarSync(idx) {
+    // Aceita qualquer cliente com tipo='cliente' OU que tenha ultCompra definida (fallback)
+    var ativos = idx.filter(function(c){
+      return (c.tipo==='cliente' || c.tipo==='Cliente') && c.coluna==='ativo';
     });
-    // Marca como adicionado para não duplicar na mesma execução
-    existTels[telNorm] = true;
-    existNomes[nomeNorm] = true;
-    novos++;
-  });
 
-  if(novos === 0){
-    showToast('Todos os clientes ativos já estão cadastrados','warn');
-    return;
+    if(!ativos.length){
+      // Diagnóstico: mostra quantos clientes existem no índice no total
+      var totalIdx = idx.length;
+      var totalClientes = idx.filter(function(c){ return c.tipo==='cliente'||c.tipo==='Cliente'; }).length;
+      var colunas = {};
+      idx.forEach(function(c){ colunas[c.coluna||'sem_coluna']=(colunas[c.coluna||'sem_coluna']||0)+1; });
+      showToast('Nenhum cliente ativo (< 90 dias) encontrado. Total no índice: '+totalIdx+' | clientes: '+totalClientes, 'warn');
+      console.log('[CRM Sync] Colunas no índice:', colunas);
+      return;
+    }
+
+    var norm = function(s){ return String(s||'').replace(/\D/g,''); };
+
+    // Monta lookup de existentes apenas por tel (normalizado, ≥8 dígitos)
+    var existTels = {};
+    CLIENTES_DATA.forEach(function(cli){
+      var t = norm(cli.tel||'');
+      if(t.length >= 8) existTels[t] = true;
+    });
+
+    var novosEntries = [];
+    var agora = new Date().toLocaleDateString('pt-BR');
+    var addedTels = {};
+
+    ativos.forEach(function(c){
+      var telNorm = norm(c.tel||'');
+      // Pula duplicata por tel apenas se tel tiver pelo menos 8 dígitos
+      if(telNorm.length >= 8 && (existTels[telNorm] || addedTels[telNorm])) return;
+      var newId = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+      novosEntries.push({
+        id:           newId,
+        nome:         c.nome || '(sem nome)',
+        tipo:         'PF',
+        tel:          c.tel || '',
+        email:        '',
+        cidade:       c.cidade || '',
+        marca:        c.marca || 'vr',
+        ultimoPedido: c.ultCompra ? String(c.ultCompra) : agora,
+        os:           []
+      });
+      if(telNorm.length >= 8) addedTels[telNorm] = true;
+    });
+
+    if(!novosEntries.length){
+      showToast('Todos os '+ativos.length+' clientes ativos já estão cadastrados na aba Clientes.','warn');
+      return;
+    }
+
+    // Desconecta o watcher temporariamente para evitar sobrescrita
+    // Insere no início da lista (mais visível)
+    novosEntries.forEach(function(e){ CLIENTES_DATA.unshift(e); });
+
+    // Salva no Firebase — o watcher vai recarregar com os dados novos
+    if(typeof _cloudSave === 'function') _cloudSave('clientes', CLIENTES_DATA);
+    if(typeof renderClientes === 'function') try{ renderClientes(); }catch(ex){}
+
+    var n = novosEntries.length;
+    showToast('✅ '+n+' cliente'+(n>1?'s cadastrados':' cadastrado')+' na aba Clientes!','ok');
   }
-  if(typeof _cloudSave === 'function') _cloudSave('clientes', CLIENTES_DATA);
-  if(typeof renderClientes === 'function') renderClientes();
-  showToast('✅ '+novos+' cliente'+(novos>1?'s adicionados':' adicionado')+' à aba Clientes!','ok');
+
+  // Se o índice já tem dados, roda direto; senão carrega primeiro
+  if(_CRM_BASE_IDX.length > 0) {
+    _executarSync(_CRM_BASE_IDX);
+  } else {
+    showToast('Carregando índice CRM Base...','warn');
+    crmBaseLoadIdx(function(){
+      _executarSync(_CRM_BASE_IDX);
+    });
+  }
 }
 
 function crmBaseExcluirSelecionados(tipo) {
