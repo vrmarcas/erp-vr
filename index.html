@@ -5438,10 +5438,20 @@ function _cloudAuthAviso(msg){
         </div>
         <div class="fg">
           <label>Tipo</label>
-          <select id="cliNovoTipo">
+          <select id="cliNovoTipo" onchange="cliNovoTipoChange(this.value)">
             <option value="PJ">PJ — Empresa</option>
             <option value="PF">PF — Pessoa Física</option>
           </select>
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Nome do Contato / Responsável</label>
+          <input type="text" id="cliNovoContato" placeholder="Ex: João Silva">
+        </div>
+        <div class="fg">
+          <label id="cliNovoDocLabel">CNPJ</label>
+          <input type="text" id="cliNovoDoc" placeholder="00.000.000/0001-00">
         </div>
       </div>
       <div class="fg2">
@@ -5466,10 +5476,6 @@ function _cloudAuthAviso(msg){
           <label>E-mail</label>
           <input type="email" id="cliNovoEmail" placeholder="contato@empresa.com">
         </div>
-      </div>
-      <div class="fg">
-        <label>CNPJ / CPF (opcional)</label>
-        <input type="text" id="cliNovoDoc" placeholder="00.000.000/0001-00">
       </div>
       <button class="gen-submit" onclick="cliConfirmarNovo()">✓ Cadastrar Cliente</button>
     </div>
@@ -11329,7 +11335,16 @@ function cliOpenDetalhe(id) {
       }).join('')+'</div>';
   }
   var obsVal = (c.obs||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  document.getElementById('cliDetBody').innerHTML='<div class="fg2" style="margin-bottom:12px"><div class="fg"><label>Telefone</label><div style="padding:6px 0;font-weight:600">'+(c.tel||'—')+'</div></div><div class="fg"><label>E-mail</label><div style="padding:6px 0;font-weight:600">'+(c.email||'—')+'</div></div></div>'
+  var docLabel = (c.tipo==='PF') ? 'CPF' : 'CNPJ';
+  var infoBlock = '<div class="fg2" style="margin-bottom:12px">'
+    +'<div class="fg"><label>Telefone</label><div style="padding:6px 0;font-weight:600">'+(c.tel||'—')+'</div></div>'
+    +'<div class="fg"><label>E-mail</label><div style="padding:6px 0;font-weight:600">'+(c.email||'—')+'</div></div>'
+    +'</div>'
+    +'<div class="fg2" style="margin-bottom:12px">'
+    +'<div class="fg"><label>Contato / Responsável</label><div style="padding:6px 0;font-weight:600">'+(c.contato||'—')+'</div></div>'
+    +'<div class="fg"><label>'+docLabel+'</label><div style="padding:6px 0;font-weight:600">'+(c.doc||'—')+'</div></div>'
+    +'</div>';
+  document.getElementById('cliDetBody').innerHTML=infoBlock
     +'<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px">📝 OBSERVAÇÕES</div>'
     +'<textarea id="cliObsTextarea" rows="2" onblur="cliSalvarObs()" placeholder="Anotações sobre este cliente..." style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;resize:vertical;font-family:inherit;background:var(--bg);color:var(--text);box-sizing:border-box">'+obsVal+'</textarea></div>'
     +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">HISTÓRICO DE OS ('+(c.os||[]).length+')</div>'+(osItems||'<div style="color:var(--muted);font-size:12px">Sem OS registradas</div>')+'</div>'+orcItems+histCompras;
@@ -11351,6 +11366,8 @@ function cliEditar(id){
   s('cliNovoNome',c.nome);s('cliNovoTipo',c.tipo||'PJ');
   s('cliNovoCidade',c.cidade);s('cliNovoMarca',c.marca||'vr');
   s('cliNovoTel',c.tel);s('cliNovoEmail',c.email);
+  s('cliNovoDoc',c.doc);s('cliNovoContato',c.contato);
+  cliNovoTipoChange(c.tipo||'PJ');
   var tEl=document.querySelector('#cliNovoOverlay .gen-modal-title');
   if(tEl) tEl.textContent='✏️ Editar Cliente';
   document.getElementById('cliNovoOverlay').classList.add('open');
@@ -11426,6 +11443,12 @@ function cliRenderLixeira(){
     });
   }
 }
+function cliNovoTipoChange(tipo) {
+  var lbl = document.getElementById('cliNovoDocLabel');
+  var inp = document.getElementById('cliNovoDoc');
+  if(lbl) lbl.textContent = tipo==='PF' ? 'CPF' : 'CNPJ';
+  if(inp) inp.placeholder = tipo==='PF' ? '000.000.000-00' : '00.000.000/0001-00';
+}
 function cliConfirmarNovo() {
   var nome=(document.getElementById('cliNovoNome')||{}).value||'';
   if(!nome){showToast('Informe o nome do cliente','warn');return;}
@@ -11434,15 +11457,17 @@ function cliConfirmarNovo() {
   var marca=(document.getElementById('cliNovoMarca')||{}).value||'vr';
   var tel=(document.getElementById('cliNovoTel')||{}).value||'';
   var email=(document.getElementById('cliNovoEmail')||{}).value||'';
+  var doc=(document.getElementById('cliNovoDoc')||{}).value||'';
+  var contato=(document.getElementById('cliNovoContato')||{}).value||'';
   if(_cliEditId){
     var idx=CLIENTES_DATA.findIndex(function(x){return x.id===_cliEditId;});
-    if(idx>=0){Object.assign(CLIENTES_DATA[idx],{nome:nome,tipo:tipo,cidade:cidade,marca:marca,tel:tel,email:email});}
+    if(idx>=0){Object.assign(CLIENTES_DATA[idx],{nome:nome,tipo:tipo,cidade:cidade,marca:marca,tel:tel,email:email,doc:doc,contato:contato});}
     renderClientes(); cliCloseNovo(); showToast('Cliente '+nome+' atualizado!','ok');
   } else {
     var hoje=new Date(), ds=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-    CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nome,tipo:tipo,cidade:cidade,marca:marca,ultimoPedido:ds,tel:tel,email:email,os:[]});
+    CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nome,tipo:tipo,cidade:cidade,marca:marca,ultimoPedido:ds,tel:tel,email:email,doc:doc,contato:contato,os:[]});
     renderClientes(); cliCloseNovo(); showToast('Cliente '+nome+' cadastrado!','ok');
-    ['cliNovoNome','cliNovoCidade','cliNovoTel','cliNovoEmail'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+    ['cliNovoNome','cliNovoCidade','cliNovoTel','cliNovoEmail','cliNovoDoc','cliNovoContato'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
   }
   if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
 }
@@ -11547,9 +11572,24 @@ var _lastOsId = null;
     if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');stockSaveData();}
 
     // Cria/atualiza cliente
-    var exists=CLIENTES_DATA.find(function(cl){return cl.nome.toLowerCase()===nomeCliente.toLowerCase();});
-    if(!exists&&nomeCliente&&nomeCliente!=='Cliente'){
-      CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nomeCliente,tipo:marca==='vr'?'PJ':'PF',cidade:cidadeCliente||'—',marca:marca,ultimoPedido:dia,tel:telCliente,email:emailCliente,os:[String(n)]});
+    if(nomeCliente&&nomeCliente!=='Cliente'){
+      var normTel=function(s){return String(s||'').replace(/\D/g,'');};
+      var telNorm=normTel(telCliente);
+      var exists=CLIENTES_DATA.find(function(cl){
+        if(telNorm.length>=8) return normTel(cl.tel)===telNorm;
+        return cl.nome.toLowerCase()===nomeCliente.toLowerCase();
+      });
+      if(exists){
+        if(!exists.os) exists.os=[];
+        if(exists.os.indexOf(String(n))<0) exists.os.push(String(n));
+        exists.ultimoPedido=dia;
+        if(telCliente&&!exists.tel) exists.tel=telCliente;
+        if(emailCliente&&!exists.email) exists.email=emailCliente;
+        if(cidadeCliente&&(!exists.cidade||exists.cidade==='—')) exists.cidade=cidadeCliente;
+      } else {
+        CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nomeCliente,tipo:marca==='vr'?'PJ':'PF',cidade:cidadeCliente||'—',marca:marca,ultimoPedido:dia,tel:telCliente,email:emailCliente,doc:docCliente,contato:'',os:[String(n)]});
+      }
+      if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
       renderClientes();
     }
 
