@@ -4243,7 +4243,7 @@ function _cloudAuthAviso(msg){
             <div style="cursor:pointer;padding:6px 12px;border-radius:7px;font-size:13px;font-weight:700;color:var(--muted)" id="cliTabLixeira" onclick="cliSetTab('lixeira')">🗑 Lixeira <span id="cliLixeiraBadge" style="background:#FEE2E2;color:#DC2626;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:3px"></span></div>
           </div>
           <div style="display:flex;gap:6px" id="cliAtivosBtns">
-            <input id="cliSearch" placeholder="🔍 Buscar..." oninput="renderClientes()" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:140px">
+            <input id="cliSearch" placeholder="🔍 Nome, telefone, CPF/CNPJ..." oninput="renderClientes()" style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:140px">
             <button class="topbar-btn ghost" onclick="cliOpenImport()" style="font-size:11px">📥 Importar Clientes</button><button class="topbar-btn" onclick="cliOpenNovo()">+ Novo Cliente</button>
           </div>
         </div>
@@ -11280,7 +11280,20 @@ function renderClientes() {
   var tbody=document.getElementById('cliTableBody'), cntEl=document.getElementById('cliCount');
   if(!tbody) return;
   var q=(document.getElementById('cliSearch')||{}).value||'';
-  var list=CLIENTES_DATA.filter(function(c){return !q||(c.nome+c.cidade+c.marca).toLowerCase().includes(q.toLowerCase());});
+  var ql=q.toLowerCase().replace(/[\.\-\/]/g,'');
+  var list=CLIENTES_DATA.filter(function(c){
+    if(!q) return true;
+    var docNorm=(c.doc||'').replace(/[\.\-\/]/g,'');
+    var telNorm=(c.tel||'').replace(/\D/g,'');
+    return (c.nome||'').toLowerCase().includes(ql)
+      ||(c.cidade||'').toLowerCase().includes(ql)
+      ||(c.marca||'').toLowerCase().includes(ql)
+      ||(c.tel||'').includes(q)
+      ||telNorm.includes(ql)
+      ||docNorm.includes(ql)
+      ||(c.contato||'').toLowerCase().includes(ql)
+      ||(c.email||'').toLowerCase().includes(ql);
+  });
   if(cntEl) cntEl.textContent='('+list.length+' clientes)';
   if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum cliente encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(c){
