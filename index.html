@@ -1626,7 +1626,7 @@ function _cloudAuthAviso(msg){
       <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
       <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
-      <div class="sb-item" onclick="nav('inteligencia',this)"><span class="ico">🧠</span> Inteligência Comercial</div>
+      <!-- Inteligência Comercial removida a pedido -->
       <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
       <div class="sb-item" onclick="nav('tarefas',this)"><span class="ico">📅</span> Tarefas <span class="sb-badge red" id="sbBadgeTarefas" style="display:none">0</span></div>
       <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
@@ -2988,7 +2988,6 @@ function _cloudAuthAviso(msg){
         <button class="exec-fb on" id="comBtnAll" onclick="comSetBrand('all')">🌐 Todas</button>
         <button class="exec-fb" id="comBtnVR"  onclick="comSetBrand('vr')">🟣 VR Marcas</button>
         <button class="exec-fb" id="comBtnVit" onclick="comSetBrand('vitre')">🌸 Vitre</button>
-        <button onclick="nav('inteligencia',null)" style="background:linear-gradient(90deg,#7C3AED,#BE185D);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;margin-left:auto">🧠 Inteligência</button>
         <div class="exec-ts-lbl">📈 Analítico Comercial</div>
       </div>
 
@@ -9399,7 +9398,7 @@ function comercialRender() {
   // KPIs
 
   setEl('comCvrPct',    cvrPct+'%');
-  setEl('comTotalLeads',totalLeads);
+  setEl('comTotalLeads',String(totalLeads));
 
   var comCvrBar = document.getElementById('comCvrBar');
   if(comCvrBar){ comCvrBar.style.width=cvrPct+'%'; comCvrBar.style.background=cvrPct>=30?'#059669':'#D97706'; }
