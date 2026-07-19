@@ -1295,9 +1295,9 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} try{var _rb=document.getElementById('crmReativCount');if(_rb&&typeof crmLeadsFor==='function')_rb.textContent=crmLeadsFor('reativ').length;var _pb=document.getElementById('crmProspCount');if(_pb&&typeof crmLeadsFor==='function')_pb.textContent=crmLeadsFor('prosp').length;}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
-    _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; } });
+    _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
     _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
@@ -3051,18 +3051,22 @@ function _cloudAuthAviso(msg){
             <div style="text-align:center">
               <div style="font-size:32px;font-weight:800;color:var(--brand-mid)" id="comEnvCount">0</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">Total salvos</div>
+              <div style="font-size:11px;color:var(--brand-mid);font-weight:700;margin-top:2px" id="comEnvCountR"></div>
             </div>
             <div style="text-align:center">
               <div style="font-size:32px;font-weight:800;color:#D97706" id="comEnvAguard">0</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">Aguardando</div>
+              <div style="font-size:11px;color:#D97706;font-weight:700;margin-top:2px" id="comEnvAguardR"></div>
             </div>
             <div style="text-align:center">
               <div style="font-size:32px;font-weight:800;color:#059669" id="comEnvAprov">0</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">Aprovados</div>
+              <div style="font-size:11px;color:#059669;font-weight:700;margin-top:2px" id="comEnvAprovR"></div>
             </div>
             <div style="text-align:center">
               <div style="font-size:32px;font-weight:800;color:#DC2626" id="comEnvRecus">0</div>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">Recusados</div>
+              <div style="font-size:11px;color:#DC2626;font-weight:700;margin-top:2px" id="comEnvRecusR"></div>
             </div>
           </div>
           <div style="margin-top:16px;text-align:center;padding-top:10px;border-top:1px solid var(--border)">
@@ -4821,6 +4825,20 @@ function _cloudAuthAviso(msg){
             <input type="text" id="planProdDesc" placeholder="Ex: Frente, laterais, base e fundo" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
           </div>
 
+          <!-- SVG de planificação -->
+          <div class="fg">
+            <label>SVG de Planificação <span style="font-size:10px;color:var(--muted);font-weight:400">(opcional — exibido no modal de planificação da OS)</span></label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1.5px dashed var(--border);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;color:var(--muted)">
+                📎 Selecionar arquivo .svg
+                <input type="file" id="planProdSvgInput" accept=".svg,image/svg+xml" style="display:none" onchange="planProdSvgChange(this)">
+              </label>
+              <span id="planProdSvgNome" style="font-size:11px;color:var(--muted)">Nenhum arquivo</span>
+              <button id="planProdSvgClear" onclick="planProdSvgClear()" style="display:none;background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Remover</button>
+            </div>
+            <div id="planProdSvgPreview" style="display:none;margin-top:8px;max-height:120px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:6px;text-align:center"></div>
+          </div>
+
           <!-- Pré-visualização com dimensões de exemplo -->
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px">
             <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">🔍 Pré-visualização (dimensões de teste)</div>
@@ -6533,6 +6551,23 @@ function planAbrir(idx) {
     try { planManualPieces = JSON.parse(rowEl.dataset.planPecas)||[]; } catch(e){}
   }
   planRenderManual();
+
+  // SVG template do produto
+  var _planSvgBox = document.getElementById('planSvgBox');
+  var _planSvgContent = document.getElementById('planSvgContent');
+  if(_planSvgBox && _planSvgContent) {
+    var _custProds = planProdLoad();
+    var _cprod = _custProds.find(function(x){ return x.nome===produto; });
+    if(_cprod && _cprod.svg) {
+      _planSvgContent.innerHTML = _cprod.svg;
+      var _svgEl = _planSvgContent.querySelector('svg');
+      if(_svgEl) { _svgEl.style.maxWidth='100%'; _svgEl.style.maxHeight='280px'; }
+      _planSvgBox.style.display = '';
+    } else {
+      _planSvgContent.innerHTML = '';
+      _planSvgBox.style.display = 'none';
+    }
+  }
 
   document.getElementById('planModal').style.display = 'flex';
 
@@ -9407,10 +9442,19 @@ function comercialRender() {
   var envAgu   = envList.filter(function(o){return o.status==='aguardando';}).length;
   var envAprov = envList.filter(function(o){return o.status==='aprovado';}).length;
   var envRecus = envList.filter(function(o){return o.status==='recusado';}).length;
-  setEl('comEnvCount', envCount);
-  setEl('comEnvAguard',envAgu);
-  setEl('comEnvAprov', envAprov);
-  setEl('comEnvRecus', envRecus);
+  setEl('comEnvCount', String(envCount));
+  setEl('comEnvAguard',String(envAgu));
+  setEl('comEnvAprov', String(envAprov));
+  setEl('comEnvRecus', String(envRecus));
+  var _fmtEnvR=function(v){return v>0?'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';};
+  var _envValTotal=envList.reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
+  var _envValAgu=envList.filter(function(o){return o.status==='aguardando';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
+  var _envValAprov=envList.filter(function(o){return o.status==='aprovado';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
+  var _envValRecus=envList.filter(function(o){return o.status==='recusado';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
+  var _ecr=document.getElementById('comEnvCountR'); if(_ecr)_ecr.textContent=_fmtEnvR(_envValTotal);
+  var _ear=document.getElementById('comEnvAguardR'); if(_ear)_ear.textContent=_fmtEnvR(_envValAgu);
+  var _epr=document.getElementById('comEnvAprovR'); if(_epr)_epr.textContent=_fmtEnvR(_envValAprov);
+  var _err=document.getElementById('comEnvRecusR'); if(_err)_err.textContent=_fmtEnvR(_envValRecus);
 
   // OS por marca
   var osByMarca = {vr:0, vit:0};
@@ -16102,7 +16146,7 @@ function secApplyPerms(funcao){
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
     comercial: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1},
+    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
     financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
   };
   var denied = HARD_DENY[funcao]||{};
@@ -16489,6 +16533,11 @@ document.addEventListener('DOMContentLoaded', function() {
       </div>
       <canvas id="planCanvas" style="width:100%;border-radius:8px;border:1px solid var(--border);background:#f8f9fa;display:block"></canvas>
       <div id="planLayoutLegenda" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+    </div>
+    <!-- SVG Template do Produto -->
+    <div id="planSvgBox" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📄 SVG do Produto (template de planificação)</div>
+      <div id="planSvgContent" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center;overflow:auto;max-height:300px"></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:14px">
       <button id="planAplicarBtn" onclick="planAplicar()" disabled
@@ -17797,6 +17846,7 @@ function cfgResetProdutos() {
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
 var _planProdPecas  = [];
+var _planProdSvgData = null; // SVG text content for planificação template
 
 var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
 
@@ -17817,7 +17867,7 @@ function planProdRender() {
           +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+'</div>'
           +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
           +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
-          +'<div style="margin-top:4px"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span></div>'
+          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(p.svg?'<span style="font-size:10px;background:#EDE9FE;border:1px solid #C4B5FD;border-radius:10px;padding:2px 8px;color:#5B21B6">📄 SVG</span>':'')+'</div>'
           +'</div>'
           +'<div style="display:flex;gap:6px">'
           +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
@@ -17842,6 +17892,45 @@ function planProdRender() {
   }
 }
 
+function planProdSvgChange(input) {
+  var file = input.files && input.files[0];
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    _planProdSvgData = e.target.result;
+    var nome = document.getElementById('planProdSvgNome');
+    if(nome) nome.textContent = file.name;
+    var clr = document.getElementById('planProdSvgClear');
+    if(clr) clr.style.display = '';
+    var prev = document.getElementById('planProdSvgPreview');
+    if(prev) { prev.style.display = ''; prev.innerHTML = _planProdSvgData; var svg=prev.querySelector('svg'); if(svg){svg.style.maxWidth='100%';svg.style.maxHeight='100px';} }
+  };
+  reader.readAsText(file);
+}
+function planProdSvgClear() {
+  _planProdSvgData = null;
+  var inp = document.getElementById('planProdSvgInput'); if(inp) inp.value='';
+  var nome = document.getElementById('planProdSvgNome'); if(nome) nome.textContent='Nenhum arquivo';
+  var clr = document.getElementById('planProdSvgClear'); if(clr) clr.style.display='none';
+  var prev = document.getElementById('planProdSvgPreview'); if(prev){prev.style.display='none';prev.innerHTML='';}
+}
+function _planProdSvgReset(svgData) {
+  _planProdSvgData = svgData||null;
+  var inp = document.getElementById('planProdSvgInput'); if(inp) inp.value='';
+  var nome = document.getElementById('planProdSvgNome');
+  var clr = document.getElementById('planProdSvgClear');
+  var prev = document.getElementById('planProdSvgPreview');
+  if(svgData) {
+    if(nome) nome.textContent = '✅ SVG salvo';
+    if(clr) clr.style.display = '';
+    if(prev) { prev.style.display=''; prev.innerHTML=svgData; var svg=prev.querySelector('svg'); if(svg){svg.style.maxWidth='100%';svg.style.maxHeight='100px';} }
+  } else {
+    if(nome) nome.textContent='Nenhum arquivo';
+    if(clr) clr.style.display='none';
+    if(prev) {prev.style.display='none';prev.innerHTML='';}
+  }
+}
+
 function planProdNovoOpen() {
   _planProdEditId = null;
   _planProdPecas  = [];
@@ -17849,6 +17938,7 @@ function planProdNovoOpen() {
   document.getElementById('planProdNome').value  = '';
   document.getElementById('planProdDesc').value  = '';
   document.getElementById('planProdDim3d').checked = true;
+  _planProdSvgReset(null);
   planProdRenderPecas();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -17864,6 +17954,7 @@ function planProdEditar(id) {
   document.getElementById('planProdNome').value  = p.nome||'';
   document.getElementById('planProdDesc').value  = p.desc||'';
   document.getElementById('planProdDim3d').checked = !!p.dim3d;
+  _planProdSvgReset(p.svg||null);
   planProdRenderPecas();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -17871,7 +17962,7 @@ function planProdEditar(id) {
 
 function planProdFechar() {
   document.getElementById('planProdOverlay').classList.remove('open');
-  _planProdEditId = null; _planProdPecas = [];
+  _planProdEditId = null; _planProdPecas = []; _planProdSvgData = null;
 }
 
 function planProdAddPeca() {
@@ -17973,7 +18064,8 @@ function planProdSalvar() {
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
-    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt}; })
+    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt}; }),
+    svg:   _planProdSvgData||undefined
   };
 
   if(_planProdEditId) {
