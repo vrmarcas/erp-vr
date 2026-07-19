@@ -11338,11 +11338,11 @@ function cliSetTab(tab){
   var tbl=document.getElementById('cliTableBody');
   var lixCard=document.getElementById('cliLixeiraCard');
   var btns=document.getElementById('cliAtivosBtns');
-  var mainCard=tbl ? tbl.closest('div.card') : null;
+  var mainTable=tbl ? tbl.closest('table') : null;
   if(tabA){ tabA.style.background=isLixeira?'':'var(--surface)'; tabA.style.color=isLixeira?'var(--muted)':'var(--text)'; }
   if(tabL){ tabL.style.background=isLixeira?'var(--surface)':''; tabL.style.color=isLixeira?'#DC2626':'var(--muted)'; }
   if(lixCard) lixCard.style.display=isLixeira?'':'none';
-  if(mainCard) mainCard.style.display=isLixeira?'none':'';
+  if(mainTable) mainTable.style.display=isLixeira?'none':'';
   if(btns) btns.style.display=isLixeira?'none':'flex';
   if(isLixeira) cliRenderLixeira();
 }
@@ -11442,6 +11442,46 @@ function cliOpenDetalhe(id) {
     }
   }
   var histCompras = (typeof clientHistExibir==='function') ? (clientHistExibir(c.tel, c.email)||'') : '';
+
+  // Histórico de compras importado do CRM Base (Firestore crm_base)
+  var crmHistHtml = '';
+  if(typeof _CRM_BASE_IDX!=='undefined' && _CRM_BASE_IDX.length) {
+    var _normNome2=function(s){return(s||'').toLowerCase().replace(/\s+/g,' ').trim();};
+    var _crmMatch=_CRM_BASE_IDX.find(function(cx){
+      var nTel=_normTel(cx.tel||'');
+      return (nTel.length>=8&&nTel===_cTel)||(_normNome2(cx.nome)===_normNome2(c.nome));
+    });
+    if(_crmMatch){
+      var _crmSumario='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:8px">'
+        +(_crmMatch.ultCompra?'<div style="background:#EDE9FE;border-radius:8px;padding:7px 10px;font-size:10px"><div style="color:#6D28D9;font-weight:700;margin-bottom:2px">Última compra</div><strong style="font-size:11px">'+_crmMatch.ultCompra+'</strong></div>':'')
+        +(_crmMatch.qtdCompras?'<div style="background:#EDE9FE;border-radius:8px;padding:7px 10px;font-size:10px"><div style="color:#6D28D9;font-weight:700;margin-bottom:2px">Qtd compras</div><strong style="font-size:11px">'+_crmMatch.qtdCompras+'</strong></div>':'')
+        +(_crmMatch.valor?'<div style="background:#D1FAE5;border-radius:8px;padding:7px 10px;font-size:10px"><div style="color:#065F46;font-weight:700;margin-bottom:2px">Total gasto</div><strong style="font-size:11px;color:#059669">R$ '+(_crmMatch.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></div>':'')
+        +((_crmMatch.produtos||[]).length?'<div style="background:#EDE9FE;border-radius:8px;padding:7px 10px;font-size:10px"><div style="color:#6D28D9;font-weight:700;margin-bottom:2px">Produtos</div><strong style="font-size:11px">'+(_crmMatch.produtos||[]).join(', ')+'</strong></div>':'')
+        +'</div>';
+      crmHistHtml='<div style="margin-top:14px">'
+        +'<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">🛒 HISTÓRICO DE COMPRAS</div>'
+        +_crmSumario
+        +'<div id="crmHistComprasDetail"><div style="font-size:10px;color:var(--muted);padding:4px 0">Carregando compras...</div></div>'
+        +'</div>';
+      // Carrega compras detalhadas do Firestore
+      if(typeof _db!=='undefined'&&_db&&typeof _CRM_BASE_COL!=='undefined'){
+        _db.collection(_CRM_BASE_COL).doc(_crmMatch.id).get().then(function(doc){
+          var det=document.getElementById('crmHistComprasDetail'); if(!det) return;
+          var data=doc.exists?doc.data():{};
+          var compras=data&&data.compras&&data.compras.length ? data.compras.slice().reverse() : [];
+          if(!compras.length){ det.innerHTML=''; return; }
+          det.innerHTML=compras.map(function(cp){
+            return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg2);border-radius:6px;margin-bottom:3px;font-size:11px">'
+              +'<span style="color:var(--muted);min-width:70px">📅 '+cp.data+'</span>'
+              +(cp.produto?'<span style="flex:1;padding:0 8px">'+cp.produto+'</span>':'<span style="flex:1"></span>')
+              +'<span style="color:#059669;font-weight:700;white-space:nowrap">R$ '+(cp.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</span>'
+              +'</div>';
+          }).join('');
+        }).catch(function(){ var det=document.getElementById('crmHistComprasDetail'); if(det) det.innerHTML=''; });
+      }
+    }
+  }
+
   var orcItems='';
   if(c.orcamentos&&c.orcamentos.length){
     orcItems='<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">ORÇAMENTOS ('+c.orcamentos.length+')</div>'
@@ -11468,7 +11508,8 @@ function cliOpenDetalhe(id) {
   document.getElementById('cliDetBody').innerHTML=infoBlock
     +'<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:5px">📝 OBSERVAÇÕES</div>'
     +'<textarea id="cliObsTextarea" rows="2" onblur="cliSalvarObs()" placeholder="Anotações sobre este cliente..." style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;resize:vertical;font-family:inherit;background:var(--bg);color:var(--text);box-sizing:border-box">'+obsVal+'</textarea></div>'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">HISTÓRICO DE OS ('+_allOsNums.length+')</div>'+(osItems||'<div style="color:var(--muted);font-size:12px">Sem OS registradas</div>')+'</div>'+_txItems+orcItems+histCompras;
+    +crmHistHtml
+    +'<div style="margin-top:14px"><div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">HISTÓRICO DE OS ('+_allOsNums.length+')</div>'+(osItems||'<div style="color:var(--muted);font-size:12px">Sem OS registradas</div>')+'</div>'+_txItems+orcItems+histCompras;
   document.getElementById('cliDetalheOverlay').classList.add('open');
 }
 function cliCloseDetalhe(){document.getElementById('cliDetalheOverlay').classList.remove('open');}
