@@ -14066,7 +14066,7 @@ function cfgSave(d) {
 }
 
 // ── BACKUP ────────────────────────────────────────────────────────────────────
-var _BACKUP_KEYS = ['erp_config','stock','erp_stock_log','orcamentos','clientes','crm_leads','fin_cr','fin_cp','erp_fornecedores','retalhos','erp_bank_config','erp_mat_prices'];
+var _BACKUP_KEYS = ['erp_config','stock','erp_stock_log','orcamentos','clientes','crm_leads','fin_cr','fin_cp','fin_tx','erp_fornecedores','retalhos','erp_bank_config','erp_mat_prices'];
 
 function erpBackupExportar() {
   if(!_db){ showToast('Firebase não conectado','warn'); return; }
@@ -16854,6 +16854,7 @@ function crmCardHTML(lead) {
     +(phone ? '<a href="'+waLink+'" target="_blank" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;padding:4px 8px;background:#25D366;color:#fff;border-radius:6px;font-size:10px;font-weight:700;text-decoration:none">💬 WhatsApp</a>' : '')
     +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmMsgAbrir(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text);cursor:pointer">✉️ Msg</button>'
     +'<button data-cid="'+lead._id+'" onclick="event.stopPropagation();crmOpenCard(this.dataset.cid)" style="padding:4px 8px;border:1px solid var(--brand-mid);border-radius:6px;font-size:10px;background:#EDE9FE;color:#5B21B6;cursor:pointer;font-weight:700">✏️ Editar</button>'
+    +'<button data-cid="'+lead._id+'" data-nome="'+String(lead.nome||'').replace(/"/g,'&quot;')+'" onclick="event.stopPropagation();if(confirm(\'Excluir \'+this.dataset.nome+\'?\'))crmExcluirLead(this.dataset.cid)" style="padding:4px 7px;border:1px solid #DC2626;border-radius:6px;font-size:10px;background:#FEF2F2;color:#DC2626;cursor:pointer" title="Excluir lead">🗑</button>'
     +'</div>'
     +'<div style="display:flex;gap:4px;margin-top:6px">'
     +'<select data-cid="'+lead._id+'" onclick="event.stopPropagation()" onchange="event.stopPropagation();crmMoverFase(this.dataset.cid,this.value)" style="flex:1;font-size:10px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)">'
