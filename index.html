@@ -1305,6 +1305,7 @@ function _cloudLoadAll() {
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
+    _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)&&d.length){ FIN_TX=d; try{finRenderTx();finDashKPIs();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
       if(d&&d.length){
         var local=usrLoadUsuarios();
@@ -6008,6 +6009,19 @@ function sbRestoreState() {
 document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreState, 100); });
 
 function nav(page, el) {
+  // ── Verificação de permissão ──────────────────────────────────────────────
+  if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao){
+    var _navDeny={
+      comercial:{'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+      producao: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
+    };
+    var _fn=(_currentSession.funcao||'').toLowerCase();
+    if(_navDeny[_fn]&&_navDeny[_fn][page]){
+      if(typeof showToast==='function') showToast('Acesso restrito para seu perfil.','err');
+      return;
+    }
+  }
+  // ── Navegação ─────────────────────────────────────────────────────────────
   // Hide all pages with direct inline style (most reliable cross-browser)
   var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca'];
   allPages.forEach(function(p) {
@@ -6138,7 +6152,7 @@ function orcStep(n) {
     if(i===n) el.classList.add('on');
   }
   if (n===4) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100); }
-  if (n===5) { const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); } }
+  if (n===5) { const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = 'R$ '+orcFmt(v.finalPrice||0); } }
 }
 
 // Custos Avançados inline toggle no Step 2
@@ -9405,8 +9419,8 @@ function comercialRender() {
     if(mk==='vr'||mk==='vr marcas') osByMarca.vr++;
     else osByMarca.vit++;
   });
-  setEl('comOsVR',  osByMarca.vr);
-  setEl('comOsVit', osByMarca.vit);
+  setEl('comOsVR',  String(osByMarca.vr));
+  setEl('comOsVit', String(osByMarca.vit));
   var comOsSub = document.getElementById('comOsSub');
   if(comOsSub) comOsSub.textContent = 'Total: '+Object.keys(KB_OS).length+' OS no sistema';
 
@@ -10021,6 +10035,7 @@ function _finCRBaixaConfirmar(id, dtISO) {
   r.status='recebido'; r.dataRecebimento=dtBR;
   var d=new Date(dtISO+'T12:00:00');
   FIN_TX.unshift({data:dtBR,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:1,sem:1,mes:d.getMonth()+1});
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
   _finSaveCR();
   finCRRender(); finDashKPIs(); finBarChartRender();
   showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
@@ -10490,8 +10505,8 @@ function finRender() {
   if(!tx.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
   var cM={PIX:'#059669',Cartão:'#7C3AED',Dinheiro:'#D97706'};
   var hoje=new Date(); hoje.setHours(0,0,0,0);
-  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.funcao==='master'||_currentSession.funcao==='Master'));
-  tbody.innerHTML=tx.slice(0,25).map(function(t){
+  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(['master','Master','admin'].includes(_currentSession.funcao)));
+  tbody.innerHTML=tx.slice(0,25).map(function(t,_ti){
     var isCartao=(t.metodo||'').toLowerCase().indexOf('cart')>=0;
     // Lógica de compensação: cartão dentro dos últimos 30 dias → A Compensar
     var txDate=null;
@@ -10510,11 +10525,12 @@ function finRender() {
     } else {
       statusBadge='<span style="background:#D1FAE5;color:#065F46;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">✅ Recebido</span>';
     }
-    // Antecipar button (só Master, só A Compensar)
+    // Antecipar + Delete (master e admin)
     var antBtn='';
     if(aCompensar&&isMaster){
       antBtn=' <button data-os="'+String(t.os).replace(/"/g,'&quot;')+'" data-val="'+t.valor+'" onclick="finAntecipar(this.dataset.os,+this.dataset.val)" style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid #D97706;background:#FEF3C7;color:#92400E;cursor:pointer;font-weight:700" title="Antecipar recebimento (aplica taxa MP/Nu)">⚡ Antecipar</button>';
     }
+    var delBtn = isMaster ? ' <button onclick="finDeleteTX(\''+String(t.os).replace(/'/g,"\\'")+"','"+String(t.data).replace(/'/g,"\\'")+"'"+',\''+String(t.cliente).replace(/'/g,"\\'")+'\')" style="font-size:9px;padding:2px 5px;border-radius:5px;border:1px solid #DC2626;background:#FEF2F2;color:#DC2626;cursor:pointer" title="Excluir transação">🗑</button>' : '';
     return '<tr>'
       +'<td>'+t.data+'</td>'
       +'<td>'+t.cliente+'</td>'
@@ -10522,9 +10538,18 @@ function finRender() {
       +'<td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td>'
       +'<td style="font-weight:700;color:var(--ok)">'+finFmt(t.valor)+'</td>'
       +'<td style="color:'+(cM[t.metodo]||'#6B7280')+';font-size:11px">'+(t.metodo||'—')+'</td>'
-      +'<td>'+statusBadge+antBtn+'</td>'
+      +'<td>'+statusBadge+antBtn+delBtn+'</td>'
       +'</tr>';
   }).join('');
+}
+// ── Excluir transação FIN_TX (master/admin only) ─────────────────────────────
+function finDeleteTX(osRef, data, cliente) {
+  if(!confirm('Excluir transação OS #'+osRef+' ('+cliente+' — '+data+')?\nEssa ação não pode ser desfeita.')) return;
+  var idx = FIN_TX.findIndex(function(t){ return String(t.os)===String(osRef)&&t.data===data&&t.cliente===cliente; });
+  if(idx<0){ alert('Transação não encontrada.'); return; }
+  FIN_TX.splice(idx,1);
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
+  finRenderTx();
 }
 // ── Antecipar recebimento de Cartão (simula taxa MP/Nubank ~3,49%) ────────────
 function finAntecipar(osRef, valor) {
@@ -10537,6 +10562,7 @@ function finAntecipar(osRef, valor) {
   if(!t){ showToast('Transação não encontrada','err'); return; }
   t.status='antecipado';
   t.valor=parseFloat((t.valor*(1-taxa)).toFixed(2));
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
   finRender(); finDashKPIs();
   showToast('Antecipação de '+finFmt(t.valor)+' registrada (taxa '+taxaDisplay+'%)','ok');
 }
@@ -10548,6 +10574,7 @@ function finBaixaManual(marca) {
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
   var m=marca||(confirm('VR Marcas? (OK=VR, Cancelar=Vitre)')?'vr':'vit');
   FIN_TX.unshift({data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
   finRender(); finDashKPIs();
   showToast('Baixa de '+finFmt(v)+' registrada!','ok');
 }
@@ -11546,6 +11573,7 @@ var _lastOsId = null;
 
     // Registra financeiro
     FIN_TX.unshift({data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:c.finalPrice||0,metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+    if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
     finRender();
 
     // ── Auto-cria Contas a Receber vinculado à OS ──────────────────
@@ -16016,6 +16044,19 @@ function authApplySession(){
   var roleEl=document.getElementById('userRole'); if(roleEl) roleEl.textContent=FUNCAO_LABEL[funcao]||funcao;
   var avatEl=document.getElementById('avatarInitial'); if(avatEl) avatEl.textContent=nome[0].toUpperCase();
   secApplyPerms(funcao);
+  // Redirecionar para dashboard se a página atual for restrita para este perfil
+  var _authDeny={
+    comercial:{'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+    producao: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
+  };
+  var _fn=(funcao||'').toLowerCase();
+  if(_authDeny[_fn]){
+    var currentPg=document.querySelector('.pg.on');
+    if(currentPg){
+      var pgId=(currentPg.id||'').replace('pg-','');
+      if(_authDeny[_fn][pgId]) nav('dashboard');
+    }
+  }
   // Load inactivity setting
   var inactSel=document.getElementById('secInactTime');
   if(inactSel) inactSel.value=String(secGetInactMins());
@@ -17622,8 +17663,9 @@ function _comIntelligence() {
   var pmap={};
   Object.values(KB_OS).forEach(function(os){
     if(!matchBrand(os)) return;
-    var raw=os.prod||os.titulo||'Produto';
-    var prod=raw.split(' — ')[0].split('—')[0].trim().substring(0,35);
+    // os.prod = nome do produto; os.titulo = "Cliente — Produto"
+    var raw = os.prod || (os.titulo ? os.titulo.split(' — ').slice(1).join(' — ') : '') || os.titulo || 'Produto';
+    var prod = raw.split(' — ')[0].split('—')[0].trim().substring(0,35);
     if(!pmap[prod])pmap[prod]={nome:prod,cnt:0,clis:{}};
     pmap[prod].cnt++;
     if(os.cliente)pmap[prod].clis[os.cliente]=(pmap[prod].clis[os.cliente]||0)+1;
