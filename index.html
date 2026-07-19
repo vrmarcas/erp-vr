@@ -7616,7 +7616,8 @@ function crmOpenCard(id) {
         <div class="ia-score-pill">Medidas: <strong>${(d.intencao&&d.intencao.medidas)||'—'}</strong></div>
         <div class="ia-score-pill">Qtd: <strong>${(d.intencao&&d.intencao.quantidade)||'—'}</strong></div>
       </div>
-      ${d.dores.length ? `<div style="margin-top:8px;font-size:10px;color:#8B949E"><strong style="color:#FF7B72">Dores identificadas:</strong> ${d.dores.map(x=>`<span style="background:#21262D;border-radius:4px;padding:2px 6px;margin:2px;display:inline-block">${x}</span>`).join('')}</div>` : ''}
+      ${d.dores.length ? `<div style="margin-top:8px;font-size:10px;color:#8B949E"><strong style="color:#FF7B72">Produtos comprados:</strong> ${d.dores.map(x=>`<span style="background:#21262D;border-radius:4px;padding:2px 6px;margin:2px;display:inline-block">${x}</span>`).join('')}</div>` : ''}
+      ${(d.sugestoes&&d.sugestoes.length) ? `<div style="margin-top:8px;padding:8px 10px;background:rgba(5,150,105,0.12);border-radius:7px;border:1px solid rgba(5,150,105,0.3)"><div style="font-size:10px;font-weight:800;color:#059669;margin-bottom:6px">💡 SUGESTÕES PARA PROSPECTAR</div><div style="display:flex;flex-wrap:wrap;gap:4px">${d.sugestoes.map(s=>`<span style="background:#059669;color:#fff;border-radius:5px;padding:3px 9px;font-size:10px;font-weight:700">${s}</span>`).join('')}</div><div style="font-size:10px;color:#6B7280;margin-top:5px">Clientes com este perfil têm alta chance de precisar desses produtos.</div></div>` : ''}
     </div>`;
   }
 
@@ -14904,7 +14905,7 @@ function crmBaseAbrirPerfil(id) {
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">ÚLTIMO CONTATO</div><div style="font-size:13px;font-weight:700">'+(d.ultimoContato||'—')+'</div></div>'
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">💰 VALOR TOTAL</div><div style="font-size:13px;font-weight:700;color:#059669">'+((d.valor&&d.valor>0)?'R$ '+Math.round(d.valor).toLocaleString('pt-BR'):'—')+'</div></div>'
       +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">🎯 TICKET MÉDIO</div><div style="font-size:13px;font-weight:700;color:#7C3AED">'+((d.valor&&d.qtdCompras)?'R$ '+Math.round(d.valor/d.qtdCompras).toLocaleString('pt-BR'):'—')+'</div></div>'
-      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">📅 ÚLTIMA COMPRA</div><div style="font-size:13px;font-weight:700">'+(d.ultCompra||'—')+((d.qtdCompras&&d.qtdCompras>0)?' <span style="color:var(--muted);font-weight:400">('+d.qtdCompras+'×)</span>':'')+'</div></div>'
+      +'<div><div style="font-size:10px;color:var(--muted);font-weight:700">📅 ÚLTIMO PEDIDO</div><div style="font-size:13px;font-weight:700">'+(d.ultCompra||'—')+((d.qtdCompras&&d.qtdCompras>0)?' <span style="color:var(--muted);font-weight:400">('+d.qtdCompras+'×)</span>':'')+'</div></div>'
       +'</div>'
       +((d.produtos&&d.produtos.length)?'<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:4px">PRODUTOS COMPRADOS</div>'
         +'<div style="display:flex;flex-wrap:wrap;gap:4px">'+d.produtos.map(function(p){ return '<span style="background:var(--bg2);border-radius:20px;padding:2px 10px;font-size:11px">'+cfgEsc(p)+'</span>'; }).join('')+'</div></div>':'')
@@ -15002,6 +15003,39 @@ function crmBaseSalvarEdicao(id) {
 }
 
 // ── Enviar contato ao Kanban CRM ─────────────────────────────────────────
+// ── Sugestão de produtos similares para prospecção ───────────────────────────
+function _crmSugerirProdutos(produtos) {
+  var MAPA = [
+    { kw: /acr[ií]lic[oa]|ps cristal|ps leitoso/i,
+      sug: ['Display Acrílico', 'Expositor Balcão', 'Porta-Folheto', 'Caixa Luminosa', 'Totem Acrílico'] },
+    { kw: /display|expositor|stand/i,
+      sug: ['Totem Display', 'Porta-Retrato Empresarial', 'Display Rótulo', 'Expositor Gôndola'] },
+    { kw: /placa|fachada|painel/i,
+      sug: ['Letra Caixa LED', 'Letreiro Iluminado', 'Fachada 3D', 'Painel Backlight', 'Placa Inox'] },
+    { kw: /letra\s*caixa|letreiro|neon|led/i,
+      sug: ['Painel LED', 'Fachada Iluminada', 'Letra 3D Relevo', 'Logo Corporativo Iluminado'] },
+    { kw: /tro[fé]u|medalha|plaqueta|homenagem/i,
+      sug: ['Placa Comemorativa', 'Troféu Laser', 'Brinde Corporativo', 'Placa Gravada'] },
+    { kw: /brinde|gravação|laser|personaliz/i,
+      sug: ['Chaveiro Acrílico', 'Placa Personalizada', 'Display Mesa', 'Troféu Laser'] },
+    { kw: /inox|metal|alumín[io]/i,
+      sug: ['Placa Inox Escovado', 'Letreiro Metálico', 'Fachada Alumínio', 'Painel Perfurado'] },
+    { kw: /banner|lona|impressão|impresso/i,
+      sug: ['Display Rollup', 'Totem Banner', 'Painel Lona', 'Bandeirola'] },
+    { kw: /cort[ae]\s*(laser|cnc)|usinagem/i,
+      sug: ['Peças Personalizadas', 'Protótipo Acrílico', 'Molde Corte Especial'] },
+  ];
+  var prods = (produtos||[]).join(' ');
+  var sugs = {};
+  MAPA.forEach(function(m){
+    if(m.kw.test(prods)) m.sug.forEach(function(s){ sugs[s]=true; });
+  });
+  // Remove sugestões que já são produtos comprados
+  var prodsLow = prods.toLowerCase();
+  var result = Object.keys(sugs).filter(function(s){ return !prodsLow.includes(s.toLowerCase().slice(0,6)); });
+  return result.slice(0,5);
+}
+
 function crmBasePushKanban() {
   var c = _CRM_BASE_PERFIL_ATUAL;
   if(!c) return;
@@ -15019,19 +15053,25 @@ function crmBasePushKanban() {
   var marca = isVR ? 'vr' : 'vitre';
   var etapa = c.tipo==='cliente' ? 'retorno' : 'contato';
   var prods = (c.produtos||[]).join(', ') || '—';
+  var sugs = _crmSugerirProdutos(c.produtos||[]);
   var id = 'base_'+(++crmLeadIdCounter);
   var temp = (c.valor && c.valor > 5000) ? 'quente' : (c.valor && c.valor > 1000) ? 'morno' : 'frio';
   var cor = temp==='quente'?'#FCA5A5':temp==='morno'?'#FCD34D':'#93C5FD';
-  var tempLabel = temp==='quente'?'🔴 Quente':temp==='morno'?'🟡 Morno':'🔵 Frio';
+  var resumoBase = 'Cliente do CRM Base — '+c.qtdCompras+'× pedido'+(c.qtdCompras>1?'s':'')
+    +'. Últimos produtos: '+prods
+    +(c.valor?' · Total histórico: R$ '+Math.round(c.valor).toLocaleString('pt-BR'):'')
+    +(c.ultCompra?' · Último pedido: '+c.ultCompra:'')
+    +(sugs.length ? ' | 💡 Sugestões para prospectar: '+sugs.join(', ') : '');
   CRM_LEADS[id] = {
     nome: c.nome, tipo: isVR?'B2B':'B2C', marca: marca,
     sub: c.tel||'—',
     contato: c.nome, tel: c.tel||'—', email: '—',
     temp: temp, score: temp==='quente'?75:temp==='morno'?45:20,
-    resumo_ia: 'Importado do CRM Base. Produtos: '+prods+(c.valor?' · Histórico R$ '+Math.round(c.valor).toLocaleString('pt-BR'):'')+(c.qtdCompras?' · '+c.qtdCompras+'× compras':''),
+    resumo_ia: resumoBase,
     valor_potencial: c.valor ? 'R$ '+Math.round(c.valor/Math.max(c.qtdCompras||1,1)).toLocaleString('pt-BR') : 'A definir',
     cor: cor, origem: 'crm_base', etapa: etapa, tempo: 'agora',
     dores: c.produtos||[],
+    sugestoes: sugs,
     intencao: { produto: prods, material:'—', medidas:'—', quantidade:'—' }
   };
   // Navega para o CRM e renderiza
