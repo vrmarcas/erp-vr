@@ -14730,22 +14730,22 @@ function crmBaseKpisRender(tipo) {
     // Ranking: valor total identificado, recorrentes (2+ compras = potencial recompra) e top cliente
     var valorTotal  = lista.reduce(function(s,c){ return s+(c.valor||0); },0);
     var recorrentes = lista.filter(function(c){ return (c.qtdCompras||0)>1; }).length;
-    var top = lista.slice().sort(function(a,b){ return (b.valor||0)-(a.valor||0); })[0];
-    var topStr = (top && top.valor) ? (top.nome||'').slice(0,14)+' · R$ '+Math.round(top.valor).toLocaleString('pt-BR') : '—';
+    var top = lista.slice().sort(function(a,b){ return (b.qtdCompras||0)-(a.qtdCompras||0); })[0];
+    var topStr = (top && top.qtdCompras) ? (top.nome||'').slice(0,14)+' · '+top.qtdCompras+'× compras' : '—';
     el.innerHTML = [
-      { ico:'👥', lbl:'Total Clientes', val:total, cor:'#7C3AED' },
-      { ico:'💰', lbl:'Valor identificado', val:'R$ '+Math.round(valorTotal).toLocaleString('pt-BR'), cor:'#059669' },
-      { ico:'🔁', lbl:'Recorrentes (2+ compras)', val:recorrentes, cor:'#0891B2' },
-      { ico:'🏆', lbl:'Top cliente', val:topStr, cor:'#D97706' },
-      { ico:'✅', lbl:'Ativos', val:ativos, cor:'#059669' },
-      { ico:'⚠️', lbl:'Inativos 90d', val:in90, cor:'#D97706' },
-      { ico:'🔴', lbl:'Inativos 180d', val:in180, cor:'#DC2626' },
-      { ico:'❌', lbl:'Perdidos', val:perdidos, cor:'#6B7280' }
+      { ico:'👥', lbl:'Total Clientes', val:total, cor:'#7C3AED', bg:'rgba(124,58,237,0.08)', brd:'rgba(124,58,237,0.25)' },
+      { ico:'💰', lbl:'Valor identificado', val:'R$ '+Math.round(valorTotal).toLocaleString('pt-BR'), cor:'#059669', bg:'rgba(5,150,105,0.08)', brd:'rgba(5,150,105,0.25)' },
+      { ico:'🔁', lbl:'Recorrentes (2+ compras)', val:recorrentes, cor:'#0891B2', bg:'rgba(8,145,178,0.08)', brd:'rgba(8,145,178,0.25)' },
+      { ico:'🏆', lbl:'+ Fiel (compras)', val:topStr, cor:'#D97706', bg:'rgba(217,119,6,0.08)', brd:'rgba(217,119,6,0.25)' },
+      { ico:'✅', lbl:'Ativos', val:ativos, cor:'#059669', bg:'rgba(5,150,105,0.08)', brd:'rgba(5,150,105,0.25)' },
+      { ico:'⚠️', lbl:'Inativos 90d', val:in90, cor:'#D97706', bg:'rgba(217,119,6,0.10)', brd:'rgba(217,119,6,0.30)' },
+      { ico:'🔴', lbl:'Inativos 180d', val:in180, cor:'#DC2626', bg:'rgba(220,38,38,0.08)', brd:'rgba(220,38,38,0.30)' },
+      { ico:'❌', lbl:'Perdidos', val:perdidos, cor:'#6B7280', bg:'rgba(107,114,128,0.07)', brd:'rgba(107,114,128,0.20)' }
     ].map(function(k){
-      return '<div style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;min-width:100px">'
+      return '<div style="background:'+k.bg+';border:1.5px solid '+k.brd+';border-radius:10px;padding:10px 14px;min-width:100px">'
         +'<div style="font-size:16px">'+k.ico+'</div>'
         +'<div style="font-size:18px;font-weight:900;color:'+k.cor+'">'+k.val+'</div>'
-        +'<div style="font-size:10px;color:var(--muted)">'+k.lbl+'</div></div>';
+        +'<div style="font-size:10px;color:var(--muted);font-weight:600">'+k.lbl+'</div></div>';
     }).join('');
   } else {
     var novos  = lista.filter(function(c){ return c.coluna==='novo'||!c.coluna; }).length;
@@ -14754,17 +14754,17 @@ function crmBaseKpisRender(tipo) {
     var fech   = lista.filter(function(c){ return c.coluna==='fechado'; }).length;
     var conv   = total ? Math.round(fech/total*100) : 0;
     el.innerHTML = [
-      { ico:'🎯', lbl:'Total Prospects', val:total, cor:'#6366F1' },
-      { ico:'🆕', lbl:'Novos', val:novos, cor:'#6366F1' },
-      { ico:'📞', lbl:'Contactados', val:cont, cor:'#0891B2' },
-      { ico:'📋', lbl:'Orç. Enviado', val:orcEnv, cor:'#7C3AED' },
-      { ico:'✅', lbl:'Fechados', val:fech, cor:'#059669' },
-      { ico:'📈', lbl:'Conversão', val:conv+'%', cor:'#059669' }
+      { ico:'🎯', lbl:'Total Prospects', val:total, cor:'#6366F1', bg:'rgba(99,102,241,0.08)', brd:'rgba(99,102,241,0.25)' },
+      { ico:'🆕', lbl:'Novos', val:novos, cor:'#6366F1', bg:'rgba(99,102,241,0.08)', brd:'rgba(99,102,241,0.25)' },
+      { ico:'📞', lbl:'Contactados', val:cont, cor:'#0891B2', bg:'rgba(8,145,178,0.08)', brd:'rgba(8,145,178,0.25)' },
+      { ico:'📋', lbl:'Orç. Enviado', val:orcEnv, cor:'#7C3AED', bg:'rgba(124,58,237,0.08)', brd:'rgba(124,58,237,0.25)' },
+      { ico:'✅', lbl:'Fechados', val:fech, cor:'#059669', bg:'rgba(5,150,105,0.08)', brd:'rgba(5,150,105,0.25)' },
+      { ico:'📈', lbl:'Conversão', val:conv+'%', cor:'#059669', bg:'rgba(5,150,105,0.08)', brd:'rgba(5,150,105,0.25)' }
     ].map(function(k){
-      return '<div style="background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;min-width:100px">'
+      return '<div style="background:'+k.bg+';border:1.5px solid '+k.brd+';border-radius:10px;padding:10px 14px;min-width:100px">'
         +'<div style="font-size:16px">'+k.ico+'</div>'
         +'<div style="font-size:18px;font-weight:900;color:'+k.cor+'">'+k.val+'</div>'
-        +'<div style="font-size:10px;color:var(--muted)">'+k.lbl+'</div></div>';
+        +'<div style="font-size:10px;color:var(--muted);font-weight:600">'+k.lbl+'</div></div>';
     }).join('');
   }
 }
