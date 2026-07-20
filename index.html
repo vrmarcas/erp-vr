@@ -7162,6 +7162,26 @@ function orcItemExtras(ri) {
   +'<input type="number" id="m_desl" value="'+g('orcDesl')+'" min="0" style="'+INP+'"></div>'
   +'</div>'
 
+  // ── Estimativa de Corte (col esquerda) ──
+  +'<div style="background:var(--surface);border:1.5px solid rgba(99,102,241,0.3);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">⚡ Estimativa de Tempo de Corte</div>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px">'
+  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Contornos/peça</div>'
+  +'<input type="number" id="m_contornos" value="1" min="1" step="1" style="'+INP+';width:100%"></div>'
+  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Cortes internos (mm)</div>'
+  +'<input type="number" id="m_compInt" value="0" min="0" style="'+INP+';width:100%"></div>'
+  +'</div>'
+  +'<button onclick="orcExtrasAutoLaser()" style="width:100%;padding:5px 0;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;margin-bottom:6px">⚡ Calcular Tempo de Corte</button>'
+  +'<div id="m_laserMemBox" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:7px 9px;font-size:9px;line-height:1.65;color:var(--text);white-space:pre;overflow:auto;max-height:130px;font-family:monospace"></div>'
+  +'<div style="display:flex;gap:5px;align-items:center;margin-top:7px">'
+  +'<input type="checkbox" id="m_laserManual" onchange="orcExtrasToggleManual()" style="accent-color:#DC2626;cursor:pointer;width:13px;height:13px">'
+  +'<label for="m_laserManual" style="font-size:9px;color:#DC2626;font-weight:700;cursor:pointer">Ajuste manual (não sobrescreve ao calcular)</label>'
+  +'</div>'
+  +'<div id="m_laserManualBox" style="display:none;margin-top:5px">'
+  +'<input type="text" id="m_laserJust" placeholder="Motivo do ajuste manual..." style="width:100%;padding:4px 7px;border:1.5px solid #DC2626;border-radius:5px;font-size:10px;background:var(--bg);color:var(--text);box-sizing:border-box">'
+  +'</div>'
+  +'</div>'
+
   +'</div>' // fim col esquerda
 
   // ── Coluna direita: Máquinas + Consumíveis ──
@@ -7192,26 +7212,6 @@ function orcItemExtras(ri) {
       +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
   }).join('')
-  +'</div>'
-
-  // ── Estimativa de Corte ──
-  +'<div style="background:var(--surface);border:1.5px solid rgba(99,102,241,0.3);border-radius:10px;padding:10px">'
-  +'<div style="font-size:9px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">⚡ Estimativa de Tempo de Corte</div>'
-  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px">'
-  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Contornos/peça</div>'
-  +'<input type="number" id="m_contornos" value="1" min="1" step="1" style="'+INP+';width:100%"></div>'
-  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Cortes internos (mm)</div>'
-  +'<input type="number" id="m_compInt" value="0" min="0" style="'+INP+';width:100%"></div>'
-  +'</div>'
-  +'<button onclick="orcExtrasAutoLaser()" style="width:100%;padding:5px 0;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;margin-bottom:6px">⚡ Calcular Tempo de Corte</button>'
-  +'<div id="m_laserMemBox" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:7px 9px;font-size:9px;line-height:1.65;color:var(--text);white-space:pre;overflow:auto;max-height:130px;font-family:monospace"></div>'
-  +'<div style="display:flex;gap:5px;align-items:center;margin-top:7px">'
-  +'<input type="checkbox" id="m_laserManual" onchange="orcExtrasToggleManual()" style="accent-color:#DC2626;cursor:pointer;width:13px;height:13px">'
-  +'<label for="m_laserManual" style="font-size:9px;color:#DC2626;font-weight:700;cursor:pointer">Ajuste manual (não sobrescreve ao calcular)</label>'
-  +'</div>'
-  +'<div id="m_laserManualBox" style="display:none;margin-top:5px">'
-  +'<input type="text" id="m_laserJust" placeholder="Motivo do ajuste manual..." style="width:100%;padding:4px 7px;border:1.5px solid #DC2626;border-radius:5px;font-size:10px;background:var(--bg);color:var(--text);box-sizing:border-box">'
-  +'</div>'
   +'</div>'
 
   // Consumíveis
