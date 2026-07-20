@@ -1905,7 +1905,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#4B5563">Segunda <span class="kh-count">3</span></div>
+            <div class="kh" id="kbHeaderSeg" style="background:#4B5563">Segunda <span id="kbDateSeg" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbSeg" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os01" style="border-color:#7C3AED" onclick="kbOpen('os01')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">CLARO — Display Acrílico</div>
@@ -1932,7 +1932,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#2563EB">Terça <span class="kh-count">2</span></div>
+            <div class="kh" id="kbHeaderTer" style="background:#2563EB">Terça <span id="kbDateTer" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbTer" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os04" style="border-color:#9D174D" onclick="kbOpen('os04')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">João P. — Letra Caixa LED</div>
@@ -1952,7 +1952,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#7C3AED">Quarta <span class="kh-count">2</span></div>
+            <div class="kh" id="kbHeaderQua" style="background:#7C3AED">Quarta <span id="kbDateQua" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbQua" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os06" style="border-color:#7C3AED" onclick="kbOpen('os06')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">SAMSUNG — Expositor</div>
@@ -1972,7 +1972,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#D97706">Quinta <span class="kh-count">3</span></div>
+            <div class="kh" id="kbHeaderQui" style="background:#D97706">Quinta <span id="kbDateQui" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbQui" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os08" style="border-color:#7C3AED" onclick="kbOpen('os08')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">OI — Painel Fachada</div>
@@ -1999,7 +1999,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#059669">Sexta <span class="kh-count">2</span></div>
+            <div class="kh" id="kbHeaderSex" style="background:#059669">Sexta <span id="kbDateSex" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbSex" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os11" style="border-color:#7C3AED" onclick="kbOpen('os11')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">C-LIGUE — Letreiro LED</div>
@@ -2019,7 +2019,7 @@ function _cloudAuthAviso(msg){
           </div>
 
           <div class="kc">
-            <div class="kh" style="background:#DB2777">Sábado <span class="kh-count">1</span></div>
+            <div class="kh" id="kbHeaderSab" style="background:#DB2777">Sábado <span id="kbDateSab" style="font-size:10px;opacity:0.75"></span> <span class="kh-count">0</span></div>
             <div class="kbody" id="kbSab" ondragover="kbOver(event)" ondragleave="kbLeave(event)" ondrop="kbDrop(event)">
               <div class="kcard" draggable="true" data-osid="os13" style="border-color:#7C3AED" onclick="kbOpen('os13')" ondragstart="kbStart(event,this)" ondragend="kbEnd(this)">
                 <div class="kcard-title">CLARO — Display Promo</div>
@@ -8635,6 +8635,28 @@ function kbSaveKbos() {
   }
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────
+function kbInitWeekHeaders() {
+  var now = new Date();
+  var day = now.getDay(); // 0=Dom,1=Seg,...,6=Sab
+  var monday = new Date(now);
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  monday.setHours(0,0,0,0);
+  var cols = [
+    {spanId:'kbDateSeg', offset:0},
+    {spanId:'kbDateTer', offset:1},
+    {spanId:'kbDateQua', offset:2},
+    {spanId:'kbDateQui', offset:3},
+    {spanId:'kbDateSex', offset:4},
+    {spanId:'kbDateSab', offset:5}
+  ];
+  cols.forEach(function(c) {
+    var d = new Date(monday); d.setDate(monday.getDate()+c.offset);
+    var dd=String(d.getDate()).padStart(2,'0'), mm=String(d.getMonth()+1).padStart(2,'0');
+    var el=document.getElementById(c.spanId);
+    if(el) el.textContent = dd+'/'+mm;
+  });
+}
+
 function kbRender() {
   var cols=['kbNovas','kbProntas','kbSeg','kbTer','kbQua','kbQui','kbSex','kbSab'];
   cols.forEach(function(id){
@@ -8642,11 +8664,24 @@ function kbRender() {
     var cards=el.querySelectorAll('.kcard');
     cards.forEach(function(c){ c.parentNode.removeChild(c); });
   });
+  kbInitWeekHeaders();
   Object.keys(KB_OS).forEach(function(k){
     var os=KB_OS[k]; if(!os) return;
     if(os.status==='entregue'||os.status==='cancelado') return;
     var isVt=(os.mk==='vit'||os.marca==='Vitre');
-    var colId=(os.status==='pronta'||os.pronto)?'kbProntas':'kbNovas';
+    // Determinar coluna pelo dia da semana da data de entrega
+    var colId='kbNovas';
+    if(os.status==='pronta'||os.pronto) {
+      colId='kbProntas';
+    } else {
+      var _prazoStr=os.entrega||os.prazo||'';
+      if(_prazoStr && _prazoStr.indexOf('-')>0) {
+        var _pp=_prazoStr.split('-');
+        var _pd=new Date(+_pp[0],+_pp[1]-1,+_pp[2]);
+        var _dayMap={1:'kbSeg',2:'kbTer',3:'kbQua',4:'kbQui',5:'kbSex',6:'kbSab',0:'kbSab'};
+        colId=_dayMap[_pd.getDay()]||'kbNovas';
+      }
+    }
     var col=document.getElementById(colId); if(!col) return;
     var card=document.createElement('div');
     var osId=os.id||k;
@@ -8665,24 +8700,25 @@ function kbRender() {
     }
     var prazoStr=os.entrega||os.prazo||'';
     var prazoBadge='';
-    if(prazoStr){
-      var pd=new Date(prazoStr),td=new Date();td.setHours(0,0,0,0);
-      if(!isNaN(pd.getTime())){
-        var diff=Math.ceil((pd-td)/864e5);
-        var pc=diff<0?'#DC2626':(diff<=3?'#D97706':'#059669');
-        var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d'):(diff===0?'🔴 Entrega hoje!':('📅 '+prazoStr.split('-').reverse().join('/')));
-        prazoBadge='<div style="margin-top:5px;font-size:9px;font-weight:700;color:'+pc+';background:'+pc+'22;padding:2px 7px;border-radius:4px;display:inline-block">'+pt+'</div>';
-      }
+    if(prazoStr && prazoStr.indexOf('-')>0){
+      var _pp2=prazoStr.split('-');
+      var pd=new Date(+_pp2[0],+_pp2[1]-1,+_pp2[2]); pd.setHours(0,0,0,0);
+      var td=new Date(); td.setHours(0,0,0,0);
+      var diff=Math.round((pd-td)/864e5);
+      var pc=diff<0?'#DC2626':(diff===0?'#DC2626':(diff<=3?'#D97706':'#059669'));
+      var dataBR=_pp2[2]+'/'+_pp2[1];
+      var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d · '+dataBR):(diff===0?('🔴 Hoje · '+dataBR):('📅 '+dataBR+' · '+diff+'d'));
+      prazoBadge='<div style="margin-bottom:6px;font-size:11px;font-weight:800;color:'+pc+';background:'+pc+'18;padding:4px 8px;border-radius:5px;border-left:3px solid '+pc+'">'+pt+'</div>';
     }
     var smMap={iniciada:{cls:'si',txt:'Iniciada'},em_andamento:{cls:'sp',txt:'Iniciada'},producao:{cls:'sp',txt:'Em Produção'},pronta:{cls:'sm ok',txt:'Pronta ✅'},master:{cls:'sm',txt:'Aguard. Master'},entregue:{cls:'sm ok',txt:'Entregue'}};
-    var sm=smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
+    var sm=_kbStatusMap[os.status]||smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
     var cbHtml=_KB_SEL_MODE?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();kbToggleSel(\''+osId+'\')" style="position:absolute;top:8px;right:8px;width:17px;height:17px;cursor:pointer;accent-color:#6366F1">':'';
     card.style.position='relative';
     card.innerHTML=cbHtml
+      +prazoBadge
       +'<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
       +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un</div>'
       +'<div class="kcard-meta">OS #0'+(os.num||'?')+'</div>'
-      +prazoBadge
       +'<span class="stag '+sm.cls+'" id="kstag-'+osId+'">'+sm.txt+'</span>'
       +'<div class="prog"><div class="prog-fill" id="kprog-'+osId+'" style="width:'+(os.prog||0)+'%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
     col.appendChild(card);
@@ -9677,10 +9713,16 @@ function kbApplyViewFilter() {
     var osId=card.dataset.osid||card.id;
     var os=KB_OS[osId];
     if(!os){ card.dataset.viewHide=''; return; }
-    // Parse date fields: dataOS, prazo, entrega (format dd/mm/yyyy)
-    var dateStr=os.dataOS||os.prazo||os.entrega||'';
-    var parts=dateStr.split('/');
-    var osDate=parts.length===3?new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0])):null;
+    // Parse entrega date (ISO YYYY-MM-DD preferido, fallback dd/mm/yyyy)
+    var osDate=null;
+    var _entStr=os.entrega||os.prazo||'';
+    if(_entStr){
+      if(_entStr.indexOf('-')>0){
+        var _ep=_entStr.split('-'); osDate=new Date(+_ep[0],+_ep[1]-1,+_ep[2]);
+      } else {
+        var _dp=_entStr.split('/'); if(_dp.length===3) osDate=new Date(+_dp[2],+_dp[1]-1,+_dp[0]);
+      }
+    }
     var inRange=false;
     if(osDate){
       if(_kbView==='week')  inRange=(osDate>=weekStart&&osDate<=weekEnd);
