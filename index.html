@@ -7396,14 +7396,18 @@ function orcDescTipoChange(){
 }
 function orcUpdateSummary() {
   const c = window._orcCalc||{};
-  const rows = document.querySelectorAll('#orcItemBody tr[data-idx]').length;
+  // Soma total de unidades de todos os itens (não contagem de linhas)
+  var totalQty = 0;
+  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(r){
+    totalQty += parseFloat((document.getElementById('oi_qty_'+r.dataset.idx)||{}).value||1)||1;
+  });
   const isVt = document.body.classList.contains('vitre');
   const rb = document.getElementById('orcRsmBadge');
   if(rb) { rb.textContent=isVt?'Vitre':'VR Marcas'; rb.className='badge '+(isVt?'bvit':'bvr'); }
   const setT = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
   setT('orcRsmCliente', document.getElementById('orcClientNome')?.value||'(não preenchido)');
   setT('orcRsmMarca', isVt?'Vitre':'VR Marcas');
-  setT('orcRsmItens', rows+' item(s)');
+  setT('orcRsmItens', totalQty+'un');
   setT('orcRsmCusto', orcFmt(c.totalCost||0));
   setT('orcRsmMarkup', (((c.overhead||0.4116)+(c.vrml||0.2))*100).toFixed(2)+'%');
   setT('orcRsmDesc', (c.descTipo==='rs'&&(c.descRS||0)>0) ? orcFmt(c.descRS||0) : ((c.descPct||0)*100).toFixed(0)+'%');
@@ -8525,24 +8529,40 @@ function kbSalvarTempo() {
   if(!_kbOsId) return;
   var os=KB_OS[_kbOsId]; if(!os) return;
   os.tempoProd=(document.getElementById('kbTempoProd')||{}).value||'';
+  _cloudSave('kb_os', KB_OS);
 }
 function kbSalvarPrazo() {
   if(!_kbOsId) return;
   var os=KB_OS[_kbOsId]; if(!os) return;
   var v=(document.getElementById('kbPrazoEntrega')||{}).value||'';
   if(v){
-    var p=v.split('-'); os.entrega=p[2]+'/'+p[1]+'/'+p[0];
-    showToast('Prazo atualizado: '+os.entrega,'ok');
-    // Mover card do kbNovas para coluna do dia se ainda estiver lá
+    // Salva em ISO (yyyy-mm-dd) — mantém card na coluna atual, sem mover
+    os.entrega=v; os.prazo=v;
+    // Atualizar badge no card diretamente
     var card=document.querySelector('.kcard[data-osid="'+_kbOsId+'"]');
-    if(card && card.parentElement && card.parentElement.id==='kbNovas') {
-      var dias=['Dom','Seg','Ter','Qua','Qui','Sex','Sab'];
-      var destId='kb'+dias[new Date().getDay()];
-      var dest=document.getElementById(destId)||document.getElementById('kbSeg');
-      if(dest){ dest.appendChild(card); kbSyncCounts(); }
+    if(card){
+      var _pp=v.split('-');
+      var pd=new Date(+_pp[0],+_pp[1]-1,+_pp[2]); pd.setHours(0,0,0,0);
+      var td=new Date(); td.setHours(0,0,0,0);
+      var diff=Math.round((pd-td)/864e5);
+      var pc=diff<0?'#DC2626':(diff===0?'#DC2626':(diff<=3?'#D97706':'#059669'));
+      var dataBR=_pp[2]+'/'+_pp[1];
+      var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d · '+dataBR):(diff===0?('🔴 Hoje · '+dataBR):('📅 '+dataBR+' · '+diff+'d'));
+      var badge=card.querySelector('.kb-prazo-badge');
+      if(badge){ badge.style.color=pc; badge.style.background=pc+'18'; badge.style.borderLeftColor=pc; badge.textContent=pt; }
     }
-    // Atualizar countdown
-    kbOpen(_kbOsId);
+    // Persistir no Firebase
+    _cloudSave('kb_os', KB_OS);
+    var dataBR2=v.split('-')[2]+'/'+v.split('-')[1]+'/'+v.split('-')[0];
+    showToast('Prazo salvo: '+dataBR2,'ok');
+    // Atualizar countdown no modal sem fechar
+    var cd=document.getElementById('kbPrazoCd');
+    if(cd){
+      var diff2=Math.round((new Date(+v.split('-')[0],+v.split('-')[1]-1,+v.split('-')[2])-new Date())/864e5);
+      cd.style.display='';
+      cd.style.color=diff2<0?'#DC2626':(diff2<=3?'#D97706':'#059669');
+      cd.textContent=diff2<0?('⚠️ Atrasado '+Math.abs(diff2)+' dias'):(diff2===0?'🔴 Entrega hoje!':('⏳ '+diff2+' dia(s) restante(s)'));
+    }
   }
 }
 function kbOpenLink() {
@@ -8749,7 +8769,7 @@ function kbRender() {
       var pc=diff<0?'#DC2626':(diff===0?'#DC2626':(diff<=3?'#D97706':'#059669'));
       var dataBR=_pp2[2]+'/'+_pp2[1];
       var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d · '+dataBR):(diff===0?('🔴 Hoje · '+dataBR):('📅 '+dataBR+' · '+diff+'d'));
-      prazoBadge='<div style="margin-bottom:6px;font-size:11px;font-weight:800;color:'+pc+';background:'+pc+'18;padding:4px 8px;border-radius:5px;border-left:3px solid '+pc+'">'+pt+'</div>';
+      prazoBadge='<div class="kb-prazo-badge" style="margin-bottom:6px;font-size:11px;font-weight:800;color:'+pc+';background:'+pc+'18;padding:4px 8px;border-radius:5px;border-left:3px solid '+pc+'">'+pt+'</div>';
     }
     var smMap={iniciada:{cls:'si',txt:'Iniciada'},em_andamento:{cls:'sp',txt:'Iniciada'},producao:{cls:'sp',txt:'Em Produção'},pronta:{cls:'sm ok',txt:'Pronta ✅'},master:{cls:'sm',txt:'Aguard. Master'},entregue:{cls:'sm ok',txt:'Entregue'}};
     var sm=_kbStatusMap[os.status]||smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
@@ -8758,7 +8778,10 @@ function kbRender() {
     card.innerHTML=cbHtml
       +prazoBadge
       +'<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
-      +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un</div>'
+      +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un'
+      +(os.entrega ? '<br>📅 '+(function(v){var p=v.split('-');return p.length===3?p[2]+'/'+p[1]:v;})(os.entrega) : '')
+      +(os.tempoProd ? ' · ⏱️ '+os.tempoProd+'h' : '')
+      +'</div>'
       +'<div class="kcard-meta">OS #0'+(os.num||'?')+'</div>'
       +'<span class="stag '+sm.cls+'" id="kstag-'+osId+'">'+sm.txt+'</span>'
       +'<div class="prog"><div class="prog-fill" id="kprog-'+osId+'" style="width:'+(os.prog||0)+'%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
