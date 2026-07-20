@@ -8215,6 +8215,24 @@ function kbDrop(e) {
   if (_kbDrag) {
     body.appendChild(_kbDrag);
     _kbDrag.classList.remove('kb-dragging');
+    // Ao arrastar para coluna de dia, salva os.entrega com a data da semana corrente
+    var _dragOsId = _kbDrag.dataset.osid;
+    var _dragOs = _dragOsId ? KB_OS[_dragOsId] : null;
+    if(_dragOs) {
+      var _colDayOffset = {kbSeg:0,kbTer:1,kbQua:2,kbQui:3,kbSex:4,kbSab:5}[body.id];
+      if(_colDayOffset !== undefined) {
+        // Compute Monday of current week
+        var _dn = new Date(); var _dow = _dn.getDay();
+        var _mon = new Date(_dn);
+        _mon.setDate(_dn.getDate() - (_dow===0?6:_dow-1));
+        _mon.setHours(0,0,0,0);
+        var _tgt = new Date(_mon); _tgt.setDate(_mon.getDate()+_colDayOffset);
+        var _yy=_tgt.getFullYear(), _mm=String(_tgt.getMonth()+1).padStart(2,'0'), _dd=String(_tgt.getDate()).padStart(2,'0');
+        _dragOs.entrega = _yy+'-'+_mm+'-'+_dd;
+        _dragOs.prazo   = _dragOs.entrega;
+        if(typeof _cloudSave==='function') _cloudSave('kb_os', KB_OS);
+      }
+    }
     _kbDrag = null;
     kbSyncCounts();
   }
@@ -8879,9 +8897,16 @@ function kbRender() {
       colId='kbProntas';
     } else {
       var _prazoStr=os.entrega||os.prazo||'';
-      if(_prazoStr && _prazoStr.indexOf('-')>0) {
-        var _pp=_prazoStr.split('-');
-        var _pd=new Date(+_pp[0],+_pp[1]-1,+_pp[2]);
+      var _pd=null;
+      if(_prazoStr){
+        if(_prazoStr.indexOf('-')>0){
+          var _pp=_prazoStr.split('-'); _pd=new Date(+_pp[0],+_pp[1]-1,+_pp[2]);
+        } else if(_prazoStr.indexOf('/')>0){
+          var _dp0=_prazoStr.split('/');
+          if(_dp0.length===3) _pd=new Date(+_dp0[2],+_dp0[1]-1,+_dp0[0]);
+        }
+      }
+      if(_pd && !isNaN(_pd.getTime())){
         var _dayMap={1:'kbSeg',2:'kbTer',3:'kbQua',4:'kbQui',5:'kbSex',6:'kbSab',0:'kbSab'};
         colId=_dayMap[_pd.getDay()]||'kbNovas';
       }
@@ -8904,16 +8929,26 @@ function kbRender() {
     }
     var prazoStr=os.entrega||os.prazo||'';
     var prazoBadge='';
-    if(prazoStr && prazoStr.indexOf('-')>0){
-      var _pp2=prazoStr.split('-');
-      var pd=new Date(+_pp2[0],+_pp2[1]-1,+_pp2[2]); pd.setHours(0,0,0,0);
+    (function(){
+      if(!prazoStr) return;
+      var pd=null;
+      if(prazoStr.indexOf('-')>0){
+        var _a=prazoStr.split('-'); pd=new Date(+_a[0],+_a[1]-1,+_a[2]);
+      } else if(prazoStr.indexOf('/')>0){
+        var _b=prazoStr.split('/'); if(_b.length===3) pd=new Date(+_b[2],+_b[1]-1,+_b[0]);
+      }
+      if(!pd||isNaN(pd.getTime())) return;
+      pd.setHours(0,0,0,0);
       var td=new Date(); td.setHours(0,0,0,0);
       var diff=Math.round((pd-td)/864e5);
       var pc=diff<0?'#DC2626':(diff===0?'#DC2626':(diff<=3?'#D97706':'#059669'));
-      var dataBR=_pp2[2]+'/'+_pp2[1];
-      var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d · '+dataBR):(diff===0?('🔴 Hoje · '+dataBR):('📅 '+dataBR+' · '+diff+'d'));
-      prazoBadge='<div class="kb-prazo-badge" style="margin-bottom:6px;font-size:11px;font-weight:800;color:'+pc+';background:'+pc+'18;padding:4px 8px;border-radius:5px;border-left:3px solid '+pc+'">'+pt+'</div>';
-    }
+      var dBR=String(pd.getDate()).padStart(2,'0')+'/'+String(pd.getMonth()+1).padStart(2,'0')+'/'+pd.getFullYear();
+      var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d — '+dBR)
+            :diff===0?('🔴 Entrega HOJE — '+dBR)
+            :diff===1?('⏰ Entrega amanhã — '+dBR)
+            :('📅 Entrega: '+dBR+' · Faltam '+diff+' dias');
+      prazoBadge='<div class="kb-prazo-badge" style="margin-bottom:6px;font-size:11px;font-weight:800;color:'+pc+';background:'+pc+'18;padding:5px 9px;border-radius:6px;border-left:3px solid '+pc+';line-height:1.4">'+pt+'</div>';
+    })();
     var smMap={iniciada:{cls:'si',txt:'Iniciada'},em_andamento:{cls:'sp',txt:'Iniciada'},producao:{cls:'sp',txt:'Em Produção'},pronta:{cls:'sm ok',txt:'Pronta ✅'},master:{cls:'sm',txt:'Aguard. Master'},entregue:{cls:'sm ok',txt:'Entregue'}};
     var sm=_kbStatusMap[os.status]||smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
     var cbHtml=_KB_SEL_MODE?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();kbToggleSel(\''+osId+'\')" style="position:absolute;top:8px;right:8px;width:17px;height:17px;cursor:pointer;accent-color:#6366F1">':'';
@@ -9965,6 +10000,9 @@ function kbApplyViewFilter() {
     if(osDate){
       if(_kbView==='week')  inRange=(osDate>=weekStart&&osDate<=weekEnd);
       if(_kbView==='month') inRange=(osDate>=monthStart&&osDate<=monthEnd);
+    } else {
+      // OS sem data de entrega: sempre visível em semana (aparece em Novas)
+      inRange = (_kbView==='week');
     }
     card.dataset.viewHide=inRange?'':'hide';
   });
