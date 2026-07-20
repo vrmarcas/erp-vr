@@ -2765,7 +2765,7 @@ function _cloudAuthAviso(msg){
               </button>
             </div>
 
-            <button class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcSimPagamento()">
+            <button id="orcBtnConfirmar" class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcSimPagamento()">
               ✓ Confirmar Pagamento Total e Gerar OS
             </button>
             <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px">Confirme após verificar o pagamento no app do banco</div>
@@ -7385,6 +7385,17 @@ function orcCalcEntradaResto() {
   var resto = Math.max(0, total - entrada);
   var el = document.getElementById('orcEntradaResto');
   if(el) el.textContent = 'R$ '+resto.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  // Botão muda conforme se é parcial ou total
+  var _btn = document.getElementById('orcBtnConfirmar');
+  if(_btn) {
+    if(entrada > 0 && entrada < total) {
+      _btn.textContent = '✓ Confirmar Entrada (R$ '+entrada.toLocaleString('pt-BR',{minimumFractionDigits:2})+') e Gerar OS';
+      _btn.style.background = '#D97706';
+    } else {
+      _btn.textContent = '✓ Confirmar Pagamento Total e Gerar OS';
+      _btn.style.background = '#059669';
+    }
+  }
 }
 
 function orcGerarReciboEntrada() {
@@ -7612,11 +7623,13 @@ function orcAtualizarIconePgto() {
   const iconEl = document.getElementById('orcPgtoIcon');
   const lblEl  = document.getElementById('orcPgtoGatewayLbl');
   const pixBox = document.getElementById('orcPgtoPixBox');
-  const icons  = { pix:'⚡', cartao:'💳', dinheiro:'💵' };
+  const icons  = { pix:'⚡', cartao:'💳', dinheiro:'💵', '50_50':'💰' };
   if (iconEl) iconEl.textContent = icons[metodo] || '💳';
   const gtwName = gtw === 0 ? 'Mercado Pago · VR' : 'Nubank PIX · Vitre';
   if (lblEl) lblEl.textContent = gtwName;
   if (pixBox) pixBox.style.display = metodo === 'pix' ? '' : 'none';
+  // Recalcular botão conforme entrada digitada
+  orcCalcEntradaResto();
 }
 
 function orcToggleNF() {
@@ -11725,6 +11738,9 @@ var _lastOsId = null;
     var metodoEl=document.getElementById('orcSimMetodo');
     var metodo=metodoEl?({pix:'PIX',cartao:'Cartão',dinheiro:'Dinheiro'}[metodoEl.value]||'PIX'):'PIX';
     var hoje=new Date(), dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
+    // Detecta pagamento parcial pelo campo de entrada (independente do método)
+    var _entradaVal = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
+    var _isPartial = _entradaVal > 0 && _entradaVal < (c.finalPrice||0);
 
     // Captura snapshot dos itens
     var itens=[];
@@ -11753,8 +11769,8 @@ var _lastOsId = null;
       itens.push({cod:'P'+String(idx).padStart(2,'0'), prod:prod, descricao:descricao, qty:qty, unit:unitVal, total:totVal, planImg:(row.dataset.planImg||null)});
     });
 
-    // Registra financeiro
-    FIN_TX.unshift({data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:c.finalPrice||0,metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+    // Registra financeiro (entrada parcial ou total)
+    FIN_TX.unshift({data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:_isPartial?_entradaVal:(c.finalPrice||0),metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
     if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
     finRender();
 
@@ -11762,13 +11778,10 @@ var _lastOsId = null;
     (function(){
       var totalOS = c.finalPrice||0;
       if(!totalOS) return;
-      var simMetodoVal = (document.getElementById('orcSimMetodo')||{}).value||'pix';
-      // Para pagamento 50/50: CR = 50% restante com status pendente
-      // Para outros: CR = total com status recebido
-      var is5050 = simMetodoVal === '50_50';
-      var crValor = is5050 ? totalOS * 0.5 : totalOS;
-      var crStatus = is5050 ? 'pendente' : 'recebido';
-      var crDesc = 'OS #0'+n + (is5050 ? ' — 50% restante na retirada' : '');
+      // Pagamento parcial detectado pelo campo de entrada
+      var crValor = _isPartial ? (totalOS - _entradaVal) : totalOS;
+      var crStatus = _isPartial ? 'pendente' : 'recebido';
+      var crDesc = 'OS #0'+n + (_isPartial ? ' — saldo restante na retirada' : '');
       // Vencimento: prazo de entrega ou hoje
       var vencIso = (window._orcPrazoEntrega&&window._orcPrazoEntrega.trim()) ? window._orcPrazoEntrega : hoje.toISOString().slice(0,10);
       var vencParts = vencIso.split('-');
@@ -11832,9 +11845,9 @@ var _lastOsId = null;
       cidade:cidadeCliente||'—',
       marca:isVt?'Vitre':'VR Marcas', mk:marca,
       material:matLabel, medidas:medidasStr, qty:qtyTotal,
-      status:(simMetodoEl&&simMetodoEl.value==='50_50')?'aguardando_saldo':'iniciada', prazo:entregaOS, entrega:entregaOS,
+      status:_isPartial?'aguardando_saldo':'iniciada', prazo:entregaOS, entrega:entregaOS,
       valor:c.finalPrice||0, prog:0, pronto:false,
-      restante:(simMetodoEl&&simMetodoEl.value==='50_50')?((c.finalPrice||0)*0.5):0,
+      restante:_isPartial?((c.finalPrice||0)-_entradaVal):0,
       checks:['Corte','Gravação','Acabamento','Embalagem'], _ck:[false,false,false,false],
       parcelas:parcelas, linkPagto:linkUrl,
       clientDoc:docCliente, clientEmail:emailCliente, clientTel:telCliente,
@@ -11873,7 +11886,7 @@ var _lastOsId = null;
         +'<div class="kcard-sub">📍 '+(cidadeCliente||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+matLabel+' · '+medidasStr+' · '+qtyTotal+'un</div>'
         +'<div class="kcard-meta">Criada hoje</div>'
         +_prazoBadge
-        +'<span class="stag '+(simMetodoEl&&simMetodoEl.value==='50_50'?'sas':'si')+'" id="kstag-'+newId+'">'+(simMetodoEl&&simMetodoEl.value==='50_50'?'💰 Aguard. Saldo':'Iniciada')+'</span>'
+        +'<span class="stag '+(_isPartial?'sas':'si')+'" id="kstag-'+newId+'">'+(_isPartial?'💰 Aguard. Saldo':'Iniciada')+'</span>'
         +'<div class="prog"><div class="prog-fill" id="kprog-'+newId+'" style="width:0%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
       _kbCol.appendChild(_card);
       kbSyncCounts();
