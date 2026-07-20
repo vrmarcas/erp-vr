@@ -6802,13 +6802,14 @@ function planCalc() {
   var priceM2 = _matGetRsm2(matKey, _planIdx);
   var custoMat = (totalArea/10000) * priceM2;
 
-  // Selling price using the correct formula: venda = custo / (1 - overhead - vrml)
+  // Selling price using the correct formula: venda = custo / (1 - overhead - impostos - vrml)
   var _cfgFin2=(_cfgData&&_cfgData.financeiro)||{};
   var _planOh=(_cfgFin2.overhead!=null?_cfgFin2.overhead:41.16)/100;
   var _planVr=(_cfgFin2.vrml!=null?_cfgFin2.vrml:20)/100;
-  var _planFac = 1 - _planOh - _planVr;  // e.g. 1 - 0.4116 - 0.20 = 0.3884
+  var _planImp=(_cfgFin2.impostos!=null?_cfgFin2.impostos:0)/100;
+  var _planFac = 1 - _planOh - _planVr - _planImp;
   var _planVenda = (_planFac > 0) ? custoMat / _planFac : 0;
-  var _planMkPct = ((_planOh + _planVr) * 100).toFixed(1);
+  var _planMkPct = ((_planOh + _planVr + _planImp) * 100).toFixed(1);
 
   // Área da chapa do material selecionado (ou 20000 cm² como fallback)
   var _sheetArea = 20000;
@@ -6919,15 +6920,16 @@ function orcFmt(v) { return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigit
 function orcSetV(id,v) { const el=document.getElementById(id); if(el) el.textContent='R$'+v.toFixed(2).replace('.',','); }
 
 function orcRecalc() {
-  // Lê overhead e vrml do Config salvo (não mais do Step 3)
+  // Lê overhead, impostos e vrml do Config salvo (não mais do Step 3)
   var _cfgFin = (_cfgData&&_cfgData.financeiro)||{};
   const overhead = (_cfgFin.overhead!=null ? _cfgFin.overhead : 41.16) / 100;
   const vrml     = (_cfgFin.vrml    !=null ? _cfgFin.vrml     : 20)    / 100;
+  const impostos = (_cfgFin.impostos!=null ? _cfgFin.impostos : 0)     / 100;
   var _descTipo=(document.getElementById('orcDescTipo')?.value)||'pct';
   var _descVal=parseFloat(document.getElementById('orcDesc')?.value)||0;
   const descPct=_descTipo==='pct' ? _descVal/100 : 0;
   const descRS =_descTipo==='rs'  ? _descVal      : 0;
-  const factor   = 1 - (overhead + vrml);
+  const factor   = 1 - (overhead + vrml + impostos);
 
   // Exibe overhead/vrml atuais no Step 3 (info somente leitura)
   var ohInfo = document.getElementById('orcOverheadInfo');
@@ -7062,7 +7064,7 @@ function orcRecalc() {
     b3.innerHTML = lines3;
   }
   // payload interno
-  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, acresPct, acresRS, acresTipo:_acresTipo };
+  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo };
 }
 
 // Per-item extras store
@@ -7584,7 +7586,7 @@ function orcUpdateSummary() {
   setT('orcRsmMarca', isVt?'Vitre':'VR Marcas');
   setT('orcRsmItens', totalQty+'un');
   setT('orcRsmCusto', orcFmt(c.totalCost||0));
-  setT('orcRsmMarkup', (((c.overhead||0.4116)+(c.vrml||0.2))*100).toFixed(2)+'%');
+  setT('orcRsmMarkup', (((c.overhead||0.4116)+(c.vrml||0.2)+(c.impostos||0))*100).toFixed(2)+'%');
   setT('orcRsmDesc', (c.descTipo==='rs'&&(c.descRS||0)>0) ? orcFmt(c.descRS||0) : ((c.descPct||0)*100).toFixed(0)+'%');
   setT('orcRsmTotal', orcFmt(c.finalPrice||0));
   var tot2 = document.getElementById('orcRsmTotal');
@@ -18483,8 +18485,9 @@ function _planRecompute() {
   var _cfg2=(_cfgData&&_cfgData.financeiro)||{};
   var oh2=(_cfg2.overhead!=null?_cfg2.overhead:41.16)/100;
   var vr2=(_cfg2.vrml!=null?_cfg2.vrml:20)/100;
-  var fac2=1-oh2-vr2; var venda2=fac2>0?custoMat2/fac2:0;
-  var mk2=((oh2+vr2)*100).toFixed(1);
+  var imp2=(_cfg2.impostos!=null?_cfg2.impostos:0)/100;
+  var fac2=1-oh2-vr2-imp2; var venda2=fac2>0?custoMat2/fac2:0;
+  var mk2=((oh2+vr2+imp2)*100).toFixed(1);
   var _sheetArea2=20000;
   if(matKey2&&matKey2.indexOf('cfg_')===0){var _sa2i=parseInt(matKey2.replace('cfg_',''));var _sa2m=((_cfgData&&_cfgData.materiais)||[])[_sa2i];if(_sa2m&&_sa2m.comp&&_sa2m.larg)_sheetArea2=_sa2m.comp*_sa2m.larg;}
   var prop2=totalArea>0?(totalArea/_sheetArea2*100).toFixed(1):'—';
