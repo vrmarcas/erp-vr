@@ -8189,7 +8189,8 @@ function kbOpen(id) {
   var _kbCd = document.getElementById('kbPrazoCd');
   if(_kbCd) {
     if(kbPEl && kbPEl.value) {
-      var _cdDate = new Date(kbPEl.value); _cdDate.setHours(0,0,0,0);
+      var _cdParts = kbPEl.value.split('-');
+      var _cdDate = new Date(+_cdParts[0], +_cdParts[1]-1, +_cdParts[2]); _cdDate.setHours(0,0,0,0);
       var _cdNow  = new Date(); _cdNow.setHours(0,0,0,0);
       var _cdDiff = Math.ceil((_cdDate - _cdNow) / 864e5);
       var _cdTxt, _cdColor;
@@ -11875,8 +11876,9 @@ var _lastOsId = null;
       var _prazoStr = entregaOS && entregaOS !== dia ? entregaOS : '';
       var _prazoBadge = '';
       if(_prazoStr) {
-        var _pd = new Date(_prazoStr), _td = new Date(); _td.setHours(0,0,0,0);
-        var _diff = Math.ceil((_pd-_td)/(864e5));
+        var _pdp=_prazoStr.split('-'), _pd=new Date(+_pdp[0],+_pdp[1]-1,+_pdp[2]); _pd.setHours(0,0,0,0);
+        var _td = new Date(); _td.setHours(0,0,0,0);
+        var _diff = Math.round((_pd-_td)/(864e5));
         var _pc = _diff<0?'#DC2626':(_diff<=3?'#D97706':'#059669');
         var _pt = _diff<0?('⚠️ Atrasado '+Math.abs(_diff)+'d'):(_diff===0?'🔴 Entrega hoje!':('📅 '+_prazoStr.split('-').reverse().join('/')));
         _prazoBadge = '<div style="margin-top:5px;font-size:9px;font-weight:700;color:'+_pc+';background:'+_pc+'22;padding:2px 7px;border-radius:4px;display:inline-block">'+_pt+'</div>';
