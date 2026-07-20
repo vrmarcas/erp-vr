@@ -779,12 +779,37 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .fin-donut-leg-lbl{font-size:11px;color:var(--text);flex:1}
 .fin-donut-leg-pct{font-size:11px;font-weight:700;color:var(--text)}
 /* Tabelas */
-.fin-tbl-actions{display:flex;gap:5px}
+.fin-tbl-actions{display:flex;gap:5px;align-items:center}
 .fin-tbl-btn{padding:3px 10px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;border:none;transition:.15s}
 .fin-tbl-btn-ok{background:#D1FAE5;color:#065F46}
 .fin-tbl-btn-ok:hover{background:#059669;color:#fff}
 .fin-tbl-btn-del{background:transparent;color:#DC2626;border:1px solid #FCA5A5 !important;font-size:13px;padding:4px 8px}
 .fin-tbl-btn-del:hover{background:#FEE2E2;color:#991B1B}
+/* 3-dot menu */
+.fin-dot-wrap{position:relative;display:inline-block}
+.fin-dot-btn{background:none;border:none;cursor:pointer;padding:3px 7px;border-radius:6px;font-size:16px;color:var(--muted);line-height:1;transition:.12s}
+.fin-dot-btn:hover{background:var(--bg2);color:var(--text)}
+.fin-dot-menu{display:none;position:absolute;right:0;top:100%;z-index:999;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.12);min-width:160px;overflow:hidden}
+.fin-dot-menu.open{display:block}
+.fin-dot-menu button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--text);text-align:left;transition:.1s}
+.fin-dot-menu button:hover{background:var(--bg2)}
+.fin-dot-menu button.danger{color:#DC2626}
+.fin-dot-menu button.danger:hover{background:#FEF2F2}
+/* Bulk select bar */
+.fin-bulk-bar{display:none;align-items:center;gap:10px;padding:8px 14px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;margin-bottom:10px;font-size:12px;color:#1D4ED8}
+.fin-bulk-bar.visible{display:flex}
+.fin-bulk-bar button{padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:none;transition:.12s}
+.fin-bulk-bar .bbtn-ok{background:#059669;color:#fff}
+.fin-bulk-bar .bbtn-ok:hover{background:#047857}
+.fin-bulk-bar .bbtn-del{background:#DC2626;color:#fff}
+.fin-bulk-bar .bbtn-del:hover{background:#B91C1C}
+.fin-bulk-bar .bbtn-cancel{background:transparent;color:#6B7280;border:1px solid #D1D5DB !important}
+/* Aging (inadimplência) */
+.fin-aging-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:14px}
+.fin-aging-card{border-radius:10px;padding:12px 14px;font-size:12px}
+.fin-aging-card .aging-label{font-weight:700;margin-bottom:3px}
+.fin-aging-card .aging-val{font-size:16px;font-weight:800}
+.fin-aging-card .aging-cnt{font-size:10px;opacity:.7;margin-top:1px}
 /* Status badges */
 .fin-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.3px}
 .fin-badge-pendente{background:#FEF3C7;color:#92400E}
@@ -4115,6 +4140,9 @@ function _cloudAuthAviso(msg){
             </div>
           </div>
         </div>
+        <!-- Inadimplência Aging -->
+        <div id="finAgingSection" style="margin-bottom:8px"></div>
+
         <div class="card">
           <div class="card-h">
             <div class="card-h-left">📥 Contas a Receber <span id="finCRCount" style="font-size:11px;color:var(--muted)"></span></div>
@@ -4130,8 +4158,18 @@ function _cloudAuthAviso(msg){
               <button class="topbar-btn" onclick="finCRNovoModal()">+ Nova Conta</button>
             </div>
           </div>
+          <!-- Bulk action bar -->
+          <div class="fin-bulk-bar" id="finCRBulkBar">
+            <span id="finCRBulkCount">0 selecionados</span>
+            <button class="bbtn-ok" onclick="finCRBulkBaixar()">✓ Baixar Selecionados</button>
+            <button class="bbtn-del" onclick="finCRBulkDelete()">🗑️ Excluir</button>
+            <button class="bbtn-cancel" onclick="finCRClearSel()">✕ Limpar</button>
+          </div>
           <table class="table">
-            <thead><tr><th>Cliente</th><th>Origem</th><th>Marca</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead>
+            <thead><tr>
+              <th style="width:28px"><input type="checkbox" id="finCRChkAll" onchange="finCRToggleAll(this.checked)" title="Selecionar todos"></th>
+              <th>Cliente</th><th>Origem</th><th>Marca</th><th>Valor</th><th>Vencimento</th><th>Status</th><th style="width:40px"></th>
+            </tr></thead>
             <tbody id="finCRBody"></tbody>
           </table>
         </div>
@@ -4190,8 +4228,18 @@ function _cloudAuthAviso(msg){
               <button class="topbar-btn" onclick="finCPNovoModal()">+ Nova Despesa</button>
             </div>
           </div>
+          <!-- Bulk action bar CP -->
+          <div class="fin-bulk-bar" id="finCPBulkBar">
+            <span id="finCPBulkCount">0 selecionados</span>
+            <button class="bbtn-ok" onclick="finCPBulkPagar()">✓ Baixar Selecionados</button>
+            <button class="bbtn-del" onclick="finCPBulkDelete()">🗑️ Excluir</button>
+            <button class="bbtn-cancel" onclick="finCPClearSel()">✕ Limpar</button>
+          </div>
           <table class="table">
-            <thead><tr><th>Fornecedor / Despesa</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead>
+            <thead><tr>
+              <th style="width:28px"><input type="checkbox" id="finCPChkAll" onchange="finCPToggleAll(this.checked)" title="Selecionar todos"></th>
+              <th>Fornecedor / Despesa</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th style="width:40px"></th>
+            </tr></thead>
             <tbody id="finCPBody"></tbody>
           </table>
         </div>
@@ -4278,7 +4326,12 @@ function _cloudAuthAviso(msg){
         <div class="card">
           <div class="card-h">
             <div class="card-h-left">📋 DRE Gerencial</div>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <!-- Regime toggle -->
+              <div style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;font-size:11px">
+                <button id="dreRegimeCaixa" onclick="finDRESetRegime('caixa')" style="padding:4px 10px;border:none;cursor:pointer;font-size:10px;font-weight:700;background:#7C3AED;color:#fff">💵 Caixa</button>
+                <button id="dreRegimeComp" onclick="finDRESetRegime('comp')" style="padding:4px 10px;border:none;cursor:pointer;font-size:10px;font-weight:700;background:var(--bg2);color:var(--muted)">📋 Competência</button>
+              </div>
               <span style="font-size:11px;color:var(--muted)">Período:</span>
               <select id="finDREMes" onchange="finDREBuild()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
                 <option value="0">Acumulado Anual</option>
@@ -10704,6 +10757,92 @@ function finCRUpdateSummary() {
   set('finCRSumPend',pend); set('finCRSumRec',rec); set('finCRSumAtras',atras);
 }
 
+// ── Contas a Receber — estado de seleção ─────────────────────────────────────
+var _finCRSel = {};
+var _finCRLastList = [];
+function finCRToggleAll(checked) {
+  _finCRLastList.forEach(function(r){ _finCRSel[r.id]=checked; });
+  finCRRender(); finCRUpdateBulkBar();
+}
+function finCRToggleSel(id) {
+  _finCRSel[id]=!_finCRSel[id];
+  finCRUpdateBulkBar();
+}
+function finCRUpdateBulkBar() {
+  var cnt=Object.values(_finCRSel).filter(Boolean).length;
+  var bar=document.getElementById('finCRBulkBar');
+  var lbl=document.getElementById('finCRBulkCount');
+  if(bar) bar.classList.toggle('visible',cnt>0);
+  if(lbl) lbl.textContent=cnt+' selecionado'+(cnt!==1?'s':'');
+}
+function finCRClearSel() { _finCRSel={}; finCRRender(); finCRUpdateBulkBar(); }
+function finCRBulkBaixar() {
+  var ids=Object.keys(_finCRSel).filter(function(id){return _finCRSel[id];});
+  if(!ids.length){showToast('Selecione registros primeiro','warn');return;}
+  var dtStr=new Date().toISOString().slice(0,10);
+  ids.forEach(function(id){ var r=FIN_CR.find(function(x){return x.id===id;}); if(r&&r.status!=='recebido') _finCRBaixaConfirmar(id,dtStr); });
+  _finCRSel={}; finCRRender(); finCRUpdateBulkBar();
+}
+function finCRBulkDelete() {
+  var ids=Object.keys(_finCRSel).filter(function(id){return _finCRSel[id];});
+  if(!ids.length) return;
+  if(!confirm('Excluir '+ids.length+' registro(s)?')) return;
+  FIN_CR=FIN_CR.filter(function(r){return !ids.includes(r.id);});
+  _finSaveCR(); _finCRSel={}; finCRRender(); finCRUpdateBulkBar();
+  showToast(ids.length+' registro(s) excluído(s)','ok');
+}
+// Fechar menus 3-dot ao clicar fora
+if(!window._finDotListenerAdded){
+  window._finDotListenerAdded=true;
+  document.addEventListener('click',function(e){
+    if(!e.target.closest('.fin-dot-wrap')) document.querySelectorAll('.fin-dot-menu.open').forEach(function(m){m.classList.remove('open');});
+  });
+}
+function _finDotToggle(id){
+  var m=document.getElementById(id); if(!m) return;
+  var wasOpen=m.classList.contains('open');
+  document.querySelectorAll('.fin-dot-menu.open').forEach(function(x){x.classList.remove('open');});
+  if(!wasOpen) m.classList.add('open');
+}
+
+// ── Inadimplência aging ───────────────────────────────────────────────────────
+function finRenderAging() {
+  var el=document.getElementById('finAgingSection'); if(!el) return;
+  var hoje=new Date(); hoje.setHours(0,0,0,0);
+  var vencidos=FIN_CR.filter(function(r){
+    var bOk=_finBrand==='todas'||r.marca===_finBrand;
+    return bOk&&(r.status==='pendente'||r.status==='vencido');
+  }).filter(function(r){
+    if(!r.vencimento) return false;
+    var p=r.vencimento.split('/'); if(p.length<3) return false;
+    var d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])); d.setHours(0,0,0,0);
+    return d<hoje;
+  }).map(function(r){
+    var p=r.vencimento.split('/');
+    var d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])); d.setHours(0,0,0,0);
+    return Object.assign({},r,{_dias:Math.round((hoje-d)/(864e5))});
+  });
+  if(!vencidos.length){el.innerHTML='';return;}
+  var b1=vencidos.filter(function(r){return r._dias<=15;});
+  var b2=vencidos.filter(function(r){return r._dias>15&&r._dias<=30;});
+  var b3=vencidos.filter(function(r){return r._dias>30;});
+  var sum=function(arr){return arr.reduce(function(s,r){return s+r.valor;},0);};
+  var card=function(label,arr,bg,color){
+    if(!arr.length) return '';
+    return '<div class="fin-aging-card" style="background:'+bg+';color:'+color+'">'
+      +'<div class="aging-label">'+label+'</div>'
+      +'<div class="aging-val">'+finFmt(sum(arr))+'</div>'
+      +'<div class="aging-cnt">'+arr.length+' conta'+(arr.length!==1?'s':'')+'</div></div>';
+  };
+  el.innerHTML='<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:12px 14px;margin-bottom:4px">'
+    +'<div style="font-size:11px;font-weight:700;color:#991B1B;margin-bottom:8px">🔴 Inadimplência — '+finFmt(sum(vencidos))+' em aberto</div>'
+    +'<div class="fin-aging-bar">'
+    +card('1 – 15 dias',b1,'#FEF3C7','#92400E')
+    +card('16 – 30 dias',b2,'#FED7AA','#9A3412')
+    +card('Acima de 30 dias',b3,'#FEE2E2','#991B1B')
+    +'</div></div>';
+}
+
 // ── Contas a Receber Render ───────────────────────────────────────────────────
 function finCRRender() {
   var tbody=document.getElementById('finCRBody');
@@ -10714,41 +10853,52 @@ function finCRRender() {
   var list=FIN_CR.filter(function(r){
     var bOk=_finBrand==='todas'||r.marca===_finBrand;
     var sOk=!statusFlt||r.status===statusFlt;
-    var qOk=!q||(r.cliente.toLowerCase().includes(q)||r.descricao.toLowerCase().includes(q));
+    var qOk=!q||((r.cliente||'').toLowerCase().includes(q)||(r.descricao||'').toLowerCase().includes(q));
     var dRef=r.dataRecebimento||r.vencimento||'';
     var pOk=finDateInPeriod(dRef);
     return bOk&&sOk&&qOk&&pOk;
   });
+  _finCRLastList=list;
   if(cnt) cnt.textContent='('+list.length+' registro'+(list.length!==1?'s':'')+')';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
+  finCRUpdateSummary();
+  finRenderAging();
+  if(!list.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(r){
-    // Marca badge
     var mLabel=r.marca==='vr'
       ?'<span class="fin-marca-badge fin-marca-vr">VR — MP</span>'
       :'<span class="fin-marca-badge fin-marca-vit">Vitre — Nu</span>';
-    // Origem badge: tem osRef = veio do fluxo de Orçamento; senão = Manual
     var origem=r.osRef
       ?'<span class="fin-origem-badge fin-origem-os">📋 '+r.osRef+'</span>'
       :'<span class="fin-origem-badge fin-origem-manual">✏️ Manual</span>';
-    // Status badge
     var statusMap={pendente:'pendente',recebido:'recebido',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMap[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
-    // Ações
-    var acoes='';
+    // Cor do valor: verde=recebido, vermelho=vencido, padrão=pendente
+    var valColor=r.status==='recebido'?'#059669':r.status==='vencido'?'#DC2626':'var(--text)';
+    // 3-dot menu
+    var menuId='crMenu_'+r.id;
+    var menuItems='';
     if(r.status==='pendente'||r.status==='vencido'){
-      acoes='<button onclick="finCRBaixa(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-ok">✓ Baixar</button> ';
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCRBaixa(\''+r.id+'\')">✓ Baixar recebimento</button>';
+      if(r.status==='vencido'){
+        var tel=(r.tel||r.clienteTel||'').replace(/\D/g,'');
+        var msgWa=encodeURIComponent('Olá '+r.cliente.split(' ')[0]+'! Verificamos que sua conta '+finFmt(r.valor)+' (venc. '+r.vencimento+') está em aberto. Podemos regularizar? 😊');
+        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');window.open(\'https://wa.me/'+(tel?'55'+tel:'')+'?text='+msgWa+'\',\'_blank\')">📱 Cobrar via WhatsApp</button>';
+      }
     } else if(r.status==='recebido'){
-      acoes='<button onclick="finCREstornar(\''+r.id+'\')" class="fin-tbl-btn" style="background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB">↩ Estornar</button> ';
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCREstornar(\''+r.id+'\')">↩ Estornar recebimento</button>';
     }
-    acoes+='<button onclick="if(confirm(\'Excluir esta conta a receber?\')) finCRDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
+    menuItems+='<button class="danger" onclick="_finDotToggle(\''+menuId+'\');if(confirm(\'Excluir conta a receber?\'))finCRDel(\''+r.id+'\')">🗑️ Excluir</button>';
+    var dotMenu='<div class="fin-dot-wrap"><button class="fin-dot-btn" onclick="event.stopPropagation();_finDotToggle(\''+menuId+'\')">⋯</button><div class="fin-dot-menu" id="'+menuId+'">'+menuItems+'</div></div>';
+    var chk='<input type="checkbox" '+(_finCRSel[r.id]?'checked':'')+' onchange="finCRToggleSel(\''+r.id+'\')" onclick="event.stopPropagation()">';
     return '<tr>'
+      +'<td>'+chk+'</td>'
       +'<td><strong>'+r.cliente+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
       +'<td>'+origem+'</td>'
       +'<td>'+mLabel+'</td>'
-      +'<td style="font-weight:800;color:#059669;font-size:13px">'+finFmt(r.valor)+'</td>'
+      +'<td style="font-weight:800;color:'+valColor+';font-size:13px">'+finFmt(r.valor)+'</td>'
       +'<td>'+r.vencimento+'</td>'
       +'<td>'+badge+'</td>'
-      +'<td><div class="fin-tbl-actions">'+acoes+'</div></td>'
+      +'<td>'+dotMenu+'</td>'
       +'</tr>';
   }).join('');
 }
@@ -11049,6 +11199,38 @@ function finCalRender() {
 }
 
 
+// ── Contas a Pagar — estado de seleção ───────────────────────────────────────
+var _finCPSel = {};
+var _finCPLastList = [];
+function finCPToggleAll(checked) {
+  _finCPLastList.forEach(function(r){ _finCPSel[r.id]=checked; });
+  finCPRender(); finCPUpdateBulkBar();
+}
+function finCPToggleSel(id) { _finCPSel[id]=!_finCPSel[id]; finCPUpdateBulkBar(); }
+function finCPUpdateBulkBar() {
+  var cnt=Object.values(_finCPSel).filter(Boolean).length;
+  var bar=document.getElementById('finCPBulkBar');
+  var lbl=document.getElementById('finCPBulkCount');
+  if(bar) bar.classList.toggle('visible',cnt>0);
+  if(lbl) lbl.textContent=cnt+' selecionado'+(cnt!==1?'s':'');
+}
+function finCPClearSel() { _finCPSel={}; finCPRender(); finCPUpdateBulkBar(); }
+function finCPBulkPagar() {
+  var ids=Object.keys(_finCPSel).filter(function(id){return _finCPSel[id];});
+  if(!ids.length){showToast('Selecione registros primeiro','warn');return;}
+  var dtStr=new Date().toISOString().slice(0,10);
+  ids.forEach(function(id){ var r=FIN_CP.find(function(x){return x.id===id;}); if(r&&r.status!=='pago') _finCPPagarConfirmar(id,dtStr); });
+  _finCPSel={}; finCPRender(); finCPUpdateBulkBar();
+}
+function finCPBulkDelete() {
+  var ids=Object.keys(_finCPSel).filter(function(id){return _finCPSel[id];});
+  if(!ids.length) return;
+  if(!confirm('Excluir '+ids.length+' despesa(s)?')) return;
+  FIN_CP=FIN_CP.filter(function(r){return !ids.includes(r.id);});
+  _finSaveCP(); _finCPSel={}; finCPRender(); finCPUpdateBulkBar();
+  showToast(ids.length+' despesa(s) excluída(s)','ok');
+}
+
 function finCPRender() {
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
@@ -11063,9 +11245,10 @@ function finCPRender() {
     var pOk=finDateInPeriod(dRef);
     return bOk&&cOk&&sOk&&pOk;
   });
+  _finCPLastList=list;
   var total=list.reduce(function(s,r){return s+r.valor;},0);
   if(cnt) cnt.textContent='('+list.length+' lançamento'+(list.length!==1?'s':'')+' · '+finFmt(total)+')';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
+  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(r){
     var statusMapCP={pendente:'pendente',pago:'pago',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMapCP[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
@@ -11073,25 +11256,29 @@ function finCPRender() {
     var tipo=FIN_TIPO_MAP[cat]||'despesa';
     var catC=FIN_CAT_COLORS[cat]||'#6B7280';
     var catIco=FIN_CAT_ICONS[cat]||'📌';
-    var tipoBadge=tipo==='custo'
-      ?'<span class="fin-tipo-custo">CMV</span>'
-      :'<span class="fin-tipo-despesa">Desp</span>';
+    var tipoBadge=tipo==='custo'?'<span class="fin-tipo-custo">CMV</span>':'<span class="fin-tipo-despesa">Desp</span>';
     var catBadge='<span class="fin-cat-badge" style="background:'+catC+'18;color:'+catC+';border:1px solid '+catC+'33">'+catIco+' '+cat+'</span>';
-    var acoesStr='';
+    // Cor do valor: vermelho só para vencido, verde para pago, padrão para pendente
+    var valColor=r.status==='vencido'?'#DC2626':r.status==='pago'?'#059669':'var(--text)';
+    // 3-dot menu
+    var menuId='cpMenu_'+r.id;
+    var menuItems='';
     if(r.status!=='pago'){
-      acoesStr='<button onclick="finCPPagar(\''+r.id+'\')" class="fin-baixar-btn">✓ Baixar</button> ';
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPPagar(\''+r.id+'\')">✓ Baixar pagamento</button>';
     } else {
-      acoesStr='<span style="font-size:10px;color:#059669;font-weight:700">✅ Pago em '+(r.dataPagamento||'—')+'</span> '
-        +'<button onclick="finCPEstornar(\''+r.id+'\')" class="fin-tbl-btn" style="background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;font-size:10px">↩</button> ';
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEstornar(\''+r.id+'\')">↩ Estornar pagamento</button>';
     }
-    acoesStr+='<button onclick="if(confirm(\'Excluir esta despesa?\')) finCPDel(\''+r.id+'\')" class="fin-tbl-btn fin-tbl-btn-del" title="Excluir">🗑️</button>';
+    menuItems+='<button class="danger" onclick="_finDotToggle(\''+menuId+'\');if(confirm(\'Excluir esta despesa?\'))finCPDel(\''+r.id+'\')">🗑️ Excluir</button>';
+    var dotMenu='<div class="fin-dot-wrap"><button class="fin-dot-btn" onclick="event.stopPropagation();_finDotToggle(\''+menuId+'\')">⋯</button><div class="fin-dot-menu" id="'+menuId+'">'+menuItems+'</div></div>';
+    var chk='<input type="checkbox" '+(_finCPSel[r.id]?'checked':'')+' onchange="finCPToggleSel(\''+r.id+'\')" onclick="event.stopPropagation()">';
     return '<tr>'
+      +'<td>'+chk+'</td>'
       +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Lançamento interno')+'</div></td>'
       +'<td>'+tipoBadge+' '+catBadge+'</td>'
-      +'<td style="font-weight:800;color:#DC2626;font-size:13px">'+finFmt(r.valor)+'</td>'
+      +'<td style="font-weight:800;color:'+valColor+';font-size:13px">'+finFmt(r.valor)+'</td>'
       +'<td>'+r.vencimento+'</td>'
       +'<td>'+badge+'</td>'
-      +'<td><div class="fin-tbl-actions">'+acoesStr+'</div></td>'
+      +'<td>'+dotMenu+'</td>'
       +'</tr>';
   }).join('');
 }
@@ -11169,13 +11356,40 @@ function finCPSalvar(){
   showToast('Despesa registrada!','ok');
 }
 
+// ── DRE — Regime de Caixa vs Competência ────────────────────────────────────
+var _dreRegime = 'caixa'; // 'caixa' | 'comp'
+function finDRESetRegime(r) {
+  _dreRegime = r;
+  var btnC=document.getElementById('dreRegimeCaixa');
+  var btnP=document.getElementById('dreRegimeComp');
+  if(btnC){ btnC.style.background=r==='caixa'?'#7C3AED':'var(--bg2)'; btnC.style.color=r==='caixa'?'#fff':'var(--muted)'; }
+  if(btnP){ btnP.style.background=r==='comp'?'#7C3AED':'var(--bg2)'; btnP.style.color=r==='comp'?'#fff':'var(--muted)'; }
+  finDREBuild();
+}
+
 // ── DRE ───────────────────────────────────────────────────────────────────────
 function finDREBuild() {
   var el=document.getElementById('finDREContent'); if(!el) return;
   var mesFlt=parseInt((document.getElementById('finDREMes')||{}).value||'0');
   var mes=finMesAtual();
-  var txFiltro=FIN_TX.filter(function(t){return t.status==='recebido'&&(mesFlt===0||(t.mes&&t.mes===mesFlt));});
-  var cpFiltro=FIN_CP.filter(function(c){return c.status==='pago'&&(mesFlt===0||(c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mesFlt));});
+  var txFiltro, cpFiltro;
+  if(_dreRegime==='comp') {
+    // Competência: usa orçamentos/OS pelo mês de emissão (_ORC_ENVIADOS_DATA e KB_OS)
+    // Para simplificar: usa FIN_TX mas pela data criação (mês da OS), não do pagamento
+    txFiltro=FIN_TX.filter(function(t){
+      // data formato dd/mm
+      var m=t.mes||(t.data&&parseInt((t.data||'').split('/')[1]));
+      return t.status==='recebido'&&(mesFlt===0||m===mesFlt);
+    });
+    cpFiltro=FIN_CP.filter(function(c){
+      var m=parseInt((c.vencimento||'').split('/')[1]);
+      return (mesFlt===0||m===mesFlt);
+    });
+  } else {
+    // Regime de Caixa (padrão): data do recebimento/pagamento efetivo
+    txFiltro=FIN_TX.filter(function(t){return t.status==='recebido'&&(mesFlt===0||(t.mes&&t.mes===mesFlt));});
+    cpFiltro=FIN_CP.filter(function(c){return c.status==='pago'&&(mesFlt===0||(c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mesFlt));});
+  }
   var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
   var impostos=receitaBruta*0.07;
   var receitaLiq=receitaBruta-impostos;
@@ -12393,9 +12607,9 @@ var _lastOsId = null;
     finRender();
 
     // ── Auto-cria Contas a Receber vinculado à OS ──────────────────
-    (function(){
+    var _autocrId = (function(){
       var totalOS = c.finalPrice||0;
-      if(!totalOS) return;
+      if(!totalOS) return '';
       // Pagamento parcial detectado pelo campo de entrada
       var crValor = _isPartial ? (totalOS - _entradaVal) : totalOS;
       var crStatus = _isPartial ? 'pendente' : 'recebido';
@@ -12419,6 +12633,7 @@ var _lastOsId = null;
         dataRecebimento: crStatus==='recebido' ? dia+'/'+hoje.getFullYear() : null
       });
       _finSaveCR();
+      return crId; // ← Fix #123: expõe crId para o _orc abaixo evitar CR duplicado
     })();
     // ──────────────────────────────────────────────────────────────
 
@@ -12524,6 +12739,7 @@ var _lastOsId = null;
         valorBase:c.finalPrice||0, valorFinal:c.finalPrice||0,
         descCond:0, descPix:0, parcelas:parcelas, pgto:formaPgto,
         status:'aprovado',
+        crId: _autocrId, // ← Fix #123: previne CR duplicado em orcEnvSetStatus
         dataSalvo:new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
         obs:'', itens:itens,
         prazo:entregaOS||'',
