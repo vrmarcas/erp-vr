@@ -1117,6 +1117,15 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .auth-card { padding: 28px 22px !important; max-width: 100% !important; border-radius: 14px !important; }
   .lock-card { padding: 28px 22px !important; }
   .auth-overlay { padding: 16px; align-items: flex-start; padding-top: 40px; }
+
+  /* ── Orçamento mobile ── */
+  .orc-step-arrow { display: none !important; }
+  .fg-row { flex-direction: column !important; }
+  #opg2 > div:first-child { grid-template-columns: 1fr !important; }
+  #opg3grid { grid-template-columns: 1fr !important; }
+  #orcMachGrid { grid-template-columns: 1fr !important; }
+  #opg4 > div:first-child { grid-template-columns: 1fr !important; }
+  #orcPrazoGrid { grid-template-columns: 1fr !important; }
 }
 
 @media (max-width: 400px) {
@@ -2360,7 +2369,7 @@ function _cloudAuthAviso(msg){
             <!-- Máquinas & Consumíveis -->
             <div class="card">
               <div class="card-h"><div class="card-h-left">⚙️ Serviços de Máquina &amp; Consumíveis</div></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div id="orcMachGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
                   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                     <select id="orcMachPresetSel" onchange="orcAplicarPreset(this.value)"
@@ -2592,7 +2601,7 @@ function _cloudAuthAviso(msg){
                 <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📅 Prazo de Produção</div>
                 <span id="orcPrazoSugeridoLabel" style="font-size:10px;color:var(--brand-mid);font-weight:700"></span>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div id="orcPrazoGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                 <div class="fg" style="margin:0">
                   <label style="font-size:10px">Dias úteis mínimo</label>
                   <input type="number" id="orcPrazoDias" min="1" max="90" placeholder="Ex: 3" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:7px;width:100%" oninput="orcCalcDataEntrega()">
