@@ -4613,7 +4613,7 @@ function _cloudAuthAviso(msg){
 
           <!-- ── Calculadora de Markup ── -->
           <div class="card" style="margin-top:18px">
-            <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div><button class="topbar-btn" style="font-size:11px" onclick="mkPopularFromConfig()">🔄 Puxar do ERP</button></div>
+            <div class="card-h"><div class="card-h-left">🧮 Calculadora de Markup</div><button class="topbar-btn" style="font-size:11px" onclick="mkPopularFromConfig()">🔄 Puxar do ERP</button><button class="topbar-btn" style="font-size:11px;background:#16a34a;color:#fff" onclick="mkSalvarNoERP()">💾 Salvar no ERP</button></div>
             <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Informe o custo e os fatores para calcular o preço de venda automaticamente. Clique em "Puxar do ERP" para preencher com os parâmetros salvos.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
               <div class="fg">
@@ -10616,9 +10616,15 @@ function finDonutRender() {
 
 // ── Contas a Receber — Sumário de totais ─────────────────────────────────────
 function finCRUpdateSummary() {
-  var pend  = FIN_CR.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
-  var rec   = FIN_CR.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
-  var atras = FIN_CR.filter(function(r){return r.status==='vencido';}).reduce(function(s,r){return s+r.valor;},0);
+  var list = FIN_CR.filter(function(r){
+    var bOk = _finBrand==='todas' || r.marca===_finBrand;
+    var dRef = r.dataRecebimento||r.vencimento||'';
+    var pOk = finDateInPeriod(dRef);
+    return bOk && pOk;
+  });
+  var pend  = list.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var rec   = list.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
+  var atras = list.filter(function(r){return r.status==='vencido';}).reduce(function(s,r){return s+r.valor;},0);
   var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
   set('finCRSumPend',pend); set('finCRSumRec',rec); set('finCRSumAtras',atras);
 }
@@ -14855,6 +14861,21 @@ function mkPopularFromConfig() {
   showToast('Calculadora preenchida com os parâmetros do ERP','ok');
 }
 
+function mkSalvarNoERP() {
+  var dga = parseFloat((document.getElementById('mkCalcDGA')||{}).value)||0;
+  var com = parseFloat((document.getElementById('mkCalcCOM')||{}).value)||0;
+  var imp = parseFloat((document.getElementById('mkCalcIMP')||{}).value)||0;
+  var mld = parseFloat((document.getElementById('mkCalcMLD')||{}).value)||0;
+  if(!_cfgData) _cfgData = {};
+  if(!_cfgData.financeiro) _cfgData.financeiro = {};
+  _cfgData.financeiro.overhead = dga;
+  _cfgData.financeiro.comissao = com;
+  _cfgData.financeiro.impostos = imp;
+  _cfgData.financeiro.vrml = mld;
+  _cloudSave('erp_config', _cfgData);
+  showToast('Parâmetros salvos no ERP!','ok');
+}
+
 function mkCalc() {
   var custo = parseFloat(document.getElementById('mkCalcCusto').value)||0;
   var dga   = parseFloat(document.getElementById('mkCalcDGA').value)||0;
@@ -16151,7 +16172,7 @@ function crmBasePushKanban() {
   if(typeof crmSaveLeads==='function') crmSaveLeads();
   nav('crm', null);
   setTimeout(function(){
-    if(typeof crmSetBrand==='function') crmSetBrand(marca);
+    if(typeof crmSetBrand==='function') crmSetBrand('pipeline');
     showToast('✅ '+c.nome+' adicionado ao Kanban CRM!','ok');
   }, 300);
 }
