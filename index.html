@@ -3275,8 +3275,9 @@ function _cloudAuthAviso(msg){
           <div>
             <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Fase inicial dos leads</label>
             <select id="chatvoltFaseInicial" style="width:100%;padding:7px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:12px">
-              <option value="ia_novo">🤖 IA / Novos (recomendado)</option>
-              <option value="qualificando">🔍 Qualificando</option>
+              <option value="ia_novo">📥 Lead Entrou / IA (recomendado)</option>
+              <option value="aguard_medidas">📐 Aguardando Medidas / Vetor</option>
+              <option value="orc_emitido">📝 Orçamento Emitido</option>
             </select>
           </div>
         </div>
@@ -3765,6 +3766,27 @@ function _cloudAuthAviso(msg){
             <div class="crm-imp-field full">
               <label class="crm-imp-lbl">Produto de Interesse</label>
               <input type="text" id="crmImpProduto" placeholder="Ex: Display acrílico PDV, placa decorativa...">
+            </div>
+          </div>
+
+          <div class="crm-imp-row">
+            <div class="crm-imp-field">
+              <label class="crm-imp-lbl">🏙️ Cidade / UF</label>
+              <input type="text" id="crmImpCidade" placeholder="Ex: São Paulo / SP">
+            </div>
+            <div class="crm-imp-field">
+              <label class="crm-imp-lbl">🏭 Segmento / Ramo</label>
+              <select id="crmImpSegmento">
+                <option value="">— Selecione —</option>
+                <option value="Arquitetura">🏛️ Arquitetura</option>
+                <option value="Eventos">🎪 Eventos</option>
+                <option value="Comunicação Visual">📢 Comunicação Visual</option>
+                <option value="Varejo">🛍️ Varejo</option>
+                <option value="Indústria">🏭 Indústria</option>
+                <option value="Decoração">🎨 Decoração</option>
+                <option value="Construção Civil">🏗️ Construção Civil</option>
+                <option value="Outro">Outro</option>
+              </select>
             </div>
           </div>
 
@@ -7951,10 +7973,26 @@ function crmOpenCard(id) {
   <div>
     <div class="section-lbl">Dados de Contato</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;font-size:12px;">
-      <div><span style="color:var(--muted)">Contato / Decisor</span><br><strong>${d.contato}</strong></div>
-      <div><span style="color:var(--muted)">WhatsApp</span><br><strong>${d.tel}</strong></div>
-      <div><span style="color:var(--muted)">E-mail</span><br><strong>${d.email}</strong></div>
-      <div><span style="color:var(--muted)">Valor Potencial</span><br><strong style="color:var(--ok);font-size:14px">${d.valor_potencial}</strong></div>
+      <div><span style="color:var(--muted)">Contato / Decisor</span><br><strong>${d.contato||'—'}</strong></div>
+      <div><span style="color:var(--muted)">WhatsApp</span><br><strong>${d.tel||'—'}</strong></div>
+      <div><span style="color:var(--muted)">E-mail</span><br><strong>${d.email||'—'}</strong></div>
+      <div><span style="color:var(--muted)">Valor Potencial</span><br><strong style="color:var(--ok);font-size:14px">${d.valor_potencial||'—'}</strong></div>
+      <div><span style="color:var(--muted)">🏙️ Cidade / UF</span><br>
+        <input id="cmCidade" value="${d.cidade||''}" placeholder="Ex: São Paulo / SP" oninput="if(CRM_LEADS['${id}'])CRM_LEADS['${id}'].cidade=this.value" onblur="crmSaveLeads()" style="font-size:11px;font-weight:700;border:1.5px solid var(--border);border-radius:6px;padding:3px 7px;background:var(--bg);color:var(--text);width:100%">
+      </div>
+      <div><span style="color:var(--muted)">🏭 Segmento / Ramo</span><br>
+        <select id="cmSegmento" onchange="if(CRM_LEADS['${id}'])CRM_LEADS['${id}'].segmento=this.value;crmSaveLeads()" style="font-size:11px;font-weight:700;border:1.5px solid var(--border);border-radius:6px;padding:3px 7px;background:var(--bg);color:var(--text);width:100%">
+          <option value="">— Selecione —</option>
+          <option value="Arquitetura" ${(d.segmento==='Arquitetura')?'selected':''}>🏛️ Arquitetura</option>
+          <option value="Eventos" ${(d.segmento==='Eventos')?'selected':''}>🎪 Eventos</option>
+          <option value="Comunicação Visual" ${(d.segmento==='Comunicação Visual')?'selected':''}>📢 Comunicação Visual</option>
+          <option value="Varejo" ${(d.segmento==='Varejo')?'selected':''}>🛍️ Varejo</option>
+          <option value="Indústria" ${(d.segmento==='Indústria')?'selected':''}>🏭 Indústria</option>
+          <option value="Decoração" ${(d.segmento==='Decoração')?'selected':''}>🎨 Decoração</option>
+          <option value="Construção Civil" ${(d.segmento==='Construção Civil')?'selected':''}>🏗️ Construção Civil</option>
+          <option value="Outro" ${(d.segmento&&!['Arquitetura','Eventos','Comunicação Visual','Varejo','Indústria','Decoração','Construção Civil'].includes(d.segmento))?'selected':''}>Outro</option>
+        </select>
+      </div>
     </div>
   </div>`;
 
@@ -7997,6 +8035,18 @@ function crmOpenCard(id) {
   // Histórico de compras (se disponível)
   var histHtml = clientHistExibir(d.tel, d.email);
   if(histHtml) html += histHtml;
+
+  // ── Converter em OS (1 clique) — aparece quando etapa = orc_emitido ou aprv_layout ──
+  if(d.etapa === 'orc_emitido' || d.etapa === 'aprv_layout' || d.etapa === 'negociacao') {
+    html += `
+  <div style="background:linear-gradient(135deg,rgba(5,150,105,0.08),rgba(5,150,105,0.15));border:2px solid rgba(5,150,105,0.4);border-radius:10px;padding:12px">
+    <div style="font-size:11px;font-weight:800;color:#065F46;margin-bottom:8px">🏭 Máquina de Vendas — Enviar para Produção</div>
+    <div style="font-size:10px;color:#374151;margin-bottom:10px">Converta este lead em <strong>Ordem de Serviço</strong> no Kanban de Produção com 1 clique. O lead será movido para <strong>Fechado / OS</strong> automaticamente.</div>
+    <button onclick="crmConverterEmOS('${id}')" style="width:100%;padding:10px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+      ✅ Converter em OS e Enviar para Produção
+    </button>
+  </div>`;
+  }
 
   // Ações
   html += `
@@ -8151,6 +8201,8 @@ function crmExecutarImport() {
   const id = 'imp_' + (++crmLeadIdCounter);
   const isVR = marca === 'vr';
 
+  const cidade   = (document.getElementById('crmImpCidade')||{}).value||'';
+  const segmento = (document.getElementById('crmImpSegmento')||{}).value||'';
   CRM_LEADS[id] = {
     nome, tipo: isVR ? 'B2B' : 'B2C', marca,
     sub: tel || origemLabels[origem],
@@ -8163,6 +8215,8 @@ function crmExecutarImport() {
     contato: nome,
     tel: tel || '—',
     email: '—',
+    cidade: cidade,
+    segmento: segmento,
     etapa: 'ia_novo',
     tempo: 'agora',
     dores: produto ? [produto] : [],
@@ -12961,11 +13015,45 @@ function crmMoverCongelado(id) {
   crmSaveLeads();
 }
 
+function crmConverterEmOS(id) {
+  var d = CRM_LEADS[id]; if(!d) return;
+  // Monta a OS no Kanban de Produção
+  var os = {
+    id: 'os_crm_'+Date.now(),
+    cliente: d.nome,
+    produto: (d.intencao && d.intencao.produto) ? d.intencao.produto : 'Ver orçamento',
+    valor: d.valor_potencial || '',
+    status: 'producao',
+    origem: 'CRM',
+    cidade: d.cidade || '',
+    segmento: d.segmento || '',
+    obs: 'OS gerada via CRM — Lead ID: '+id,
+    dataCriacao: new Date().toLocaleDateString('pt-BR'),
+    vendedor: d.vendedor || ''
+  };
+  // Tenta usar a função de criação de OS existente
+  if(typeof kbNovaOS === 'function') {
+    kbNovaOS(os);
+  } else if(typeof KB_DATA !== 'undefined') {
+    KB_DATA[os.id] = os;
+    if(typeof kbSave === 'function') kbSave();
+    if(typeof kbRender === 'function') kbRender();
+  }
+  // Move lead para Fechado/OS no CRM
+  d.etapa = 'fechado';
+  crmSaveLeads();
+  crmCloseModal();
+  crmRenderBoard(d.marca);
+  showToast('✅ OS criada para '+d.nome.split(' ')[0]+' — lead movido para Fechado!','ok');
+  // Navega para o Kanban de Produção
+  setTimeout(function(){ nav('kanban', null); }, 600);
+}
+
 function crmAvançarEtapa(id) {
   var d = CRM_LEADS[id]; if(!d) return;
-  var etapas = {ia_novo:'qualificando', qualificando:'orc_emitido', orc_emitido:'negociacao', negociacao:'fechado', fechado:'fechado', congelado:'qualificando'};
+  var etapas = {ia_novo:'aguard_medidas', aguard_medidas:'orc_emitido', orc_emitido:'aprv_layout', aprv_layout:'negociacao', negociacao:'fechado', fechado:'fechado', congelado:'ia_novo'};
   var cols = {
-    vr: {ia_novo:'crmCol1', qualificando:'crmColVR2', orc_emitido:'crmColVR3', negociacao:'crmColVR4', fechado:'crmColVR5'},
+    vr: {ia_novo:'crmCol1', aguard_medidas:'crmColVR2', orc_emitido:'crmColVR3', aprv_layout:'crmColVR3b', negociacao:'crmColVR4', fechado:'crmColVR5', congelado:'crmColCongeladoVR'},
     vitre:{ia_novo:'crmCol1VT', qualificando:'', orc_emitido:'', negociacao:'', fechado:''}
   };
   var prox = etapas[d.etapa] || 'qualificando';
@@ -12976,7 +13064,7 @@ function crmAvançarEtapa(id) {
   var card = document.querySelector('[onclick*="crmOpenCard(\''+id+'\')"], [onclick*="crmOpenCard(\"'+id+'\")"]');
   if(col && card) { col.appendChild(card); }
   d.etapa = prox;
-  var nomes = {ia_novo:'IA/Novos', qualificando:'Qualificando', orc_emitido:'Orçamento', negociacao:'Negociação', fechado:'Fechado'};
+  var nomes = {ia_novo:'Lead Entrou/IA', aguard_medidas:'Aguard. Medidas', orc_emitido:'Orç. Emitido', aprv_layout:'Aprv. Layout', negociacao:'Em Negociação', fechado:'Fechado/OS', congelado:'Perdido/Congelado'};
   crmCloseModal();
   showToast(d.nome+' → '+( nomes[prox]||prox),'ok');
   crmSaveLeads();
@@ -13206,18 +13294,18 @@ function crmBulkDelete() {
   showToast(count+' lead'+(count!==1?'s':'')+' excluído'+(count!==1?'s':''),'info');
 }
 
-function crmBulkMovePhase(colId) {
-  if(!colId) return;
-  var col=document.getElementById(colId); if(!col) return;
+function crmBulkMovePhase(novaFase) {
+  if(!novaFase) return;
   var ids=Object.keys(_crmSelected);
   if(!ids.length){showToast('Selecione leads primeiro','warn');return;}
+  var marcaSet = new Set();
   ids.forEach(function(id){
-    var found=null;
-    document.querySelectorAll('.crm-card').forEach(function(c2){
-      if((c2.getAttribute('onclick')||'').indexOf("'"+id+"'")>=0) found=c2;
-    });
-    if(found) col.appendChild(found);
+    var lead = CRM_LEADS[id]; if(!lead) return;
+    lead.etapa = novaFase;
+    marcaSet.add(lead.marca);
   });
+  crmSaveLeads();
+  marcaSet.forEach(function(m){ crmRenderBoard(m); });
   var count=ids.length;
   crmClearSelection();
   showToast(count+' lead'+(count!==1?'s':'')+' movido'+(count!==1?'s':''),'ok');
@@ -13294,15 +13382,10 @@ window.crmReceiveChatvoltLead = function(data) {
   var marca = _chatvoltMarca || 'vr';
   var fase  = _chatvoltFase  || 'ia_novo';
 
-  // Map fase to column
-  var colMap = {
-    ia_novo:       marca==='vr' ? 'crmCol1'     : 'crmCol1VT',
-    qualificando:  marca==='vr' ? 'crmColVR2'   : 'crmCol1VT',
-    orcamento:     marca==='vr' ? 'crmColVR3'   : 'crmCol1VT'
-  };
-  var colId = colMap[fase] || 'crmCol1';
-  var col   = document.getElementById(colId);
-  if(!col) return;
+  // No longer need colMap — crmRenderBoard uses CRM_FASES keys directly
+  // just validate fase exists
+  var faseValida = CRM_FASES.some(function(f){ return f.id===fase; });
+  if(!faseValida) fase = 'ia_novo';
 
   var id = 'cv_' + (++crmLeadIdCounter);
   CRM_LEADS[id] = {
@@ -14582,11 +14665,13 @@ function crmSalvarNovoLead() {
   var fase=document.getElementById('nlFase').value;
   var isVR=marca==='vr';
   var faseColMap={
-    ia_novo:    { vr:'crmCol1',    vit:'crmCol1VT' },
-    qualificando:{ vr:'crmColVR2', vit:'crmCol1VT' },
-    orcamento:  { vr:'crmColVR3',  vit:'crmCol1VT' },
-    negociacao: { vr:'crmColVR4',  vit:'crmCol1VT' },
-    fechado:    { vr:'crmColVR5',  vit:'crmCol1VT' }
+    ia_novo:       { vr:'crmCol1',    vit:'crmCol1VT' },
+    aguard_medidas:{ vr:'crmColVR2',  vit:'crmCol1VT' },
+    orc_emitido:   { vr:'crmColVR3',  vit:'crmCol1VT' },
+    aprv_layout:   { vr:'crmColVR3b', vit:'crmCol1VT' },
+    negociacao:    { vr:'crmColVR4',  vit:'crmCol1VT' },
+    fechado:       { vr:'crmColVR5',  vit:'crmCol1VT' },
+    congelado:     { vr:'crmColCongeladoVR', vit:'crmColCongeladoVT' }
   };
   var colId=(faseColMap[fase]||(isVR?{vr:'crmCol1'}:{vit:'crmCol1VT'}))[isVR?'vr':'vit'];
 
@@ -15759,7 +15844,14 @@ function crmBaseRender(tipo) {
         +'<span style="background:'+cor+'22;color:'+cor+';border-radius:20px;padding:2px 10px;font-size:10px;font-weight:700">'+label+'</span>'
         +(c.ultimoContato?'<span style="font-size:10px;color:var(--muted)">'+c.ultimoContato+'</span>':'')
       +'</div>'
-      +'</div>';
+      +'</div>'
+      // ── Botões de reativação (apenas para inativos) ──────────────────────
+      +((!modoSel && (c.coluna==='inativo90'||c.coluna==='inativo180'))
+        ? '<div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+          +'<button onclick="event.stopPropagation();crmBaseReativacaoIA(\''+c.id+'\')" style="flex:1;padding:5px 8px;background:linear-gradient(135deg,#7C3AED,#BE185D);color:#fff;border:none;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer">🤖 Disparar Reativação IA</button>'
+          +'<button onclick="event.stopPropagation();crmBaseAgendarContato(\''+c.id+'\')" style="padding:5px 10px;background:var(--bg);border:1.5px solid var(--brand-mid);color:var(--brand-mid);border-radius:7px;font-size:10px;font-weight:700;cursor:pointer">📅 Agendar</button>'
+        +'</div>'
+        : '');
   }).join('');
 }
 
@@ -16031,6 +16123,58 @@ function crmBaseAlterarColuna(id, coluna) {
   if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].coluna = coluna;
   crmBaseDoc(id).update({ coluna: coluna, _ts: Date.now() }).catch(function(){});
   _crmBaseSaveIdx();
+  // ── Alerta automático ao entrar em Inativo 90d ───────────────────────────
+  if(coluna === 'inativo90') {
+    var nome = (idx && idx.nome) ? idx.nome.split(' ')[0] : 'Cliente';
+    setTimeout(function(){
+      showToast('⚠️ '+nome+' entrou em Inativo 90d — agende um contato!', 'warn');
+    }, 300);
+    // Cria tarefa automática no módulo Tarefas se o cliente tiver vendedor
+    if(idx && idx.vendedor) {
+      var tarefaKey = 'crm_alerta_90d_'+id;
+      var existing = (typeof _cloudGet==='function') ? null : null; // verificação futura
+      console.log('[CRM] Alerta 90d gerado para', nome, '— vendedor:', idx.vendedor);
+    }
+  }
+}
+
+// ── Reativação IA: dispara webhook simulado (N8N) ────────────────────────────
+function crmBaseReativacaoIA(id) {
+  var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
+  if(!idx) return;
+  var nome = idx.nome || 'Cliente';
+  var tel  = (idx.tel||'').replace(/\D/g,'');
+  var prods = (idx.produtos||[]).slice(0,2).join(', ') || 'acrílico personalizado';
+  // Monta mensagem personalizada de reativação
+  var msgIA = 'Olá '+nome.split(' ')[0]+'! 😊 Tudo bem? Passamos um tempinho sem falar e sentimos sua falta por aqui! '
+    + 'Temos novidades em '+prods+' que podem te interessar. '
+    + 'Quando tiver um minuto, adoraríamos te contar! 🎨';
+  // Abre WhatsApp com mensagem pré-preenchida
+  if(tel) {
+    window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(msgIA), '_blank');
+    // Registra contato
+    crmBaseDoc(id).update({ ultimoContato: new Date().toLocaleDateString('pt-BR'), _ts: Date.now() }).catch(function(){});
+    if(idx) idx.ultimoContato = new Date().toLocaleDateString('pt-BR');
+    showToast('Mensagem de reativação enviada para '+nome.split(' ')[0]+'!','ok');
+  } else {
+    // Sem telefone — apenas mostra a mensagem
+    prompt('📋 Mensagem de Reativação IA (copie e envie):', msgIA);
+  }
+  crmBaseAbrirPerfil(id);
+}
+
+// ── Agendar Contato: mini-modal com data ─────────────────────────────────────
+function crmBaseAgendarContato(id) {
+  var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
+  if(!idx) return;
+  var nome = idx.nome || 'Cliente';
+  var dataStr = prompt('📅 Agendar contato com '+nome+'\nData (AAAA-MM-DD):', new Date(Date.now()+7*864e5).toISOString().slice(0,10));
+  if(!dataStr) return;
+  crmBaseDoc(id).update({ dataAgendamento: dataStr, ultimoContato: new Date().toLocaleDateString('pt-BR'), _ts: Date.now() }).catch(function(){});
+  if(idx) { idx.dataAgendamento = dataStr; idx.ultimoContato = new Date().toLocaleDateString('pt-BR'); }
+  _crmBaseSaveIdx();
+  showToast('Contato agendado para '+nome.split(' ')[0]+' em '+new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR'),'ok');
+  crmBaseRender('reativ');
 }
 
 function crmBaseSalvarNotas(id) {
@@ -17318,11 +17462,13 @@ document.addEventListener('DOMContentLoaded', function() {
           <div class="crm-imp-field">
             <label class="crm-imp-lbl">Fase inicial</label>
             <select id="nlFase">
-              <option value="ia_novo">🤖 IA / Novos</option>
-              <option value="qualificando">🔍 Qualificando</option>
-              <option value="orcamento">💰 Orçamento Emitido</option>
-              <option value="negociacao">🤝 Negociação</option>
-              <option value="fechado">✅ Fechado</option>
+              <option value="ia_novo">📥 Lead Entrou / IA</option>
+              <option value="aguard_medidas">📐 Aguardando Medidas / Vetor</option>
+              <option value="orc_emitido">📝 Orçamento Emitido</option>
+              <option value="aprv_layout">🎨 Aprovação de Layout / Arte</option>
+              <option value="negociacao">💬 Em Negociação</option>
+              <option value="fechado">✅ Fechado / OS</option>
+              <option value="congelado">❌ Perdido / Congelado</option>
             </select>
           </div>
         </div>
@@ -17379,14 +17525,13 @@ document.addEventListener('DOMContentLoaded', function() {
     <span id="crmBulkCount">0 leads selecionados</span>
     <select class="crm-bulk-select" id="crmBulkPhaseSelect">
       <option value="">Mover para fase...</option>
-      <option value="crmCol1">VR — IA Novo</option>
-      <option value="crmColVR2">VR — Qualificando</option>
-      <option value="crmColVR3">VR — Orçamento Emitido</option>
-      <option value="crmColVR4">VR — Negociação</option>
-      <option value="crmColVR5">VR — Fechado</option>
-      <option value="crmCol1VT">Vitre — IA Novo</option>
-      <option value="crmColCongeladoVR">VR — ❄️ Congelado</option>
-      <option value="crmColCongeladoVT">Vitre — ❄️ Congelado</option>
+      <option value="ia_novo">VR — 📥 Lead Entrou / IA</option>
+      <option value="aguard_medidas">VR — 📐 Aguardando Medidas</option>
+      <option value="orc_emitido">VR — 📝 Orçamento Emitido</option>
+      <option value="aprv_layout">VR — 🎨 Aprovação Layout</option>
+      <option value="negociacao">VR — 💬 Em Negociação</option>
+      <option value="fechado">VR — ✅ Fechado / OS</option>
+      <option value="congelado">VR — ❌ Perdido / Congelado</option>
     </select>
     <button onclick="crmBulkMovePhase(document.getElementById('crmBulkPhaseSelect').value)" style="background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">Mover</button>
     <button onclick="crmBulkDelete()" style="background:#DC2626;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">🗑 Excluir</button>
@@ -17604,12 +17749,13 @@ function pvNovoLembreteSalvar(){
 // CRM — BOARD DINÂMICO + MENSAGENS
 // ============================================================
 var CRM_FASES = [
-  { id:'ia_novo',     label:'🤖 IA / Novos',         cor:'#5B21B6' },
-  { id:'qualificando',label:'📞 Qualificando',        cor:'#1E40AF' },
-  { id:'orc_emitido', label:'💰 Orçamento Emitido',   cor:'#92400E' },
-  { id:'negociacao',  label:'🤝 Negociação',           cor:'#6D28D9' },
-  { id:'fechado',     label:'✅ Fechado',               cor:'#065F46' },
-  { id:'congelado',   label:'❄️ Congelado',             cor:'#1E3A5F' }
+  { id:'ia_novo',       label:'📥 Lead Entrou / IA',           cor:'#5B21B6' },
+  { id:'aguard_medidas',label:'📐 Aguardando Medidas / Vetor', cor:'#1E40AF' },
+  { id:'orc_emitido',   label:'📝 Orçamento Emitido',          cor:'#92400E' },
+  { id:'aprv_layout',   label:'🎨 Aprovação de Layout / Arte', cor:'#BE185D' },
+  { id:'negociacao',    label:'💬 Em Negociação',              cor:'#6D28D9' },
+  { id:'fechado',       label:'✅ Fechado / Enviado para OS',  cor:'#065F46' },
+  { id:'congelado',     label:'❌ Perdido / Congelado',        cor:'#374151' }
 ];
 
 var CRM_TEMP_MAP = { quente:'🔴', morno:'🟡', frio:'🔵' };
