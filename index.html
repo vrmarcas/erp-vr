@@ -2045,6 +2045,17 @@ function _cloudAuthAviso(msg){
 
         </div>
       </div>
+
+      <!-- MONTH CALENDAR VIEW -->
+      <div id="kbMonthView" style="display:none;padding:10px 14px">
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:12px">
+          <button onclick="kbMonthNav(-1)" class="topbar-btn" style="font-size:16px;padding:4px 12px;line-height:1">‹</button>
+          <div id="kbMonthTitle" style="font-size:15px;font-weight:800;color:var(--text);min-width:180px;text-align:center"></div>
+          <button onclick="kbMonthNav(1)" class="topbar-btn" style="font-size:16px;padding:4px 12px;line-height:1">›</button>
+        </div>
+        <div id="kbMonthGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px"></div>
+      </div>
+
     </div>
 
     <!-- OS DETAIL MODAL -->
@@ -9759,7 +9770,16 @@ function kbSetView(view, btn) {
   _kbView = view;
   ['kbViewAll','kbViewWeek','kbViewMonth'].forEach(function(id){ var b=document.getElementById(id); if(b) b.classList.remove('on'); });
   if(btn) btn.classList.add('on');
-  kbApplyViewFilter();
+  var kbWrap = document.querySelector('#pg-kanban .kb-wrap');
+  var monthView = document.getElementById('kbMonthView');
+  if(view === 'month') {
+    if(kbWrap) kbWrap.style.display = 'none';
+    if(monthView) { monthView.style.display = ''; kbRenderMonthCalendar(); }
+  } else {
+    if(kbWrap) kbWrap.style.display = '';
+    if(monthView) monthView.style.display = 'none';
+    kbApplyViewFilter();
+  }
 }
 
 function kbApplyViewFilter() {
@@ -9803,6 +9823,95 @@ function kbApplyViewFilter() {
     var vOk=card.dataset.viewHide!=='hide';
     card.style.display=(bOk&&tOk&&vOk)?'':'none';
   });
+}
+
+var _kbMonthYear  = new Date().getFullYear();
+var _kbMonthMonth = new Date().getMonth(); // 0-indexed
+
+function kbMonthNav(dir) {
+  _kbMonthMonth += dir;
+  if(_kbMonthMonth > 11) { _kbMonthMonth = 0; _kbMonthYear++; }
+  if(_kbMonthMonth < 0)  { _kbMonthMonth = 11; _kbMonthYear--; }
+  kbRenderMonthCalendar();
+}
+
+function kbRenderMonthCalendar() {
+  var title = document.getElementById('kbMonthTitle');
+  var grid  = document.getElementById('kbMonthGrid');
+  if(!title || !grid) return;
+
+  var monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var dayNames   = ['DOM','SEG','TER','QUA','QUI','SEX','SÁB'];
+  title.textContent = monthNames[_kbMonthMonth] + ' ' + _kbMonthYear;
+
+  // Group OS by ISO date key (yyyy-mm-dd) within this month
+  var osByDate = {};
+  Object.keys(KB_OS).forEach(function(k) {
+    var os = KB_OS[k]; if(!os) return;
+    if(os.status === 'cancelado') return;
+    var _entStr = os.entrega || os.prazo || '';
+    if(!_entStr) return;
+    var d = null;
+    if(_entStr.indexOf('-') > 0) {
+      var _ep = _entStr.split('-');
+      d = new Date(+_ep[0], +_ep[1]-1, +_ep[2]);
+    } else if(_entStr.indexOf('/') > 0) {
+      var _dp = _entStr.split('/');
+      if(_dp.length === 3) d = new Date(+_dp[2], +_dp[1]-1, +_dp[0]);
+    }
+    if(!d || d.getFullYear() !== _kbMonthYear || d.getMonth() !== _kbMonthMonth) return;
+    var dateKey = d.getDate(); // just day number, since we're already in month
+    if(!osByDate[dateKey]) osByDate[dateKey] = [];
+    osByDate[dateKey].push({ os: os, id: os.id || k });
+  });
+
+  var today = new Date(); today.setHours(0,0,0,0);
+  var firstDay = new Date(_kbMonthYear, _kbMonthMonth, 1);
+  var lastDay  = new Date(_kbMonthYear, _kbMonthMonth + 1, 0);
+  var startDow = firstDay.getDay(); // 0=Sun
+
+  var smMap = {iniciada:'#6B7280',em_andamento:'#6B7280',producao:'#D97706',pronta:'#059669',entregue:'#059669',cancelado:'#DC2626'};
+
+  var html = '';
+  // Header row
+  dayNames.forEach(function(d) {
+    html += '<div style="text-align:center;font-size:10px;font-weight:800;color:var(--muted);padding:5px 0;border-bottom:1.5px solid var(--border)">'+d+'</div>';
+  });
+
+  // Empty leading cells
+  for(var i = 0; i < startDow; i++) {
+    html += '<div style="min-height:80px;border-radius:6px;background:var(--bg);opacity:0.4;border:1px solid var(--border)"></div>';
+  }
+
+  // Day cells
+  for(var day = 1; day <= lastDay.getDate(); day++) {
+    var cellDate = new Date(_kbMonthYear, _kbMonthMonth, day); cellDate.setHours(0,0,0,0);
+    var isToday  = cellDate.getTime() === today.getTime();
+    var dayItems = osByDate[day] || [];
+    var borderStyle = isToday ? 'border:2px solid var(--brand-mid);background:rgba(99,102,241,0.05)' : 'border:1px solid var(--border);background:var(--bg2)';
+    var dayNumColor = isToday ? 'var(--brand-mid)' : 'var(--text)';
+    var dayNumWeight = isToday ? '900' : '700';
+
+    html += '<div style="min-height:80px;border-radius:8px;'+borderStyle+';padding:4px;overflow:hidden;vertical-align:top">';
+    html += '<div style="font-size:11px;font-weight:'+dayNumWeight+';color:'+dayNumColor+';margin-bottom:3px;line-height:1">'
+           + day + (isToday ? ' <span style="color:var(--brand-mid)">●</span>' : '') + '</div>';
+
+    dayItems.forEach(function(item) {
+      var os = item.os; var osId = item.id;
+      var isVt = (os.mk==='vit'||os.marca==='Vitre');
+      var bc = isVt ? '#BE185D' : '#7C3AED';
+      var sc = smMap[os.status] || '#6B7280';
+      var stTxt = {iniciada:'Iniciada',em_andamento:'Iniciada',producao:'Produção',pronta:'Pronta ✅',entregue:'Entregue'}[os.status] || os.status || '—';
+      html += '<div onclick="kbOpen(\''+osId+'\')" style="cursor:pointer;background:'+bc+'15;border-left:3px solid '+bc+';border-radius:4px;padding:3px 5px;margin-bottom:3px;font-size:10px;overflow:hidden">';
+      html += '<div style="font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px">'+(os.cliente||os.titulo||'OS')+'</div>';
+      html += '<div style="color:'+sc+';font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">OS#'+(os.num||'?')+' · '+stTxt+'</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+  }
+
+  grid.innerHTML = html;
 }
 
 function kbOpenNovaOS() {
