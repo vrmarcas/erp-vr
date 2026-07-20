@@ -1367,6 +1367,13 @@ function _cloudLoadAll() {
           if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
         });
         _cfgData = merged;
+        // Migração automática: impostos foi inicializado como 0 pelo bug do loop; corrigir para 7
+        if (!merged._impostos_migrated && merged.financeiro && !merged.financeiro.impostos) {
+          _cfgData.financeiro.impostos = 7;
+          _cfgData._impostos_migrated = true;
+          _cloudSave('erp_config', _cfgData);
+          return; // próximo disparo do watch re-renderiza com o valor correto
+        }
         var pg=document.getElementById('cfgPg1');
         if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
         try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
@@ -15332,7 +15339,6 @@ function cfgAtualizarMargemPlan() {
   var imp = parseFloat((document.getElementById('cfgImpostos')||{}).value)||0;
   var el = document.getElementById('cfgMargemPlanTotal');
   if(el) el.textContent = (oh+vr+imp).toFixed(1)+'%';
-  cfgSalvar();
 }
 
 function cfgSalvar() {
