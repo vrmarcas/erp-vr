@@ -2159,8 +2159,6 @@ function _cloudAuthAviso(msg){
             </div>
             <div id="kbMatProdQtyLabel" style="font-size:11px;color:#92400E;margin-top:3px"></div>
           </div>
-          <button id="kbReverterBtn" onclick="kbReverterProducao()" style="display:none;width:100%;padding:10px;margin-bottom:8px;border:1.5px solid #D97706;background:transparent;color:#D97706;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">↩ Reverter para Produção</button>
-          <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
           <!-- Bloco Avisar Cliente — só visível para Master quando OS está pronta -->
           <div id="kbAvisarClienteBox" style="display:none;margin-top:10px;background:#F0FDF4;border:2px solid #86EFAC;border-radius:10px;padding:14px">
             <div style="font-size:12px;font-weight:800;color:#065F46;margin-bottom:6px">📱 Avisar Cliente — OS Pronta</div>
@@ -2170,7 +2168,13 @@ function _cloudAuthAviso(msg){
               💬 Enviar via WhatsApp
             </button>
           </div>
-          <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px"><button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button><button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button></div>
+          <!-- RODAPÉ FIXO — Ações principais -->
+          <div style="position:sticky;bottom:0;z-index:5;background:var(--surface);border-top:1.5px solid var(--border);padding:10px 0 4px;margin-top:10px;display:flex;flex-direction:column;gap:6px">
+            <button id="kbReverterBtn" onclick="kbReverterProducao()" style="display:none;width:100%;padding:10px;border:1.5px solid #D97706;background:transparent;color:#D97706;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">↩ Reverter para Produção</button>
+            <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
+            <button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button>
+            <button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button>
+          </div>
           <!-- ── ENVIAR PARA FORNECEDOR ── -->
           <div id="kbFornSection" style="margin-top:14px;border-top:1.5px solid var(--border);padding-top:14px;display:none">
             <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🏭 Fornecedor desta OS</div>
@@ -8286,8 +8290,8 @@ function kbOpen(id) {
     else if(_pdiff<=3)  _prazoStatus = ' <span style="color:#D97706;font-weight:700;font-size:10px">⏰ '+_pdiff+'d</span>';
   }
   const _cidade  = os.cidade  || os.clientCidade || '—';
-  const _mat     = os.material || (os.itens && os.itens[0] ? os.itens[0].matLabel : '') || '—';
-  const _med     = os.medidas  || (os.itens && os.itens[0] && os.itens[0].larg ? os.itens[0].larg+'×'+os.itens[0].alt+'cm' : '—');
+  const _mat     = os.material || (os.itens && os.itens[0] ? (os.itens[0].matLabel || os.itens[0].mat || '') : '') || '—';
+  const _med     = os.medidas  || (os.itens && os.itens[0] && os.itens[0].larg ? os.itens[0].larg+'×'+os.itens[0].alt+'cm' : '') || (os.esp ? os.esp+'mm' : '') || '—';
   const _qty     = os.qty      || (os.itens ? os.itens.reduce((s,i)=>s+(i.qty||1),0) : 1) || 1;
   const _valorFmt = typeof os.valor === 'number'
     ? 'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
@@ -8391,7 +8395,18 @@ function kbOpen(id) {
   var _matProdBox = document.getElementById('kbMatProdBox');
   var _matProdLbl = document.getElementById('kbMatProdLabel');
   var _matProdQty = document.getElementById('kbMatProdQtyLabel');
-  if (_iniciarBox) _iniciarBox.style.display = (os.status === 'iniciada') ? '' : 'none';
+  if (_iniciarBox) {
+    var _ibBtn = _iniciarBox.querySelector('button');
+    if (os.status === 'iniciada') {
+      _iniciarBox.style.display = '';
+      if(_ibBtn){ _ibBtn.innerHTML='🔧 Iniciar Produção'; _ibBtn.style.background='linear-gradient(90deg,#D97706,#B45309)'; _ibBtn.onclick=function(){ kbIniciarProd(); }; }
+    } else if (os.status === 'producao') {
+      _iniciarBox.style.display = '';
+      if(_ibBtn){ _ibBtn.innerHTML='⏸ Pausar Produção'; _ibBtn.style.background='linear-gradient(90deg,#6B7280,#4B5563)'; _ibBtn.onclick=function(){ kbPausarProd(); }; }
+    } else {
+      _iniciarBox.style.display = 'none';
+    }
+  }
   // Receber Saldo — visível quando aguardando_saldo
   var _saldoBox = document.getElementById('kbReceberSaldoBox');
   if (_saldoBox) {
@@ -8560,9 +8575,14 @@ function kbAceitarSugestaoBtn(btn) {
   if(prazoEl) prazoEl.value = dateVal;
   kbSalvarTempo();
   kbSalvarPrazo();
+  // Re-aplicar filtro de visão para mover card para coluna correta
+  if(typeof _kbView !== 'undefined') {
+    if(_kbView === 'week' && typeof kbApplyViewFilter === 'function') kbApplyViewFilter();
+    if(_kbView === 'month' && typeof kbRenderMonthCalendar === 'function') kbRenderMonthCalendar();
+  }
   var box = document.getElementById('kbPrazoSugBox');
   if(box) box.style.display='none';
-  showToast('Prazo definido com base na sugestão!','ok');
+  showToast('Prazo e tempo estimado definidos! ✅','ok');
 }
 
 function kbClose() { document.getElementById('kbOsOverlay').classList.remove('open'); _kbOsId = null; }
@@ -9000,6 +9020,28 @@ function kbIniciarProd() {
   _kbProdEditMode = false;
   _kbProdTipo = 'chapa';
   _kbOpenProdOverlay(os);
+}
+
+function kbPausarProd() {
+  var os = KB_OS[_kbOsId]; if(!os) return;
+  if(!confirm('Pausar produção e reverter OS para "Iniciada"?')) return;
+  os.status = 'iniciada';
+  // Atualizar stag no modal
+  var stag = document.getElementById('kbOsStag');
+  if(stag) { stag.className='stag si'; stag.textContent='Iniciada'; }
+  // Atualizar stag no card
+  var card = document.querySelector('.kcard[data-osid="'+_kbOsId+'"]');
+  if(card) { var t=card.querySelector('.stag'); if(t){t.className='stag si';t.textContent='Iniciada';} }
+  // Ocultar material em produção
+  var mb = document.getElementById('kbMatProdBox'); if(mb) mb.style.display='none';
+  // Restaurar botão "Iniciar Produção"
+  var ib = document.getElementById('kbIniciarProdBox');
+  var btn = ib ? ib.querySelector('button') : null;
+  if(ib) ib.style.display='';
+  if(btn){ btn.innerHTML='🔧 Iniciar Produção'; btn.style.background='linear-gradient(90deg,#D97706,#B45309)'; btn.onclick=function(){kbIniciarProd();}; }
+  _cloudSave('kb_os', KB_OS);
+  if(typeof kbSyncCounts==='function') kbSyncCounts();
+  showToast('Produção pausada — OS retornou para Iniciada','warn');
 }
 
 function kbEditarMatProd() {
