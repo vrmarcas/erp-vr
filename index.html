@@ -4486,9 +4486,55 @@ function _cloudAuthAviso(msg){
               <thead><tr><th>Material</th><th style="text-align:center">Espessura</th><th style="text-align:center">Velocidade (mm/s)</th></tr></thead>
               <tbody id="laserSpeedBody"></tbody>
             </table>
-            <div style="font-size:11px;color:var(--muted);margin-top:8px">⏱️ Fórmula: Perímetro (mm) ÷ Velocidade ÷ 60 = minutos de laser</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px">⏱️ Fórmula: Comprimento (mm) ÷ Velocidade (mm/s) = Tempo (s)</div>
             <div style="text-align:right;margin-top:10px">
               <button class="topbar-btn" onclick="cfgSalvarLaser()">💾 Salvar Velocidades</button>
+            </div>
+          </div>
+
+          <!-- Parâmetros de Produção -->
+          <div class="card" style="margin-top:14px">
+            <div class="card-h">
+              <div class="card-h-left">⚙️ Parâmetros de Produção</div>
+              <span style="font-size:11px;color:var(--muted)">Ajustes adicionais no cálculo de tempo</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px 0">
+              <div class="fg">
+                <label style="font-size:11px">Fator de eficiência (%)</label>
+                <input type="number" id="lp_efic" min="1" max="100" step="1" value="100" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Ex: 85 → tempo ÷ 0,85</span>
+              </div>
+              <div class="fg">
+                <label style="font-size:11px">Margem de segurança (%)</label>
+                <input type="number" id="lp_margem" min="0" max="100" step="1" value="0" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Acrescida ao tempo final</span>
+              </div>
+              <div class="fg">
+                <label style="font-size:11px">Tempo de início (seg/trabalho)</label>
+                <input type="number" id="lp_startup" min="0" step="1" value="0" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Aquecimento / home da máquina</span>
+              </div>
+              <div class="fg">
+                <label style="font-size:11px">Tempo de perfuração (seg/contorno)</label>
+                <input type="number" id="lp_perf" min="0" step="0.1" value="0" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Pierce time por início de contorno</span>
+              </div>
+              <div class="fg">
+                <label style="font-size:11px">Tempo de preparação (seg/chapa)</label>
+                <input type="number" id="lp_prep" min="0" step="1" value="0" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Posicionamento e regulagem</span>
+              </div>
+              <div class="fg">
+                <label style="font-size:11px">Custo da máquina (R$/hora)</label>
+                <input type="number" id="lp_custoH" min="0" step="1" value="120" style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)">
+                <span style="font-size:10px;color:var(--muted)">Custo de corte em R$ no resultado</span>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:8px;padding:6px 8px;background:var(--bg2);border-radius:6px;line-height:1.5">
+              ⏱️ <strong>Fórmula completa:</strong> (Comp ÷ Vel) ÷ Eficiência + Perfuração×Contornos + Prep + Startup + Margem%
+            </div>
+            <div style="text-align:right;margin-top:10px">
+              <button class="topbar-btn" onclick="cfgSalvarLaserParams()">💾 Salvar Parâmetros</button>
             </div>
           </div>
         </div>
@@ -7138,10 +7184,30 @@ function orcItemExtras(ri) {
       +'<span style="'+RNAME+'">'+r[1]+'</span>'
       +'<span style="'+RRATE+'">'+r[2]+'</span>'
       +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
-      +(r[4]?'<button onclick="orcExtrasAutoLaser()" style="padding:2px 5px;background:var(--brand-mid);color:#fff;border:none;border-radius:4px;font-size:9px;font-weight:700;cursor:pointer">Auto</button>':'')
+      +(r[4]?'<span id="m_laserManualTag" style="display:none;font-size:8px;color:#DC2626;font-weight:800">✏️MANUAL</span>':'')
       +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
   }).join('')
+  +'</div>'
+
+  // ── Estimativa de Corte ──
+  +'<div style="background:var(--surface);border:1.5px solid rgba(99,102,241,0.3);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">⚡ Estimativa de Tempo de Corte</div>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px">'
+  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Contornos/peça</div>'
+  +'<input type="number" id="m_contornos" value="1" min="1" step="1" style="'+INP+';width:100%"></div>'
+  +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Cortes internos (mm)</div>'
+  +'<input type="number" id="m_compInt" value="0" min="0" style="'+INP+';width:100%"></div>'
+  +'</div>'
+  +'<button onclick="orcExtrasAutoLaser()" style="width:100%;padding:5px 0;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:800;cursor:pointer;margin-bottom:6px">⚡ Calcular Tempo de Corte</button>'
+  +'<div id="m_laserMemBox" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:7px 9px;font-size:9px;line-height:1.65;color:var(--text);white-space:pre;overflow:auto;max-height:130px;font-family:monospace"></div>'
+  +'<div style="display:flex;gap:5px;align-items:center;margin-top:7px">'
+  +'<input type="checkbox" id="m_laserManual" onchange="orcExtrasToggleManual()" style="accent-color:#DC2626;cursor:pointer;width:13px;height:13px">'
+  +'<label for="m_laserManual" style="font-size:9px;color:#DC2626;font-weight:700;cursor:pointer">Ajuste manual (não sobrescreve ao calcular)</label>'
+  +'</div>'
+  +'<div id="m_laserManualBox" style="display:none;margin-top:5px">'
+  +'<input type="text" id="m_laserJust" placeholder="Motivo do ajuste manual..." style="width:100%;padding:4px 7px;border:1.5px solid #DC2626;border-radius:5px;font-size:10px;background:var(--bg);color:var(--text);box-sizing:border-box">'
+  +'</div>'
   +'</div>'
 
   // Consumíveis
@@ -7231,29 +7297,67 @@ function orcExtrasAplicarPreset(idx){
   });
   orcExtrasCalcMaq();
 }
+function orcExtrasToggleManual() {
+  var chk = !!(document.getElementById('m_laserManual')||{}).checked;
+  var box = document.getElementById('m_laserManualBox');
+  var inp = document.getElementById('m_laser');
+  var tag = document.getElementById('m_laserManualTag');
+  if(box) box.style.display = chk ? 'block' : 'none';
+  if(inp) { inp.readOnly = false; inp.style.borderColor = chk ? '#DC2626' : ''; inp.style.background = chk ? 'rgba(220,38,38,0.06)' : ''; }
+  if(tag) tag.style.display = chk ? 'inline' : 'none';
+  if(!chk) { var jEl = document.getElementById('m_laserJust'); if(jEl) jEl.value = ''; }
+}
+
 function orcExtrasAutoLaser(){
-  // Velocidades de corte: lê do Config (editável), fallback para padrão da máquina
-  var _lsGet = function(esp) { return cfgLaserSpeed(Math.round(esp)); };
-  var _espSpeed = cfgLaserSpeed('esp');
-  // Usa o ri do item atualmente aberto no modal (salvo em orcItemExtras)
-  var ri = window._extrasRiAtual || null;
-  var larg = ri ? (parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0) : 0;
-  var alt  = ri ? (parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0) : 0;
-  var qty  = ri ? (parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1) : 1;
-  var esp  = ri ? (parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3) : 3;
-  var matEl = ri ? document.getElementById('oi_mat_'+ri) : null;
+  var ri     = window._extrasRiAtual || null;
+  var larg   = ri ? (parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0) : 0;
+  var alt    = ri ? (parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0) : 0;
+  var qty    = ri ? (parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1) : 1;
+  var esp    = ri ? (parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3) : 3;
+  var matEl  = ri ? document.getElementById('oi_mat_'+ri) : null;
   if(!matEl) matEl = document.querySelector('#orcItemBody select[id^="oi_mat_"]');
   var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
-  var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? _espSpeed : _lsGet(esp);
-  var min = 0;
-  if(larg > 0 && alt > 0){
-    var perim = 2*(larg*10 + alt*10); // cm → mm
-    min = Math.ceil((perim / speed / 60) * qty);
-  } else {
-    min = Math.max(1, Math.round(10 / speed * 3));
+
+  // Velocidade pelo material/espessura
+  var speed = /inox|aco|aço/i.test(matLbl) ? 25
+            : /espelh/i.test(matLbl) ? cfgLaserSpeed('esp')
+            : cfgLaserSpeed(Math.round(esp));
+
+  // Comprimento externo: cm → mm (larg e alt são em cm no ERP)
+  var comprExt = (larg>0 && alt>0) ? 2*(larg*10 + alt*10) : 0;
+  var comprInt = parseFloat((document.getElementById('m_compInt')||{}).value)||0;
+  var contornos = parseInt((document.getElementById('m_contornos')||{}).value)||1;
+
+  if(comprExt <= 0 && comprInt <= 0) {
+    showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn');
+    return;
   }
-  var el=document.getElementById('m_laser'); if(el) el.value=min;
+
+  var result = calcTempoCorte({
+    velocidade: speed,
+    comprExtMm: comprExt,
+    comprIntMm: comprInt,
+    contornos:  contornos,
+    qty:        qty,
+    matLabel:   matLbl,
+    espMm:      esp
+  });
+
+  if(!result.ok) { showToast(result.erro||'Erro no cálculo.','warn'); return; }
+
+  // Só atualiza o campo se não está em modo manual
+  var isManual = !!(document.getElementById('m_laserManual')||{}).checked;
+  if(!isManual) {
+    var el = document.getElementById('m_laser');
+    if(el) el.value = result.minutosCeil;
+  }
+
+  // Mostrar memória de cálculo
+  var memBox = document.getElementById('m_laserMemBox');
+  if(memBox) { memBox.style.display='block'; memBox.textContent=result.memoria; }
+
   orcExtrasCalcMaq();
+  showToast('Laser: '+result.minutosCeil+'min ('+result.tempoFinal.toFixed(0)+'s)','ok');
 }
 
 function orcItemExtrasFechar() {
@@ -7381,28 +7485,30 @@ function orcSoCorteChange(){
 }
 
 function orcAutoLaser(){
-  // Velocidades de corte: lê do Config (editável), fallback para padrão da máquina
-  var _lsGet = function(esp) { return cfgLaserSpeed(Math.round(esp)); };
-  var _espSpeed = cfgLaserSpeed('esp');
-  var totalMin = 0;
+  // Usa calcTempoCorte() para cada item e soma os tempos finais
+  var totalSeg = 0;
   document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
-    var ri = row.dataset.idx;
-    var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
-    var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
-    var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
-    var esp  = parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3;
-    var matEl = document.getElementById('oi_mat_'+ri);
+    var ri     = row.dataset.idx;
+    var larg   = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
+    var alt    = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
+    var qty    = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
+    var esp    = parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3;
+    var matEl  = document.getElementById('oi_mat_'+ri);
     var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
-    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? _espSpeed : _lsGet(esp);
+    var speed  = /inox|aco|aço/i.test(matLbl) ? 25
+               : /espelh/i.test(matLbl) ? cfgLaserSpeed('esp')
+               : cfgLaserSpeed(Math.round(esp));
     if(larg>0 && alt>0){
-      var perim = 2*(larg*10 + alt*10); // cm → mm
-      totalMin += (perim / speed / 60) * qty;
+      var comprExt = 2*(larg*10 + alt*10); // cm → mm
+      var r = calcTempoCorte({velocidade:speed, comprExtMm:comprExt, qty:qty, matLabel:matLbl, espMm:esp});
+      if(r.ok) totalSeg += r.tempoFinal;
     }
   });
-  if(totalMin <= 0){ showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn'); return; }
+  if(totalSeg <= 0){ showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn'); return; }
+  var totalMin = Math.ceil(totalSeg/60);
   var el = document.getElementById('om_laser');
-  if(el){ el.value = Math.ceil(totalMin); orcRecalc(); }
-  showToast('Laser calculado automaticamente: '+Math.ceil(totalMin)+' min','ok');
+  if(el){ el.value = totalMin; orcRecalc(); }
+  showToast('Laser: '+totalMin+'min ('+totalSeg.toFixed(0)+'s)','ok');
 }
 
 function orcDescTipoChange(){
@@ -14732,6 +14838,7 @@ function cfgRenderTables() {
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
   cfgAtualizarMargemPlan();
   cfgRenderLaserSpeeds();
+  cfgRenderLaserParams();
   // Markup
   var mk = d.markup||{};
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
@@ -14873,6 +14980,147 @@ function cfgSalvarLaser() {
   _cfgData.laser.speeds = speeds;
   cfgSave(_cfgData);
   showToast('Velocidades do laser salvas!','ok');
+}
+
+// ── PARÂMETROS DE PRODUÇÃO ─────────────────────────────────────────────────────
+var _LASER_PARAMS_DEF = {efic:100,margem:0,startup:0,perf:0,prep:0,custoH:120};
+
+function cfgGetLaserParams() {
+  return (_cfgData && _cfgData.laser && _cfgData.laser.params) || {};
+}
+function cfgGetLaserParam(key) {
+  var saved = cfgGetLaserParams();
+  return saved[key] !== undefined ? saved[key] : (_LASER_PARAMS_DEF[key] !== undefined ? _LASER_PARAMS_DEF[key] : 0);
+}
+function cfgRenderLaserParams() {
+  var saved = cfgGetLaserParams();
+  ['efic','margem','startup','perf','prep','custoH'].forEach(function(k) {
+    var el = document.getElementById('lp_'+k);
+    if(el) el.value = (saved[k] !== undefined ? saved[k] : (_LASER_PARAMS_DEF[k] !== undefined ? _LASER_PARAMS_DEF[k] : 0));
+  });
+}
+function cfgSalvarLaserParams() {
+  if(!_cfgData) _cfgData = cfgLoad();
+  if(!_cfgData.laser) _cfgData.laser = {};
+  var params = {};
+  ['efic','margem','startup','perf','prep','custoH'].forEach(function(k) {
+    var el = document.getElementById('lp_'+k);
+    params[k] = el ? (parseFloat(el.value) !== undefined ? parseFloat(el.value) : _LASER_PARAMS_DEF[k]) : (_LASER_PARAMS_DEF[k]||0);
+    if(isNaN(params[k])) params[k] = _LASER_PARAMS_DEF[k]||0;
+  });
+  _cfgData.laser.params = params;
+  cfgSave(_cfgData);
+  showToast('Parâmetros de produção salvos!','ok');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENGINE DE CÁLCULO — TEMPO DE CORTE A LASER
+// Fonte única de verdade para todos os cálculos de laser no ERP.
+//
+// params = {
+//   velocidade    : mm/s  (obrigatório, >0)
+//   comprExtMm    : mm contorno externo por peça  (≥0, default 0)
+//   comprIntMm    : mm cortes internos por peça   (≥0, default 0)
+//   comprFurosMm  : mm furos por peça             (≥0, default 0)
+//   comprAdicMm   : mm adicionais por peça        (≥0, default 0)
+//   contornos     : contornos por peça            (int ≥1, default 1)
+//   qty           : quantidade de peças           (int ≥1, default 1)
+//   matLabel      : string descritiva do material (opcional)
+//   espMm         : espessura em mm               (opcional)
+//   efic          : % eficiência (0-100, default: lê config)
+//   margem        : % margem de segurança (0-100, default: lê config)
+//   startup       : seg por trabalho (default: lê config)
+//   perf          : seg por contorno (default: lê config)
+//   prep          : seg por chapa (default: lê config)
+//   custoH        : R$/hora (default: lê config)
+// }
+// ══════════════════════════════════════════════════════════════════════════════
+function calcTempoCorte(params) {
+  params = params || {};
+
+  // Lê parâmetros de config como fallback
+  var p_efic    = params.efic    !== undefined ? params.efic    : cfgGetLaserParam('efic');
+  var p_margem  = params.margem  !== undefined ? params.margem  : cfgGetLaserParam('margem');
+  var p_startup = params.startup !== undefined ? params.startup : cfgGetLaserParam('startup');
+  var p_perf    = params.perf    !== undefined ? params.perf    : cfgGetLaserParam('perf');
+  var p_prep    = params.prep    !== undefined ? params.prep    : cfgGetLaserParam('prep');
+  var p_custoH  = params.custoH  !== undefined ? params.custoH  : cfgGetLaserParam('custoH');
+
+  var velocidade = parseFloat(params.velocidade) || 0;
+  if(velocidade <= 0) return {ok:false,erro:'Velocidade zero ou não cadastrada para este material/espessura.',tempoFinal:0,minutos:0,minutosCeil:0,memoria:''};
+
+  var eficFator  = Math.max(0.01, Math.min(100, parseFloat(p_efic)||100)) / 100;
+  var margemPct  = Math.max(0, parseFloat(p_margem)||0) / 100;
+  var startupSeg = Math.max(0, parseFloat(p_startup)||0);
+  var perfSeg    = Math.max(0, parseFloat(p_perf)||0);
+  var prepSeg    = Math.max(0, parseFloat(p_prep)||0);
+  var custoH     = Math.max(0, parseFloat(p_custoH)||120);
+
+  var comprExtMm   = Math.max(0, parseFloat(params.comprExtMm)||0);
+  var comprIntMm   = Math.max(0, parseFloat(params.comprIntMm)||0);
+  var comprFurosMm = Math.max(0, parseFloat(params.comprFurosMm)||0);
+  var comprAdicMm  = Math.max(0, parseFloat(params.comprAdicMm)||0);
+  var contornos    = Math.max(1, parseInt(params.contornos)||1);
+  var qty          = Math.max(1, parseInt(params.qty)||1);
+
+  var comprPorPeca = comprExtMm + comprIntMm + comprFurosMm + comprAdicMm;
+  if(comprPorPeca <= 0) return {ok:false,erro:'Comprimento de corte zero. Informe as dimensões da peça.',tempoFinal:0,minutos:0,minutosCeil:0,memoria:''};
+
+  var comprTotal = comprPorPeca * qty;
+
+  // ── Cálculo preciso — sem arredondar prematuramente ──
+  var tempoTeorico  = comprTotal / velocidade;          // seg bruto
+  var tempoAjustado = tempoTeorico / eficFator;          // ajuste eficiência
+  var tempoEntradas = perfSeg * contornos * qty;         // pierce time total
+  var margemSeg     = tempoAjustado * margemPct;         // margem de segurança
+  var tempoFinal    = tempoAjustado + tempoEntradas + prepSeg + startupSeg + margemSeg;
+  var custoCorte    = (tempoFinal / 3600) * custoH;
+
+  // ── Formatadores ──
+  var _fmt2 = function(n){ return n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var _fmtSeg = function(s){
+    if(s<60) return _fmt2(s)+' s';
+    var m=Math.floor(s/60),r=s-m*60;
+    if(m<60) return m+'min '+_fmt2(r)+'s';
+    var h=Math.floor(m/60),m2=m-h*60;
+    return h+'h '+m2+'min '+Math.round(r)+'s';
+  };
+  var _fmtMm = function(n){ return n.toLocaleString('pt-BR',{maximumFractionDigits:1})+' mm'; };
+
+  var matLabel = params.matLabel||'Acrílico';
+  var espLabel = params.espMm?(params.espMm+' mm'):'—';
+
+  var linhas = [
+    'Material: '+matLabel,
+    'Espessura: '+espLabel,
+    'Velocidade: '+velocidade+' mm/s',
+    '',
+    'Comprimento externo/peça: '+_fmtMm(comprExtMm),
+    comprIntMm>0?   'Cortes internos/peça:   '+_fmtMm(comprIntMm):null,
+    comprFurosMm>0? 'Furos/peça:             '+_fmtMm(comprFurosMm):null,
+    comprAdicMm>0?  'Adicional/peça:         '+_fmtMm(comprAdicMm):null,
+    'Comprimento/peça: '+_fmtMm(comprPorPeca)+' × '+qty+'un = '+_fmtMm(comprTotal),
+    '',
+    'Tempo teórico:   '+_fmt2(tempoTeorico)+' s   ('+comprTotal.toFixed(1)+' ÷ '+velocidade+')',
+    eficFator<1?  'Eficiência ('+Math.round(eficFator*100)+'%):  ÷'+eficFator+' = '+_fmt2(tempoAjustado)+' s':null,
+    tempoEntradas>0?'Pierce time:     '+contornos+'×'+qty+'×'+perfSeg+'s = '+_fmt2(tempoEntradas)+' s':null,
+    prepSeg>0?    'Preparação:      '+_fmt2(prepSeg)+' s':null,
+    startupSeg>0? 'Startup:         '+_fmt2(startupSeg)+' s':null,
+    margemSeg>0?  'Margem ('+Math.round(margemPct*100)+'%):     +'+_fmt2(margemSeg)+' s':null,
+    '',
+    '→ Tempo total:   '+_fmt2(tempoFinal)+' s  ('+_fmtSeg(tempoFinal)+')',
+    custoH>0?     '→ Custo corte:   R$ '+_fmt2(custoCorte)+'  (R$ '+custoH+'/h)':null
+  ].filter(function(l){return l!==null;});
+
+  return {
+    ok:true, erro:null,
+    velocidade:velocidade, comprPorPeca:comprPorPeca, comprTotal:comprTotal,
+    tempoTeorico:tempoTeorico, tempoAjustado:tempoAjustado,
+    tempoEntradas:tempoEntradas, tempoPrep:prepSeg, tempoStartup:startupSeg,
+    margemSeg:margemSeg, tempoFinal:tempoFinal, custoCorte:custoCorte,
+    minutos:tempoFinal/60, minutosCeil:Math.ceil(tempoFinal/60),
+    memoria:linhas.join('\n')
+  };
 }
 
 function cfgAtualizarMargemPlan() {
