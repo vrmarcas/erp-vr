@@ -4464,6 +4464,22 @@ function _cloudAuthAviso(msg){
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
           </div>
+
+          <!-- Velocidades do Laser -->
+          <div class="card" style="margin-top:14px">
+            <div class="card-h">
+              <div class="card-h-left">⚡ Velocidades de Corte — Laser</div>
+              <span style="font-size:11px;color:var(--muted)">mm/s por espessura de acrílico</span>
+            </div>
+            <table class="table" id="laserSpeedTable">
+              <thead><tr><th>Material</th><th style="text-align:center">Espessura</th><th style="text-align:center">Velocidade (mm/s)</th></tr></thead>
+              <tbody id="laserSpeedBody"></tbody>
+            </table>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px">⏱️ Fórmula: Perímetro (mm) ÷ Velocidade ÷ 60 = minutos de laser</div>
+            <div style="text-align:right;margin-top:10px">
+              <button class="topbar-btn" onclick="cfgSalvarLaser()">💾 Salvar Velocidades</button>
+            </div>
+          </div>
         </div>
 
         <!-- ── ABA 3: FINANCEIRO ── -->
@@ -7199,15 +7215,9 @@ function orcExtrasAplicarPreset(idx){
   orcExtrasCalcMaq();
 }
 function orcExtrasAutoLaser(){
-  // Velocidades de corte reais (mm/s) por espessura (mm) — tabela da máquina
-  var LASER_SPEED = {2:18, 3:16, 4:14, 5:12, 6:10, 8:6, 10:3, 15:2, 20:1};
-  var _lsGet = function(esp) {
-    if(LASER_SPEED[esp] !== undefined) return LASER_SPEED[esp];
-    var keys = Object.keys(LASER_SPEED).map(Number).sort(function(a,b){return a-b;});
-    var best = keys[0], bestDiff = Math.abs(esp - keys[0]);
-    keys.forEach(function(k){ var d=Math.abs(esp-k); if(d<bestDiff){bestDiff=d;best=k;} });
-    return LASER_SPEED[best];
-  };
+  // Velocidades de corte: lê do Config (editável), fallback para padrão da máquina
+  var _lsGet = function(esp) { return cfgLaserSpeed(Math.round(esp)); };
+  var _espSpeed = cfgLaserSpeed('esp');
   // Usa o ri do item atualmente aberto no modal (salvo em orcItemExtras)
   var ri = window._extrasRiAtual || null;
   var larg = ri ? (parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0) : 0;
@@ -7217,13 +7227,12 @@ function orcExtrasAutoLaser(){
   var matEl = ri ? document.getElementById('oi_mat_'+ri) : null;
   if(!matEl) matEl = document.querySelector('#orcItemBody select[id^="oi_mat_"]');
   var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
-  var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? 18 : _lsGet(Math.round(esp));
+  var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? _espSpeed : _lsGet(esp);
   var min = 0;
   if(larg > 0 && alt > 0){
     var perim = 2*(larg*10 + alt*10); // cm → mm
     min = Math.ceil((perim / speed / 60) * qty);
   } else {
-    // Fallback: estimativa pela espessura quando sem dimensões
     min = Math.max(1, Math.round(10 / speed * 3));
   }
   var el=document.getElementById('m_laser'); if(el) el.value=min;
@@ -7355,16 +7364,9 @@ function orcSoCorteChange(){
 }
 
 function orcAutoLaser(){
-  // Velocidades de corte reais (mm/s) por espessura (mm) — tabela da máquina
-  var LASER_SPEED = {2:18, 3:16, 4:14, 5:12, 6:10, 8:6, 10:3, 15:2, 20:1};
-  // Busca velocidade para espessura — interpola pela chave mais próxima
-  var _lsGet = function(esp) {
-    if(LASER_SPEED[esp] !== undefined) return LASER_SPEED[esp];
-    var keys = Object.keys(LASER_SPEED).map(Number).sort(function(a,b){return a-b;});
-    var best = keys[0], bestDiff = Math.abs(esp - keys[0]);
-    keys.forEach(function(k){ var d=Math.abs(esp-k); if(d<bestDiff){bestDiff=d;best=k;} });
-    return LASER_SPEED[best];
-  };
+  // Velocidades de corte: lê do Config (editável), fallback para padrão da máquina
+  var _lsGet = function(esp) { return cfgLaserSpeed(Math.round(esp)); };
+  var _espSpeed = cfgLaserSpeed('esp');
   var totalMin = 0;
   document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
     var ri = row.dataset.idx;
@@ -7374,11 +7376,9 @@ function orcAutoLaser(){
     var esp  = parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3;
     var matEl = document.getElementById('oi_mat_'+ri);
     var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
-    // Espelhado → mesma velocidade do acrílico 2mm; inox → velocidade diferente
-    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? 18 : _lsGet(Math.round(esp));
+    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? _espSpeed : _lsGet(esp);
     if(larg>0 && alt>0){
-      // Perímetro do retângulo em mm (larg e alt estão em cm → *10)
-      var perim = 2*(larg*10 + alt*10);
+      var perim = 2*(larg*10 + alt*10); // cm → mm
       totalMin += (perim / speed / 60) * qty;
     }
   });
@@ -14593,6 +14593,7 @@ function cfgRenderTables() {
   var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
   cfgAtualizarMargemPlan();
+  cfgRenderLaserSpeeds();
   // Markup
   var mk = d.markup||{};
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
@@ -14682,6 +14683,58 @@ function cfgDelRow(tipo, idx) {
   if(arr) arr.splice(idx,1);
   cfgSave(_cfgData);
   cfgRenderTables();
+}
+
+// ── VELOCIDADES DO LASER ──────────────────────────────────────────────────────
+var _LASER_ROWS = [
+  {key:2,  label:'Acrílico 2mm'},
+  {key:3,  label:'Acrílico 3mm'},
+  {key:4,  label:'Acrílico 4mm'},
+  {key:5,  label:'Acrílico 5mm'},
+  {key:6,  label:'Acrílico 6mm'},
+  {key:8,  label:'Acrílico 8mm'},
+  {key:10, label:'Acrílico 10mm'},
+  {key:15, label:'Acrílico 15mm'},
+  {key:20, label:'Acrílico 20mm'},
+  {key:'esp', label:'Acrílico Espelhado'}
+];
+var _LASER_SPEED_DEF = {2:18,3:16,4:14,5:12,6:10,8:6,10:3,15:2,20:1,'esp':18};
+
+function cfgGetLaserSpeeds() {
+  return (_cfgData && _cfgData.laser && _cfgData.laser.speeds) || {};
+}
+function cfgLaserSpeed(key) {
+  var saved = cfgGetLaserSpeeds();
+  return saved[key] !== undefined ? saved[key] : (_LASER_SPEED_DEF[key] || 10);
+}
+
+function cfgRenderLaserSpeeds() {
+  var tb = document.getElementById('laserSpeedBody'); if(!tb) return;
+  var saved = cfgGetLaserSpeeds();
+  tb.innerHTML = '';
+  _LASER_ROWS.forEach(function(row) {
+    var val = saved[row.key] !== undefined ? saved[row.key] : (_LASER_SPEED_DEF[row.key] || 10);
+    tb.insertAdjacentHTML('beforeend',
+      '<tr>'
+      +'<td style="font-size:12px;font-weight:600">'+row.label+'</td>'
+      +'<td style="text-align:center;color:var(--muted);font-size:11px">'+(row.key==='esp'?'—':row.key+'mm')+'</td>'
+      +'<td style="text-align:center"><input type="number" id="ls_'+row.key+'" value="'+val+'" min="0.1" max="200" step="0.1" style="width:70px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-size:13px;font-weight:700;background:var(--bg);color:var(--text)"></td>'
+      +'</tr>'
+    );
+  });
+}
+
+function cfgSalvarLaser() {
+  if(!_cfgData) _cfgData = cfgLoad();
+  if(!_cfgData.laser) _cfgData.laser = {};
+  var speeds = {};
+  _LASER_ROWS.forEach(function(row) {
+    var el = document.getElementById('ls_'+row.key);
+    if(el) speeds[row.key] = parseFloat(el.value) || (_LASER_SPEED_DEF[row.key] || 10);
+  });
+  _cfgData.laser.speeds = speeds;
+  cfgSave(_cfgData);
+  showToast('Velocidades do laser salvas!','ok');
 }
 
 function cfgAtualizarMargemPlan() {
