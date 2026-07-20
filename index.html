@@ -1315,7 +1315,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
@@ -8255,13 +8255,13 @@ function kbSyncCounts() {
   var novasCnt = document.getElementById('kbNovasCount');
   var novasHint = document.getElementById('kbNovasHint');
   if(novasCol && novasCnt) {
-    var n = novasCol.querySelectorAll('.kcard').length;
+    var n=0; novasCol.querySelectorAll('.kcard').forEach(function(c){if(c.style.display!=='none')n++;});
     novasCnt.textContent = n;
     if(novasHint) novasHint.style.display = n ? 'none' : '';
   }
-  document.querySelectorAll('.kc').forEach(col => {
-    const n = col.querySelectorAll('.kcard').length;
-    const cnt = col.querySelector('.kh-count');
+  document.querySelectorAll('.kc').forEach(function(col) {
+    var n=0; col.querySelectorAll('.kcard').forEach(function(c){if(c.style.display!=='none')n++;});
+    var cnt = col.querySelector('.kh-count');
     if (cnt) cnt.textContent = n;
   });
 }
@@ -8953,20 +8953,56 @@ function kbRender() {
     var sm=_kbStatusMap[os.status]||smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
     var cbHtml=_KB_SEL_MODE?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();kbToggleSel(\''+osId+'\')" style="position:absolute;top:8px;right:8px;width:17px;height:17px;cursor:pointer;accent-color:#6366F1">':'';
     card.style.position='relative';
+    // Etapas de produção
+    var _etapas=os._etapas||{};
+    var _etNms=['Corte','Gravar','Acab.','Embal.']; var _etKs=['corte','gravacao','acabamento','embalagem'];
+    var _etHtml='<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap">';
+    _etNms.forEach(function(e,i){
+      var d=!!_etapas[_etKs[i]];
+      _etHtml+='<span onclick="event.stopPropagation();kbToggleEtapa(\''+osId+'\',\''+_etKs[i]+'\',this)" style="cursor:pointer;font-size:9px;padding:2px 5px;border-radius:3px;border:1px solid '+(d?'#059669':'var(--border)')+';background:'+(d?'#059669':'transparent')+';color:'+(d?'#fff':'var(--muted)')+'">'+(d?'✓ ':'')+e+'</span>';
+    });
+    _etHtml+='</div>';
     card.innerHTML=cbHtml
       +prazoBadge
       +'<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
       +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un'
-      +(os.entrega ? '<br>📅 '+(function(v){var p=v.split('-');return p.length===3?p[2]+'/'+p[1]:v;})(os.entrega) : '')
       +(os.tempoProd ? ' · ⏱️ '+os.tempoProd+'h' : '')
       +'</div>'
+      +_etHtml
       +'<div class="kcard-meta">OS #0'+(os.num||'?')+'</div>'
       +'<span class="stag '+sm.cls+'" id="kstag-'+osId+'">'+sm.txt+'</span>'
       +'<div class="prog"><div class="prog-fill" id="kprog-'+osId+'" style="width:'+(os.prog||0)+'%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
     col.appendChild(card);
   });
+  // Carga de máquina por coluna (soma tempoProd das OSs alocadas)
+  var _cargaH={kbSeg:0,kbTer:0,kbQua:0,kbQui:0,kbSex:0,kbSab:0};
+  Object.keys(KB_OS).forEach(function(k){
+    var os=KB_OS[k]; if(!os) return;
+    if(os.status==='entregue'||os.status==='cancelado') return;
+    var h=parseFloat(os.tempoProd)||0; if(!h) return;
+    var _s=os.entrega||os.prazo||''; var _pd=null;
+    if(_s.indexOf('-')>0){var _p=_s.split('-');_pd=new Date(+_p[0],+_p[1]-1,+_p[2]);}
+    else if(_s.indexOf('/')>0){var _dp=_s.split('/');if(_dp.length===3)_pd=new Date(+_dp[2],+_dp[1]-1,+_dp[0]);}
+    if(!_pd||isNaN(_pd.getTime())) return;
+    var _dm={1:'kbSeg',2:'kbTer',3:'kbQua',4:'kbQui',5:'kbSex',6:'kbSab',0:'kbSab'};
+    var _ci=_dm[_pd.getDay()]; if(_ci&&_cargaH[_ci]!==undefined) _cargaH[_ci]+=h;
+  });
+  var _hdrMap={kbSeg:'kbHeaderSeg',kbTer:'kbHeaderTer',kbQua:'kbHeaderQua',kbQui:'kbHeaderQui',kbSex:'kbHeaderSex',kbSab:'kbHeaderSab'};
+  Object.keys(_cargaH).forEach(function(cid){
+    var hEl=document.getElementById(_hdrMap[cid]); if(!hEl) return;
+    var cEl=hEl.querySelector('.kb-carga-h');
+    if(!cEl){cEl=document.createElement('span');cEl.className='kb-carga-h';cEl.style.cssText='font-size:9px;font-weight:600;opacity:0.85;margin-left:4px';hEl.appendChild(cEl);}
+    cEl.textContent=_cargaH[cid]>0?'· ⏱'+_cargaH[cid].toFixed(1)+'h':'';
+  });
+  // Dispatch por visão ativa (mantém filtro correto após re-render do Firebase)
+  if(typeof _kbView!=='undefined'&&_kbView==='month'){
+    try{kbRenderMonthCalendar();}catch(e){}
+  } else if(typeof _kbView!=='undefined'&&_kbView==='week'){
+    try{kbApplyViewFilter();}catch(e){}
+  } else {
+    try{kbFilter();}catch(e){}
+  }
   kbSyncCounts();
-  try{kbFilter();}catch(e){}
 }
 
 // ── OS Tabs ───────────────────────────────────────────────────────────────────
@@ -9077,6 +9113,42 @@ function kbPausarProd() {
   _cloudSave('kb_os', KB_OS);
   if(typeof kbSyncCounts==='function') kbSyncCounts();
   showToast('Produção pausada — OS retornou para Iniciada','warn');
+}
+
+// ── Normalização de datas ─────────────────────────────────────────────────────
+function _kbNormToISO(s) {
+  if(!s) return s;
+  if(s.indexOf('/')>0){
+    var p=s.split('/');
+    if(p.length===3) return p[2]+'-'+String(p[1]).padStart(2,'0')+'-'+String(p[0]).padStart(2,'0');
+  }
+  return s; // já ISO ou formato desconhecido
+}
+function kbNormalizarDatas() {
+  var dirty=false;
+  Object.keys(KB_OS).forEach(function(k){
+    var os=KB_OS[k]; if(!os) return;
+    ['entrega','prazo'].forEach(function(field){
+      if(os[field]&&os[field].indexOf('/')>0){
+        var norm=_kbNormToISO(os[field]);
+        if(norm!==os[field]){ os[field]=norm; dirty=true; }
+      }
+    });
+  });
+  if(dirty) _cloudSave('kb_os', KB_OS);
+}
+
+// ── Toggle etapa no card ──────────────────────────────────────────────────────
+function kbToggleEtapa(osId, key, el) {
+  var os=KB_OS[osId]; if(!os) return;
+  os._etapas=os._etapas||{};
+  os._etapas[key]=!os._etapas[key];
+  var done=os._etapas[key];
+  el.style.background=done?'#059669':'transparent';
+  el.style.borderColor=done?'#059669':'var(--border)';
+  el.style.color=done?'#fff':'var(--muted)';
+  el.textContent=(done?'✓ ':'')+{corte:'Corte',gravacao:'Gravar',acabamento:'Acab.',embalagem:'Embal.'}[key];
+  _cloudSave('kb_os',KB_OS);
 }
 
 function kbEditarMatProd() {
@@ -9950,7 +10022,8 @@ function kbFilter(brand) {
     var cb=card.dataset.brand||'vr', txt=card.textContent.toLowerCase();
     var bOk=(_kbBrandFilter==='all'||cb===_kbBrandFilter);
     var tOk=(!q||txt.includes(q.toLowerCase()));
-    card.style.display=(bOk&&tOk)?'':'none';
+    var vOk=(typeof _kbView==='undefined'||_kbView==='all')||card.dataset.viewHide!=='hide';
+    card.style.display=(bOk&&tOk&&vOk)?'':'none';
   });
 }
 var _kbView = 'all'; // 'all', 'week', 'month'
