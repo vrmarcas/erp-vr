@@ -7077,6 +7077,10 @@ function orcItemExtras(ri) {
   var planArea = parseFloat(row && row.dataset.planArea)||0;
   var areaCm2  = (planArea>0 ? planArea : (larg*alt)) * qty;
   var adhFmt   = (areaCm2*0.0056).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  // Pré-calcular contornos a partir das peças planificadas (para pré-popular m_contornos)
+  var _planPecasModal = null;
+  try { var _ppjModal=row&&row.dataset.planPecas; if(_ppjModal) _planPecasModal=JSON.parse(_ppjModal); } catch(e){}
+  var _initContornos = (_planPecasModal&&_planPecasModal.length) ? _planPecasModal.reduce(function(s,p){return s+(parseInt(p.qty)||1);},0) : 1;
   var adSim = ex.adesivoSim ? 'sim' : 'nao';
 
   // Ler valores atuais dos inputs do Step 3
@@ -7167,7 +7171,7 @@ function orcItemExtras(ri) {
   +'<div style="font-size:9px;font-weight:800;color:var(--brand-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">⚡ Estimativa de Tempo de Corte</div>'
   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px">'
   +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Contornos/peça</div>'
-  +'<input type="number" id="m_contornos" value="1" min="1" step="1" style="'+INP+';width:100%"></div>'
+  +'<input type="number" id="m_contornos" value="'+_initContornos+'" min="1" step="1" style="'+INP+';width:100%"></div>'
   +'<div><div style="font-size:9px;color:var(--muted);font-weight:700;margin-bottom:2px">Cortes internos (mm)</div>'
   +'<input type="number" id="m_compInt" value="0" min="0" style="'+INP+';width:100%"></div>'
   +'</div>'
@@ -7313,12 +7317,11 @@ function orcExtrasToggleManual() {
 }
 
 function orcExtrasAutoLaser(){
-  var ri     = window._extrasRiAtual || null;
-  var larg   = ri ? (parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0) : 0;
-  var alt    = ri ? (parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0) : 0;
-  var qty    = ri ? (parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1) : 1;
-  var esp    = ri ? (parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3) : 3;
-  var matEl  = ri ? document.getElementById('oi_mat_'+ri) : null;
+  var ri    = window._extrasRiAtual || null;
+  var row   = ri ? document.getElementById('oir_'+ri) : null;
+  var qty   = ri ? (parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1) : 1;
+  var esp   = ri ? (parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3) : 3;
+  var matEl = ri ? document.getElementById('oi_mat_'+ri) : null;
   if(!matEl) matEl = document.querySelector('#orcItemBody select[id^="oi_mat_"]');
   var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
 
@@ -7327,13 +7330,54 @@ function orcExtrasAutoLaser(){
             : /espelh/i.test(matLbl) ? cfgLaserSpeed('esp')
             : cfgLaserSpeed(Math.round(esp));
 
-  // Comprimento externo: cm → mm (larg e alt são em cm no ERP)
-  var comprExt = (larg>0 && alt>0) ? 2*(larg*10 + alt*10) : 0;
   var comprInt = parseFloat((document.getElementById('m_compInt')||{}).value)||0;
-  var contornos = parseInt((document.getElementById('m_contornos')||{}).value)||1;
+  var comprExt = 0;
+  var contornos = 1;
+  var prefixMem = '';
 
-  if(comprExt <= 0 && comprInt <= 0) {
-    showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn');
+  // ── Tentar usar peças da planificação ──
+  var _planPecas = null;
+  try { var _ppj=row&&row.dataset.planPecas; if(_ppj) _planPecas=JSON.parse(_ppj); } catch(e){}
+
+  if(_planPecas && _planPecas.length > 0) {
+    // Modo planificado: somar perímetro de cada peça × sua quantidade (cm → mm)
+    var _totalCtorn = 0;
+    var _linhas = [];
+    _planPecas.forEach(function(p){
+      var pL=parseFloat(p.larg)||0, pA=parseFloat(p.alt)||0, pQ=parseInt(p.qty)||1;
+      if(pL<=0||pA<=0) return;
+      var perimMm=2*(pL*10+pA*10);
+      var grupoMm=perimMm*pQ;
+      comprExt+=grupoMm;
+      _totalCtorn+=pQ;
+      _linhas.push('  '+(p.nome||'Peça')+': '+pQ+' un × '+perimMm.toFixed(0)+' mm = '+grupoMm.toFixed(0)+' mm');
+    });
+    contornos = _totalCtorn||1;
+    var _pfx=['Peças identificadas: '+contornos,''];
+    _pfx=_pfx.concat(_linhas);
+    _pfx.push('');
+    _pfx.push('Comprimento externo total: '+comprExt.toFixed(0)+' mm');
+    if(comprInt>0) _pfx.push('Cortes internos: '+comprInt.toFixed(0)+' mm');
+    _pfx.push('Comprimento total: '+(comprExt+comprInt).toFixed(0)+' mm');
+    _pfx.push('');
+    prefixMem = _pfx.join('\n');
+    // Atualizar campo contornos no modal
+    var cEl=document.getElementById('m_contornos');
+    if(cEl) cEl.value=contornos;
+  } else {
+    // Sem planificação — usar dimensões do item
+    var larg=ri?(parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0):0;
+    var alt =ri?(parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0):0;
+    contornos=parseInt((document.getElementById('m_contornos')||{}).value)||1;
+    comprExt=(larg>0&&alt>0)?2*(larg*10+alt*10):0;
+  }
+
+  if(comprExt<=0 && comprInt<=0) {
+    if(_planPecas&&_planPecas.length>0) {
+      showToast('As peças planificadas não possuem dimensões válidas. Revise a planificação.','warn');
+    } else {
+      showToast('Nenhuma peça planificada encontrada. Faça a planificação ou informe as dimensões do item manualmente.','warn');
+    }
     return;
   }
 
@@ -7350,18 +7394,20 @@ function orcExtrasAutoLaser(){
   if(!result.ok) { showToast(result.erro||'Erro no cálculo.','warn'); return; }
 
   // Só atualiza o campo se não está em modo manual
-  var isManual = !!(document.getElementById('m_laserManual')||{}).checked;
+  var isManual=!!(document.getElementById('m_laserManual')||{}).checked;
   if(!isManual) {
-    var el = document.getElementById('m_laser');
-    if(el) el.value = result.minutosCeil;
+    var laserEl=document.getElementById('m_laser');
+    if(laserEl) laserEl.value=result.minutos.toFixed(4); // valor exato, sem arredondar
   }
 
-  // Mostrar memória de cálculo
-  var memBox = document.getElementById('m_laserMemBox');
-  if(memBox) { memBox.style.display='block'; memBox.textContent=result.memoria; }
+  // Exibir memória completa: breakdown por peça + cálculo de tempo
+  var memBox=document.getElementById('m_laserMemBox');
+  if(memBox){ memBox.style.display='block'; memBox.textContent=prefixMem+result.memoria; }
 
   orcExtrasCalcMaq();
-  showToast('Laser: '+result.minutosCeil+'min ('+result.tempoFinal.toFixed(0)+'s)','ok');
+  var _hasPlan=_planPecas&&_planPecas.length>0;
+  var minStr=result.minutos.toFixed(4).replace('.',',');
+  showToast('Laser: '+minStr+'min ('+result.tempoFinal.toFixed(2)+'s)'+(_hasPlan?' · '+contornos+' peças planificadas':''),'ok');
 }
 
 function orcItemExtrasFechar() {
