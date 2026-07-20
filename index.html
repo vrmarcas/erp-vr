@@ -1112,6 +1112,11 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   #pg-clientes .table tbody td:nth-child(4),
   #pg-clientes .table tbody td:nth-child(5),
   #pg-clientes .table tbody td:nth-child(6) { display: none; }
+
+  /* ── Auth / lock cards ── */
+  .auth-card { padding: 28px 22px !important; max-width: 100% !important; border-radius: 14px !important; }
+  .lock-card { padding: 28px 22px !important; }
+  .auth-overlay { padding: 16px; align-items: flex-start; padding-top: 40px; }
 }
 
 @media (max-width: 400px) {
@@ -1295,7 +1300,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} try{var _rb=document.getElementById('crmReativCount');if(_rb&&typeof crmLeadsFor==='function')_rb.textContent=crmLeadsFor('reativ').length;var _pb=document.getElementById('crmProspCount');if(_pb&&typeof crmLeadsFor==='function')_pb.textContent=crmLeadsFor('prosp').length;}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -1386,7 +1391,15 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
-  if(typeof crmBaseLoadIdx==='function'){ crmBaseLoadIdx(function(){ done(); }); } else { _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); }); }
+  if(typeof crmBaseLoadIdx==='function'){ crmBaseLoadIdx(function(){
+    try{
+      var _rb=document.getElementById('crmReativCount');
+      if(_rb) _rb.textContent=(_CRM_BASE_IDX.filter(function(c){return c.tipo==='cliente';}).length);
+      var _pb=document.getElementById('crmProspCount');
+      if(_pb) _pb.textContent=(_CRM_BASE_IDX.filter(function(c){return c.tipo==='prospect';}).length);
+    }catch(e){}
+    done();
+  }); } else { _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); }); }
   _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){
@@ -16161,6 +16174,10 @@ function authApplySession(){
   var nameEl=document.getElementById('userName'); if(nameEl) nameEl.textContent=nome;
   var roleEl=document.getElementById('userRole'); if(roleEl) roleEl.textContent=FUNCAO_LABEL[funcao]||funcao;
   var avatEl=document.getElementById('avatarInitial'); if(avatEl) avatEl.textContent=nome[0].toUpperCase();
+  // Mobile panel user info
+  var mspN=document.getElementById('mspUserName'); if(mspN) mspN.textContent=nome;
+  var mspR=document.getElementById('mspUserRole'); if(mspR) mspR.textContent=FUNCAO_LABEL[funcao]||funcao;
+  var mspA=document.getElementById('mspAvatar'); if(mspA) mspA.textContent=nome[0].toUpperCase();
   secApplyPerms(funcao);
   // Redirecionar para dashboard se a página atual for restrita para este perfil
   var _authDeny={
@@ -19010,6 +19027,53 @@ setTimeout(function(){
 <!-- ══ MOBILE SIDE PANEL ══ -->
 <div id="mobileOverlayBg" onclick="mobilePanelClose()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;opacity:0;transition:opacity .28s"></div>
 <div id="mobileSidePanel">
-  <div style="padding:16px 14px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between">
+  <!-- Header -->
+  <div style="padding:16px 14px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
     <div style="color:#fff;font-weight:800;font-size:15px">📊 ERP Marcas</div>
-    <button onclick="
+    <button onclick="mobilePanelClose()" style="background:rgba(255,255,255,.1);border:none;color:#fff;font-size:18px;cursor:pointer;padding:5px 10px;line-height:1;border-radius:8px;-webkit-tap-highlight-color:transparent">✕</button>
+  </div>
+  <!-- User info -->
+  <div class="msp-user">
+    <div class="msp-avatar" id="mspAvatar">M</div>
+    <div>
+      <div class="msp-uname" id="mspUserName">Usuário</div>
+      <div class="msp-urole" id="mspUserRole">—</div>
+    </div>
+  </div>
+  <!-- Nav: Principal -->
+  <div class="mdrw-section" id="mspSec-principal">Principal</div>
+  <div class="mdrw-item" id="mspItem-dashboard" onclick="mobilePanelNav('dashboard')"><span class="mdrw-ico">📊</span> Dashboard</div>
+  <!-- Nav: Operação -->
+  <div class="mdrw-section" id="mspSec-operacao">Operação</div>
+  <div class="mdrw-item" id="mspItem-kanban" onclick="mobilePanelNav('kanban')"><span class="mdrw-ico">📋</span> Kanban OS</div>
+  <div class="mdrw-item" id="mspItem-os-list" onclick="mobilePanelNav('os-list')"><span class="mdrw-ico">📄</span> Todas as OS</div>
+  <div class="mdrw-item" id="mspItem-estoque" onclick="mobilePanelNav('estoque')"><span class="mdrw-ico">📦</span> Estoque</div>
+  <div class="mdrw-item" id="mspItem-fornecedores" onclick="mobilePanelNav('fornecedores')"><span class="mdrw-ico">🏭</span> Fornecedores</div>
+  <!-- Nav: Comercial -->
+  <div class="mdrw-section" id="mspSec-comercial">Comercial</div>
+  <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
+  <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+  <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
+  <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+  <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
+  <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
+  <!-- Nav: Financeiro -->
+  <div class="mdrw-section" id="mspSec-financeiro">Financeiro</div>
+  <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelClose();setTimeout(function(){navFin('dash',null);},120)"><span class="mdrw-ico">💳</span> Dashboard Financeiro</div>
+  <div class="mdrw-item" id="mspItem-fin-cr" onclick="mobilePanelClose();setTimeout(function(){navFin('cr',null);},120)"><span class="mdrw-ico">📥</span> Contas a Receber</div>
+  <div class="mdrw-item" id="mspItem-fin-cp" onclick="mobilePanelClose();setTimeout(function(){navFin('cp',null);},120)"><span class="mdrw-ico">📤</span> Contas a Pagar</div>
+  <div class="mdrw-item" id="mspItem-fin-dre" onclick="mobilePanelClose();setTimeout(function(){navFin('dre',null);},120)"><span class="mdrw-ico">📋</span> DRE Gerencial</div>
+  <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
+  <!-- Nav: Admin -->
+  <div class="mdrw-section" id="mspSec-config">Admin</div>
+  <div class="mdrw-item" id="mspItem-config-orc" onclick="mobilePanelNav('config-orc')"><span class="mdrw-ico">⚙️</span> Config. Orçamento</div>
+  <div class="mdrw-item" id="mspItem-config-plan" onclick="mobilePanelNav('config-plan')"><span class="mdrw-ico">📐</span> Produtos / Planif.</div>
+  <div class="mdrw-item" id="mspItem-config-usr" onclick="mobilePanelNav('config-usr')"><span class="mdrw-ico">👥</span> Criação de Usuários</div>
+  <div class="mdrw-item" id="mspItem-seguranca" onclick="mobilePanelNav('seguranca')"><span class="mdrw-ico">🔐</span> Segurança</div>
+  <!-- Footer logout -->
+  <div style="padding:14px 16px;border-top:1px solid rgba(255,255,255,.1);margin-top:8px;flex-shrink:0">
+    <button onclick="mobilePanelClose();setTimeout(authLogout,120)" style="width:100%;padding:12px;background:rgba(220,38,38,.12);border:1.5px solid rgba(220,38,38,.3);color:#FCA5A5;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">🚪 Sair do Sistema</button>
+  </div>
+</div>
+</body>
+</html>
