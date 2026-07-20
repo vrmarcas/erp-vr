@@ -6764,8 +6764,14 @@ function planCalc() {
   var _sheetArea = 20000;
   if(matKey && matKey.indexOf('cfg_')===0) {
     var _saMIdx = parseInt(matKey.replace('cfg_',''));
-    var _saMat = ((_cfgData&&_cfgData.materiais)||[])[_saMIdx];
-    if(_saMat && _saMat.comp && _saMat.larg) _sheetArea = _saMat.comp * _saMat.larg;
+    // Tenta _cfgData (em memória) primeiro; fallback para cfgLoad() (localStorage síncrono)
+    var _cfgMatsArr = (_cfgData&&_cfgData.materiais&&_cfgData.materiais.length)
+                      ? _cfgData.materiais
+                      : (cfgLoad().materiais || []);
+    var _saMat = _cfgMatsArr[_saMIdx];
+    var _saComp = parseFloat(_saMat && _saMat.comp) || 0;
+    var _saLarg = parseFloat(_saMat && _saMat.larg) || 0;
+    if(_saComp > 0 && _saLarg > 0) _sheetArea = _saComp * _saLarg;
   }
   var _proporcao  = totalArea > 0 ? (totalArea / _sheetArea * 100).toFixed(1) : '—';
 
