@@ -200,6 +200,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .sr { background: #D1FAE5; color: #065F46; }
 .se { background: #DBEAFE; color: #1E40AF; }
 .sm { background: #FCE7F3; color: #9D174D; }
+.sas { background: #FEF9C3; color: #92400E; border: 1.5px dashed #D97706; }
 
 /* =========================================================
    CARDS / TABLES
@@ -2131,6 +2132,12 @@ function _cloudAuthAviso(msg){
             <button onclick="kbIniciarProd()" style="width:100%;padding:11px;background:linear-gradient(90deg,#D97706,#B45309);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
               🔧 Iniciar Produção
             </button>
+          </div>
+          <!-- Receber Saldo — visível quando status=aguardando_saldo -->
+          <div id="kbReceberSaldoBox" style="display:none;margin-bottom:10px;background:#FEF9C3;border:1.5px dashed #D97706;border-radius:9px;padding:12px 14px">
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Saldo na Entrega</div>
+            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px">Restante: <span id="kbSaldoValor">—</span></div>
+            <button onclick="kbReceberSaldo()" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ Confirmar Recebimento do Saldo</button>
           </div>
           <!-- Exibição do material selecionado para produção -->
           <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
@@ -8083,9 +8090,10 @@ const _kbStatusMap = {
   master:       { cls:'sm', txt:'🔐 Aguard. Master' },
   entregue:     { cls:'se', txt:'Entregue 🎉'       },
   em_andamento: { cls:'si', txt:'Iniciada'          },
-  aguard_master:{ cls:'sm', txt:'🔐 Aguard. Master' },
-  cancelado:    { cls:'si', txt:'Cancelado'         },
-  orcamento:    { cls:'si', txt:'Orçamento'         }
+  aguard_master:    { cls:'sm',  txt:'🔐 Aguard. Master' },
+  cancelado:        { cls:'si',  txt:'Cancelado'         },
+  orcamento:        { cls:'si',  txt:'Orçamento'         },
+  aguardando_saldo: { cls:'sas', txt:'💰 Aguard. Saldo'  }
 };
 
 function kbOpen(id) {
@@ -8216,6 +8224,18 @@ function kbOpen(id) {
   var _matProdLbl = document.getElementById('kbMatProdLabel');
   var _matProdQty = document.getElementById('kbMatProdQtyLabel');
   if (_iniciarBox) _iniciarBox.style.display = (os.status === 'iniciada') ? '' : 'none';
+  // Receber Saldo — visível quando aguardando_saldo
+  var _saldoBox = document.getElementById('kbReceberSaldoBox');
+  if (_saldoBox) {
+    if (os.status === 'aguardando_saldo') {
+      var _restFmt = 'R$ '+(os.restante||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      var _svEl = document.getElementById('kbSaldoValor');
+      if (_svEl) _svEl.textContent = _restFmt;
+      _saldoBox.style.display = '';
+    } else {
+      _saldoBox.style.display = 'none';
+    }
+  }
   if (_matProdBox) {
     var _mp = os.matProd;
     if (_mp && os.status === 'producao') {
@@ -8957,9 +8977,40 @@ function kbConfirmarProd() {
   showToast(_kbProdEditMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
 }
 
+function kbReceberSaldo() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  var hoje = new Date();
+  var dia = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  // Marca CR restante como recebido
+  var crEntry = FIN_CR.find(function(c){ return c.osRef && c.osRef.indexOf(String(os.num))>=0 && c.status==='pendente'; });
+  if (crEntry) { crEntry.status='recebido'; crEntry.dataRecebimento=dia; _finSaveCR(); try{finRender();}catch(e){} }
+  // Lança no caixa
+  var _metodo = os.formaPgto || 'PIX';
+  FIN_TX.unshift({data:dia.slice(0,5),cliente:os.cliente,os:String(os.num),marca:os.mk||'vr',valor:os.restante||0,metodo:_metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
+  try{finRender();}catch(e){}
+  // Atualiza OS
+  os.status='iniciada'; os.restante=0;
+  kbSaveKbos();
+  // Atualiza badge no card
+  var stg = document.getElementById('kstag-'+_kbOsId);
+  if(stg){stg.className='stag si';stg.textContent='Iniciada';}
+  // Atualiza modal
+  var _sm = _kbStatusMap['iniciada'];
+  var _stag = document.getElementById('kbOsStag');
+  if(_stag){_stag.className='stag '+_sm.cls;_stag.textContent=_sm.txt;}
+  var _saldoBoxUp = document.getElementById('kbReceberSaldoBox');
+  if(_saldoBoxUp) _saldoBoxUp.style.display='none';
+  var _iniciarBoxUp = document.getElementById('kbIniciarProdBox');
+  if(_iniciarBoxUp) _iniciarBoxUp.style.display='';
+  kbSyncCounts(); renderOsTable(); syncSidebarBadges();
+  showToast('✅ Saldo recebido! OS liberada para produção.','ok');
+}
+
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
+  if (os.status === 'aguardando_saldo') { showToast('💰 Aguardando recebimento do saldo antes de marcar como Pronta!','warn'); return; }
   var _pCard=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
   if(_pCard&&_pCard.parentElement) os.kbDay=_pCard.parentElement.id;
   var _pDest=document.getElementById('kbProntas');
@@ -11794,8 +11845,9 @@ var _lastOsId = null;
       cidade:cidadeCliente||'—',
       marca:isVt?'Vitre':'VR Marcas', mk:marca,
       material:matLabel, medidas:medidasStr, qty:qtyTotal,
-      status:'iniciada', prazo:entregaOS, entrega:entregaOS,
+      status:(simMetodoEl&&simMetodoEl.value==='50_50')?'aguardando_saldo':'iniciada', prazo:entregaOS, entrega:entregaOS,
       valor:c.finalPrice||0, prog:0, pronto:false,
+      restante:(simMetodoEl&&simMetodoEl.value==='50_50')?((c.finalPrice||0)*0.5):0,
       checks:['Corte','Gravação','Acabamento','Embalagem'], _ck:[false,false,false,false],
       parcelas:parcelas, linkPagto:linkUrl,
       clientDoc:docCliente, clientEmail:emailCliente, clientTel:telCliente,
@@ -11833,7 +11885,7 @@ var _lastOsId = null;
         +'<div class="kcard-sub">📍 '+(cidadeCliente||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+matLabel+' · '+medidasStr+' · '+qtyTotal+'un</div>'
         +'<div class="kcard-meta">Criada hoje</div>'
         +_prazoBadge
-        +'<span class="stag si" id="kstag-'+newId+'">Iniciada</span>'
+        +'<span class="stag '+(simMetodoEl&&simMetodoEl.value==='50_50'?'sas':'si')+'" id="kstag-'+newId+'">'+(simMetodoEl&&simMetodoEl.value==='50_50'?'💰 Aguard. Saldo':'Iniciada')+'</span>'
         +'<div class="prog"><div class="prog-fill" id="kprog-'+newId+'" style="width:0%;background:'+(isVt?'#BE185D':'#7C3AED')+'"></div></div>';
       _kbCol.appendChild(_card);
       kbSyncCounts();
@@ -11843,6 +11895,27 @@ var _lastOsId = null;
     document.getElementById('orcOsDet').textContent=(isVt?'Vitre':'VR Marcas')+' · Iniciada no Kanban';
     document.getElementById('orcModal').classList.add('open');
     kbSaveKbos(); renderOsTable(); syncSidebarBadges();
+    // Bug #98 — auto-salva em Orçamentos Enviados
+    (function(){
+      var _orc={
+        id:'ORC-'+String(Date.now()).slice(-6),
+        num:String(Date.now()).slice(-6),
+        cliente:nomeCliente, tel:telCliente, email:emailCliente,
+        produto:prodNome, marca:marca,
+        valorBase:c.finalPrice||0, valorFinal:c.finalPrice||0,
+        descCond:0, descPix:0, parcelas:parcelas, pgto:formaPgto,
+        status:'aprovado',
+        dataSalvo:new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
+        obs:'', itens:itens,
+        prazo:entregaOS||'',
+        dataPedido:new Date().toISOString().slice(0,10),
+        osRef:newId, orcNum:String(n)
+      };
+      var _lista=orcGetEnviados(); _lista.unshift(_orc);
+      orcSetEnviados(_lista);
+      if(typeof orcAtualizarBadgeEnviados==='function') orcAtualizarBadgeEnviados();
+      if(typeof orcLinkClienteOrcamento==='function') orcLinkClienteOrcamento(_orc);
+    })();
     crmPushOrcamento(newId);
     showToast('OS #0'+n+' criada e adicionada ao Kanban!','ok');
     // Abrir automaticamente o modal da OS após 1.2s
@@ -13858,7 +13931,7 @@ function orcEnvGerarOS(){
     id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
     cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
     material:matLabel,medidas:medidasStr,qty:qtyTotal,
-    status:'iniciada',prazo:dia,entrega:dia,
+    status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
     valor:valorTotal,prog:0,pronto:false,
     checks:['Corte','Gravação','Acabamento','Embalagem'],_ck:[false,false,false,false],
     parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
