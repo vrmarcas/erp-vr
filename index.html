@@ -15329,14 +15329,16 @@ function calcTempoCorte(params) {
 function cfgAtualizarMargemPlan() {
   var oh = parseFloat((document.getElementById('cfgOverhead')||{}).value)||0;
   var vr = parseFloat((document.getElementById('cfgVrml')||{}).value)||0;
+  var imp = parseFloat((document.getElementById('cfgImpostos')||{}).value)||0;
   var el = document.getElementById('cfgMargemPlanTotal');
-  if(el) el.textContent = (oh+vr).toFixed(1)+'%';
+  if(el) el.textContent = (oh+vr+imp).toFixed(1)+'%';
+  cfgSalvar();
 }
 
 function cfgSalvar() {
   if(!_cfgData) _cfgData = cfgLoad();
   // Financeiro
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',despPct:'cfgDespPct'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
   if(!_cfgData.financeiro) _cfgData.financeiro={};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el) _cfgData.financeiro[k]=parseFloat(el.value)||0; });
   // Markup
