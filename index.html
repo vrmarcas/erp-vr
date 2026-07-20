@@ -13905,7 +13905,7 @@ var _METAS_VENDEDOR = {};
 var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
-var _SEC_INACT_MINS = 20;
+var _SEC_INACT_MINS = 5;
 var _chatvoltAgentId = '';
 var _chatvoltMarca   = 'vr';
 var _chatvoltFase    = 'ia_novo';
@@ -16828,10 +16828,10 @@ function secSaveInactTime(){
   showToast('Bloqueio automático: '+(v?v+' min':'desativado'),'ok');
 }
 
-// ── Session (sessionStorage — limpa ao fechar o browser) ─────────────────────
-function secGetSession(){ try{ return JSON.parse(sessionStorage.getItem(SEC_SESSION_KEY)); }catch(e){ return null; } }
-function secSetSession(s){ try{ sessionStorage.setItem(SEC_SESSION_KEY, JSON.stringify(s)); }catch(e){} }
-function secClearSession(){ try{ sessionStorage.removeItem(SEC_SESSION_KEY); }catch(e){} }
+// ── Session (localStorage — persiste entre reloads, limpa só no logout) ──────
+function secGetSession(){ try{ return JSON.parse(localStorage.getItem(SEC_SESSION_KEY)); }catch(e){ return null; } }
+function secSetSession(s){ try{ localStorage.setItem(SEC_SESSION_KEY, JSON.stringify(s)); }catch(e){} }
+function secClearSession(){ try{ localStorage.removeItem(SEC_SESSION_KEY); }catch(e){} }
 
 // ── Senha master ──────────────────────────────────────────────────────────────
 function secGetMasterHash(){
@@ -16871,8 +16871,29 @@ function secCheckLockout(){
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 function authInit(){
-  // Recarregar sempre exige login novo
-  secClearSession();
+  var stored=secGetSession();
+  var inactMins=_SEC_INACT_MINS||5;
+  if(stored&&stored.user&&stored.lastActivity){
+    var elapsed=(Date.now()-stored.lastActivity)/60000;
+    if(elapsed<inactMins){
+      // Sessão recente — restaurar silenciosamente sem pedir senha
+      _currentSession=stored;
+      _currentSession.lastActivity=Date.now();
+      secSetSession(_currentSession);
+      secPopulateUserSelect();
+      var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
+      authApplySession();
+      secStartInactivityTimer();
+      return;
+    } else {
+      // Sessão existe mas expirou — mostrar lock (não login completo)
+      _currentSession=stored;
+      secPopulateUserSelect();
+      authLock();
+      return;
+    }
+  }
+  // Sem sessão salva — exige login completo
   _currentSession=null;
   secPopulateUserSelect();
   var ov=document.getElementById('authOverlay');
@@ -17093,7 +17114,7 @@ function authLogout(){
 // ── Lock screen ───────────────────────────────────────────────────────────────
 function authLock(){
   if(!_currentSession) return;
-  secClearSession(); // segurança: reload da página exige re-login completo
+  // NÃO limpa sessão — reload restaura automaticamente se recente
   secStopInactivityTimer();
   var nome=_currentSession.user||'Usuário';
   var avEl=document.getElementById('lockAvatar'); if(avEl) avEl.textContent=nome[0].toUpperCase();
