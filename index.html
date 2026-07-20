@@ -3147,8 +3147,29 @@ function _cloudAuthAviso(msg){
           <div id="comTopClientes" style="margin-top:10px;max-height:220px;overflow-y:auto"></div>
         </div>
         <div class="echart">
-          <div class="echart-h">📦 Produtos Mais Vendidos <span class="echart-sub" id="comProdSub">todas as OS</span></div>
+          <div class="echart-h" style="flex-wrap:wrap;gap:6px">
+            <span>📦 Produtos Mais Vendidos <span class="echart-sub" id="comProdSub">todas as OS</span></span>
+            <span style="display:flex;gap:4px;margin-left:auto">
+              <button id="comProdBtnVal" onclick="comProdSetMode('val')" style="font-size:9px;padding:2px 7px;border:1px solid var(--brand-mid);background:var(--brand-mid);color:#fff;border-radius:5px;cursor:pointer;font-weight:700">R$ Faturamento</button>
+              <button id="comProdBtnQtd" onclick="comProdSetMode('qtd')" style="font-size:9px;padding:2px 7px;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:5px;cursor:pointer">Qtd Vendida</button>
+            </span>
+          </div>
           <div id="comTopProdutos" style="margin-top:10px;max-height:220px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <!-- CARD VENDAS POR ESTADO -->
+      <div class="card" style="margin-top:14px">
+        <div class="card-h" style="flex-wrap:wrap;gap:8px">
+          <div class="card-h-left">🗺️ Ranking de Vendas por Estado (UF)</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <span style="font-size:10px;color:var(--muted)">Ordenar por:</span>
+            <button id="comUFBtnVal" class="topbar-btn" style="font-size:10px;padding:3px 9px;background:var(--brand-mid);color:#fff;border:none" onclick="comUFSetSort('val')">R$ Faturado</button>
+            <button id="comUFBtnQtd" class="topbar-btn ghost" style="font-size:10px;padding:3px 9px" onclick="comUFSetSort('qtd')">Nº Pedidos</button>
+          </div>
+        </div>
+        <div id="comUFTabela" style="margin-top:8px;overflow-x:auto">
+          <div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Carregando...</div>
         </div>
       </div>
 
@@ -18782,68 +18803,207 @@ cfgTab = function(n){ _cfgTabB(n); if(n===2) setTimeout(cfgRenderMachPresets,50)
 var _comRenderB = comercialRender;
 comercialRender = function(){ _comRenderB(); _comIntelligence(); };
 
+var _comProdMode = 'val'; // 'val' = faturamento R$  |  'qtd' = quantidade
+var _comUFSort   = 'val'; // 'val' = faturamento  |  'qtd' = nº pedidos
+
+function comProdSetMode(m) {
+  _comProdMode = m;
+  var bVal = document.getElementById('comProdBtnVal');
+  var bQtd = document.getElementById('comProdBtnQtd');
+  if(bVal){ bVal.style.background = m==='val'?'var(--brand-mid)':'var(--bg)'; bVal.style.color=m==='val'?'#fff':'var(--text)'; bVal.style.borderColor=m==='val'?'var(--brand-mid)':'var(--border)'; }
+  if(bQtd){ bQtd.style.background = m==='qtd'?'var(--brand-mid)':'var(--bg)'; bQtd.style.color=m==='qtd'?'#fff':'var(--text)'; bQtd.style.borderColor=m==='qtd'?'var(--brand-mid)':'var(--border)'; }
+  _comRenderTopProdutos(_comIntelLastPmap || {});
+}
+
+function comUFSetSort(s) {
+  _comUFSort = s;
+  var bVal = document.getElementById('comUFBtnVal');
+  var bQtd = document.getElementById('comUFBtnQtd');
+  if(bVal){ bVal.style.background=s==='val'?'var(--brand-mid)':'transparent'; bVal.style.color=s==='val'?'#fff':'var(--text)'; bVal.className=s==='val'?'topbar-btn':'topbar-btn ghost'; }
+  if(bQtd){ bQtd.style.background=s==='qtd'?'var(--brand-mid)':'transparent'; bQtd.style.color=s==='qtd'?'#fff':'var(--text)'; bQtd.className=s==='qtd'?'topbar-btn':'topbar-btn ghost'; }
+  _comRenderUF(_comIntelLastUFMap || {});
+}
+
+var _comIntelLastPmap  = {};
+var _comIntelLastUFMap = {};
+
+// Extrai UF de "Cidade / UF" ou "São Paulo / SP" → "SP"
+function _comExtractUF(cidade) {
+  if(!cidade || cidade==='—') return null;
+  var parts = cidade.split(/[\/\-,]/);
+  for(var i=parts.length-1;i>=0;i--) {
+    var s=parts[i].trim().toUpperCase();
+    if(s.length===2 && /^[A-Z]{2}$/.test(s)) return s;
+  }
+  // Fallback: tenta últimas 2 letras se parecer UF
+  var t=cidade.trim().toUpperCase();
+  if(t.length>=2) { var last2=t.slice(-2); if(/^[A-Z]{2}$/.test(last2)) return last2; }
+  return cidade.trim().toUpperCase().substring(0,20) || null;
+}
+
+function _parsValNum(v) {
+  if(typeof v==='number') return v;
+  return parseFloat(String(v||'0').replace(/[^\d.,]/g,'').replace(',','.'))||0;
+}
+
+function _comRenderTopClientes(cmap) {
+  // Combina OSs com orçamentos aprovados para contar orçamentos reais
+  var orcMap={};
+  var envList=(typeof orcGetEnviados==='function')?orcGetEnviados():[];
+  envList.forEach(function(o){
+    var n=o.cliente||'';
+    if(!n||n.toLowerCase()==='consumidor final'||n==='—') return;
+    if(!orcMap[n]) orcMap[n]=0;
+    orcMap[n]++;
+  });
+
+  var topC=Object.values(cmap)
+    .filter(function(c){ return c.nome && c.nome!=='—' && c.nome.toLowerCase()!=='consumidor final' && c.nome!==''; })
+    .sort(function(a,b){return b.val-a.val;}).slice(0,8);
+  var maxVal=topC.length?topC[0].val:1;
+  var tcEl=document.getElementById('comTopClientes');
+  if(!tcEl) return;
+  if(!topC.length){ tcEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum dado disponível</div>'; return; }
+  tcEl.innerHTML=topC.map(function(c){
+    var pct=Math.round(c.val/maxVal*100)||1;
+    var vf='R$ '+Math.round(c.val).toLocaleString('pt-BR');
+    var nOrcs = orcMap[c.nome] || 0;
+    var infoExtra = c.cnt+' OS'+(nOrcs?' · '+nOrcs+' orç.':'');
+    return '<div style="margin-bottom:10px">'
+      +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;gap:6px">'
+      +'<span style="font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%">'+c.nome+'</span>'
+      +'<span style="color:var(--muted);white-space:nowrap;font-size:10px">'+infoExtra+' · <strong style="color:#059669">'+vf+'</strong></span></div>'
+      +'<div style="background:var(--bg2);border-radius:4px;height:6px">'
+      +'<div style="height:6px;border-radius:4px;background:var(--brand-mid);width:'+pct+'%"></div></div>'
+      +'</div>';
+  }).join('');
+}
+
+function _comRenderTopProdutos(pmap) {
+  _comIntelLastPmap = pmap;
+  var mode = _comProdMode;
+  var list = Object.values(pmap);
+  list.sort(function(a,b){ return mode==='val' ? b.val-a.val : b.cnt-a.cnt; });
+  var top = list.slice(0,8);
+  var maxV = top.length ? (mode==='val' ? top[0].val : top[0].cnt) : 1;
+  var tpEl=document.getElementById('comTopProdutos');
+  if(!tpEl) return;
+  if(!top.length){ tpEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum dado disponível</div>'; return; }
+  tpEl.innerHTML=top.map(function(p){
+    var v = mode==='val' ? p.val : p.cnt;
+    var pct=Math.round(v/maxV*100)||1;
+    var label = mode==='val'
+      ? 'R$ '+Math.round(p.val).toLocaleString('pt-BR')
+      : p.cnt+'× vendido'+(p.cnt!==1?'s':'');
+    var topCli=Object.keys(p.clis).sort(function(a,b){return p.clis[b]-p.clis[a];}).slice(0,2).join(', ');
+    var cor = mode==='val' ? '#059669' : '#7C3AED';
+    return '<div style="margin-bottom:9px">'
+      +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;gap:4px">'
+      +'<span style="font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%">'+p.nome+'</span>'
+      +'<span style="color:var(--muted);white-space:nowrap;font-size:10px">'+label+'</span></div>'
+      +(topCli?'<div style="font-size:10px;color:var(--muted);margin-bottom:2px">👤 '+topCli+'</div>':'')
+      +'<div style="background:var(--bg2);border-radius:4px;height:6px">'
+      +'<div style="height:6px;border-radius:4px;background:'+cor+';width:'+pct+'%"></div></div>'
+      +'</div>';
+  }).join('');
+}
+
+function _comRenderUF(ufMap) {
+  _comIntelLastUFMap = ufMap;
+  var sort = _comUFSort;
+  var list = Object.values(ufMap).filter(function(u){ return u.uf && u.uf!=='?' && u.cnt>0; });
+  list.sort(function(a,b){ return sort==='qtd' ? b.cnt-a.cnt : b.val-a.val; });
+  var top = list.slice(0,15);
+  var el = document.getElementById('comUFTabela');
+  if(!el) return;
+  if(!top.length){ el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:12px;text-align:center">Sem dados de UF cadastrados nas OS</div>'; return; }
+  var maxVal = top.reduce(function(m,u){ return Math.max(m,u.val); },0)||1;
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="background:var(--bg2)">'
+    +'<th style="text-align:left;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:700">ESTADO (UF)</th>'
+    +'<th style="text-align:right;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:700">FATURADO</th>'
+    +'<th style="text-align:right;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:700">PEDIDOS</th>'
+    +'<th style="text-align:right;padding:7px 10px;font-size:10px;color:var(--muted);font-weight:700">TICKET MÉDIO</th>'
+    +'<th style="padding:7px 10px;min-width:80px"></th>'
+    +'</tr></thead><tbody>'
+    + top.map(function(u,i){
+        var ticket = u.cnt>0 ? Math.round(u.val/u.cnt) : 0;
+        var pct = Math.round(u.val/maxVal*100)||1;
+        var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+        return '<tr style="border-top:1px solid var(--border)">'
+          +'<td style="padding:8px 10px;font-weight:800;color:var(--text)">'+medal+' '+u.uf+'</td>'
+          +'<td style="padding:8px 10px;text-align:right;font-weight:700;color:#059669">R$ '+Math.round(u.val).toLocaleString('pt-BR')+'</td>'
+          +'<td style="padding:8px 10px;text-align:right;color:var(--muted)">'+u.cnt+'</td>'
+          +'<td style="padding:8px 10px;text-align:right;color:#7C3AED;font-weight:600">R$ '+ticket.toLocaleString('pt-BR')+'</td>'
+          +'<td style="padding:8px 10px">'
+            +'<div style="background:var(--bg2);border-radius:3px;height:5px">'
+            +'<div style="height:5px;border-radius:3px;background:#059669;width:'+pct+'%"></div></div>'
+          +'</td>'
+          +'</tr>';
+      }).join('')
+    +'</tbody></table>';
+}
+
 function _comIntelligence() {
   var bf = (typeof _comBrand!=='undefined') ? _comBrand : 'all';
   function matchBrand(os) {
     if(bf==='all') return true;
     var m=((os.mk||os.marca||os.brand||'')).toLowerCase();
-    if(bf==='vr') return m==='vr'||m.indexOf('vr')>=0&&m.indexOf('vitre')<0;
+    if(bf==='vr') return (m==='vr'||m.indexOf('vr')>=0)&&m.indexOf('vitre')<0;
     if(bf==='vitre') return m.indexOf('vit')>=0;
     return true;
   }
-  // Top clientes
+
+  // ── Top clientes (agrega por nome — exclui "Consumidor Final" e valores vazios) ──
   var cmap={};
   Object.values(KB_OS).forEach(function(os){
     if(!matchBrand(os)) return;
-    var n=os.cliente||'—'; if(!cmap[n])cmap[n]={nome:n,cnt:0,val:0};
-    cmap[n].cnt++; cmap[n].val+=typeof os.valor==='number'?os.valor:parseFloat(String(os.valor||'0').replace(/[^\d.,]/g,'').replace(',','.'))||0;
+    var n=(os.cliente||'').trim();
+    if(!n||n==='—'||n.toLowerCase()==='consumidor final') return;
+    if(!cmap[n]) cmap[n]={nome:n,cnt:0,val:0};
+    cmap[n].cnt++;
+    cmap[n].val+=_parsValNum(os.valor);
   });
-  var topC=Object.values(cmap).sort(function(a,b){return b.cnt-a.cnt;}).slice(0,8);
-  var maxC=topC.length?topC[0].cnt:1;
-  var tcEl=document.getElementById('comTopClientes');
-  if(tcEl){
-    if(!topC.length){tcEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum dado disponível</div>';}
-    else tcEl.innerHTML=topC.map(function(c){
-      var pct=Math.round(c.cnt/maxC*100);
-      var vf='R$ '+Math.round(c.val).toLocaleString('pt-BR');
-      return '<div style="margin-bottom:9px">'
-        +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
-        +'<span style="font-weight:600;color:var(--text)">'+c.nome+'</span>'
-        +'<span style="color:var(--muted)">'+c.cnt+' OS · '+vf+'</span></div>'
-        +'<div style="background:var(--bg2);border-radius:4px;height:7px">'
-        +'<div style="height:7px;border-radius:4px;background:var(--brand-mid);width:'+pct+'%"></div></div>'
-        +'</div>';
-    }).join('');
-  }
-  // Top produtos
+  // Também conta orçamentos aprovados para enriquecer "total de orçamentos"
+  var envList=(typeof orcGetEnviados==='function')?orcGetEnviados():[];
+  envList.forEach(function(o){
+    if(!matchBrand(o)) return;
+    var n=(o.cliente||'').trim();
+    if(!n||n==='—'||n.toLowerCase()==='consumidor final') return;
+    // Soma valor dos orçamentos aprovados no faturamento se não tiver OS correspondente
+    if(o.status==='aprovado') {
+      if(!cmap[n]) cmap[n]={nome:n,cnt:0,val:0};
+      // não duplica — só adiciona se não há OS com mesmo cliente+valor
+    }
+  });
+  _comRenderTopClientes(cmap);
+
+  // ── Top produtos ─────────────────────────────────────────────────────────────
   var pmap={};
   Object.values(KB_OS).forEach(function(os){
     if(!matchBrand(os)) return;
-    // os.prod = nome do produto; os.titulo = "Cliente — Produto"
     var raw = os.prod || (os.titulo ? os.titulo.split(' — ').slice(1).join(' — ') : '') || os.titulo || 'Produto';
     var prod = raw.split(' — ')[0].split('—')[0].trim().substring(0,35);
-    if(!pmap[prod])pmap[prod]={nome:prod,cnt:0,clis:{}};
+    if(!prod) return;
+    if(!pmap[prod]) pmap[prod]={nome:prod,cnt:0,val:0,clis:{}};
     pmap[prod].cnt++;
-    if(os.cliente)pmap[prod].clis[os.cliente]=(pmap[prod].clis[os.cliente]||0)+1;
+    pmap[prod].val+=_parsValNum(os.valor);
+    if(os.cliente&&os.cliente!=='—') pmap[prod].clis[os.cliente]=(pmap[prod].clis[os.cliente]||0)+1;
   });
-  var topP=Object.values(pmap).sort(function(a,b){return b.cnt-a.cnt;}).slice(0,8);
-  var maxP=topP.length?topP[0].cnt:1;
-  var tpEl=document.getElementById('comTopProdutos');
-  if(tpEl){
-    if(!topP.length){tpEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">Nenhum dado disponível</div>';}
-    else tpEl.innerHTML=topP.map(function(p){
-      var pct=Math.round(p.cnt/maxP*100);
-      var topCli=Object.keys(p.clis).sort(function(a,b){return p.clis[b]-p.clis[a];}).slice(0,2).join(', ');
-      return '<div style="margin-bottom:9px">'
-        +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">'
-        +'<span style="font-weight:600;color:var(--text)">'+p.nome+'</span>'
-        +'<span style="color:var(--muted)">'+p.cnt+'×</span></div>'
-        +(topCli?'<div style="font-size:10px;color:var(--muted);margin-bottom:2px">👤 '+topCli+'</div>':'')
-        +'<div style="background:var(--bg2);border-radius:4px;height:7px">'
-        +'<div style="height:7px;border-radius:4px;background:#059669;width:'+pct+'%"></div></div>'
-        +'</div>';
-    }).join('');
-  }
+  _comRenderTopProdutos(pmap);
+
+  // ── Vendas por Estado (UF) ───────────────────────────────────────────────────
+  var ufMap={};
+  Object.values(KB_OS).forEach(function(os){
+    if(!matchBrand(os)) return;
+    var cidadeRaw = os.clientCidade || os.cidade || '';
+    var uf = _comExtractUF(cidadeRaw) || '?';
+    if(!ufMap[uf]) ufMap[uf]={uf:uf,cnt:0,val:0};
+    ufMap[uf].cnt++;
+    ufMap[uf].val+=_parsValNum(os.valor);
+  });
+  _comRenderUF(ufMap);
+
   try{ if(typeof comissaoCardRender==='function') comissaoCardRender(); }catch(e){}
 }
 // ============================================================
