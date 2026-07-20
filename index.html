@@ -6862,7 +6862,9 @@ function planAplicar() {
     row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
-    row.dataset.planPecas = JSON.stringify(planManualPieces);
+    // Salvar TODAS as peças: catálogo (_planEditPieces) + manuais adicionais (planManualPieces)
+    var _allPlanPecas = (_planEditPieces||[]).concat(planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
+    row.dataset.planPecas = JSON.stringify(_allPlanPecas);
     var _pSumBox=document.getElementById('planSumBox'); if(_pSumBox&&_pSumBox.dataset.planImg) row.dataset.planImg=_pSumBox.dataset.planImg;
   }
 
