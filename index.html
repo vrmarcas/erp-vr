@@ -4471,8 +4471,13 @@ function _cloudAuthAviso(msg){
           <div class="card">
             <div class="card-h"><div class="card-h-left">💹 Parâmetros Financeiros</div></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-              <div class="fg"><label>Overhead / Custos fixos (%)</label><input type="number" id="cfgOverhead" step="0.1" min="0" max="100" placeholder="Ex: 15"></div>
-              <div class="fg"><label>Margem VRML / Lucro (%)</label><input type="number" id="cfgVrml" step="0.1" min="0" max="100" placeholder="Ex: 30"></div>
+              <div class="fg"><label>Overhead / Custos fixos (%)</label><input type="number" id="cfgOverhead" step="0.1" min="0" max="100" placeholder="Ex: 15" oninput="cfgAtualizarMargemPlan()"></div>
+              <div class="fg"><label>Margem VRML / Lucro (%)</label><input type="number" id="cfgVrml" step="0.1" min="0" max="100" placeholder="Ex: 30" oninput="cfgAtualizarMargemPlan()"></div>
+              <div style="grid-column:1/-1;background:#EDE9FE;border:1.5px solid #7C3AED;border-radius:8px;padding:10px 14px;font-size:12px;color:#4C1D95">
+                📐 <strong>Margem total usada na Planificação:</strong>
+                <span id="cfgMargemPlanTotal" style="font-size:15px;font-weight:900;color:#7C3AED;margin-left:6px">—</span>
+                <span style="color:#6B7280;font-size:11px;margin-left:4px">(Overhead + VRML) — edite os campos acima para alterar</span>
+              </div>
               <div class="fg"><label>% Despesas Operacionais (ref.)</label><input type="number" id="cfgDespPct" step="0.1" min="0" max="100" placeholder="Ex: 20" title="Usado para alertar quando despesas ultrapassarem esse % do faturamento"></div>
               <div class="fg"><label>Taxa Cartão de Crédito (%)</label><input type="number" id="cfgCartao" step="0.01" min="0" max="10" placeholder="Ex: 3.49"></div>
               <div class="fg"><label>Taxa PIX / Mercado Pago (%)</label><input type="number" id="cfgPix" step="0.01" min="0" max="5" placeholder="Ex: 0.99"></div>
@@ -6728,8 +6733,13 @@ function planCalc() {
   var _planVenda = (_planFac > 0) ? custoMat / _planFac : 0;
   var _planMkPct = ((_planOh + _planVr) * 100).toFixed(1);
 
-  // Area of default sheet for proportion calculation (200×100 cm = 20000 cm²)
-  var _sheetArea  = 20000; // cm² — uma chapa padrão 200×100 cm
+  // Área da chapa do material selecionado (ou 20000 cm² como fallback)
+  var _sheetArea = 20000;
+  if(matKey && matKey.indexOf('cfg_')===0) {
+    var _saMIdx = parseInt(matKey.replace('cfg_',''));
+    var _saMat = ((_cfgData&&_cfgData.materiais)||[])[_saMIdx];
+    if(_saMat && _saMat.comp && _saMat.larg) _sheetArea = _saMat.comp * _saMat.larg;
+  }
   var _proporcao  = totalArea > 0 ? (totalArea / _sheetArea * 100).toFixed(1) : '—';
 
   document.getElementById('planSumArea').textContent = (totalArea/10000).toFixed(4) + ' m²  (' + Math.round(totalArea) + ' cm²)';
@@ -6974,6 +6984,7 @@ function orcRecalc() {
 var ORC_ITEM_EXTRAS = {};
 
 function orcItemExtras(ri) {
+  window._extrasRiAtual = ri; // usado por orcExtrasAutoLaser
   var ex   = ORC_ITEM_EXTRAS[ri] || {};
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
@@ -7188,11 +7199,33 @@ function orcExtrasAplicarPreset(idx){
   orcExtrasCalcMaq();
 }
 function orcExtrasAutoLaser(){
-  // lê espessura do material do item aberto
-  var matSel=document.querySelector('#orcItemBody select[id^="oi_mat_"]');
-  var esp=3;
-  if(matSel){ var opt=matSel.options[matSel.selectedIndex]; if(opt) esp=parseFloat(opt.dataset.esp)||3; }
-  var min=Math.round(esp*2.5);
+  // Velocidades de corte reais (mm/s) por espessura (mm) — tabela da máquina
+  var LASER_SPEED = {2:18, 3:16, 4:14, 5:12, 6:10, 8:6, 10:3, 15:2, 20:1};
+  var _lsGet = function(esp) {
+    if(LASER_SPEED[esp] !== undefined) return LASER_SPEED[esp];
+    var keys = Object.keys(LASER_SPEED).map(Number).sort(function(a,b){return a-b;});
+    var best = keys[0], bestDiff = Math.abs(esp - keys[0]);
+    keys.forEach(function(k){ var d=Math.abs(esp-k); if(d<bestDiff){bestDiff=d;best=k;} });
+    return LASER_SPEED[best];
+  };
+  // Usa o ri do item atualmente aberto no modal (salvo em orcItemExtras)
+  var ri = window._extrasRiAtual || null;
+  var larg = ri ? (parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0) : 0;
+  var alt  = ri ? (parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0) : 0;
+  var qty  = ri ? (parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1) : 1;
+  var esp  = ri ? (parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3) : 3;
+  var matEl = ri ? document.getElementById('oi_mat_'+ri) : null;
+  if(!matEl) matEl = document.querySelector('#orcItemBody select[id^="oi_mat_"]');
+  var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
+  var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? 18 : _lsGet(Math.round(esp));
+  var min = 0;
+  if(larg > 0 && alt > 0){
+    var perim = 2*(larg*10 + alt*10); // cm → mm
+    min = Math.ceil((perim / speed / 60) * qty);
+  } else {
+    // Fallback: estimativa pela espessura quando sem dimensões
+    min = Math.max(1, Math.round(10 / speed * 3));
+  }
   var el=document.getElementById('m_laser'); if(el) el.value=min;
   orcExtrasCalcMaq();
 }
@@ -7322,8 +7355,16 @@ function orcSoCorteChange(){
 }
 
 function orcAutoLaser(){
-  // Velocidades de corte (mm/s) por espessura (mm)
-  var LASER_SPEED = {2:20, 3:18, 4:15, 5:13, 6:12, 8:10, 10:8};
+  // Velocidades de corte reais (mm/s) por espessura (mm) — tabela da máquina
+  var LASER_SPEED = {2:18, 3:16, 4:14, 5:12, 6:10, 8:6, 10:3, 15:2, 20:1};
+  // Busca velocidade para espessura — interpola pela chave mais próxima
+  var _lsGet = function(esp) {
+    if(LASER_SPEED[esp] !== undefined) return LASER_SPEED[esp];
+    var keys = Object.keys(LASER_SPEED).map(Number).sort(function(a,b){return a-b;});
+    var best = keys[0], bestDiff = Math.abs(esp - keys[0]);
+    keys.forEach(function(k){ var d=Math.abs(esp-k); if(d<bestDiff){bestDiff=d;best=k;} });
+    return LASER_SPEED[best];
+  };
   var totalMin = 0;
   document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
     var ri = row.dataset.idx;
@@ -7333,8 +7374,8 @@ function orcAutoLaser(){
     var esp  = parseFloat((document.getElementById('oi_esp_'+ri)||{}).value)||3;
     var matEl = document.getElementById('oi_mat_'+ri);
     var matLbl = matEl ? (matEl.options[matEl.selectedIndex]||{}).text||'' : '';
-    // inox: velocidade maior
-    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : (LASER_SPEED[Math.round(esp)] || 18);
+    // Espelhado → mesma velocidade do acrílico 2mm; inox → velocidade diferente
+    var speed = /inox|aco|aço/i.test(matLbl) ? 25 : /espelh/i.test(matLbl) ? 18 : _lsGet(Math.round(esp));
     if(larg>0 && alt>0){
       // Perímetro do retângulo em mm (larg e alt estão em cm → *10)
       var perim = 2*(larg*10 + alt*10);
@@ -7355,7 +7396,7 @@ function orcDescTipoChange(){
 }
 function orcUpdateSummary() {
   const c = window._orcCalc||{};
-  const rows = document.querySelectorAll('#orcItemBody tr').length;
+  const rows = document.querySelectorAll('#orcItemBody tr[data-idx]').length;
   const isVt = document.body.classList.contains('vitre');
   const rb = document.getElementById('orcRsmBadge');
   if(rb) { rb.textContent=isVt?'Vitre':'VR Marcas'; rb.className='badge '+(isVt?'bvit':'bvr'); }
@@ -14551,6 +14592,7 @@ function cfgRenderTables() {
   var fin = d.financeiro||{};
   var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
+  cfgAtualizarMargemPlan();
   // Markup
   var mk = d.markup||{};
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
@@ -14640,6 +14682,13 @@ function cfgDelRow(tipo, idx) {
   if(arr) arr.splice(idx,1);
   cfgSave(_cfgData);
   cfgRenderTables();
+}
+
+function cfgAtualizarMargemPlan() {
+  var oh = parseFloat((document.getElementById('cfgOverhead')||{}).value)||0;
+  var vr = parseFloat((document.getElementById('cfgVrml')||{}).value)||0;
+  var el = document.getElementById('cfgMargemPlanTotal');
+  if(el) el.textContent = (oh+vr).toFixed(1)+'%';
 }
 
 function cfgSalvar() {
@@ -17796,11 +17845,13 @@ function _planRecompute() {
   var vr2=(_cfg2.vrml!=null?_cfg2.vrml:20)/100;
   var fac2=1-oh2-vr2; var venda2=fac2>0?custoMat2/fac2:0;
   var mk2=((oh2+vr2)*100).toFixed(1);
-  var prop2=totalArea>0?(totalArea/20000*100).toFixed(1):'—';
+  var _sheetArea2=20000;
+  if(matKey2&&matKey2.indexOf('cfg_')===0){var _sa2i=parseInt(matKey2.replace('cfg_',''));var _sa2m=((_cfgData&&_cfgData.materiais)||[])[_sa2i];if(_sa2m&&_sa2m.comp&&_sa2m.larg)_sheetArea2=_sa2m.comp*_sa2m.larg;}
+  var prop2=totalArea>0?(totalArea/_sheetArea2*100).toFixed(1):'—';
 
   var saEl=document.getElementById('planSumArea');     if(saEl) saEl.textContent=(totalArea/10000).toFixed(4)+' m²  ('+Math.round(totalArea)+' cm²)';
   var spEl=document.getElementById('planSumPecas');    if(spEl) spEl.textContent=totalQty+' peças';
-  var prEl=document.getElementById('planSumProporcao');if(prEl) prEl.textContent='📄 Proporção da chapa usada: '+prop2+'%  ('+Math.round(totalArea)+' de 20000 cm²)';
+  var prEl=document.getElementById('planSumProporcao');if(prEl) prEl.textContent='📄 Proporção da chapa usada: '+prop2+'%  ('+Math.round(totalArea)+' de '+_sheetArea2+' cm²)';
   var scEl=document.getElementById('planSumCusto');    if(scEl) scEl.textContent='💵 Custo do material ≈ R$ '+custoMat2.toFixed(2).replace('.',',');
   var svEl=document.getElementById('planSumVenda');    if(svEl) svEl.textContent='💰 Preço de venda ≈ R$ '+venda2.toFixed(2).replace('.',',');
   var sfEl=document.getElementById('planSumFormula');  if(sfEl) sfEl.textContent='Fórmula: R$'+custoMat2.toFixed(2)+' ÷ (1 − '+mk2+'%) = R$'+venda2.toFixed(2);
