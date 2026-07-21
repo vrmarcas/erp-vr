@@ -1336,7 +1336,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'reativ');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -1693,6 +1693,7 @@ function _cloudAuthAviso(msg){
       <div class="sb-item" id="sbMktIntg"  onclick="navMkt('integracoes',this)"><span class="ico">🔗</span> Conexões & Ads</div>
       <div class="sb-item" id="sbMktIntel" onclick="navMkt('inteligencia',this)"><span class="ico">💡</span> Inteligência & Tendências</div>
       <div class="sb-item" id="sbMktDash"  onclick="navMkt('dashboard',this)"><span class="ico">📊</span> Dashboard de Conversão</div>
+    <div class="sb-item" id="sbMktLeads" onclick="navMkt('leadsSite',this)">🛒 Leads do Site</div>
     </div>
 
     <div class="sb-section" onclick="sbToggle('financeiro')"><span>Financeiro</span><span class="sb-arrow">▼</span></div>
@@ -3393,11 +3394,7 @@ function _cloudAuthAviso(msg){
 
       <!-- Tab bar + actions -->
       <div style="display:flex;align-items:center;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
-        <button id="crmTabSite" onclick="crmSetBrand('site')"
-          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:800;cursor:pointer;border-bottom:3px solid #059669;margin-bottom:-2px;color:#065F46;display:flex;align-items:center;gap:6px">
-          🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px" id="crmSiteCount">0</span>
-        </button>
-        <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
+                <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
           🔄 Reativação <span style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:1px 7px;font-size:10px" id="crmReativCount">0</span>
         </button>
@@ -3426,97 +3423,7 @@ function _cloudAuthAviso(msg){
         <div id="crmKpiVT" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <div style="overflow-x:auto;padding-bottom:8px"><div class="crm-board" id="crmBoardVT"></div></div>
       </div>
-      <div id="crmBrandSite" style="display:none">
-        <!-- KPI bar -->
-        <div id="crmKpiSite" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
-
-        <!-- Topbar ações -->
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-          <input id="siteLeadSearch" type="text" placeholder="🔍 Buscar por nome, email, tel..."
-            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
-            oninput="siteLeadRender()">
-          <select id="siteLeadFiltroStatus" onchange="siteLeadRender()"
-            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
-            <option value="">Todos os status</option>
-            <option value="novo">🆕 Novo</option>
-            <option value="contatado">📞 Contatado</option>
-            <option value="qualificado">⭐ Qualificado</option>
-            <option value="convertido">✅ Convertido</option>
-            <option value="inativo">❌ Inativo</option>
-          </select>
-          <select id="siteLeadFiltroOrigem" onchange="siteLeadRender()"
-            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
-            <option value="">Todas as origens</option>
-            <option value="cadastro">👤 Cadastro</option>
-            <option value="compra">🛍 Compra</option>
-            <option value="newsletter">📧 Newsletter</option>
-            <option value="manual">✏️ Manual</option>
-          </select>
-          <button class="topbar-btn" style="font-size:11px" onclick="siteLeadNovoModal()">+ Novo Lead</button>
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteShopifyPanel()">🔄 Sync Shopify</button>
-          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteImportCSV()">📥 Importar CSV</button>
-        </div>
-
-        <!-- Shopify sync panel (hidden by default) -->
-        <div id="siteShopifyPanelDiv" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-            <span style="font-size:20px">🛒</span>
-            <div>
-              <div style="font-weight:800;font-size:13px">Sincronizar com Shopify</div>
-              <div style="font-size:10px;color:var(--muted)">Puxe os clientes do vitredecor.com automaticamente</div>
-            </div>
-            <button onclick="document.getElementById('siteShopifyPanelDiv').style.display='none'" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted)">✕</button>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-            <div>
-              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">URL da loja (.myshopify.com)</label>
-              <input id="shopifyStoreUrl" type="text" placeholder="vitredecor.myshopify.com"
-                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Admin API Access Token</label>
-              <input id="shopifyToken" type="password" placeholder="shpat_xxxxxxxxxxxx"
-                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
-            </div>
-          </div>
-          <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#92400E;line-height:1.5">
-            <strong>Como obter o token:</strong> No painel Shopify → Configurações → Aplicativos → Desenvolver aplicativos → Criar aplicativo → 
-            em "Permissões da API Admin" ative <em>read_customers</em> e <em>read_orders</em> → Instalar → copiar o "Token de acesso da API Admin".
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <button onclick="siteShopifySync()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">🔄 Sincronizar Agora</button>
-            <button onclick="siteSalvarConfig()" style="padding:9px 14px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:11px;color:var(--text)">💾 Salvar Config</button>
-            <span id="shopifySyncStatus" style="font-size:11px;color:var(--muted)"></span>
-          </div>
-          <!-- CSV import -->
-          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ou importe um CSV exportado do Shopify (Clientes → Exportar):</div>
-            <input type="file" id="siteCSVInput" accept=".csv" onchange="siteParseCSV(this)" style="font-size:11px">
-          </div>
-        </div>
-
-        <!-- Leads table -->
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead>
-              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cliente</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Contato</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Origem</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Pedidos</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Status</th>
-                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cadastro</th>
-                <th style="padding:10px 12px;text-align:center;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="siteLeadsTbody">
-              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
-                Nenhum lead ainda. Clique em <strong>Sync Shopify</strong> para importar clientes do site ou em <strong>+ Novo Lead</strong> para adicionar manualmente.
-              </td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      
 
       <!-- ── BASE DE CLIENTES — Reativação ── -->
       <div id="crmBrandReativ" style="display:none">
@@ -5306,6 +5213,7 @@ function _cloudAuthAviso(msg){
       <button class="fin-tab-btn on" id="mktTabBtn-integracoes" onclick="mktTab('integracoes')">🔗 Conexões &amp; Ads</button>
       <button class="fin-tab-btn" id="mktTabBtn-inteligencia" onclick="mktTab('inteligencia')">💡 Inteligência &amp; Tendências</button>
       <button class="fin-tab-btn" id="mktTabBtn-dashboard" onclick="mktTab('dashboard')">📊 Dashboard de Conversão</button>
+      <button class="fin-tab-btn" id="mktTabBtn-leadsSite" onclick="mktTab('leadsSite')">🛒 Leads do Site</button>
     </div>
     <button class="topbar-btn" onclick="mktForceSync()" id="mktSyncBtn" style="white-space:nowrap">🔄 Sincronizar</button>
   </div>
@@ -5589,7 +5497,101 @@ function _cloudAuthAviso(msg){
       </div>
     </div>
 
-  </div><!-- /mktTabContent-dashboard -->
+  </div><div id="mktTabContent-leadsSite" style="display:none">
+        <!-- KPI bar -->
+        <div id="crmKpiSite" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+
+        <!-- Topbar aÃ§Ãµes -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <input id="siteLeadSearch" type="text" placeholder="ð Buscar por nome, email, tel..."
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
+            oninput="siteLeadRender()">
+          <select id="siteLeadFiltroStatus" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os status</option>
+            <option value="novo">ð Novo</option>
+            <option value="contatado">ð Contatado</option>
+            <option value="qualificado">â­ Qualificado</option>
+            <option value="convertido">â Convertido</option>
+            <option value="inativo">â Inativo</option>
+          </select>
+          <select id="siteLeadFiltroOrigem" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todas as origens</option>
+            <option value="cadastro">ð¤ Cadastro</option>
+            <option value="compra">ð Compra</option>
+            <option value="newsletter">ð§ Newsletter</option>
+            <option value="manual">âï¸ Manual</option>
+          </select>
+          <button class="topbar-btn" style="font-size:11px" onclick="siteLeadNovoModal()">+ Novo Lead</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteShopifyPanel()">ð Sync Shopify</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteImportCSV()">ð¥ Importar CSV</button>
+        </div>
+
+        <!-- Shopify sync panel (hidden by default) -->
+        <div id="siteShopifyPanelDiv" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-size:20px">ð</span>
+            <div>
+              <div style="font-weight:800;font-size:13px">Sincronizar com Shopify</div>
+              <div style="font-size:10px;color:var(--muted)">Puxe os clientes do vitredecor.com automaticamente</div>
+            </div>
+            <button onclick="document.getElementById('siteShopifyPanelDiv').style.display='none'" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted)">â</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">URL da loja (.myshopify.com)</label>
+              <input id="shopifyStoreUrl" type="text" placeholder="vitredecor.myshopify.com"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Admin API Access Token</label>
+              <input id="shopifyToken" type="password" placeholder="shpat_xxxxxxxxxxxx"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#92400E;line-height:1.5">
+            <strong>Como obter o token:</strong> No painel Shopify â ConfiguraÃ§Ãµes â Aplicativos â Desenvolver aplicativos â Criar aplicativo â 
+            em "PermissÃµes da API Admin" ative <em>read_customers</em> e <em>read_orders</em> â Instalar â copiar o "Token de acesso da API Admin".
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button onclick="siteShopifySync()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">ð Sincronizar Agora</button>
+            <button onclick="siteSalvarConfig()" style="padding:9px 14px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:11px;color:var(--text)">ð¾ Salvar Config</button>
+            <span id="shopifySyncStatus" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <!-- CSV import -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ou importe um CSV exportado do Shopify (Clientes â Exportar):</div>
+            <input type="file" id="siteCSVInput" accept=".csv" onchange="siteParseCSV(this)" style="font-size:11px">
+          </div>
+        </div>
+
+        <!-- Leads table -->
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cliente</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Contato</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Origem</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Pedidos</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Status</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cadastro</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">AÃ§Ãµes</th>
+              </tr>
+            </thead>
+            <tbody id="siteLeadsTbody">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
+                Nenhum lead ainda. Clique em <strong>Sync Shopify</strong> para importar clientes do site ou em <strong>+ Novo Lead</strong> para adicionar manualmente.
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ââ BASE DE CLIENTES â ReativaÃ§Ã£o ââ -->
+</div>
+<!-- /mktTabContent-dashboard -->
 
 </div><!-- /pg-marketing -->
 
@@ -6042,14 +6044,15 @@ function navMkt(tab, el) {
 }
 
 function mktTab(tab) {
-  ['integracoes','inteligencia','dashboard'].forEach(function(t){
+  ['integracoes','inteligencia','dashboard','leadsSite']].forEach(function(t){
     var content = document.getElementById('mktTabContent-'+t);
     var btn     = document.getElementById('mktTabBtn-'+t);
     if(content) content.style.display = (t === tab) ? '' : 'none';
     if(btn){ btn.classList.toggle('on', t === tab); }
   });
   if(tab === 'inteligencia') _mktRenderInteligencia();
-  if(tab === 'dashboard')    _mktRenderDashboard();
+  if(tab === 'dashboard')    _mktRenderDashboard();  if(tab === 'leadsSite') { try{siteLeadRender();siteKpiRender();}catch(e){} }
+
 }
 
 // Calendário B2B e radar de tendências
@@ -8827,8 +8830,7 @@ function crmSetBrand(b) {
   var panels = {
     'crmBrandVR':    isVR,
     'crmBrandVT':    false,
-    'crmBrandSite':  isSite,
-    'crmBrandDia':   isDia,
+    'crmBrandSite':  false,    'crmBrandDia':   isDia,
     'crmBrandReativ':isReativ,
     'crmBrandProsp': isProsp
   };
