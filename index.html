@@ -11415,13 +11415,29 @@ function finDREBuild() {
     var valHtml=isResult?sign+finFmt(val)+'</span>'+pct(val):finFmt(val)+pct(val);
     return '<div class="'+cls+'"><span>'+lbl+'</span><div>'+valHtml+'</div></div>';
   };
-  var recVR=txFiltro.filter(function(t){return t.marca==='vr';}).reduce(function(s,t){return s+t.valor;},0);
-  var recVT=txFiltro.filter(function(t){return t.marca==='vit';}).reduce(function(s,t){return s+t.valor;},0);
+  // Receitas dinâmicas por marca + banco principal cadastrado em Dados Bancários
+  var _marcaMap = {vr:'VR Marcas', vit:'Vitre', vitre:'Vitre'};
+  var _bankData = (typeof bankLoad==='function') ? bankLoad() : {};
+  // Coleta todas as marcas distintas presentes nas transações + nas configs de banco
+  var _marcasConfig = Object.keys(_bankData).filter(function(k){ return k!=='_v'; });
+  var _marcasTx = txFiltro.map(function(t){return t.marca;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+  var _todasMarcas = _marcasConfig.concat(_marcasTx).filter(function(v,i,a){return a.indexOf(v)===i;});
+  // Para cada marca, calcula o total e monta o label com banco principal
+  var _recByMarca = {};
+  txFiltro.forEach(function(t){ _recByMarca[t.marca]=(_recByMarca[t.marca]||0)+t.valor; });
+  var _recMarcaRows = _todasMarcas.map(function(mk){
+    var val = _recByMarca[mk]||0;
+    var brandLabel = _marcaMap[mk] || mk;
+    // Banco principal: primeiro com principal=true, senão o primeiro da lista
+    var banks = Array.isArray(_bankData[mk]) ? _bankData[mk] : (_bankData[mk]?[_bankData[mk]]:[]);
+    var principal = banks.find(function(b){return b.principal;}) || banks[0];
+    var bankLabel = principal ? (' — '+(principal.nome||'')) : '';
+    return row('(+) '+brandLabel+bankLabel, val, '', true);
+  }).join('');
 
   el.innerHTML='<div class="dre-wrap">'
     +secHd('RECEITAS')
-    +row('(+) VR Marcas — Mercado Pago',recVR,'',true)
-    +row('(+) Vitre — Nubank',recVT,'',true)
+    +_recMarcaRows
     +row('(+) Receita Bruta de Vendas',receitaBruta,'dre-row-total')
     +row('(−) Impostos e Deduções (7%)',impostos,'',true)
     +row('(=) Receita Líquida',receitaLiq,'dre-row-total '+(receitaLiq>=0?'dre-row-result-pos':'dre-row-result-neg'))
