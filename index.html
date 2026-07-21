@@ -5033,6 +5033,7 @@ function _cloudAuthAviso(msg){
               <option value="comercial">💼 Comercial</option>
               <option value="producao">🔧 Produção</option>
               <option value="financeiro">💳 Financeiro</option>
+          <option value="marketing">📣 Marketing</option>
               <option value="master">👑 Master</option>
             </select>
           </div>
@@ -16461,19 +16462,20 @@ var MODULOS = [
   { id:'clientes',   nome:'Clientes' },
   { id:'estoque',    nome:'Estoque' },
   { id:'financeiro', nome:'Financeiro' },
-  { id:'config',     nome:'Configurações' }
+  { id:'config',     nome:'Configurações' },
+  { id:'marketing',  nome:'Marketing' }
 ];
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id), marketing: ['dashboard','marketing','orcamento'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
 function usrLoadPerms(){ return _PERM_DATA ? JSON.parse(JSON.stringify(_PERM_DATA)) : JSON.parse(JSON.stringify(PERM_DEFAULT)); }
 
-var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
-var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
+var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro', marketing:'📣 Marketing' };
+var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46', marketing:'#D97706' };
 
 function usrRender() {
   var users = usrLoadUsuarios();
@@ -18231,8 +18233,8 @@ function secApplyPerms(funcao){
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
     comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
-    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
+    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1,'marketing':1},
+    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'marketing':1}
   };
   var denied = HARD_DENY[funcao]||{};
   function getPermForMod(mod, page){
@@ -18261,6 +18263,8 @@ function secApplyPerms(funcao){
   document.querySelectorAll('.sb-item[onclick]').forEach(function(item){
     applyToItem(item, /nav\('([^']+)'/);
   });
+  // Marketing group visibility (uses navMkt, not nav)
+  (function(){var mp=perms['marketing'],ok=mp&&mp[funcao]&&!denied['marketing'];var g=document.getElementById('sbG-marketing');if(g){g.style.display=ok?'':'none';var p=g.previousElementSibling;if(p&&p.classList.contains('sb-section'))p.style.displayok?'':'none'';}})();
   // Mobile side panel items
   document.querySelectorAll('#mobileSidePanel .mdrw-item[id]').forEach(function(item){
     var page=(item.id||'').replace('mspItem-','');
