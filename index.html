@@ -1331,8 +1331,8 @@ function _cloudLoadAll() {
     // Backup automático diário (salva no Firebase em erp_backups/YYYY-MM-DD)
     setTimeout(function(){ try{ erpBackupAutomatico(); }catch(e){} }, 3000);
     // Listeners em tempo real
-    _cloudWatch("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; try{finCRRender();finDashKPIs();}catch(e){} } });
-    _cloudWatch("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; try{finCPRender();finDashKPIs();}catch(e){} } });
+    _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} } });
+    _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
@@ -1345,7 +1345,7 @@ function _cloudLoadAll() {
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
-    _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)&&d.length){ FIN_TX=d; try{finRenderTx();finDashKPIs();}catch(e){} } });
+    _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; try{finRenderTx();finDashKPIs();dashRender();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
       if(d&&d.length){
         var local=usrLoadUsuarios();
@@ -11582,6 +11582,7 @@ function finDeleteTX(osRef, data, cliente) {
   FIN_TX.splice(idx,1);
   if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
   finRenderTx();
+  try { finDashKPIs(); dashRender(); } catch(e){}
 }
 // ── Antecipar recebimento de Cartão (simula taxa MP/Nubank ~3,49%) ────────────
 function finAntecipar(osRef, valor) {
