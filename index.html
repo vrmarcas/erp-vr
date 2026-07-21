@@ -15801,7 +15801,7 @@ var MODULOS = [
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['dashboard','kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['dashboard','kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
@@ -17444,15 +17444,16 @@ function authApplySession(){
   secApplyPerms(funcao);
   // Redirecionar para dashboard se a página atual for restrita para este perfil
   var _authDeny={
-    comercial:{'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
+    comercial:{'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+    producao: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
   };
+  var _authDefault={ comercial:'orcamento', producao:'kanban' };
   var _fn=(funcao||'').toLowerCase();
   if(_authDeny[_fn]){
     var currentPg=document.querySelector('.pg.on');
     if(currentPg){
       var pgId=(currentPg.id||'').replace('pg-','');
-      if(_authDeny[_fn][pgId]) nav('dashboard');
+      if(_authDeny[_fn][pgId]) nav(_authDefault[_fn]||'kanban');
     }
   }
   // Load inactivity setting
@@ -17465,8 +17466,8 @@ function secApplyPerms(funcao){
   var perms=usrLoadPerms();
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
-    comercial: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao:  {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
+    comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
     financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
   };
   var denied = HARD_DENY[funcao]||{};
