@@ -9777,17 +9777,27 @@ function dashRender() {
   if(dkCvrSub) dkCvrSub.textContent = osEntregues + ' entregues de ' + osList.length + ' OS';
   if(dkCvrBar) { dkCvrBar.style.width = cvrPct+'%'; dkCvrBar.style.background = cvrPct >= 50 ? '#059669' : '#D97706'; }
 
-  // ── KPI 2: Ticket médio ───────────────────────────────────────────────────
-  var txVR  = FIN_TX.filter(function(t){ return (t.marca==='vr')  && t.status==='recebido' && (!mesFiltro||t.mes===mesFiltro); });
-  var txVit = FIN_TX.filter(function(t){ return (t.marca==='vit') && t.status==='recebido' && (!mesFiltro||t.mes===mesFiltro); });
-  var tkVR  = txVR.length  ? txVR.reduce(function(s,t){return s+t.valor;},0)/txVR.length   : 0;
-  var tkVit = txVit.length ? txVit.reduce(function(s,t){return s+t.valor;},0)/txVit.length : 0;
-  var tkGeral = txAll.length ? txAll.reduce(function(s,t){return s+t.valor;},0)/txAll.length : 0;
+  // ── KPI 2: Ticket médio — usa KB_OS.finalPrice (valor real do pedido) ───────
+  // FIN_TX registra eventos de pagamento (pode ser parcial/entrada), distorcendo a média.
+  // KB_OS.finalPrice = valor total de cada OS → fonte correta para ticket médio.
+  var _osComValor = osList.filter(function(o){ return (o.finalPrice||o.total||0) > 0; });
+  var _osMesOk = _osComValor.filter(function(o){
+    if(!mesFiltro) return true;
+    var _d = o.data || o.createdAt || '';
+    var _m = 0;
+    if(_d) { var _dp=_d.split('/'); _m = _dp.length>=2 ? parseInt(_dp[1])||0 : 0; }
+    return _m === mesFiltro;
+  });
+  var _osVR  = _osMesOk.filter(function(o){ return (o.mk||o.marca||'vr')==='vr'; });
+  var _osVit = _osMesOk.filter(function(o){ return (o.mk||o.marca||'')==='vit'||(o.mk||o.marca||'')==='vitre'; });
+  var tkVR    = _osVR.length  ? _osVR.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osVR.length   : 0;
+  var tkVit   = _osVit.length ? _osVit.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osVit.length : 0;
+  var tkGeral = _osMesOk.length ? _osMesOk.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osMesOk.length : 0;
   var dkTicket = document.getElementById('dkTicket');
   var dkTicketSub = document.getElementById('dkTicketSub');
   var dkTicketBar = document.getElementById('dkTicketBar');
-  if(dkTicket) { dkTicket.textContent = 'R$ '+Math.round(tkGeral).toLocaleString('pt-BR'); dkTicket.style.color='#059669'; }
-  if(dkTicketSub) dkTicketSub.textContent = 'VR: R$'+Math.round(tkVR).toLocaleString('pt-BR')+' · Vitre: R$'+Math.round(tkVit).toLocaleString('pt-BR');
+  if(dkTicket) { dkTicket.textContent = tkGeral>0 ? 'R$ '+Math.round(tkGeral).toLocaleString('pt-BR') : '—'; dkTicket.style.color='#059669'; }
+  if(dkTicketSub) dkTicketSub.textContent = 'VR: '+(tkVR>0?'R$'+Math.round(tkVR).toLocaleString('pt-BR'):'—')+' · Vitre: '+(tkVit>0?'R$'+Math.round(tkVit).toLocaleString('pt-BR'):'—');
   if(dkTicketBar) { dkTicketBar.style.width = Math.min(Math.round(tkGeral/1000*10),100)+'%'; }
 
   // ── KPI 3: Gargalos Master ───────────────────────────────────────────────
