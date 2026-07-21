@@ -6033,8 +6033,8 @@ function navFin(tab, el) {
 
 // ── MARKETING: navegação por sub-aba ────────────────────────────────────────
 function navMkt(tab, el) {
+  window._mktPendingTab = tab;
   nav('marketing', el);
-  setTimeout(function(){ mktTab(tab); }, 60);
   var subtitles = {integracoes:'Conexões & Ads', inteligencia:'Inteligência & Tendências', dashboard:'Dashboard de Conversão'};
   var titleEl = document.getElementById('topbarTitle');
   if(titleEl && subtitles[tab]) titleEl.textContent = subtitles[tab];
@@ -21476,7 +21476,9 @@ var _MKT_PER_PAGE   = 15;
 var _mktUnsubscribe = null;
 
 function mktInit() {
-  mktTab('integracoes');
+  var targetTab = window._mktPendingTab || 'integracoes';
+  window._mktPendingTab = null;
+  mktTab(targetTab);
   var monthEl = document.getElementById('mktMonthFilter');
   if(monthEl && !monthEl.value) {
     var now = new Date();
