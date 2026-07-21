@@ -6807,8 +6807,9 @@ function planAbrir(idx) {
 
   planManualPieces = [];
   var rowEl = document.getElementById('oir_'+idx);
-  if(rowEl && rowEl.dataset.planPecas) {
-    try { planManualPieces = JSON.parse(rowEl.dataset.planPecas)||[]; } catch(e){}
+  if(rowEl && rowEl.dataset.planPecasManual) {
+    // Restaura só peças extras manuais — catálogo é regenerado pelo planCalc()
+    try { planManualPieces = JSON.parse(rowEl.dataset.planPecasManual)||[]; } catch(e){}
   }
   planRenderManual();
 
@@ -7013,9 +7014,12 @@ function planAplicar() {
     row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
-    // Salvar TODAS as peças: catálogo (_planEditPieces) + manuais adicionais (planManualPieces)
+    // planPecas = TODAS (catálogo + extras) — usado pelo cálculo de laser
     var _allPlanPecas = (_planEditPieces||[]).concat(planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
     row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+    // planPecasManual = só as extras manuais — restaurado ao reabrir (evita duplicação do catálogo)
+    var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
+    row.dataset.planPecasManual = JSON.stringify(_onlyManual);
     var _pSumBox=document.getElementById('planSumBox'); if(_pSumBox&&_pSumBox.dataset.planImg) row.dataset.planImg=_pSumBox.dataset.planImg;
   }
 
