@@ -2743,8 +2743,7 @@ function _cloudAuthAviso(msg){
               <div class="fg">
                 <label>Gateway</label>
                 <select id="orcSimGtw" onchange="orcAtualizarIconePgto()">
-                  <option>Mercado Pago (VR)</option>
-                  <option>Nubank PIX (Vitre)</option>
+                  <option>Carregando...</option>
                 </select>
               </div>
               <div class="fg" id="orcSimParcelasRow" style="display:none">
@@ -2765,7 +2764,7 @@ function _cloudAuthAviso(msg){
 
             <div id="orcPgtoPixBox" style="background:#F0FDF4;border:1.5px solid #BBF7D0;border-radius:9px;padding:14px;margin-bottom:14px;text-align:center">
               <div style="font-size:11px;font-weight:700;color:#065F46;margin-bottom:8px">Chave PIX gerada</div>
-              <div style="background:#fff;border-radius:7px;padding:10px;font-size:13px;font-weight:700;color:#059669;letter-spacing:.5px;word-break:break-all" id="orcPixChave">vr@vrmarcas.com.br</div>
+              <div style="background:#fff;border-radius:7px;padding:10px;font-size:13px;font-weight:700;color:#059669;letter-spacing:.5px;word-break:break-all" id="orcPixChave">—</div>
               <div style="font-size:10px;color:#059669;margin-top:6px">Aguardando confirmação do cliente...</div>
             </div>
 
@@ -5048,6 +5047,7 @@ function _cloudAuthAviso(msg){
               </label>
               <span id="planProdSvgNome" style="font-size:11px;color:var(--muted)">Nenhum arquivo</span>
               <button id="planProdSvgClear" onclick="planProdSvgClear()" style="display:none;background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Remover</button>
+              <button id="planProdSvgParseBtn" onclick="planSvgParseNow()" style="display:none;background:var(--primary);color:#fff;border:none;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:600">🔍 Extrair Peças do SVG</button>
             </div>
             <div id="planProdSvgPreview" style="display:none;margin-top:8px;max-height:120px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:6px;text-align:center"></div>
           </div>
@@ -5081,7 +5081,7 @@ function _cloudAuthAviso(msg){
             </div>
             <div style="overflow-x:auto">
               <table style="width:100%;border-collapse:collapse">
-                <thead>
+                <thead id="planProdPecasHead">
                   <tr style="background:var(--bg);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
                     <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:50px">Qtd</th>
                     <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Nome da Peça</th>
@@ -6383,7 +6383,12 @@ function orcStep(n) {
     if(i===n) el.classList.add('on');
   }
   if (n===4) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100); }
-  if (n===5) { const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = 'R$ '+orcFmt(v.finalPrice||0); } }
+  if (n===5) {
+    const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = 'R$ '+orcFmt(v.finalPrice||0); }
+    // Sincroniza bancos com a empresa selecionada
+    var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
+    if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);
+  }
 }
 
 // Custos Avançados inline toggle no Step 2
@@ -6430,6 +6435,46 @@ function orcSyncStep3Result() {
   if(b3 && b) b3.innerHTML   = b.innerHTML;
 }
 
+// ── Helper: banco principal da empresa selecionada no orçamento ───────────────
+function orcGetBancoPrincipal(empresa) {
+  if(typeof bankListFor !== 'function') return null;
+  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  var bancos = bankListFor(marcaKey);
+  if(!bancos || !bancos.length) bancos = bankListFor(empresa);
+  if(!bancos || !bancos.length) return null;
+  return bancos.find(function(b){ return b.principal; }) || bancos[0];
+}
+
+// ── Popula dropdown de gateway/banco com bancos cadastrados ──────────────────
+function orcPopularBancos(empresa) {
+  var sel = document.getElementById('orcSimGtw');
+  if(!sel) return;
+  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  var bancos = (typeof bankListFor==='function') ? bankListFor(marcaKey) : [];
+  if(!bancos || !bancos.length) bancos = (typeof bankListFor==='function') ? bankListFor(empresa) : [];
+  sel.innerHTML = '';
+  if(bancos && bancos.length) {
+    bancos.forEach(function(b, i){
+      var opt = document.createElement('option');
+      opt.value = i;
+      opt.dataset.pix = b.pix || b.chavePix || '';
+      opt.dataset.nome = b.nome || '';
+      opt.dataset.titular = b.titular || '';
+      opt.dataset.agencia = b.agencia || '';
+      opt.dataset.conta = b.conta || '';
+      opt.textContent = b.nome + (b.principal ? ' ★' : '');
+      if(b.principal) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } else {
+    var opt = document.createElement('option');
+    opt.value = 0;
+    opt.textContent = 'Nenhum banco cadastrado';
+    sel.appendChild(opt);
+  }
+  orcAtualizarIconePgto();
+}
+
 function orcEmpresaChange() {
   var empSel  = document.getElementById('orcEmpresaSel');
   var tipSel  = document.getElementById('orcTipoClienteSel');
@@ -6448,8 +6493,8 @@ function orcEmpresaChange() {
     bb.textContent = lbl;
     bb.className = 'badge ' + (isVitre ? 'bvit' : 'bvr');
   }
-  var pi = document.getElementById('orcPgtoInfo');
-  if(pi) pi.innerHTML = 'Gateway: <strong>' + (isVitre ? 'Nubank PIX' : 'Mercado Pago') + '</strong>';
+  // Popula bancos dinamicamente por empresa
+  orcPopularBancos(empresa);
   orcRecalc();
 }
 function orcTipoChange(sel) { orcEmpresaChange(); }
@@ -6700,10 +6745,12 @@ function planGetRecipe(produto) {
       pieces: function(L, A, P, e) {
         return (custom.pecas||[]).map(function(peca) {
           return {
-            qty: parseInt(peca.qty)||1,
+            qty:  parseInt(peca.qty)||1,
             nome: peca.nome||'Peça',
             larg: planEvalFormula(peca.larg, L, A, P, e),
-            alt:  planEvalFormula(peca.alt,  L, A, P, e)
+            alt:  planEvalFormula(peca.alt,  L, A, P, e),
+            esp:  peca.esp||'',
+            tipo: peca.tipo||''
           };
         });
       }
@@ -6872,7 +6919,7 @@ function planCalc() {
 
   // Inicializar array editável (preserva edições anteriores se recalcular)
   _planEditPieces = pieces.map(function(pc) {
-    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100};
+    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100, esp:pc.esp||'', tipo:pc.tipo||''};
   });
 
   _planEditPieces.forEach(function(pc, pci) {
@@ -6945,7 +6992,7 @@ function planCalc() {
   sumBox.dataset.totalArea = totalArea;
   sumBox.dataset.totalQty  = totalQty;
   sumBox.dataset.pcs       = JSON.stringify(pieces.map(function(pc){
-    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100};
+    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100, esp:pc.esp||'', tipo:pc.tipo||''};
   }));
 
   if(btn) { btn.disabled = false; btn.style.opacity = '1'; }
@@ -7605,9 +7652,12 @@ function orcGerarLinkPagamento(){
   var marca=document.body.classList.contains('vitre')?'Vitre':'VR Marcas';
   var valor=c2.finalPrice||0;
   var valorFmt='R$ '+valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  // Get PIX key from config
-  var cfgD=cfgLoad?cfgLoad():{};
-  var pixKey=(cfgD.pix||cfgD.pixKey||'');
+  // Get PIX key from bank config (empresa selecionada no orçamento)
+  var _orcEmp = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
+  var _orcBanco = orcGetBancoPrincipal ? orcGetBancoPrincipal(_orcEmp) : null;
+  var pixKey = (_orcBanco && (_orcBanco.pix||_orcBanco.chavePix)) || '';
+  // Fallback: chave exibida no box
+  if(!pixKey){ var _pixEl=document.getElementById('orcPixChave'); if(_pixEl&&_pixEl.textContent&&_pixEl.textContent.indexOf('Cadastre')<0) pixKey=_pixEl.textContent.trim(); }
   var pixInfo=pixKey?('\n\n💠 *Chave PIX:* '+pixKey):'';
   var items=[];
   document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
@@ -7943,16 +7993,30 @@ function orcAtualizarIconePgto() {
   if(_pr) _pr.style.display=(_m==='cartao'||_m==='link')?'':'none';
   orcCalcParcelaDisplay();
 
-  const metodo = document.getElementById('orcSimMetodo') ? document.getElementById('orcSimMetodo').value : 'pix';
-  const gtw    = document.getElementById('orcSimGtw')    ? document.getElementById('orcSimGtw').selectedIndex : 0;
-  const iconEl = document.getElementById('orcPgtoIcon');
-  const lblEl  = document.getElementById('orcPgtoGatewayLbl');
-  const pixBox = document.getElementById('orcPgtoPixBox');
-  const icons  = { pix:'⚡', cartao:'💳', dinheiro:'💵', '50_50':'💰' };
+  var metodo = document.getElementById('orcSimMetodo') ? document.getElementById('orcSimMetodo').value : 'pix';
+  var gtwSel = document.getElementById('orcSimGtw');
+  var selOpt = gtwSel && gtwSel.selectedOptions && gtwSel.selectedOptions[0];
+  var iconEl = document.getElementById('orcPgtoIcon');
+  var lblEl  = document.getElementById('orcPgtoGatewayLbl');
+  var pixBox = document.getElementById('orcPgtoPixBox');
+  var pixChaveEl = document.getElementById('orcPixChave');
+  var icons  = { pix:'⚡', cartao:'💳', dinheiro:'💵', '50_50':'💰' };
   if (iconEl) iconEl.textContent = icons[metodo] || '💳';
-  const gtwName = gtw === 0 ? 'Mercado Pago · VR' : 'Nubank PIX · Vitre';
-  if (lblEl) lblEl.textContent = gtwName;
+  // Nome do banco selecionado
+  var gtwName = selOpt ? (selOpt.dataset.nome || selOpt.textContent.replace(' ★','')) : '';
+  if (lblEl) lblEl.textContent = gtwName || '—';
+  // PIX key do banco selecionado
+  var pixKey = selOpt ? (selOpt.dataset.pix || '') : '';
   if (pixBox) pixBox.style.display = metodo === 'pix' ? '' : 'none';
+  if (pixChaveEl) {
+    if(pixKey) {
+      pixChaveEl.textContent = pixKey;
+      pixChaveEl.style.color = '#059669';
+    } else {
+      pixChaveEl.textContent = 'Cadastre a chave PIX em Config → Dados Bancários';
+      pixChaveEl.style.color = '#D97706';
+    }
+  }
   // Recalcular botão conforme entrada digitada
   orcCalcEntradaResto();
 }
@@ -16391,29 +16455,82 @@ function crmBaseAlterarColuna(id, coluna) {
   }
 }
 
-// ── Reativação IA: dispara webhook simulado (N8N) ────────────────────────────
+// ── Reativação IA: modal com 3 sugestões ─────────────────────────────────────
+var _crmReativMsgsStore = {};
 function crmBaseReativacaoIA(id) {
-  var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
-  if(!idx) return;
-  var nome = idx.nome || 'Cliente';
-  var tel  = (idx.tel||'').replace(/\D/g,'');
-  var prods = (idx.produtos||[]).slice(0,2).join(', ') || 'acrílico personalizado';
-  // Monta mensagem personalizada de reativação
-  var msgIA = 'Olá '+nome.split(' ')[0]+'! 😊 Tudo bem? Passamos um tempinho sem falar e sentimos sua falta por aqui! '
-    + 'Temos novidades em '+prods+' que podem te interessar. '
-    + 'Quando tiver um minuto, adoraríamos te contar! 🎨';
-  // Abre WhatsApp com mensagem pré-preenchida
-  if(tel) {
-    window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(msgIA), '_blank');
-    // Registra contato
-    crmBaseDoc(id).update({ ultimoContato: new Date().toLocaleDateString('pt-BR'), _ts: Date.now() }).catch(function(){});
-    if(idx) idx.ultimoContato = new Date().toLocaleDateString('pt-BR');
-    showToast('Mensagem de reativação enviada para '+nome.split(' ')[0]+'!','ok');
-  } else {
-    // Sem telefone — apenas mostra a mensagem
-    prompt('📋 Mensagem de Reativação IA (copie e envie):', msgIA);
-  }
-  crmBaseAbrirPerfil(id);
+  var c = _CRM_BASE_IDX.find(function(x){ return x.id===id; });
+  if(!c) return;
+  var nome = c.nome || 'Cliente';
+  var fn = nome.split(' ')[0];
+  var tel = (c.tel||'').replace(/\D/g,'');
+  var prods = (c.produtos||[]).slice(0,2).join(', ') || 'acrílico personalizado';
+  var diasStr = c.coluna==='inativo180' ? 'mais de 6 meses' : 'alguns meses';
+  _crmReativMsgsStore[id] = [
+    {
+      label:'😊 Saudade',
+      desc:'Tom caloroso, foco no relacionamento',
+      texto:'Oi '+fn+'! 😊 Tudo bem? Faz '+diasStr+' que a gente não fala e você faz falta por aqui! Tem novidades no nosso catálogo que acho que você vai gostar. Posso te mostrar? 🎨'
+    },
+    {
+      label:'🆕 Novidade de produto',
+      desc:'Foco nos produtos que o cliente já comprou',
+      texto:'Olá '+fn+'! 👋 Passando para te contar que temos novidades em '+prods+'. Se você precisar de algo personalizado ou quiser ver nossas opções, é só chamar — adoramos trabalhar com você! 🙌'
+    },
+    {
+      label:'🎁 Oferta exclusiva',
+      desc:'Tom de exclusividade e urgência',
+      texto:'Oi '+fn+'! Como você é um cliente especial da VR, preparamos uma condição exclusiva para o seu próximo pedido. Quer saber mais? Me chama que eu te explico! 😄'
+    }
+  ];
+  var existMod = document.getElementById('crmReativIAModal');
+  if(existMod) existMod.remove();
+  var cardsHtml = _crmReativMsgsStore[id].map(function(m, i){
+    var hasTel = !!tel;
+    var waBtn = hasTel
+      ? '<button onclick="crmBaseReativEnviar(\''+id+'\','+i+')" style="flex:1;padding:7px 0;background:#25D366;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📱 Enviar WhatsApp</button>'
+      : '';
+    return '<div style="background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;padding:14px">'
+      +'<div style="font-size:11px;font-weight:800;color:var(--brand-mid);margin-bottom:2px">'+m.label+'</div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-bottom:8px">'+m.desc+'</div>'
+      +'<div style="font-size:12px;color:var(--text);line-height:1.6;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px">'+m.texto+'</div>'
+      +'<div style="display:flex;gap:6px">'
+        +waBtn
+        +'<button onclick="crmBaseReativCopiar(\''+id+'\','+i+')" style="'+(hasTel?'padding:7px 12px':'flex:1;padding:7px 0')+';background:var(--bg);border:1.5px solid var(--border);border-radius:7px;font-size:11px;cursor:pointer;font-weight:600">'+(hasTel?'📋':'📋 Copiar mensagem')+'</button>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+  var mod = document.createElement('div');
+  mod.id = 'crmReativIAModal';
+  mod.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  mod.innerHTML = '<div style="background:var(--card);border-radius:14px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+      +'<div style="font-size:15px;font-weight:900">🤖 Reativação IA</div>'
+      +'<button onclick="document.getElementById(\'crmReativIAModal\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1">✕</button>'
+    +'</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Escolha uma sugestão para <strong>'+fn+'</strong>:</div>'
+    +'<div style="display:flex;flex-direction:column;gap:10px">'+cardsHtml+'</div>'
+  +'</div>';
+  mod.addEventListener('click', function(e){ if(e.target===mod) mod.remove(); });
+  document.body.appendChild(mod);
+}
+function crmBaseReativEnviar(id, msgIdx) {
+  var store = _crmReativMsgsStore[id];
+  if(!store || !store[msgIdx]) return;
+  var c = _CRM_BASE_IDX.find(function(x){ return x.id===id; });
+  if(!c) return;
+  var tel = (c.tel||'').replace(/\D/g,'');
+  var msg = store[msgIdx].texto;
+  window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(msg), '_blank');
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  crmBaseDoc(id).update({ ultimoContato: hoje, _ts: Date.now() }).catch(function(){});
+  c.ultimoContato = hoje;
+  showToast('Mensagem enviada para '+(c.nome||'').split(' ')[0]+'!','ok');
+  var m = document.getElementById('crmReativIAModal'); if(m) m.remove();
+}
+function crmBaseReativCopiar(id, msgIdx) {
+  var store = _crmReativMsgsStore[id];
+  if(!store || !store[msgIdx]) return;
+  navigator.clipboard.writeText(store[msgIdx].texto).then(function(){ showToast('Mensagem copiada!','ok'); }).catch(function(){ showToast('Copie manualmente','warn'); });
 }
 
 // ── Agendar Contato: mini-modal com data ─────────────────────────────────────
@@ -18693,14 +18810,14 @@ function planDrawCanvas() {
     try {
       JSON.parse(sumBox.dataset.pcs).forEach(function(p) {
         for (var i = 0; i < p.qty; i++)
-          allPieces.push({nome:p.nome, larg:p.larg, alt:p.alt, manual:false});
+          allPieces.push({nome:p.nome, larg:p.larg, alt:p.alt, esp:p.esp||'', tipo:p.tipo||'', manual:false});
       });
     } catch(e) {}
   }
   planManualPieces.forEach(function(p) {
     if (p.larg > 0 && p.alt > 0)
       for (var i = 0; i < (p.qty||1); i++)
-        allPieces.push({nome:(p.nome||'Manual'), larg:p.larg, alt:p.alt, manual:true});
+        allPieces.push({nome:(p.nome||'Manual'), larg:p.larg, alt:p.alt, esp:'', tipo:'', manual:true});
   });
   if (!allPieces.length) { if(layoutBox) layoutBox.style.display='none'; return; }
   if (layoutBox) layoutBox.style.display = '';
@@ -18711,27 +18828,49 @@ function planDrawCanvas() {
   var colorMap={}, colorIdx=0;
   allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
 
-  // ── Packing multi-chapa ─────────────────────────────────────────
-  var sorted = allPieces.slice().sort(function(a,b){ return (b.alt-a.alt)||(b.larg-a.larg); });
-  var chapas = []; // array de arrays de {p, x, y}
-  var curChapa = [], curX=0, curY=0, rowH=0;
+  // ── Grupos por espessura (se houver esp definido) ───────────────
+  var hasEspGrp = allPieces.some(function(p){ return p.esp; });
+  var espGrupos = []; // [{espLabel, pieces:[]}]
+  if(hasEspGrp) {
+    var espKeys = [];
+    allPieces.forEach(function(p){ var k=p.esp||'?'; if(espKeys.indexOf(k)<0) espKeys.push(k); });
+    espKeys.sort(function(a,b){ return parseFloat(b)-parseFloat(a); });
+    espKeys.forEach(function(k){ espGrupos.push({espLabel:k?k+'mm':'sem esp', pieces:allPieces.filter(function(p){return (p.esp||'?')===k;})}); });
+  } else {
+    espGrupos = [{espLabel:null, pieces:allPieces}];
+  }
 
-  sorted.forEach(function(p) {
-    if (curX + p.larg > SHEET_W + 0.01) { curY += rowH; curX = 0; rowH = 0; }
-    if (curY + p.alt > SHEET_H + 0.01) {
-      // nova chapa
-      chapas.push(curChapa); curChapa = [];
-      curX = 0; curY = 0; rowH = 0;
-    }
-    curChapa.push({p:p, x:curX, y:curY});
-    curX += p.larg;
-    if (p.alt > rowH) rowH = p.alt;
+  // ── Packing: por grupo de espessura ────────────────────────────
+  function packGrupo(pieces) {
+    var sorted = pieces.slice().sort(function(a,b){ return (b.alt-a.alt)||(b.larg-a.larg); });
+    var chapas = [], curChapa=[], curX=0, curY=0, rowH=0;
+    sorted.forEach(function(p) {
+      if (curX + p.larg > SHEET_W + 0.01) { curY += rowH; curX = 0; rowH = 0; }
+      if (curY + p.alt > SHEET_H + 0.01) {
+        chapas.push(curChapa); curChapa = [];
+        curX = 0; curY = 0; rowH = 0;
+      }
+      curChapa.push({p:p, x:curX, y:curY});
+      curX += p.larg;
+      if (p.alt > rowH) rowH = p.alt;
+    });
+    if (curChapa.length) chapas.push(curChapa);
+    return chapas;
+  }
+
+  // Construir lista plana de chapas com label do grupo
+  var allChapas = []; // [{espLabel, sheetInGrp, totalInGrp, pieces, usedArea}]
+  espGrupos.forEach(function(grp){
+    var chapas = packGrupo(grp.pieces);
+    chapas.forEach(function(cp, si){
+      var used = cp.reduce(function(acc,it){return acc+it.p.larg*it.p.alt;},0);
+      allChapas.push({espLabel:grp.espLabel, sheetInGrp:si+1, totalInGrp:chapas.length, pieces:cp, usedArea:used});
+    });
   });
-  if (curChapa.length) chapas.push(curChapa);
 
-  var numChapas = chapas.length;
+  var numChapas = allChapas.length;
   var canvW = Math.round(SHEET_W * SCALE) + PAD * 2;
-  var canvH = PAD + numChapas * (Math.round(SHEET_H*SCALE) + GAP + 14) + PAD;
+  var canvH = PAD + numChapas * (Math.round(SHEET_H*SCALE) + GAP + 20) + PAD;
 
   canvas.width = canvW; canvas.height = canvH;
   canvas.style.maxWidth = '100%';
@@ -18739,8 +18878,21 @@ function planDrawCanvas() {
   ctx.fillStyle = '#e8eaed'; ctx.fillRect(0, 0, canvW, canvH);
 
   // ── Desenhar cada chapa ─────────────────────────────────────────
-  function drawSheet(sheetIdx, pieces) {
-    var offY = PAD + sheetIdx * (Math.round(SHEET_H*SCALE) + GAP + 14);
+  function drawSheet(sheetIdx, chapaData) {
+    var offY = PAD + sheetIdx * (Math.round(SHEET_H*SCALE) + GAP + 20);
+    var usedPct = Math.round(chapaData.usedArea / (SHEET_W*SHEET_H) * 100);
+
+    // Rótulo do grupo (espessura)
+    if(chapaData.espLabel) {
+      ctx.fillStyle = '#7C3AED'; ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('▪ Chapa ' + chapaData.espLabel + ' — ' + chapaData.sheetInGrp + (chapaData.totalInGrp>1?'/'+chapaData.totalInGrp:'') + ' — 200×100 cm  (utilização: '+usedPct+'%)', PAD, offY-7);
+    } else {
+      ctx.fillStyle = numChapas > 1 ? '#5B21B6' : '#888';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText('Chapa '+(sheetIdx+1)+(numChapas>1?' de '+numChapas:'')+'  — 200×100 cm  ('+usedPct+'% util.)', PAD+4, offY-5);
+    }
+    ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
+    [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), offY-5); });
 
     // Fundo da chapa
     ctx.fillStyle = '#fff';
@@ -18757,15 +18909,8 @@ function planDrawCanvas() {
       ctx.beginPath(); ctx.moveTo(PAD, offY+gy*SCALE); ctx.lineTo(PAD+SHEET_W*SCALE, offY+gy*SCALE); ctx.stroke();
     }
 
-    // Label da chapa
-    ctx.fillStyle = numChapas > 1 ? '#5B21B6' : '#888';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.fillText('Chapa ' + (sheetIdx+1) + (numChapas>1?' de '+numChapas:'') + ' — 200\xd7100 cm', PAD+4, offY-5);
-    ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
-    [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), offY-5+(numChapas>1?0:0)); });
-
     // Peças
-    pieces.forEach(function(item) {
+    chapaData.pieces.forEach(function(item) {
       var p=item.p, px=PAD+item.x*SCALE, py=offY+item.y*SCALE, pw=p.larg*SCALE, ph=p.alt*SCALE;
       ctx.shadowColor='rgba(0,0,0,0.15)'; ctx.shadowBlur=3; ctx.shadowOffsetX=1; ctx.shadowOffsetY=1;
       ctx.fillStyle = p.manual ? '#FCD34D' : colorMap[p.nome];
@@ -18784,12 +18929,12 @@ function planDrawCanvas() {
     });
   }
 
-  chapas.forEach(function(pieces, i){ drawSheet(i, pieces); });
+  allChapas.forEach(function(chapaData, i){ drawSheet(i, chapaData); });
 
   // ── Aviso de múltiplas chapas ────────────────────────────────────
   if (numChapas > 1) {
     ctx.fillStyle='#7C3AED'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('⚠️ Distribu\xeddo em ' + numChapas + ' chapas de 200\xd7100 cm', canvW/2, canvH-6);
+    ctx.fillText('⚠️ Distribu\xeddo em ' + numChapas + ' chapa(s)', canvW/2, canvH-6);
     ctx.textAlign='left';
   }
 
@@ -18818,7 +18963,7 @@ function planExportSVG() {
   var allPieces = [];
   var sumBox = document.getElementById('planSumBox');
   if (sumBox && sumBox.dataset.pcs) {
-    try { JSON.parse(sumBox.dataset.pcs).forEach(function(p){ for(var i=0;i<p.qty;i++) allPieces.push({nome:p.nome,larg:p.larg,alt:p.alt,manual:false}); }); } catch(e){}
+    try { JSON.parse(sumBox.dataset.pcs).forEach(function(p){ for(var i=0;i<p.qty;i++) allPieces.push({nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',manual:false}); }); } catch(e){}
   }
   planManualPieces.forEach(function(p){ if(p.larg>0&&p.alt>0) for(var i=0;i<(p.qty||1);i++) allPieces.push({nome:(p.nome||'Manual'),larg:p.larg,alt:p.alt,manual:true}); });
   if(!allPieces.length){ showToast('Calcule as dimensões antes de exportar','warn'); return; }
@@ -19369,15 +19514,223 @@ function planProdSvgChange(input) {
     if(clr) clr.style.display = '';
     var prev = document.getElementById('planProdSvgPreview');
     if(prev) { prev.style.display = ''; prev.innerHTML = _planProdSvgData; var svg=prev.querySelector('svg'); if(svg){svg.style.maxWidth='100%';svg.style.maxHeight='100px';} }
+    // Botão de extração
+    var parseBtn = document.getElementById('planProdSvgParseBtn');
+    if(parseBtn) parseBtn.style.display = '';
+    // Auto-parse
+    setTimeout(function(){ planSvgParsePecas(_planProdSvgData); }, 200);
   };
   reader.readAsText(file);
 }
+
+// ── Parser SVG → Peças ────────────────────────────────────────────────────────
+function _planUnitToMm(val) {
+  if(!val) return 0;
+  val = String(val).trim();
+  var n = parseFloat(val);
+  if(isNaN(n)) return 0;
+  if(val.endsWith('mm')) return n;
+  if(val.endsWith('cm')) return n*10;
+  if(val.endsWith('in')) return n*25.4;
+  if(val.endsWith('pt')) return n*0.352778;
+  if(val.endsWith('px')) return n*0.264583; // 96dpi
+  return n*0.264583; // default px
+}
+
+function _planColorIsInternal(stroke) {
+  if(!stroke) return false;
+  var s = stroke.toLowerCase().replace(/\s/g,'');
+  // Vermelho = usinagem/rasgo
+  if(s==='red'||s==='#ff0000'||s==='#f00'||s==='rgb(255,0,0)') return true;
+  // Azul = dobra/vinco
+  if(s==='blue'||s==='#0000ff'||s==='#00f'||s==='rgb(0,0,255)') return true;
+  // Tons verdes claro = marcação interna
+  if(s==='#00ff00'||s==='lime'||s==='#0f0') return true;
+  return false;
+}
+
+function _planGetStroke(el) {
+  var s = el.getAttribute('stroke') || '';
+  if(!s) {
+    var style = el.getAttribute('style') || '';
+    var m = style.match(/stroke\s*:\s*([^;]+)/);
+    if(m) s = m[1].trim();
+  }
+  return s;
+}
+
+function _planShapeBboxFromAttrs(el) {
+  var tag = el.tagName.toLowerCase();
+  if(tag==='rect') {
+    var w=parseFloat(el.getAttribute('width')||0), h=parseFloat(el.getAttribute('height')||0);
+    if(w>0&&h>0) return {x:parseFloat(el.getAttribute('x')||0),y:parseFloat(el.getAttribute('y')||0),width:w,height:h};
+  }
+  if(tag==='circle') { var r=parseFloat(el.getAttribute('r')||0); return {x:0,y:0,width:r*2,height:r*2}; }
+  if(tag==='ellipse') { var rx=parseFloat(el.getAttribute('rx')||0),ry=parseFloat(el.getAttribute('ry')||0); return {x:0,y:0,width:rx*2,height:ry*2}; }
+  if(tag==='line') {
+    var x1=parseFloat(el.getAttribute('x1')||0),y1=parseFloat(el.getAttribute('y1')||0),x2=parseFloat(el.getAttribute('x2')||0),y2=parseFloat(el.getAttribute('y2')||0);
+    return {x:Math.min(x1,x2),y:Math.min(y1,y2),width:Math.abs(x2-x1),height:Math.abs(y2-y1)};
+  }
+  if(tag==='polygon'||tag==='polyline') {
+    var pts=(el.getAttribute('points')||'').trim().split(/[\s,]+/).map(Number);
+    var xs=[],ys=[];
+    for(var i=0;i<pts.length;i+=2){xs.push(pts[i]);ys.push(pts[i+1]);}
+    if(xs.length) return {x:Math.min.apply(null,xs),y:Math.min.apply(null,ys),width:Math.max.apply(null,xs)-Math.min.apply(null,xs),height:Math.max.apply(null,ys)-Math.min.apply(null,ys)};
+  }
+  return null;
+}
+
+function _planGuessTipo(wCm, hCm, nomePeca, esp) {
+  var n = (nomePeca||'').toLowerCase();
+  if(n.indexOf('fundo')>=0||n.indexOf('base')>=0) return 'prateleira';
+  if(n.indexOf('gaveta')>=0||n.indexOf('drawer')>=0) return 'gaveta';
+  if(n.indexOf('divis')>=0||n.indexOf('colmeia')>=0||n.indexOf('tira')>=0) return 'divisoria';
+  if(n.indexOf('lateral')>=0||n.indexOf('painel')>=0||n.indexOf('frente')>=0||n.indexOf('fren')>=0) return 'painel';
+  // Heurística por proporção: peça muito comprida e estreita = divisória
+  var ratio = Math.max(wCm,hCm) / Math.max(1, Math.min(wCm,hCm));
+  if(ratio > 4) return 'divisoria';
+  // Peça grande = painel, pequena = prateleira
+  if(wCm*hCm > 200) return 'painel';
+  return 'prateleira';
+}
+
+function planSvgParsePecas(svgText) {
+  if(!svgText) return;
+  var parser = new DOMParser();
+  var doc = parser.parseFromString(svgText, 'image/svg+xml');
+  var svgEl = doc.querySelector('svg');
+  if(!svgEl) { showToast('SVG inválido — nenhum elemento <svg> encontrado', 'err'); return; }
+
+  // ── Renderizar off-screen para getBBox() ──────────────────────────────────
+  var hiddenDiv = document.createElement('div');
+  hiddenDiv.style.cssText = 'position:fixed;left:-9999px;top:0;width:2000px;height:2000px;overflow:visible;pointer-events:none;z-index:-1';
+  hiddenDiv.innerHTML = svgText;
+  document.body.appendChild(hiddenDiv);
+  var renderedSvg = hiddenDiv.querySelector('svg');
+  if(renderedSvg) { renderedSvg.style.width='2000px'; renderedSvg.style.height='2000px'; }
+
+  // ── Escala SVG-units → mm ─────────────────────────────────────────────────
+  var vb = svgEl.getAttribute('viewBox');
+  var attrW = svgEl.getAttribute('width')||'';
+  var attrH = svgEl.getAttribute('height')||'';
+  var physWmm = _planUnitToMm(attrW);
+  var physHmm = _planUnitToMm(attrH);
+  var scaleX=1, scaleY=1;
+  if(vb) {
+    var vbp = vb.trim().split(/[\s,]+/).map(Number);
+    if(vbp.length>=4 && vbp[2]>0 && vbp[3]>0) {
+      if(physWmm>0) { scaleX=physWmm/vbp[2]; scaleY=physHmm>0?physHmm/vbp[3]:scaleX; }
+      else { scaleX=0.264583; scaleY=0.264583; } // assume px at 96dpi
+    }
+  } else if(physWmm>0) {
+    // width/height sem viewBox — unidades são as reais
+    scaleX=scaleY=1;
+  } else {
+    scaleX=scaleY=0.264583; // fallback px→mm
+  }
+
+  // ── Detectar grupos por espessura ─────────────────────────────────────────
+  var ESP_RE = /(\d+(?:[.,]\d+)?)\s*mm/i;
+  var espGroups = [];
+  var allG = Array.from(doc.querySelectorAll('g'));
+  allG.forEach(function(g) {
+    var lbl = g.getAttribute('id')||g.getAttribute('inkscape:label')||g.getAttribute('data-esp')||g.getAttribute('data-layer')||'';
+    var mEsp = lbl.match(ESP_RE);
+    if(mEsp) {
+      // Avoid duplicating child groups already captured by parent
+      var alreadyCovered = espGroups.some(function(eg){ return eg.el.contains(g); });
+      if(!alreadyCovered) espGroups.push({ esp: parseFloat(mEsp[1].replace(',','.')), el: g, label: lbl });
+    }
+  });
+  if(!espGroups.length) {
+    // Sem grupos espessura — pega tudo
+    espGroups = [{ esp: null, el: svgEl, label: 'geral' }];
+  }
+
+  // ── Extrair peças de cada grupo ───────────────────────────────────────────
+  var SHAPE_TAGS = ['rect','path','polygon','polyline','ellipse','circle'];
+  var rawPecas = [];
+  var idCounter = {};
+
+  espGroups.forEach(function(grp) {
+    var shapes = [];
+    SHAPE_TAGS.forEach(function(tag){ grp.el.querySelectorAll(tag).forEach(function(s){ shapes.push(s); }); });
+
+    shapes.forEach(function(shape) {
+      var stroke = _planGetStroke(shape);
+      var isInternal = _planColorIsInternal(stroke);
+
+      // getBBox via rendered SVG
+      var bbox = null;
+      try {
+        var rEl = renderedSvg && renderedSvg.querySelector('[id="'+shape.getAttribute('id')+'"]');
+        if(rEl) bbox = rEl.getBBox();
+      } catch(ex) {}
+      if(!bbox || bbox.width<1 || bbox.height<1) bbox = _planShapeBboxFromAttrs(shape);
+      if(!bbox || bbox.width<2 || bbox.height<2) return;
+
+      var wMm = Math.round(bbox.width  * scaleX * 100) / 100;
+      var hMm = Math.round(bbox.height * scaleY * 100) / 100;
+      if(wMm < 3 || hMm < 3) return; // ignora pontos e linhas finas
+
+      var wCm = Math.round(wMm / 10 * 100) / 100;
+      var hCm = Math.round(hMm / 10 * 100) / 100;
+
+      var shapeName = shape.getAttribute('id')||shape.getAttribute('inkscape:label')||'';
+      if(!shapeName) {
+        var k = grp.esp ? grp.esp+'mm' : 'peca';
+        idCounter[k] = (idCounter[k]||0)+1;
+        shapeName = k + '_' + idCounter[k];
+      }
+
+      rawPecas.push({
+        qty: '1',
+        nome: shapeName,
+        larg: String(wCm),
+        alt: String(hCm),
+        esp: grp.esp ? String(grp.esp) : '',
+        tipo: _planGuessTipo(wCm, hCm, shapeName, grp.esp),
+        usinagem: isInternal ? 'rasgo' : ''
+      });
+    });
+  });
+
+  document.body.removeChild(hiddenDiv);
+
+  if(!rawPecas.length) {
+    showToast('Nenhuma peça detectada. Verifique se os grupos estão nomeados com espessura (ex: "8mm") e se há formas com dimensões válidas.','warn');
+    return;
+  }
+
+  // ── Deduplicar peças idênticas (mesma larg×alt×esp → agrupa qty) ─────────
+  var deduped = [];
+  rawPecas.forEach(function(p) {
+    var ex = deduped.find(function(x){ return x.larg===p.larg && x.alt===p.alt && x.esp===p.esp && x.tipo===p.tipo; });
+    if(ex && !p.usinagem) { ex.qty = String(parseInt(ex.qty)+1); }
+    else deduped.push(Object.assign({},p));
+  });
+
+  // Ordenar: por espessura desc, depois área desc
+  deduped.sort(function(a,b){
+    var ea=parseFloat(a.esp)||0, eb=parseFloat(b.esp)||0;
+    if(eb!==ea) return eb-ea;
+    return (parseFloat(b.larg)*parseFloat(b.alt)) - (parseFloat(a.larg)*parseFloat(a.alt));
+  });
+
+  _planProdPecas = deduped;
+  planProdRenderPecas();
+  planProdPrevCalc();
+  showToast('✅ '+deduped.length+' peças extraídas do SVG ('+espGroups.filter(function(g){return g.esp;}).length+' espessura(s) detectada(s))','ok');
+}
+
+function planSvgParseNow() { planSvgParsePecas(_planProdSvgData); }
 function planProdSvgClear() {
   _planProdSvgData = null;
   var inp = document.getElementById('planProdSvgInput'); if(inp) inp.value='';
   var nome = document.getElementById('planProdSvgNome'); if(nome) nome.textContent='Nenhum arquivo';
   var clr = document.getElementById('planProdSvgClear'); if(clr) clr.style.display='none';
   var prev = document.getElementById('planProdSvgPreview'); if(prev){prev.style.display='none';prev.innerHTML='';}
+  var parseBtn = document.getElementById('planProdSvgParseBtn'); if(parseBtn) parseBtn.style.display='none';
 }
 function _planProdSvgReset(svgData) {
   _planProdSvgData = svgData||null;
@@ -19447,16 +19800,20 @@ function planProdReadPecas() {
   var tbody = document.getElementById('planProdPecasBody');
   if(!tbody) return;
   var rows = tbody.querySelectorAll('tr');
-  rows.forEach(function(row, i) {
+  rows.forEach(function(row) {
     var qty  = row.querySelector('[data-field="qty"]');
     var nome = row.querySelector('[data-field="nome"]');
     var larg = row.querySelector('[data-field="larg"]');
     var alt  = row.querySelector('[data-field="alt"]');
+    var esp  = row.querySelector('[data-field="esp"]');
+    var tipo = row.querySelector('[data-field="tipo"]');
     _planProdPecas.push({
       qty:  qty  ? qty.value  : '1',
       nome: nome ? nome.value : '',
       larg: larg ? larg.value : 'L',
-      alt:  alt  ? alt.value  : 'A'
+      alt:  alt  ? alt.value  : 'A',
+      esp:  esp  ? esp.value  : '',
+      tipo: tipo ? tipo.value : ''
     });
   });
 }
@@ -19468,18 +19825,40 @@ function planProdRenderPecas() {
   if(!_planProdPecas.length) {
     tbody.innerHTML = '';
     if(empty) empty.style.display='block';
+    // Atualiza cabeçalhos sem coluna esp
+    _planProdUpdateTableHeader(false);
     return;
   }
   if(empty) empty.style.display='none';
+  var hasEsp = _planProdPecas.some(function(p){ return p.esp; });
+  _planProdUpdateTableHeader(hasEsp);
+  var TIPOS = ['painel','prateleira','divisoria','gaveta'];
   tbody.innerHTML = _planProdPecas.map(function(peca, i) {
+    var tipoSel = TIPOS.map(function(t){ return '<option value="'+t+'"'+(peca.tipo===t?' selected':'')+'>'+t+'</option>'; }).join('');
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:6px 8px"><input type="number" data-field="qty" value="'+cfgEsc(peca.qty)+'" min="1" style="width:45px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
       +'<td style="padding:6px 8px"><input type="text" data-field="nome" value="'+cfgEsc(peca.nome)+'" placeholder="Ex: Lateral" style="width:100%;min-width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>'
       +'<td style="padding:6px 8px"><input type="text" data-field="larg" value="'+cfgEsc(peca.larg)+'" placeholder="Ex: L - 2*e" style="width:100%;min-width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
       +'<td style="padding:6px 8px"><input type="text" data-field="alt"  value="'+cfgEsc(peca.alt)+'"  placeholder="Ex: A - e"   style="width:100%;min-width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
+      +(hasEsp ? '<td style="padding:6px 8px"><input type="text" data-field="esp" value="'+cfgEsc(peca.esp||'')+'" placeholder="mm" style="width:50px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>' : '')
+      +(hasEsp ? '<td style="padding:6px 8px"><select data-field="tipo" style="padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"><option value="">—</option>'+tipoSel+'</select></td>' : '')
       +'<td style="padding:6px 8px;text-align:center"><button data-idx="'+i+'" onclick="planProdReadPecas();planProdRemovePeca(this.dataset.idx*1)" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:14px" title="Remover">✕</button></td>'
       +'</tr>';
   }).join('');
+}
+
+function _planProdUpdateTableHeader(hasEsp) {
+  var thead = document.getElementById('planProdPecasHead');
+  if(!thead) return;
+  thead.innerHTML = '<tr style="font-size:11px;color:var(--muted)">'
+    +'<th style="padding:4px 8px;text-align:left;font-weight:600">Qtd</th>'
+    +'<th style="padding:4px 8px;text-align:left;font-weight:600">Nome da Peça</th>'
+    +'<th style="padding:4px 8px;text-align:left;font-weight:600">Largura (fórmula)</th>'
+    +'<th style="padding:4px 8px;text-align:left;font-weight:600">Altura (fórmula)</th>'
+    +(hasEsp ? '<th style="padding:4px 8px;text-align:left;font-weight:600">Esp mm</th>' : '')
+    +(hasEsp ? '<th style="padding:4px 8px;text-align:left;font-weight:600">Tipo</th>' : '')
+    +'<th></th>'
+    +'</tr>';
 }
 
 function planProdPrevCalc() {
@@ -19529,7 +19908,7 @@ function planProdSalvar() {
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
-    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt}; }),
+    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||''}; }),
     svg:   _planProdSvgData||undefined
   };
 
