@@ -21620,6 +21620,7 @@ async function mktConnectMeta() {
   var btn=document.getElementById('mktMetaConnectBtn');
   if(btn){btn.disabled=true;btn.textContent='Aguarde...';}
   try {
+    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('getMetaAuthUrl');
     var r=await fn({});
     window.open(r.data.url,'_blank','width=600,height=700');
@@ -21631,6 +21632,7 @@ async function mktConnectGoogle() {
   var btn=document.getElementById('mktGoogleConnectBtn');
   if(btn){btn.disabled=true;btn.textContent='Aguarde...';}
   try {
+    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('getGoogleAuthUrl');
     var r=await fn({});
     window.open(r.data.url,'_blank','width=600,height=700');
@@ -21648,6 +21650,7 @@ async function mktForceSync() {
   var btn=document.getElementById('mktSyncBtn');
   if(btn){btn.disabled=true;btn.textContent='⏳ Sincronizando...';}
   try {
+    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('forceMarketingSync');
     var companyId=(_currentSession&&(_currentSession.companyId||_currentSession.empresa))||'vr';
     var r=await fn({companyId});
