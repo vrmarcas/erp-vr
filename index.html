@@ -5108,7 +5108,8 @@ function _cloudAuthAviso(msg){
     <!-- Overlay Novo Usuário -->
     <div class="gen-overlay" id="usrOverlay" onclick="if(event.target===this)usrNovoClose()">
       <div class="gen-modal" style="max-width:440px">
-        <div class="gen-modal-hdr"><span style="font-weight:800">👤 Novo Usuário</span><button class="gen-modal-close" onclick="usrNovoClose()">✕</button></div>
+        <input type="hidden" id="usrEditIdx" value="">
+        <div class="gen-modal-hdr"><span id="usrOverlayTitulo" style="font-weight:800">👤 Novo Usuário</span><button class="gen-modal-close" onclick="usrNovoClose()">✕</button></div>
         <div style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
           <div class="fg"><label>Nome completo</label><input type="text" id="usrNome" placeholder="Ex: Carlos Oliveira"></div>
           <div class="fg"><label>E-mail de acesso</label><input type="email" id="usrEmail" placeholder="Ex: carlos@empresa.com.br"></div>
@@ -5120,10 +5121,10 @@ function _cloudAuthAviso(msg){
               <option value="master">👑 Master</option>
             </select>
           </div>
-          <div class="fg"><label>Senha de acesso</label><input type="password" id="usrSenha" placeholder="Mínimo 4 caracteres"></div>
+          <div class="fg" id="usrSenhaWrap"><label>Senha de acesso</label><input type="password" id="usrSenha" placeholder="Mínimo 4 caracteres"></div>
           <div style="text-align:right;margin-top:4px">
             <button class="topbar-btn ghost" style="margin-right:8px" onclick="usrNovoClose()">Cancelar</button>
-            <button class="topbar-btn" onclick="usrSalvar()">Criar Usuário</button>
+            <button class="topbar-btn" id="usrSalvarBtn" onclick="usrSalvar()">Criar Usuário</button>
           </div>
         </div>
       </div>
@@ -6504,7 +6505,7 @@ function orcAddItem() {
   const tbody = document.getElementById('orcItemBody');
   const tr = document.createElement('tr');
   tr.id = 'oir_'+orcItemCount; tr.dataset.idx = orcItemCount;
-  const prodOpts = ORC_PRODUTOS.map(p=>`<option>${p}</option>`).join('');
+  const prodOpts = ORC_PRODUTOS.map(p=>`<option>${p}</option>`).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
   // Gerar opções de material APENAS da configuração do Firebase (nunca usar fallback padrão)
   var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
   var matOpts = _cfgMats.length
@@ -6575,15 +6576,20 @@ function orcRefreshMatSelects() {
 // Atualiza os selects de produto em linhas já existentes quando ORC_PRODUTOS chega do Firebase
 function orcRefreshProdSelects() {
   if(!orcItemCount || !ORC_PRODUTOS.length) return;
-  var newOpts = ORC_PRODUTOS.map(function(p){ return '<option>'+p+'</option>'; }).join('');
+  var newOpts = ORC_PRODUTOS.map(function(p){ return '<option>'+p+'</option>'; }).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
   for(var idx=1;idx<=orcItemCount;idx++){
     var sel=document.getElementById('oi_prod_'+idx);
     if(!sel) continue;
-    var selectedText = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+    var selVal = sel.value;
+    var selText = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
     sel.innerHTML=newOpts;
-    if(selectedText){
+    if(selVal === '__typed__') {
+      // preservar produto personalizado já digitado
+      var opt=document.createElement('option'); opt.value='__typed__'; opt.text=selText; opt.selected=true;
+      sel.add(opt);
+    } else if(selText){
       for(var j=0;j<sel.options.length;j++){
-        if(sel.options[j].text===selectedText){ sel.selectedIndex=j; break; }
+        if(sel.options[j].text===selText){ sel.selectedIndex=j; break; }
       }
     }
   }
@@ -7887,8 +7893,19 @@ function orcSugerirPrazo(prodNome) {
 }
 
 function orcOnProdChange(sel) {
-  var prodNome = sel ? sel.value : '';
-  if(prodNome) orcSugerirPrazo(prodNome);
+  if(sel && sel.value === '__custom__') {
+    var nome = prompt('Nome do produto personalizado:');
+    if(nome && nome.trim()) {
+      var opt = document.createElement('option');
+      opt.value = '__typed__'; opt.text = nome.trim();
+      sel.add(opt);
+      sel.value = '__typed__';
+    } else {
+      sel.selectedIndex = 0;
+    }
+  }
+  var prodNome = sel ? sel.options[sel.selectedIndex].text : '';
+  if(prodNome && sel.value !== '__custom__') orcSugerirPrazo(prodNome);
 }
 
 function orcCalcDataEntrega() {
@@ -15895,7 +15912,7 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
   }).join('');
 }
 
@@ -15947,8 +15964,41 @@ function usrRedefinirSenha(idx) {
   showToast('Senha de "' + u.nome + '" redefinida!', 'ok');
 }
 
-function usrNovoOpen(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='flex'; }
-function usrNovoClose(){ var o=document.getElementById('usrOverlay'); if(o) o.style.display='none'; }
+function usrNovoOpen(){
+  var o=document.getElementById('usrOverlay'); if(!o) return;
+  var titulo=document.getElementById('usrOverlayTitulo');
+  var btn=document.getElementById('usrSalvarBtn');
+  var senhaWrap=document.getElementById('usrSenhaWrap');
+  var eidx=document.getElementById('usrEditIdx');
+  if(titulo) titulo.textContent='👤 Novo Usuário';
+  if(btn) btn.textContent='Criar Usuário';
+  if(senhaWrap) senhaWrap.style.display='';
+  if(eidx) eidx.value='';
+  ['usrNome','usrEmail','usrSenha'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  var sel=document.getElementById('usrFuncao'); if(sel) sel.value='comercial';
+  o.style.display='flex';
+}
+function usrNovoClose(){
+  var o=document.getElementById('usrOverlay'); if(o) o.style.display='none';
+  var eidx=document.getElementById('usrEditIdx'); if(eidx) eidx.value='';
+}
+function usrEditarAbrir(idx) {
+  var users = usrLoadUsuarios();
+  var u = users[idx]; if(!u) return;
+  var o=document.getElementById('usrOverlay'); if(!o) return;
+  var titulo=document.getElementById('usrOverlayTitulo');
+  var btn=document.getElementById('usrSalvarBtn');
+  var senhaWrap=document.getElementById('usrSenhaWrap');
+  var eidx=document.getElementById('usrEditIdx');
+  if(titulo) titulo.textContent='✏️ Editar Usuário';
+  if(btn) btn.textContent='Salvar Alterações';
+  if(senhaWrap) senhaWrap.style.display='none'; // senha via botão 🔑 separado
+  if(eidx) eidx.value=String(idx);
+  var nome=document.getElementById('usrNome'); if(nome) nome.value=u.nome||'';
+  var email=document.getElementById('usrEmail'); if(email) email.value=u.email||'';
+  var funcao=document.getElementById('usrFuncao'); if(funcao) funcao.value=u.funcao||'comercial';
+  o.style.display='flex';
+}
 
 
 
@@ -17318,22 +17368,35 @@ function usrSalvar() {
   var nome = (document.getElementById('usrNome')||{}).value||'';
   var email = ((document.getElementById('usrEmail')||{}).value||'').trim().toLowerCase();
   var funcao = (document.getElementById('usrFuncao')||{}).value||'comercial';
-  var senha = (document.getElementById('usrSenha')||{}).value||'';
+  var eidxEl = document.getElementById('usrEditIdx');
+  var editIdx = eidxEl && eidxEl.value !== '' ? parseInt(eidxEl.value) : -1;
   if(!nome.trim()){ showToast('Informe o nome do usuário','err'); return; }
   if(!email){ showToast('Informe o e-mail de acesso','err'); return; }
-  if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
   var users = usrLoadUsuarios();
-  if(users.find(function(u){ return u.email&&u.email===email; })){
-    showToast('E-mail já cadastrado','err'); return;
+
+  if(editIdx >= 0) {
+    // MODO EDIÇÃO — atualiza nome, email, funcao (sem mexer na senha)
+    var u = users[editIdx]; if(!u) return;
+    // verificar e-mail duplicado em outro usuário
+    var dupEmail = users.findIndex(function(x){ return x.email&&x.email===email; });
+    if(dupEmail >= 0 && dupEmail !== editIdx){ showToast('E-mail já cadastrado em outro usuário','err'); return; }
+    u.nome = nome.trim(); u.email = email; u.funcao = funcao;
+    _USR_DATA = users;
+    showToast('Usuário "'+nome+'" atualizado!','ok');
+    if(typeof secAuditLog==='function') secAuditLog('user_updated','Usuário editado: '+nome+' ('+funcao+')');
+  } else {
+    // MODO CRIAÇÃO
+    var senha = (document.getElementById('usrSenha')||{}).value||'';
+    if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
+    if(users.find(function(u){ return u.email&&u.email===email; })){ showToast('E-mail já cadastrado','err'); return; }
+    users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
+    _USR_DATA=users;
+    showToast('Usuário "'+nome+'" criado!','ok');
+    if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
   }
-  users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
-  _USR_DATA=users;
-  showToast('Usuário "'+nome+'" criado!','ok');
-  if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
-  // Sincronizar usuários com a nuvem (sem senhas em texto puro — armazena hash)
+
   if(typeof _cloudSave==='function' && _cloudReady){
-    var usersCloud = users.map(function(u){ return Object.assign({},u); });
-    _cloudSave('erp_usuarios', usersCloud);
+    _cloudSave('erp_usuarios', users.map(function(u){ return Object.assign({},u); }));
   }
   usrNovoClose();
   usrRender();
@@ -18731,7 +18794,7 @@ function cliSalvarObs() {
 var planManualPieces = [];
 
 function planAddManual() {
-  planManualPieces.push({nome:'Peça '+(planManualPieces.length+1), larg:0, alt:0, qty:1});
+  planManualPieces.push({nome:'Peça '+(planManualPieces.length+1), larg:0, alt:0, qty:1, esp:''});
   planRenderManual();
 }
 
@@ -18748,8 +18811,11 @@ function planRenderManual() {
   if(!planManualPieces.length) { if(hint) hint.style.display=''; wrap.innerHTML=''; return; }
   if(hint) hint.style.display='none';
   wrap.innerHTML = planManualPieces.map(function(p,i){
-    return '<div style="display:grid;grid-template-columns:2fr 1fr 1fr 0.6fr auto;gap:5px;align-items:center;margin-bottom:5px">'
+    return '<div style="display:grid;grid-template-columns:2fr 0.6fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
+      +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
+      +'<input type="number" placeholder="esp mm" value="'+(p.esp||'')+'" min="0" step="0.5"'
+      +' oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
       +'<input type="number" placeholder="Larg cm" value="'+(p.larg||'')+'" min="0" step="0.1"'
       +' oninput="planManualPieces['+i+'].larg=parseFloat(this.value)||0;_planCalcAndMerge()"'
@@ -18832,7 +18898,7 @@ function planDrawCanvas() {
   planManualPieces.forEach(function(p) {
     if (p.larg > 0 && p.alt > 0)
       for (var i = 0; i < (p.qty||1); i++)
-        allPieces.push({nome:(p.nome||'Manual'), larg:p.larg, alt:p.alt, esp:'', tipo:'', manual:true});
+        allPieces.push({nome:(p.nome||'Manual'), larg:p.larg, alt:p.alt, esp:p.esp||'', tipo:'', manual:true});
   });
   if (!allPieces.length) { if(layoutBox) layoutBox.style.display='none'; return; }
   if (layoutBox) layoutBox.style.display = '';
@@ -18980,7 +19046,7 @@ function planExportSVG() {
   if (sumBox && sumBox.dataset.pcs) {
     try { JSON.parse(sumBox.dataset.pcs).forEach(function(p){ for(var i=0;i<p.qty;i++) allPieces.push({nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',manual:false}); }); } catch(e){}
   }
-  planManualPieces.forEach(function(p){ if(p.larg>0&&p.alt>0) for(var i=0;i<(p.qty||1);i++) allPieces.push({nome:(p.nome||'Manual'),larg:p.larg,alt:p.alt,manual:true}); });
+  planManualPieces.forEach(function(p){ if(p.larg>0&&p.alt>0) for(var i=0;i<(p.qty||1);i++) allPieces.push({nome:(p.nome||'Manual'),larg:p.larg,alt:p.alt,esp:p.esp||'',manual:true}); });
   if(!allPieces.length){ showToast('Calcule as dimensões antes de exportar','warn'); return; }
 
   var SHEET_W=200, SHEET_H=100; // cm
@@ -19953,6 +20019,14 @@ function planProdDel(id) {
   prods = prods.filter(function(x){ return x.id!==id; });
   planProdSaveList(prods);
   planProdRender();
+  // sincronizar com dropdown do orçamento
+  var oidx = ORC_PRODUTOS.indexOf(p.nome);
+  if(oidx >= 0) {
+    ORC_PRODUTOS.splice(oidx, 1);
+    _prodSave();
+    try { orcRefreshProdSelects(); } catch(e){}
+    try { cfgRenderProdutos(); } catch(e){}
+  }
   showToast('Produto "'+p.nome+'" removido','warn');
 }
 
