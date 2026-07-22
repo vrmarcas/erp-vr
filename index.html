@@ -12686,7 +12686,7 @@ function stockRenderItems() {
 
 function stockPopulateSelects() {
   var keys = Object.keys(STOCK);
-  var opts = keys.map(function(k){ return '<option value="'+k+'">'+STOCK[k].label+(STOCK[k].cor?' — '+STOCK[k].cor:'')+'</option>'; }).join('');
+  var opts = keys.map(function(k){ var s=STOCK[k]; var espTag=s.esp?' — '+s.esp+'mm':''; return '<option value="'+k+'">'+ s.label+(s.cor?' '+s.cor:'')+espTag+' (Qtd: '+s.qty+')' + '</option>'; }).join('');
   ['stEntMat','stSaidaMat','retalhoFormMat','stockHistFiltMat'].forEach(function(id){
     var el = document.getElementById(id);
     if (!el) return;
