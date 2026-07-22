@@ -3916,6 +3916,33 @@ function _cloudAuthAviso(msg){
           <div style="color:var(--muted);font-size:12px;padding:8px 0">Nenhum retalho cadastrado ainda.</div>
         </div>
       </div>
+      <!-- Modal Editar Retalho -->
+      <div id="retalhoEditOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9100;align-items:center;justify-content:center">
+        <div style="background:var(--bg);border-radius:14px;padding:22px 24px;width:min(420px,95vw);box-shadow:0 8px 40px rgba(0,0,0,.3);border:1.5px solid #C4B5FD">
+          <div style="font-size:14px;font-weight:800;color:#5B21B6;margin-bottom:14px">✏️ Editar Retalho</div>
+          <input type="hidden" id="retalhoEditIdx">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Material</label>
+              <select id="retalhoEditMat" style="border:1.5px solid #C4B5FD"></select>
+            </div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Dimensões (cm × cm)</label>
+              <input type="text" id="retalhoEditDims" placeholder="Ex: 60×40" style="border:1.5px solid #C4B5FD">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:80px 1fr;gap:10px;margin-bottom:10px">
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Qtd</label>
+              <input type="number" id="retalhoEditQty" min="1" step="1" style="border:1.5px solid #C4B5FD">
+            </div>
+            <div class="form-group" style="margin:0"><label style="font-size:11px">Observação</label>
+              <input type="text" id="retalhoEditObs" placeholder="Ex: bom estado, prateleira B2" style="border:1px solid var(--border)">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="topbar-btn" style="flex:1;background:#7C3AED;font-size:12px" onclick="retalhoEditarSalvar()">💾 Salvar Alterações</button>
+            <button class="topbar-btn ghost" style="font-size:12px" onclick="retalhoEditarFechar()">Cancelar</button>
+          </div>
+        </div>
+      </div>
       <!-- HISTÓRICO DE MOVIMENTAÇÕES -->
       <div class="card" style="margin-top:12px">
         <div class="card-h">
@@ -13749,12 +13776,13 @@ function retalhoGerarCodigo(mat) {
 
 function retalhoRender() {
   var el=document.getElementById('retalhoTabela'), cnt=document.getElementById('retalhoCount');
-  var lista=RETALHOS.filter(function(r){return r.qty>0;});
+  var lista=RETALHOS.map(function(r,i){return {r:r,i:i};}).filter(function(x){return x.r.qty>0;});
   if(cnt) cnt.textContent=lista.length+' peça'+(lista.length!==1?'s':'')+' disponível'+(lista.length!==1?'is':'');
   if(!el) return;
   if(!lista.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0">Nenhum retalho disponível.</div>';return;}
   el.innerHTML='<table class="retalho-table"><thead><tr><th>Código</th><th>Material</th><th>Dimensões (cm)</th><th>Qtd</th><th>Obs</th><th>Entrada</th><th></th></tr></thead><tbody>'+
-    lista.map(function(r,i){
+    lista.map(function(x){
+      var r=x.r, ri=x.i;
       var cod = r.codigo || '—';
       return '<tr>'
         +'<td><span style="font-family:monospace;font-weight:800;color:var(--brand-mid);font-size:12px;background:var(--bg2);padding:2px 7px;border-radius:5px;border:1px solid var(--border)">'+cod+'</span></td>'
@@ -13763,7 +13791,11 @@ function retalhoRender() {
         +'<td>'+r.qty+'</td>'
         +'<td style="color:var(--muted);font-size:10px">'+(r.obs||'—')+'</td>'
         +'<td style="color:var(--muted)">'+r.data+'</td>'
-        +'<td><button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+i+')">✅ Usar</button></td></tr>';
+        +'<td style="display:flex;gap:5px;align-items:center">'
+        +'<button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+ri+')">✅ Usar</button>'
+        +'<button style="background:#2563EB;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 9px;font-weight:700;cursor:pointer" title="Editar retalho" onclick="retalhoEditarAbrir('+ri+')">✏️</button>'
+        +'<button style="background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 9px;font-weight:700;cursor:pointer" title="Excluir retalho" onclick="retalhoExcluirConfirmar('+ri+')">🗑</button>'
+        +'</td></tr>';
     }).join('')+'</tbody></table>';
 }
 
@@ -13792,6 +13824,53 @@ function retalhoConfirmarUso(idx) {
   var r = RETALHOS[idx]; if(!r) return;
   if(!confirm('Usar retalho "'+r.label+'" ('+r.dims+' cm)?\nIsso registrará a saída deste retalho.')) return;
   retalhoRemover(idx);
+}
+function retalhoEditarAbrir(idx) {
+  var r = RETALHOS[idx]; if(!r) return;
+  document.getElementById('retalhoEditIdx').value = idx;
+  var sel = document.getElementById('retalhoEditMat');
+  if(sel) {
+    sel.innerHTML = Object.keys(STOCK).map(function(k){
+      var s=STOCK[k];
+      var lbl=s.label+(s.cor?' '+s.cor:'')+(s.esp?' — '+s.esp+'mm':'');
+      return '<option value="'+k+'"'+(r.mat===k?' selected':'')+'>'+lbl+'</option>';
+    }).join('');
+  }
+  var el=function(id){return document.getElementById(id);};
+  if(el('retalhoEditDims')) el('retalhoEditDims').value = r.dims||'';
+  if(el('retalhoEditQty'))  el('retalhoEditQty').value  = r.qty||1;
+  if(el('retalhoEditObs'))  el('retalhoEditObs').value  = r.obs||'';
+  var ov=document.getElementById('retalhoEditOverlay');
+  if(ov){ ov.style.display='flex'; }
+}
+function retalhoEditarFechar() {
+  var ov=document.getElementById('retalhoEditOverlay'); if(ov) ov.style.display='none';
+}
+function retalhoEditarSalvar() {
+  var idx=parseInt((document.getElementById('retalhoEditIdx')||{}).value);
+  if(isNaN(idx)||!RETALHOS[idx]) { showToast('Erro: retalho não encontrado','err'); return; }
+  var matKey=(document.getElementById('retalhoEditMat')||{}).value||'';
+  var dims=((document.getElementById('retalhoEditDims')||{}).value||'').replace(/x/gi,'×').trim();
+  var qty=parseInt((document.getElementById('retalhoEditQty')||{}).value)||1;
+  var obs=((document.getElementById('retalhoEditObs')||{}).value||'').trim();
+  if(!dims){ showToast('Informe as dimensões','warn'); return; }
+  RETALHOS[idx].mat   = matKey;
+  RETALHOS[idx].label = STOCK[matKey]?STOCK[matKey].label:matKey;
+  RETALHOS[idx].dims  = dims;
+  RETALHOS[idx].qty   = qty;
+  RETALHOS[idx].obs   = obs;
+  retalhoSalvar();
+  retalhoRender();
+  retalhoEditarFechar();
+  showToast('Retalho atualizado','ok');
+}
+function retalhoExcluirConfirmar(idx) {
+  var r = RETALHOS[idx]; if(!r) return;
+  if(!confirm('Confirma a remoção do retalho "'+r.label+' ('+r.dims+' cm)" do estoque?\nEsta ação não pode ser desfeita.')) return;
+  RETALHOS.splice(idx,1);
+  retalhoSalvar();
+  retalhoRender();
+  showToast('Retalho removido do estoque','info');
 }
 function retalhoToggleForm() {
   var wrap = document.getElementById('retalhoFormWrap');
