@@ -7563,12 +7563,14 @@ function planCalc() {
     var inp = 'style="width:52px;padding:2px 5px;border:1.5px solid var(--border);border-radius:5px;font-size:11px;background:var(--bg);color:var(--text);text-align:center"';
     var tr = document.createElement('tr');
     tr.setAttribute('data-plan-auto','1');
+    tr.id='planAutoRow_'+pci;
     tr.innerHTML =
       '<td><strong style="font-size:11px">' + pc.nome + '</strong></td>' +
       '<td style="text-align:center"><input type="number" '+inp+' value="'+pc.qty+'" min="1" step="1" data-planf="qty" data-pci="'+pci+'" oninput="_planEditField(this)">×</td>' +
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.larg.toFixed(1)+'" min="0" step="0.1" data-planf="larg" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.alt.toFixed(1)+'" min="0" step="0.1" data-planf="alt" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
-      '<td class="area-td" id="planEditArea_'+pci+'" style="color:var(--brand-mid);font-weight:700">'+(areaPc/10000).toFixed(4)+'</td>';
+      '<td class="area-td" id="planEditArea_'+pci+'" style="color:var(--brand-mid);font-weight:700">'+(areaPc/10000).toFixed(4)+'</td>'+
+      '<td style="text-align:center"><button onclick="_planDeleteAuto('+pci+')" title="Remover peça" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:14px;padding:2px 4px;line-height:1">🗑</button></td>';
     tbody.appendChild(tr);
   });
 
@@ -7578,6 +7580,7 @@ function planCalc() {
     '<td colspan="2" style="font-weight:800">TOTAL</td>' +
     '<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">' + totalQty + ' peças</td>' +
     '<td class="area-td" style="font-size:15px">' + (totalArea/10000).toFixed(4) + '</td>' +
+    '<td></td>' +
     '</tr>';
 
   // summary box
@@ -7648,7 +7651,8 @@ function planAplicar() {
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
     // planPecas = TODAS (catálogo + extras) — usado pelo cálculo de laser
-    var _allPlanPecas = (_planEditPieces||[]).concat(planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
+    var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
+      .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
     row.dataset.planPecas = JSON.stringify(_allPlanPecas);
     // planPecasManual = só as extras manuais — restaurado ao reabrir (evita duplicação do catálogo)
     var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
@@ -18739,6 +18743,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <th>Peça</th><th style="text-align:center">Qtd</th>
         <th style="text-align:right">Larg cm</th><th style="text-align:right">Alt cm</th>
         <th style="text-align:right">Área m²</th>
+        <th style="width:28px"></th>
       </tr></thead>
       <tbody id="planPiecesBody"></tbody>
       <tfoot id="planPiecesFoot"></tfoot>
@@ -18758,6 +18763,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <div style="font-size:13px;font-weight:800;color:var(--brand-text)">📐 Área Total Planificada</div>
       <div style="font-size:15px;font-weight:700;color:var(--brand-mid)" id="planSumArea">—</div>
       <div style="font-size:12px;color:var(--muted)" id="planSumPecas">—</div>
+      <div id="planEspBreakdown" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
       <div style="border-top:1px solid var(--border);margin:6px 0"></div>
       <div style="font-size:12px;color:var(--muted)" id="planSumProporcao">—</div>
       <div style="font-size:12px;color:var(--text);font-weight:600" id="planSumCusto">—</div>
@@ -19537,9 +19543,7 @@ function planRenderManual() {
     return '<div style="display:grid;grid-template-columns:2fr 0.6fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
-      +'<input type="number" placeholder="esp mm" value="'+(p.esp||'')+'" min="0" step="0.5"'
-      +' oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()"'
-      +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
+      +'<select oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'      +'<option value="">esp</option>'      +[2,3,4,5,6,8,10,12].map(function(v){return '<option value="'+v+'"\'+(parseInt(p.esp||0)===v?' selected':'')+'>'+v+'mm</option>';}).join('')      +'</select>'
       +'<input type="number" placeholder="Larg cm" value="'+(p.larg||'')+'" min="0" step="0.1"'
       +' oninput="planManualPieces['+i+'].larg=parseFloat(this.value)||0;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
@@ -19570,7 +19574,8 @@ function _planCalcAndMerge() {
         +'<td style="text-align:center">'+p.qty+'×</td>'
         +'<td class="area-td">'+p.larg.toFixed(1)+'</td>'
         +'<td class="area-td">'+p.alt.toFixed(1)+'</td>'
-        +'<td class="area-td" style="color:var(--brand-mid);font-weight:700">'+(area/10000).toFixed(4)+'</td>';
+        +'<td class="area-td" style="color:var(--brand-mid);font-weight:700">'+(area/10000).toFixed(4)+'</td>'
+        +'<td></td>';
       if(tbody) tbody.appendChild(tr);
     }
   });
@@ -19596,7 +19601,8 @@ function _planCalcAndMerge() {
   var tfoot=document.getElementById('planPiecesFoot');
   if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL geral</td>'
     +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+newQty+' peças</td>'
-    +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td></tr>';
+    +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td>'
+    +'<td></td></tr>';
   setTimeout(planDrawCanvas, 0);
 }
 
@@ -19846,6 +19852,15 @@ function planExportSVG() {
 // ── Edição de peças auto-geradas ────────────────────────────────────
 var _planEditPieces = [];
 
+function _planDeleteAuto(pci) {
+  if(_planEditPieces && _planEditPieces[pci]) {
+    _planEditPieces[pci]._deleted = true;
+    var row = document.getElementById('planAutoRow_'+pci);
+    if(row) row.style.display='none';
+    _planRecompute();
+  }
+}
+
 function _planEditField(input) {
   var field = input.dataset.planf;
   var pci   = parseInt(input.dataset.pci);
@@ -19861,18 +19876,32 @@ function _planEditField(input) {
 
 function _planRecompute() {
   var totalArea = 0, totalQty = 0;
+  var espMap = {};
   _planEditPieces.forEach(function(p) {
+    if(p._deleted) return;
     totalArea += p.larg * p.alt * p.qty;
     totalQty  += p.qty;
+    var eMm = parseInt(p.esp||0)||0;
+    if(eMm>0){ espMap[eMm]=(espMap[eMm]||0)+p.larg*p.alt*p.qty; }
   });
   planManualPieces.forEach(function(p) {
-    if (p.larg>0 && p.alt>0) { totalArea += p.larg*p.alt*(p.qty||1); totalQty += (p.qty||1); }
+    if (p.larg>0 && p.alt>0) {
+      var _area=p.larg*p.alt*(p.qty||1); totalArea += _area; totalQty += (p.qty||1);
+      var eMm2=parseInt(p.esp||0)||0;
+      if(eMm2>0){ espMap[eMm2]=(espMap[eMm2]||0)+_area; }
+    }
   });
 
   var tfoot = document.getElementById('planPiecesFoot');
   if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL</td>'
     +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+totalQty+' peças</td>'
-    +'<td class="area-td" style="font-size:15px">'+(totalArea/10000).toFixed(4)+'</td></tr>';
+    +'<td class="area-td" style="font-size:15px">'+(totalArea/10000).toFixed(4)+'</td>'
+    +'<td></td></tr>';
+  var ebEl=document.getElementById('planEspBreakdown');
+  if(ebEl){
+    var espKeys=Object.keys(espMap).map(Number).sort(function(a,b){return a-b;});
+    ebEl.innerHTML=espKeys.length?espKeys.map(function(k){return '\uD83D\uDCCF Chapa '+k+'mm: '+(espMap[k]/10000).toFixed(4)+' m\xB2';}).join(' &nbsp;|&nbsp; '):'';
+  }
 
   var sumBox = document.getElementById('planSumBox');
   if (!sumBox) return;
