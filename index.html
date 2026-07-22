@@ -5035,8 +5035,10 @@ function _cloudAuthAviso(msg){
               <option value="financeiro">💳 Financeiro</option>
           <option value="marketing">📣 Marketing</option>
               <option value="master">👑 Master</option>
+              <option value="admin">🔐 Admin</option>
             </select>
           </div>
+          <div class="fg" id="usrStatusWrap"><label>Status</label><select id="usrAtivo"><option value="1">✅ Ativo</option><option value="0">🚫 Inativo</option></select></div>
           <div class="fg" id="usrSenhaWrap"><label>Senha de acesso</label><input type="password" id="usrSenha" placeholder="Mínimo 4 caracteres"></div>
           <div style="text-align:right;margin-top:4px">
             <button class="topbar-btn ghost" style="margin-right:8px" onclick="usrNovoClose()">Cancelar</button>
@@ -16483,7 +16485,7 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">● Ativo</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
   }).join('');
 }
 
@@ -16568,6 +16570,7 @@ function usrEditarAbrir(idx) {
   var nome=document.getElementById('usrNome'); if(nome) nome.value=u.nome||'';
   var email=document.getElementById('usrEmail'); if(email) email.value=u.email||'';
   var funcao=document.getElementById('usrFuncao'); if(funcao) funcao.value=u.funcao||'comercial';
+  var ativo=document.getElementById('usrAtivo'); if(ativo) ativo.value=(u.ativo===0||u.ativo==='0')?'0':'1';
   o.style.display='flex';
 }
 
@@ -17948,10 +17951,18 @@ function usrSalvar() {
   if(editIdx >= 0) {
     // MODO EDIÇÃO — atualiza nome, email, funcao (sem mexer na senha)
     var u = users[editIdx]; if(!u) return;
+    // Verificar permissão: apenas master/admin podem editar
+    var myFuncao=(_currentSession&&_currentSession.funcao)||'';
+    if(myFuncao!=='master'&&myFuncao!=='admin'){ showToast('Sem permissão para editar usuários','err'); return; }
+    // Proteção contra auto-remoção de privilégios
+    var myEmail=(_currentSession&&(_currentSession.email||_currentSession.user))||'';
+    if(u.email===myEmail&&funcao!==myFuncao){ showToast('Você não pode alterar sua própria função','err'); return; }
+    var ativoEl=document.getElementById('usrAtivo'); var ativoVal=ativoEl?parseInt(ativoEl.value):1;
+    if(u.email===myEmail&&ativoVal===0){ showToast('Você não pode se desativar','err'); return; }
     // verificar e-mail duplicado em outro usuário
     var dupEmail = users.findIndex(function(x){ return x.email&&x.email===email; });
     if(dupEmail >= 0 && dupEmail !== editIdx){ showToast('E-mail já cadastrado em outro usuário','err'); return; }
-    u.nome = nome.trim(); u.email = email; u.funcao = funcao;
+    u.nome = nome.trim(); u.email = email; u.funcao = funcao; u.ativo = ativoVal; u.updatedAt = new Date().toLocaleDateString('pt-BR');
     _USR_DATA = users;
     showToast('Usuário "'+nome+'" atualizado!','ok');
     if(typeof secAuditLog==='function') secAuditLog('user_updated','Usuário editado: '+nome+' ('+funcao+')');
