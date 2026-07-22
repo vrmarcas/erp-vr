@@ -3869,6 +3869,9 @@ function _cloudAuthAviso(msg){
                   <input type="number" id="stRetalhoComp" placeholder="—" min="0" step="1" style="border:1px solid #C4B5FD">
                 </div>
               </div>
+              <div class="form-group" style="margin-top:8px;margin-bottom:0"><label style="font-size:11px">Código do Retalho <span style="font-weight:400;color:var(--muted)">(gerado automaticamente)</span></label>
+                <input type="text" id="stRetalhoCodPreview" readonly placeholder="Selecione o material..." style="border:1.5px solid #C4B5FD;background:#F5F3FF;color:#5B21B6;font-family:monospace;font-weight:800;font-size:13px;letter-spacing:1px;cursor:default">
+              </div>
             </div>
             <div class="form-group"><label>Observação</label>
               <input type="text" id="stSaidaObs" placeholder="Ex: 2 placas para lateral do display">
@@ -13911,6 +13914,13 @@ function stockSaidaOnMatChange(matKey) {
   if(cl && s.chapLarg) cl.value=s.chapLarg;
   if(cc && s.chapComp) cc.value=s.chapComp;
   stockSaidaCalc();
+  _stPreviewCod();
+}
+function _stPreviewCod() {
+  var matKey=(document.getElementById('stSaidaMat')||{}).value||'';
+  var el=document.getElementById('stRetalhoCodPreview'); if(!el) return;
+  if(!matKey||typeof retalhoGerarCodigo!=='function'){ el.value=''; return; }
+  el.value = retalhoGerarCodigo(matKey);
 }
 function stockSaidaCalc() {
   var larg=parseFloat((document.getElementById('stSaidaLarg')||{}).value)||0;
@@ -13926,6 +13936,7 @@ function stockSaidaCalc() {
   var sobraLarg=Math.max(0,cLarg-larg);
   var rlEl=document.getElementById('stRetalhoLarg'); if(rlEl) rlEl.value=sobraLarg>0?sobraLarg:'';
   var rcEl=document.getElementById('stRetalhoComp'); if(rcEl) rcEl.value=sobraLarg>0?cComp:'';
+  _stPreviewCod();
 }
 
 function stockRegistrarSaidaSimples(){ _stockFazSaida(); }
@@ -13954,7 +13965,7 @@ function _stockFazSaida() {
   var _rc=(document.getElementById('stRetalhoComp')||{}).value;
   if(_larg&&_comp){ var _dimObs=_larg+'×'+_comp+'cm'; if(_qtdP&&parseInt(_qtdP)>1)_dimObs+=' ×'+_qtdP+'pçs'; if(_rl&&_rc)_dimObs+=' | retalho:'+_rl+'×'+_rc+'cm'; _obsVinc=_dimObs+(_obsVinc?' · '+_obsVinc:''); }
   _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
-  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=''});
+  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp','stRetalhoCodPreview'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=''});
   var _qpEl=document.getElementById('stSaidaQtdPecas');if(_qpEl)_qpEl.value='1';
   showToast('Saída de '+qty.toFixed(2)+' chapa(s) de '+STOCK[matKey].label+' registrada','ok');
   syncSidebarBadges();
