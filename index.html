@@ -3828,31 +3828,55 @@ function _cloudAuthAviso(msg){
               </div>
             </div>
             <div class="form-group"><label>Material</label>
-              <select id="stSaidaMat" onchange="stockSaidaToggleRetalho()">
+              <select id="stSaidaMat" onchange="stockSaidaOnMatChange(this.value)">
                 <option value="">Carregando...</option>
               </select>
             </div>
-            <div class="form-group"><label>Quantidade utilizada <span style="font-size:10px;color:var(--muted)">(use 0.5 para meia placa)</span></label>
-              <input type="number" id="stSaidaQty" placeholder="Ex: 1 ou 0.5" min="0.1" step="0.5" oninput="stockSaidaToggleRetalho()">
+            <!-- Bloco A: Dimensões da peça cortada -->
+            <div style="background:var(--bg2,#f4f4f8);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;font-weight:700;color:var(--brand-mid);margin-bottom:8px">📐 Dimensões da Peça Cortada</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Largura (cm)</label>
+                  <input type="number" id="stSaidaLarg" placeholder="Ex: 100" min="0" step="1" oninput="stockSaidaCalc()">
+                </div>
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Comprimento (cm)</label>
+                  <input type="number" id="stSaidaComp" placeholder="Ex: 50" min="0" step="1" oninput="stockSaidaCalc()">
+                </div>
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Qtd Peças</label>
+                  <input type="number" id="stSaidaQtdPecas" placeholder="1" value="1" min="1" step="1" oninput="stockSaidaCalc()">
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Larg. Chapa (cm)</label>
+                  <input type="number" id="stChapaLarg" placeholder="200" value="200" min="1" step="1" oninput="stockSaidaCalc()">
+                </div>
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Comp. Chapa (cm)</label>
+                  <input type="number" id="stChapaComp" placeholder="100" value="100" min="1" step="1" oninput="stockSaidaCalc()">
+                </div>
+              </div>
+            </div>
+            <!-- Bloco B: Cálculo + Retalho -->
+            <div style="background:#EDE9FE;border:1.5px solid #C4B5FD;border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;font-weight:700;color:#5B21B6;margin-bottom:8px">🔢 Cálculo Automático &amp; Retalho</div>
+              <div class="form-group" style="margin-bottom:8px"><label style="font-size:11px">Frações de chapa consumida <span style="font-weight:400;color:var(--muted)">(calculado automaticamente)</span></label>
+                <input type="number" id="stSaidaQty" placeholder="0.00" min="0.01" step="0.01" style="border:1.5px solid #C4B5FD">
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Larg. sobra (cm) ✏️</label>
+                  <input type="number" id="stRetalhoLarg" placeholder="—" min="0" step="1" style="border:1px solid #C4B5FD">
+                </div>
+                <div class="form-group" style="margin:0"><label style="font-size:11px">Comp. sobra (cm) ✏️</label>
+                  <input type="number" id="stRetalhoComp" placeholder="—" min="0" step="1" style="border:1px solid #C4B5FD">
+                </div>
+              </div>
             </div>
             <div class="form-group"><label>Observação</label>
               <input type="text" id="stSaidaObs" placeholder="Ex: 2 placas para lateral do display">
             </div>
-            <!-- Campo de retalho — aparece ao usar qty fracionada -->
-            <div class="retalho-dims-field" id="stRetalhoField">
-              <div style="background:#EDE9FE;border:1px solid #C4B5FD;border-radius:8px;padding:10px 12px">
-                <div style="font-size:11px;font-weight:700;color:#5B21B6;margin-bottom:7px">✂️ Sobra detectada — Adicionar ao Banco de Retalhos?</div>
-                <div class="form-group" style="margin-bottom:0">
-                  <label>Dimensões da sobra (cm × cm)</label>
-                  <input type="text" id="stRetalhoDims" placeholder="Ex: 60×40" style="border:1px solid #C4B5FD">
-                </div>
-                <div style="display:flex;gap:7px;margin-top:8px">
-                  <button class="topbar-btn" style="flex:1;background:#7C3AED;font-size:11px" onclick="stockRegistrarSaidaComRetalho()">✂️ Registrar + Guardar Retalho</button>
-                  <button class="topbar-btn ghost" style="font-size:11px" onclick="stockRegistrarSaidaSimples()">Só registrar saída</button>
-                </div>
-              </div>
+            <div style="display:flex;gap:7px">
+              <button class="topbar-btn" style="flex:1" id="stSaidaBtn" onclick="stockRegistrarSaida()">📉 Registrar Saída</button>
+              <button class="topbar-btn" style="flex:1;background:#7C3AED" onclick="stockRegistrarSaidaComRetalho()">✂️ + Guardar Retalho</button>
             </div>
-            <button class="topbar-btn" id="stSaidaBtn" onclick="stockRegistrarSaida()">📉 Registrar Saída</button>
           </div>
         </div>
       </div>
@@ -13801,22 +13825,38 @@ function retalhoAdicionarManual() {
   showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+cod, 'ok');
 }
 
-function stockSaidaToggleRetalho() {
-  var qty=parseFloat((document.getElementById('stSaidaQty')||{}).value)||0;
-  var field=document.getElementById('stRetalhoField');
-  var btn=document.getElementById('stSaidaBtn');
-  if(!field||!btn) return;
-  var isFrac=qty>0&&qty<1;
-  field.className=isFrac?'retalho-dims-field show':'retalho-dims-field';
-  btn.style.display=isFrac?'none':'';
+function stockSaidaToggleRetalho() { stockSaidaCalc(); }
+function stockSaidaOnMatChange(matKey) {
+  var s = STOCK[matKey]; if (!s) return;
+  var cl=document.getElementById('stChapaLarg'); var cc=document.getElementById('stChapaComp');
+  if(cl && s.chapLarg) cl.value=s.chapLarg;
+  if(cc && s.chapComp) cc.value=s.chapComp;
+  stockSaidaCalc();
+}
+function stockSaidaCalc() {
+  var larg=parseFloat((document.getElementById('stSaidaLarg')||{}).value)||0;
+  var comp=parseFloat((document.getElementById('stSaidaComp')||{}).value)||0;
+  var qtdP=parseInt((document.getElementById('stSaidaQtdPecas')||{}).value)||1;
+  var cLarg=parseFloat((document.getElementById('stChapaLarg')||{}).value)||200;
+  var cComp=parseFloat((document.getElementById('stChapaComp')||{}).value)||100;
+  if(!larg||!comp) return;
+  var areaUsada=(larg*comp/10000)*qtdP;
+  var areaChapa=cLarg*cComp/10000;
+  var frac=areaChapa>0?+(areaUsada/areaChapa).toFixed(4):0;
+  var qEl=document.getElementById('stSaidaQty'); if(qEl) qEl.value=frac||'';
+  var sobraLarg=Math.max(0,cLarg-larg);
+  var rlEl=document.getElementById('stRetalhoLarg'); if(rlEl) rlEl.value=sobraLarg>0?sobraLarg:'';
+  var rcEl=document.getElementById('stRetalhoComp'); if(rcEl) rcEl.value=sobraLarg>0?cComp:'';
 }
 
 function stockRegistrarSaidaSimples(){ _stockFazSaida(); }
 function stockRegistrarSaidaComRetalho() {
-  var dims=(document.getElementById('stRetalhoDims')||{}).value||'';
+  var rl=parseFloat((document.getElementById('stRetalhoLarg')||{}).value)||0;
+  var rc=parseFloat((document.getElementById('stRetalhoComp')||{}).value)||0;
   var matKey=(document.getElementById('stSaidaMat')||{}).value||'ac3';
   _stockFazSaida();
-  retalhoAdicionar(matKey,dims);
+  if(rl>0&&rc>0) retalhoAdicionar(matKey, rl+'×'+rc);
+  else showToast('Preencha as dimensões da sobra para guardar o retalho','warn');
 }
 function _stockFazSaida() {
   var matKey=(document.getElementById('stSaidaMat')||{}).value||'ac3';
@@ -13828,11 +13868,16 @@ function _stockFazSaida() {
   STOCK[matKey].qty-=minQty; stockUpdateDisplay(matKey); stockSaveData();
   var _osVinc=Array.from(document.querySelectorAll('#stSaidaOSChips .os-chip-sel')).map(function(el){return el.dataset.osid;}).join(', ');
   var _obsVinc=(document.getElementById('stSaidaObs')||{}).value||'';
+  var _larg=(document.getElementById('stSaidaLarg')||{}).value;
+  var _comp=(document.getElementById('stSaidaComp')||{}).value;
+  var _qtdP=(document.getElementById('stSaidaQtdPecas')||{}).value;
+  var _rl=(document.getElementById('stRetalhoLarg')||{}).value;
+  var _rc=(document.getElementById('stRetalhoComp')||{}).value;
+  if(_larg&&_comp){ var _dimObs=_larg+'×'+_comp+'cm'; if(_qtdP&&parseInt(_qtdP)>1)_dimObs+=' ×'+_qtdP+'pçs'; if(_rl&&_rc)_dimObs+=' | retalho:'+_rl+'×'+_rc+'cm'; _obsVinc=_dimObs+(_obsVinc?' · '+_obsVinc:''); }
   _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
-  var qEl=document.getElementById('stSaidaQty'); if(qEl) qEl.value='';
-  var fld=document.getElementById('stRetalhoField'); if(fld) fld.className='retalho-dims-field';
-  var btn=document.getElementById('stSaidaBtn'); if(btn) btn.style.display='';
-  showToast('Saída de '+qty+' un de '+STOCK[matKey].label+' registrada','ok');
+  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=''});
+  var _qpEl=document.getElementById('stSaidaQtdPecas');if(_qpEl)_qpEl.value='1';
+  showToast('Saída de '+qty.toFixed(2)+' chapa(s) de '+STOCK[matKey].label+' registrada','ok');
   syncSidebarBadges();
 }
 // ── Popula chips de OS na Baixa de Estoque ────────────────────────────────
@@ -13871,8 +13916,6 @@ function stockFilterOsChips(q) {
 }
 
 function stockRegistrarSaida() {
-  var qty=parseFloat((document.getElementById('stSaidaQty')||{}).value)||0;
-  if(qty>0&&qty<1){showToast('Quantidade fracionada — informe as dimensões do retalho acima','warn');return;}
   _stockFazSaida();
 }
 
