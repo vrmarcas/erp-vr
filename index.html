@@ -10011,11 +10011,17 @@ function _kbOpenProdOverlay(os) {
     matSel.innerHTML = '<option value="">— Selecionar material —</option>'
       + keys.map(function(k){
           var s = STOCK[k];
-          var avail = s.qty > 0 ? ' (' + s.qty + ' disponíveis)' : ' ⚠ Sem estoque';
-          return '<option value="'+k+'"' + (s.qty<=0?' style="color:#DC2626"':'') + '>' + s.label + (s.cor?' — '+s.cor:'') + avail + '</option>';
+          var avail = s.qty > 0 ? ' (Estoque: ' + s.qty + ')' : ' ⚠ Sem estoque';
+          var espTag = s.esp ? ' — ' + s.esp + 'mm' : '';
+          return '<option value="'+k+'"' + (s.qty<=0?' style="color:#DC2626"':'') + '>' + s.label + (s.cor?' '+s.cor:'') + espTag + avail + '</option>';
         }).join('');
-    // Pre-select if editing
-    if (_kbProdEditMode && os.matProd && os.matProd.matKey) matSel.value = os.matProd.matKey;
+    // Pre-select if editing, else auto-match por espessura da OS
+    if (_kbProdEditMode && os.matProd && os.matProd.matKey) {
+      matSel.value = os.matProd.matKey;
+    } else if (!_kbProdEditMode && os.esp) {
+      var _espKeys = Object.keys(STOCK).filter(function(k){ return STOCK[k].esp == os.esp && STOCK[k].qty > 0; });
+      if (_espKeys.length === 1) matSel.value = _espKeys[0];
+    }
   }
   // Populate retalho select
   var retSel = document.getElementById('kbProdRetalhoSel');
@@ -10149,7 +10155,7 @@ function kbConfirmarProd() {
       var _matLabel = STOCK[matKey].label + (STOCK[matKey].cor?' — '+STOCK[matKey].cor:'');
       retalhoAdicionar(matKey, 'sobra ' + sobra.toFixed(2) + ' chapa — OS #' + (os.num||os.id));
     }
-    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' — ' + STOCK[matKey].cor : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
+    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' ' + STOCK[matKey].cor : '') + (STOCK[matKey].esp ? ' — ' + STOCK[matKey].esp + 'mm' : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
   }
 
   // Se não estava em produção ainda, mudar status
