@@ -10377,7 +10377,7 @@ function showToast(msg, type, dur) {
   var t=document.createElement('div');
   t.className='toast '+type;
   var ico={ok:'✅',warn:'⚠️',err:'❌',info:'ℹ️'}[type]||'✅';
-  t.innerHTML='<span>'+ico+'</span><span style="margin-left:8px">'+msg+'</span>';
+  var _sp=document.createElement('span'); _sp.style.marginLeft='8px'; _sp.textContent=msg; t.innerHTML='<span>'+ico+'</span>'; t.appendChild(_sp);
   c.appendChild(t);
   setTimeout(function(){t.classList.add('out');setTimeout(function(){if(t.parentNode)t.parentNode.removeChild(t);},220);},dur);
 }
@@ -15066,6 +15066,7 @@ var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
 var _SEC_INACT_MINS = 5;
+var _SEC_LOCKOUT = {count:0,until:0};
 var _chatvoltAgentId = '';
 var _chatvoltMarca   = 'vr';
 var _chatvoltFase    = 'ia_novo';
@@ -16674,7 +16675,7 @@ function usrRedefinirSenha(idx) {
   if(novaSenha === null) return; // cancelou
   novaSenha = novaSenha.trim();
   if(novaSenha.length < 4) { showToast('Senha muito curta — mínimo 4 caracteres','err'); return; }
-  users[idx].senha = novaSenha;
+  users[idx].senha = secHash(novaSenha);
   _USR_DATA=users;
   if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
   showToast('Senha de "' + u.nome + '" redefinida!', 'ok');
@@ -18114,7 +18115,7 @@ function usrSalvar() {
     var senha = (document.getElementById('usrSenha')||{}).value||'';
     if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
     if(users.find(function(u){ return u.email&&u.email===email; })){ showToast('E-mail já cadastrado','err'); return; }
-    users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:senha, criado:new Date().toLocaleDateString('pt-BR') });
+    users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:secHash(senha), criado:new Date().toLocaleDateString('pt-BR') });
     _USR_DATA=users;
     showToast('Usuário "'+nome+'" criado!','ok');
     if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
@@ -18184,8 +18185,8 @@ function secGetMasterHash(){
 }
 
 // ── Lockout ───────────────────────────────────────────────────────────────────
-function secGetLockout(){ try{ return JSON.parse(sessionStorage.getItem(SEC_LOCKOUT_KEY))||{count:0,until:0}; }catch(e){ return {count:0,until:0}; } }
-function secSetLockout(lo){ try{ sessionStorage.setItem(SEC_LOCKOUT_KEY, JSON.stringify(lo)); }catch(e){} }
+function secGetLockout(){ return _SEC_LOCKOUT; }
+function secSetLockout(lo){ _SEC_LOCKOUT = lo; }
 
 function secCheckLockout(){
   var lo=secGetLockout();
