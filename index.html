@@ -4514,6 +4514,7 @@ function _cloudAuthAviso(msg){
           <button class="cfg-tab" id="cfgTab6" onclick="cfgTab(6)">💳 Parcelamento</button>
           <button class="cfg-tab" id="cfgTab7" onclick="cfgTab(7)">🏦 Dados Bancários</button>
           <button class="cfg-tab" id="cfgTab8" onclick="cfgTab(8)">🗂️ Produtos</button>
+          <button class="cfg-tab" id="cfgTab9" onclick="cfgTab(9)">🔌 Integrações</button>
           <button class="topbar-btn" onclick="erpBackupExportar()" style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Backup JSON</button>
         </div>
 
@@ -4844,6 +4845,28 @@ function _cloudAuthAviso(msg){
           </div>
         </div>
 
+        <div id="cfgPg9" class="cfg-pg" style="display:none">
+          <div class="card">
+            <div class="card-h"><div class="card-h-left">🔌 Integrações — Valéria AI</div></div>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 14px 0">Configure a chave de autenticação usada pelo agente de WhatsApp (Valéria / Chatvolt).</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+              <div><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">API KEY (Chatvolt / Valéria)</label>
+                <input type="password" id="cfgIntegApiKey" placeholder="Chave secreta..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box"></div>
+              <div><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">WEBHOOK URL (opcional)</label>
+                <input type="text" id="cfgIntegWebhook" placeholder="https://..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box"></div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button onclick="cfgIntegSalvar()" style="padding:7px 18px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
+              <button onclick="cfgIntegMostrarKey()" style="padding:7px 14px;background:none;border:1.5px solid var(--border);border-radius:7px;font-size:12px;cursor:pointer;color:var(--muted)">👁 Mostrar/Ocultar</button>
+              <span id="cfgIntegStatus" style="font-size:11px;color:var(--muted)"></span>
+            </div>
+            <div style="margin-top:18px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+              <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">MOTOR API — TESTE</div>
+              <button onclick="(function(){var r=window.calcularOrcamentoAPI({itens:[{larg:100,alt:100,qty:1}]});document.getElementById('cfgIntegTestOut').textContent=JSON.stringify(r,null,2);})()" style="padding:5px 14px;background:none;border:1.5px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer">▶ Testar motor</button>
+              <pre id="cfgIntegTestOut" style="font-size:10px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></pre>
+            </div>
+          </div>
+        </div>
     </div><!-- /pg-config-orc -->
 
     <!-- ================================================
@@ -7857,6 +7880,37 @@ function orcRecalc() {
   // payload interno
   window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo };
 }
+
+// ── Motor de Orçamento API (Valéria / Cloud Functions) ──────────────────────
+window.calcularOrcamentoAPI = function(params) {
+  try {
+    var p=params||{}, itens=Array.isArray(p.itens)?p.itens:[];
+    var _cfgFin=(_cfgData&&_cfgData.financeiro)||{};
+    var overhead=((_cfgFin.overhead!=null?_cfgFin.overhead:41.16))/100;
+    var vrml=((_cfgFin.vrml!=null?_cfgFin.vrml:20))/100;
+    var impostos=((_cfgFin.impostos!=null?_cfgFin.impostos:0))/100;
+    var factor=1-(overhead+vrml+impostos); if(factor<=0)factor=0.01;
+    var mats=((_cfgData&&_cfgData.materiais)||[]);
+    function _gmp(mk){
+      if(!mk)return 0;
+      if(mk.indexOf('cfg_')===0){var mi=parseInt(mk.replace('cfg_',''));var mr=mats[mi];if(mr){var a=(mr.comp||0)*(mr.larg||0)/10000;return a>0?(mr.preco||0)/a:0;}}
+      return 0;
+    }
+    var matTotal=0;
+    itens.forEach(function(it){
+      var qty=parseFloat(it.qty)||1,larg=parseFloat(it.larg)||0,alt=parseFloat(it.alt)||0;
+      var useArea=parseFloat(it.planArea)>0?parseFloat(it.planArea):(larg*alt);
+      matTotal+=(useArea/10000)*(parseFloat(it.rsm2)||_gmp(it.matKey))*qty;
+    });
+    var extrasTotal=parseFloat(p.extras)||0,totalCost=matTotal+extrasTotal;
+    var descPct=parseFloat(p.descPct)||0,descRS=parseFloat(p.descRS)||0;
+    var acresPct=parseFloat(p.acresPct)||0,acresRS=parseFloat(p.acresRS)||0;
+    var finalPrice=(totalCost/factor)*(1-descPct/100)-descRS;
+    finalPrice=finalPrice*(1+acresPct/100)+acresRS;
+    if(finalPrice<0)finalPrice=0;
+    return{finalPrice:Math.round(finalPrice*100)/100,totalCost:Math.round(totalCost*100)/100,matTotal:Math.round(matTotal*100)/100,breakdown:{overhead:overhead*100,vrml:vrml*100,impostos:impostos*100,factor:Math.round(factor*10000)/100,extrasTotal:extrasTotal}};
+  }catch(e){return{finalPrice:0,totalCost:0,matTotal:0,error:e.message};}
+};
 
 // Per-item extras store
 var ORC_ITEM_EXTRAS = {};
@@ -15137,7 +15191,8 @@ function orcSalvarOrcamento() {
     prazo: (document.getElementById('orcPrazoEntrega')||{}).value||'',
     prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
     prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||'',
-    dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10)
+    dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10),
+    pricingVersion: (function(){ var _f=(_cfgData&&_cfgData.financeiro)||{}; return [_f.overhead,_f.vrml,_f.impostos].join('_')||new Date().toISOString().slice(0,10); })()
   };
   lista.unshift(orc);
   orcSetEnviados(lista);
@@ -15210,8 +15265,12 @@ function orcClienteSelecionar(idx) {
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
   if(!nome || nome==='(não informado)' || nome==='Cliente') return;
-  var existe = CLIENTES_DATA.find(function(c){
-    return (c.nome||'').toLowerCase().trim() === nome.toLowerCase();
+  var _telNorm=(orc.tel||'').replace(/\D/g,''),_emailNorm=(orc.email||'').toLowerCase().trim();
+  var existe=CLIENTES_DATA.find(function(c){
+    if((c.nome||'').toLowerCase().trim()===nome.toLowerCase())return true;
+    if(_telNorm&&_telNorm.length>=8&&(c.tel||'').replace(/\D/g,'')===_telNorm)return true;
+    if(_emailNorm&&_emailNorm.indexOf('@')>0&&(c.email||'').toLowerCase().trim()===_emailNorm)return true;
+    return false;
   });
   if(existe) {
     // Atualiza dados se tiver campos vazios
@@ -16189,15 +16248,21 @@ function cfgLimparBanco(marca) { bankRemover(marca, bankListFor(marca)[0]?.id||'
 
 function cfgTab(n) {
   if(n===5) { setTimeout(mkPopularFromConfig, 50); }
-  for(var i=1;i<=8;i++){
+  for(var i=1;i<=9;i++){
     var t=document.getElementById('cfgTab'+i), p=document.getElementById('cfgPg'+i);
     if(t) t.classList.toggle('on', i===n);
     if(p) p.style.display = i===n ? 'block' : 'none';
   }
   if(n===6) cfgRenderParc();
   if(n===7) cfgCarregarBanco();
+  if(n===9) cfgIntegLoad();
 }
 
+var _CFG_INTEG={};
+function cfgIntegLoad(){try{var d=JSON.parse(localStorage.getItem('erp_integ_cfg')||'{}');_CFG_INTEG=d;var kEl=document.getElementById('cfgIntegApiKey'),wEl=document.getElementById('cfgIntegWebhook');if(kEl&&d.apiKey)kEl.value=d.apiKey;if(wEl&&d.webhook)wEl.value=d.webhook;var st=document.getElementById('cfgIntegStatus');if(st)st.textContent=d.apiKey?'✅ Chave configurada':'';}catch(e){}}
+function cfgIntegSalvar(){var k=(document.getElementById('cfgIntegApiKey')||{}).value||'',w=(document.getElementById('cfgIntegWebhook')||{}).value||'';_CFG_INTEG={apiKey:k,webhook:w,updatedAt:new Date().toISOString()};localStorage.setItem('erp_integ_cfg',JSON.stringify(_CFG_INTEG));var st=document.getElementById('cfgIntegStatus');if(st)st.textContent=k?'✅ Chave salva':'⚠️ Sem chave';showToast('Config Integrações salva','ok');if(typeof secAuditLog==='function')secAuditLog('integ_cfg_saved','API key atualizada');}
+function cfgIntegMostrarKey(){var el=document.getElementById('cfgIntegApiKey');if(el)el.type=el.type==='password'?'text':'password';}
+window._getIntegConfig=function(){return{webhook:(_CFG_INTEG||{}).webhook||''};};
 function cfgRenderTables() {
   try {
   // Garantir _cfgData com arrays válidos antes de qualquer coisa
