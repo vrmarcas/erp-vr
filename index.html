@@ -19554,7 +19554,7 @@ function planRenderManual() {
     return '<div style="display:grid;grid-template-columns:2fr 0.6fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
-      +'<select oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'      +'<option value="">esp</option>'      +[2,3,4,5,6,8,10,12].map(function(v){return '<option value="'+v+'"\'+(parseInt(p.esp||0)===v?' selected':'')+'>'+v+'mm</option>';}).join('')      +'</select>'
+      +'<select oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'      +'<option value="">esp</option>'      +[2,3,4,5,6,8,10,12].map(function(v){return '<option value="'+v+'"'+(parseInt(p.esp||0)===v?' selected':'')+'>'+v+'mm</option>';}).join('')      +'</select>'
       +'<input type="number" placeholder="Larg cm" value="'+(p.larg||'')+'" min="0" step="0.1"'
       +' oninput="planManualPieces['+i+'].larg=parseFloat(this.value)||0;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
