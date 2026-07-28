@@ -28,8 +28,10 @@ import { ok, err, QUOTE_RESPONSES } from "./response";
 import type {
   Cliente,
   CrmLead,
+  CrmLeadDict,
   KbOs,
   OrcamentoEnviado,
+  PricingSimulation,
   QuoteItem,
 } from "./types";
 
@@ -65,6 +67,68 @@ async function fsWrite(key: string, data: unknown): Promise<void> {
     data: JSON.stringify(data),
     ts: Date.now(),
   });
+}
+
+// ── Helpers CRM (dict unificado ERP + Valéria) ───────────────────────────────
+
+const SIM_COL     = "valeria_simulations";
+const SIM_TTL_MS  = 60 * 60 * 1000; // 1 hora
+
+/**
+ * Mapeamento: etapa interna Valéria → coluna Kanban ERP.
+ * O ERP usa strings minúsculas com underline; a Valéria usa CAPS.
+ */
+const VALERIA_TO_ERP_ETAPA: Record<string, string> = {
+  NOVO_LEAD:          "ia_novo",
+  CONTATO_FEITO:      "qualificando",
+  BRIEFING_COLETADO:  "qualificando",
+  ORCAMENTO_ENVIADO:  "orc_emitido",
+  NEGOCIACAO:         "negociacao",
+  GANHO:              "fechado",
+  PERDIDO:            "fechado",
+  REABERTO:           "qualificando",
+  aguardando_humano:  "qualificando",
+};
+
+/** Temperatura padrão por etapa Valéria */
+const ETAPA_TO_TEMP: Record<string, string> = {
+  NOVO_LEAD: "frio", CONTATO_FEITO: "frio",
+  BRIEFING_COLETADO: "morno", ORCAMENTO_ENVIADO: "morno",
+  NEGOCIACAO: "quente", GANHO: "quente",
+};
+
+/** Cor padrão por temperatura */
+const TEMP_TO_COR: Record<string, string> = {
+  quente: "#FCA5A5", morno: "#FCD34D", frio: "#93C5FD",
+};
+
+/** Procura um lead no dict por conversationId */
+function findLeadByConv(dict: CrmLeadDict, conversationId: string): { id: string; lead: CrmLead } | null {
+  for (const [id, lead] of Object.entries(dict)) {
+    if (lead.valeria?.conversationId === conversationId) return { id, lead };
+  }
+  return null;
+}
+
+/** Monta / atualiza campos ERP a partir da etapa Valéria */
+function erpFieldsFromEtapa(valeriaStatus: string): Partial<CrmLead> {
+  const etapa = VALERIA_TO_ERP_ETAPA[valeriaStatus] ?? "qualificando";
+  const temp  = ETAPA_TO_TEMP[valeriaStatus] ?? "frio";
+  return { etapa, temp, cor: TEMP_TO_COR[temp] };
+}
+
+// ── Helpers simulação de preço ───────────────────────────────────────────────
+
+async function saveSimulation(sim: PricingSimulation): Promise<void> {
+  const db = admin.firestore();
+  await db.collection(SIM_COL).doc(sim.simulationId).set(sim);
+}
+
+async function getSimulation(simulationId: string): Promise<PricingSimulation | null> {
+  const db  = admin.firestore();
+  const doc = await db.collection(SIM_COL).doc(simulationId).get();
+  if (!doc.exists) return null;
+  return doc.data() as PricingSimulation;
 }
 
 function normTel(tel: string): string {
@@ -111,9 +175,14 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       }
 
       let lead: CrmLead | null = null;
-      if (leadId) {
-        const leads = await fsRead<CrmLead[]>("valeria_leads");
-        lead = leads?.find((l) => l.id === leadId) ?? null;
+      // Busca no dict unificado crm_leads (mesmo que o ERP Kanban lê)
+      const leadsDict = await fsRead<CrmLeadDict>("crm_leads");
+      if (leadId && leadsDict?.[leadId]) {
+        lead = leadsDict[leadId];
+      } else if (!leadId) {
+        // Fallback: buscar por conversationId no dict
+        const found = leadsDict ? findLeadByConv(leadsDict, ctx.conversationId) : null;
+        if (found) lead = found.lead;
       }
 
       res.json(ok(
@@ -249,13 +318,10 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCalcularOrcamento" },
       async () => {
-        const pricing = await evaluateQuoteEligibility(itens, {
-          extras:   body["extras"]   as number | undefined,
-          descPct:  body["descPct"]  as number | undefined,
-          descRS:   body["descRS"]   as number | undefined,
-          acresPct: body["acresPct"] as number | undefined,
-          acresRS:  body["acresRS"]  as number | undefined,
-        });
+        // Campos de preço bloqueados: o motor calcula exclusivamente server-side.
+        // rsm2 nos itens também é ignorado — preço vem do catálogo (matKey).
+        const sanitizedItens = itens.map((it) => { const { rsm2: _r, ...rest } = it as unknown as Record<string,unknown>; return rest as unknown as QuoteItem; });
+        const pricing = await evaluateQuoteEligibility(sanitizedItens, {});
 
         switch (pricing.eligibility) {
           case "NEEDS_INFORMATION":
@@ -268,17 +334,34 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
             return QUOTE_RESPONSES.unsupported(String(body["descricao"] ?? "desconhecido"));
           case "TEMPORARILY_UNAVAILABLE":
             return QUOTE_RESPONSES.temporarilyUnavailable();
-          case "ELIGIBLE":
+          case "ELIGIBLE": {
+            // Persistir simulação no servidor — criarOrcamento vai recuperar por ID
+            const simId  = pricing.simulationId ?? uid("sim");
+            const simNow = Date.now();
+            const sim: PricingSimulation = {
+              simulationId:      simId,
+              conversationId:    ctx.conversationId,
+              itensNormalizados: sanitizedItens,
+              finalPrice:        pricing.finalPrice!,
+              pricingVersion:    pricing.pricingVersion!,
+              createdAt:         simNow,
+              expiresAt:         simNow + SIM_TTL_MS,
+              origem:            "valeria",
+              usado:             false,
+            };
+            await saveSimulation(sim);
+
             return ok(
               {
-                simulationId:   pricing.simulationId,
+                simulationId:   simId,
                 finalPrice:     pricing.finalPrice,
                 pricingVersion: pricing.pricingVersion,
-                itensCount:     itens.length,
+                itensCount:     sanitizedItens.length,
                 conversationId: ctx.conversationId,
               },
               { communicableToCustomer: true, verified: true }
             );
+          }
         }
       }
     );
@@ -329,27 +412,29 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOrcamento" },
       async () => {
-        // Recalcula pelo motor oficial — simulationId é referência de sessão, não cheque em branco
-        const pricing = await evaluateQuoteEligibility(itens!, {
-          extras:   body["extras"]   as number | undefined,
-          descPct:  body["descPct"]  as number | undefined,
-          descRS:   body["descRS"]   as number | undefined,
-          acresPct: body["acresPct"] as number | undefined,
-          acresRS:  body["acresRS"]  as number | undefined,
-        });
-
-        if (pricing.eligibility !== "ELIGIBLE") {
-          switch (pricing.eligibility) {
-            case "NEEDS_INFORMATION":
-              return QUOTE_RESPONSES.needsInformation(pricing.missingFields ?? []);
-            case "HUMAN_VALIDATION_REQUIRED":
-              return QUOTE_RESPONSES.humanValidationRequired("Cálculo requer validação humana.");
-            case "UNSUPPORTED":
-              return QUOTE_RESPONSES.unsupported(String(body["descricao"] ?? "desconhecido"));
-            default:
-              return QUOTE_RESPONSES.temporarilyUnavailable();
-          }
+        // Recuperar simulação persistida — NÃO recalcular com campos da IA
+        const sim = await getSimulation(simulationId!);
+        if (!sim) {
+          return err("SIMULATION_NOT_FOUND",
+            "simulationId não encontrado. Execute valeriaCalcularOrcamento primeiro.",
+            { communicableToCustomer: false }
+          );
         }
+        if (sim.conversationId !== ctx.conversationId) {
+          return err("SIMULATION_MISMATCH", "simulationId pertence a outra conversa.", { communicableToCustomer: false });
+        }
+        if (sim.expiresAt < Date.now()) {
+          return err("SIMULATION_EXPIRED",
+            "Simulação expirada (válida por 1h). Execute valeriaCalcularOrcamento novamente.",
+            { communicableToCustomer: true }
+          );
+        }
+        if (sim.usado) {
+          return err("SIMULATION_ALREADY_USED", "Esta simulação já foi usada para criar um orçamento.", { communicableToCustomer: false });
+        }
+
+        // Marcar como usada atomicamente ANTES de criar o orçamento
+        await admin.firestore().collection(SIM_COL).doc(simulationId!).update({ usado: true });
 
         const orcamentos = (await fsRead<OrcamentoEnviado[]>("orcamentos")) ?? [];
         const maxN = orcamentos.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
@@ -361,10 +446,10 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
           telCliente:            telCliente!,
           emailCliente:          (body["emailCliente"] as string) ?? "",
           descricao:             (body["descricao"]    as string) ?? "",
-          itens:                 itens!,
-          total:                 pricing.finalPrice!,
-          totalCost:             pricing.totalCost!,
-          pricingVersion:        pricing.pricingVersion!,
+          itens:                 sim.itensNormalizados,   // itens do servidor, não da IA
+          total:                 sim.finalPrice,           // preço do servidor
+          totalCost:             sim.finalPrice,
+          pricingVersion:        sim.pricingVersion,
           quoteEngine:           "erp_official",
           simulationId:          simulationId!,
           communicableToCustomer: true,
@@ -414,48 +499,82 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOportunidade" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
-        const now   = new Date().toISOString();
-        // Vínculo primário: conversationId. Fallback: channelPhone
-        let idx = leads.findIndex((l) => l.conversationId === ctx.conversationId);
-        if (idx < 0) idx = leads.findIndex((l) => normTel(l.tel ?? "") === normTel(tel));
+        // Lê o dict unificado crm_leads (mesmo documento que o Kanban do ERP usa)
+        const dict: CrmLeadDict = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
+        const now  = new Date().toISOString();
+
+        // Busca por conversationId no dict; fallback por telefone normalizado
+        let found = findLeadByConv(dict, ctx.conversationId);
+        if (!found) {
+          const normT = normTel(tel);
+          const entry = Object.entries(dict).find(([, l]) => normTel(l.tel ?? "") === normT);
+          if (entry) found = { id: entry[0], lead: entry[1] };
+        }
 
         let lead: CrmLead;
         let acao: string;
 
-        if (idx >= 0) {
-          Object.assign(leads[idx], {
-            nome, conversationId: ctx.conversationId,
-            agentId: ctx.agentId, organizationId: ctx.organizationId,
-            ...(body["email"]          !== undefined && { email:          body["email"]          }),
-            ...(body["observacoes"]    !== undefined && { observacoes:    body["observacoes"]    }),
-            ...(body["proximaAcao"]    !== undefined && { proximaAcao:    body["proximaAcao"]    }),
-            ...(body["dataProximaAcao"] !== undefined && { dataProximaAcao: body["dataProximaAcao"] }),
-          });
-          leads[idx].historico = [...(leads[idx].historico ?? []),
-            { ts: now, acao: "atualizado", agentId: ctx.agentId }];
-          lead = leads[idx];
+        if (found) {
+          // Atualizar lead existente (mantém campos ERP; atualiza sub-objeto valeria)
+          const existing = found.lead;
+          existing.nome  = nome;
+          existing.tel   = tel;
+          if (body["email"]) existing.email = body["email"] as string;
+          existing.valeria = {
+            ...existing.valeria,
+            status:         existing.valeria?.status ?? "NOVO_LEAD",
+            conversationId: ctx.conversationId,
+            agentId:        ctx.agentId,
+            organizationId: ctx.organizationId,
+            ...(body["observacoes"]     !== undefined && { observacoes:     body["observacoes"] as string }),
+            ...(body["proximaAcao"]     !== undefined && { proximaAcao:     body["proximaAcao"] as string }),
+            ...(body["dataProximaAcao"] !== undefined && { dataProximaAcao: body["dataProximaAcao"] as string }),
+            dataEntrada:    existing.valeria?.dataEntrada ?? now,
+            updatedAt:      now,
+            historico:      [...(existing.valeria?.historico ?? []),
+              { ts: now, acao: "atualizado", agentId: ctx.agentId }],
+          };
+          dict[found.id] = existing;
+          lead = existing;
           acao = "atualizado";
         } else {
+          // Criar novo lead em formato compatível com o Kanban ERP
+          const id = uid("lead");
           lead = {
-            id: uid("lead"), nome, tel,
-            email:           (body["email"] as string) ?? "",
-            status:          "novo",
-            origem:          (body["origem"] as string) ?? "valeria",
-            observacoes:     (body["observacoes"] as string) ?? "",
-            dataEntrada:     now,
-            proximaAcao:     (body["proximaAcao"] as string) ?? "",
-            dataProximaAcao: (body["dataProximaAcao"] as string) ?? "",
-            conversationId:  ctx.conversationId,
-            agentId:         ctx.agentId,
-            organizationId:  ctx.organizationId,
-            historico:       [{ ts: now, acao: "criado", agentId: ctx.agentId }],
+            id,
+            nome,
+            tel,
+            email:    (body["email"] as string) ?? "",
+            etapa:    "ia_novo",           // primeira coluna do Kanban
+            marca:    "vr",                // padrão; pode ser overridden via briefing
+            sub:      tel,
+            temp:     "frio",
+            score:    Math.floor(Math.random() * 30) + 10,
+            cor:      TEMP_TO_COR["frio"],
+            origem:   (body["origem"] as string) ?? "valeria",
+            contato:  nome,
+            cidade:   (body["cidade"] as string) ?? "",
+            segmento: (body["segmento"] as string) ?? "",
+            dores:    [],
+            resumo_ia: (body["observacoes"] as string) ?? "Lead criado pela Valéria.",
+            valor:    "A definir",
+            valeria: {
+              status:         "NOVO_LEAD",
+              conversationId: ctx.conversationId,
+              agentId:        ctx.agentId,
+              organizationId: ctx.organizationId,
+              observacoes:    (body["observacoes"] as string) ?? "",
+              proximaAcao:    (body["proximaAcao"] as string) ?? "",
+              dataProximaAcao:(body["dataProximaAcao"] as string) ?? "",
+              dataEntrada:    now,
+              historico:      [{ ts: now, acao: "criado", agentId: ctx.agentId }],
+            },
           };
-          leads.unshift(lead);
+          dict[id] = lead;
           acao = "criado";
         }
 
-        await fsWrite("valeria_leads", leads);
+        await fsWrite("crm_leads", dict);
         await admin.firestore().collection("valeria_conversations")
           .doc(ctx.conversationId)
           .set({ leadId: lead.id, updatedAt: Date.now() }, { merge: true });
@@ -562,15 +681,23 @@ export const valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res)
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaTransferirHumano" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
-        const now   = new Date().toISOString();
-        const idx   = leads.findIndex((l) => l.conversationId === ctx.conversationId);
+        const dict = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
+        const now  = new Date().toISOString();
+        const found = findLeadByConv(dict, ctx.conversationId);
 
-        if (idx >= 0) {
-          leads[idx].status    = "aguardando_humano";
-          leads[idx].historico = [...(leads[idx].historico ?? []),
-            { ts: now, acao: "transferido_humano", agentId: ctx.agentId, detalhe: motivo }];
-          await fsWrite("valeria_leads", leads);
+        if (found) {
+          const { id, lead } = found;
+          lead.valeria = {
+            ...lead.valeria!,
+            status:   "aguardando_humano",
+            updatedAt: now,
+            historico: [...(lead.valeria?.historico ?? []),
+              { ts: now, acao: "transferido_humano", agentId: ctx.agentId, detalhe: motivo }],
+          };
+          // Etapa ERP fica em qualificando (aguardando triagem humana)
+          lead.etapa = "qualificando";
+          dict[id]   = lead;
+          await fsWrite("crm_leads", dict);
         }
 
         await admin.firestore().collection("valeria_alertas").add({
@@ -604,21 +731,28 @@ export const valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
     const result = await withIdempotency<{ warning?: string; agendado?: boolean; acao?: string }>(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaProximaAcao" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
-        const idx   = leads.findIndex((l) => l.conversationId === ctx.conversationId);
+        const dict  = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
+        const found = findLeadByConv(dict, ctx.conversationId);
 
-        if (idx < 0) {
+        if (!found) {
           return ok(
             { warning: "Lead não encontrado para esta conversa." },
             { warnings: ["Lead não encontrado — use valeriaCriarOportunidade primeiro."] }
           );
         }
 
-        leads[idx].proximaAcao     = acao;
-        leads[idx].dataProximaAcao = (body["data"] as string) ?? new Date().toISOString();
-        leads[idx].historico       = [...(leads[idx].historico ?? []),
-          { ts: new Date().toISOString(), acao: `proxima_acao: ${acao}`, agentId: ctx.agentId }];
-        await fsWrite("valeria_leads", leads);
+        const now = new Date().toISOString();
+        const { id, lead } = found;
+        lead.valeria = {
+          ...lead.valeria!,
+          proximaAcao:     acao,
+          dataProximaAcao: (body["data"] as string) ?? now,
+          updatedAt:       now,
+          historico:       [...(lead.valeria?.historico ?? []),
+            { ts: now, acao: `proxima_acao: ${acao}`, agentId: ctx.agentId }],
+        };
+        dict[id] = lead;
+        await fsWrite("crm_leads", dict);
 
         return ok({ agendado: true, acao }, { communicableToCustomer: false });
       }

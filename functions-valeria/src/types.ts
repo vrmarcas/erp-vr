@@ -110,23 +110,61 @@ export interface QuoteItem {
   descricao?: string;
 }
 
+/**
+ * CrmLead — formato unificado ERP + Valéria.
+ *
+ * Os campos de primeiro nível são compatíveis com o Kanban do index.html.
+ * Dados exclusivos da Valéria ficam em `valeria: {}` para não quebrar
+ * cards existentes.
+ *
+ * Armazenado em erp_vr/crm_leads como objeto-dicionário: { [id]: CrmLead }
+ */
 export interface CrmLead {
+  // ── Campos ERP (primeiro nível — usados pelo Kanban / index.html) ──
   id: string;
   nome: string;
   tel: string;
   email?: string;
-  status: string;
-  origem?: string;
-  observacoes?: string;
-  dataEntrada: string;   // ISO-8601
-  proximaAcao?: string;
-  dataProximaAcao?: string;
-  conversationId?: string;
-  agentId?: string;
-  organizationId?: string;
-  historico?: LeadHistoricoEntry[];
+  /** Coluna do Kanban: ia_novo | qualificando | orc_emitido | negociacao | fechado */
+  etapa: string;
+  marca: string;          // 'vr' | 'vitre'
+  sub?: string;           // subtitle exibida no card
+  temp?: string;          // 'quente' | 'morno' | 'frio'
+  score?: number;         // 0–100
+  cor?: string;           // hex
+  origem?: string;        // 'valeria' | 'site' | 'indicacao' etc.
+  contato?: string;
+  cidade?: string;
+  segmento?: string;
+  dores?: string[];
+  intencao?: { produto: string; material: string; medidas: string; quantidade: string };
+  resumo_ia?: string;
+  valor?: string;
+
+  // ── Sub-objeto exclusivo da Valéria (não afeta o Kanban) ──
+  valeria?: {
+    status: string;        // CrmEtapa interna (NOVO_LEAD, CONTATO_FEITO, …)
+    conversationId: string;
+    agentId: string;
+    organizationId: string;
+    observacoes?: string;
+    proximaAcao?: string;
+    dataProximaAcao?: string;
+    historico?: LeadHistoricoEntry[];
+    dataEntrada: string;
+    updatedAt?: string;
+    briefing?: Record<string, unknown>;
+    orcamentoGanhoId?: string;
+    motivoPerda?: string;
+    reaberturaJustificativa?: string;
+    responsavel?: string;
+  };
+
   [key: string]: unknown;
 }
+
+/** Dicionário de leads — formato usado pelo ERP e pela Valéria */
+export type CrmLeadDict = Record<string, CrmLead>;
 
 export interface LeadHistoricoEntry {
   ts: string;            // ISO-8601
@@ -168,6 +206,22 @@ export interface MaquinaConfig {
   nome: string;
   ratePerMin: number;
   [key: string]: unknown;
+}
+
+// ── Simulação de preço persistida ────────────────────────────────────────────
+
+/** Gravada em valeria_simulations/{simulationId}. Só criarOrcamento pode usá-la. */
+export interface PricingSimulation {
+  simulationId: string;
+  conversationId: string;
+  itensNormalizados: QuoteItem[];   // sem rsm2, sem campos livres de preço
+  finalPrice: number;
+  pricingVersion: string;
+  createdAt: number;                // Date.now()
+  expiresAt: number;                // +1h padrão
+  origem: "valeria";
+  usado: boolean;                   // true após criarOrcamento consumir
+  autorizacaoHumana?: string;       // opcional — id de autorização manual
 }
 
 // ── Resultado do motor de preço ───────────────────────────────────────────────

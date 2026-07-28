@@ -26,11 +26,20 @@ import { withIdempotency, extractIdempotencyKey } from "./idempotency";
 import { ok, err }           from "./response";
 import type {
   CrmLead,
+  CrmLeadDict,
   CrmEtapa,
   FechamentoResultado,
   LeadHistoricoEntry,
 } from "./types";
 import { CRM_TRANSICOES } from "./types";
+
+/** Mapeamento: status Valéria → coluna Kanban ERP */
+const VALERIA_TO_ERP_ETAPA: Record<string, string> = {
+  NOVO_LEAD: "ia_novo", CONTATO_FEITO: "qualificando",
+  BRIEFING_COLETADO: "qualificando", ORCAMENTO_ENVIADO: "orc_emitido",
+  NEGOCIACAO: "negociacao", GANHO: "fechado", PERDIDO: "fechado",
+  REABERTO: "qualificando", aguardando_humano: "qualificando",
+};
 
 const SECRET_NAMES = ["VALERIA_BEARER_SECRET", "VALERIA_BEARER_SECRET_PREV"];
 const RUN_OPTS = functions.runWith({
@@ -73,10 +82,12 @@ function validarTransicao(atual: string | undefined, destino: CrmEtapa): string 
   return null;
 }
 
-function findLead(leads: CrmLead[], conversationId: string): { idx: number; lead: CrmLead } | null {
-  const idx = leads.findIndex((l) => l.conversationId === conversationId);
-  if (idx < 0) return null;
-  return { idx, lead: leads[idx] };
+/** Busca lead no dict unificado crm_leads por conversationId */
+function findLead(dict: CrmLeadDict, conversationId: string): { id: string; lead: CrmLead } | null {
+  for (const [id, lead] of Object.entries(dict)) {
+    if (lead.valeria?.conversationId === conversationId) return { id, lead };
+  }
+  return null;
 }
 
 // ── valeriaMudarEtapa ────────────────────────────────────────────────────────
@@ -119,8 +130,8 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
   const result = await withIdempotency(
     { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" },
     async () => {
-      const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
-      const found = findLead(leads, ctx.conversationId);
+      const dict  = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
+      const found = findLead(dict, ctx.conversationId);
 
       if (!found) {
         return err("NOT_FOUND",
@@ -129,32 +140,38 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         );
       }
 
-      const { idx, lead } = found;
-      const etapaAtual    = (lead.status ?? "NOVO_LEAD").toUpperCase();
+      const { id, lead } = found;
+      const valeriaStatus = (lead.valeria?.status ?? "NOVO_LEAD").toUpperCase();
 
-      // Validar transição
-      const errTransicao = validarTransicao(etapaAtual, destino);
+      const errTransicao = validarTransicao(valeriaStatus, destino);
       if (errTransicao) {
         return err("INVALID_TRANSITION", errTransicao, { communicableToCustomer: false });
       }
 
       const now  = new Date().toISOString();
       const entry: LeadHistoricoEntry = {
-        ts:     now,
-        acao:   `etapa: ${etapaAtual} → ${destino}`,
+        ts:      now,
+        acao:    `etapa: ${valeriaStatus} → ${destino}`,
         agentId: ctx.agentId,
         detalhe: [responsavel && `responsavel: ${responsavel}`, observacao].filter(Boolean).join("; ") || undefined,
       };
 
-      leads[idx].status    = destino;
-      if (responsavel)     leads[idx].responsavel = responsavel;
-      leads[idx].historico = [...(lead.historico ?? []), entry];
-      leads[idx].updatedAt = now;
+      // Atualizar sub-objeto valeria (status interno)
+      lead.valeria = {
+        ...lead.valeria!,
+        status:    destino,
+        updatedAt: now,
+        historico: [...(lead.valeria?.historico ?? []), entry],
+        ...(responsavel && { responsavel }),
+      };
+      // Sincronizar coluna do Kanban ERP
+      lead.etapa = VALERIA_TO_ERP_ETAPA[destino] ?? "qualificando";
+      dict[id]   = lead;
 
-      await fsWrite("valeria_leads", leads);
+      await fsWrite("crm_leads", dict);
 
       return ok(
-        { leadId: lead.id, etapaAnterior: etapaAtual, etapaAtual: destino },
+        { leadId: lead.id, etapaAnterior: valeriaStatus, etapaAtual: destino },
         { communicableToCustomer: false, verified: true }
       );
     }
@@ -215,8 +232,8 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
   const result = await withIdempotency(
     { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" },
     async () => {
-      const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
-      const found = findLead(leads, ctx.conversationId);
+      const dict  = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
+      const found = findLead(dict, ctx.conversationId);
 
       if (!found) {
         return err("NOT_FOUND",
@@ -225,8 +242,8 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         );
       }
 
-      const { idx, lead } = found;
-      const etapaAtual    = (lead.status ?? "NOVO_LEAD").toUpperCase();
+      const { id, lead } = found;
+      const etapaAtual   = (lead.valeria?.status ?? "NOVO_LEAD").toUpperCase();
       const now           = new Date().toISOString();
 
       // Mapear resultado para etapa
@@ -267,22 +284,23 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         detalhe: detalhe || undefined,
       };
 
-      leads[idx].status    = destino;
-      leads[idx].historico = [...(lead.historico ?? []), entry];
-      leads[idx].updatedAt = now;
+      // Atualizar sub-objeto valeria
+      lead.valeria = {
+        ...lead.valeria!,
+        status:    destino,
+        updatedAt: now,
+        historico: [...(lead.valeria?.historico ?? []), entry],
+        ...(resultado === "ganho"    && orcId   && { orcamentoGanhoId: orcId }),
+        ...(resultado === "perda"    && motivo  && { motivoPerda: motivo }),
+        ...(resultado === "reaberto" && justif  && { reaberturaJustificativa: justif,
+          orcamentoGanhoId: undefined, motivoPerda: undefined,
+          proximaAcao: (body["proximaAcao"] as string) ?? "Contato de reabertura" }),
+      };
+      // Sincronizar coluna Kanban ERP
+      lead.etapa = VALERIA_TO_ERP_ETAPA[destino] ?? "qualificando";
+      dict[id]   = lead;
 
-      // Campos adicionais por resultado
-      if (resultado === "ganho" && orcId)   leads[idx].orcamentoGanhoId  = orcId;
-      if (resultado === "perda" && motivo)  leads[idx].motivoPerda       = motivo;
-      if (resultado === "reaberto") {
-        delete leads[idx].motivoPerda;
-        delete leads[idx].orcamentoGanhoId;
-        leads[idx].reaberturaJustificativa = justif;
-        // Retorna à fila ativa
-        leads[idx].proximaAcao = (body["proximaAcao"] as string) ?? "Contato de reabertura";
-      }
-
-      await fsWrite("valeria_leads", leads);
+      await fsWrite("crm_leads", dict);
 
       // Alerta para equipe nos casos de GANHO e PERDIDO
       if (resultado !== "reaberto") {

@@ -48,8 +48,8 @@ export async function pipeline(
   if (!ctxResult.ok) { sendAuthError(res, ctxResult); return null; }
   const ctx = ctxResult.ctx;
 
-  // 3. Agente/organização autorizados
-  const agentResult = validateAgent(ctx.agentId, ctx.organizationId, functionName);
+  // 3. Agente/organização autorizados (fail-closed — async lê do Firestore)
+  const agentResult = await validateAgent(ctx.agentId, ctx.organizationId, functionName);
   if (!agentResult.ok) { sendAuthError(res, agentResult); return null; }
 
   // 4. Rate limiting + payload
