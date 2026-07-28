@@ -107,7 +107,7 @@ function findLead(leads, conversationId) {
     return { idx, lead: leads[idx] };
 }
 // ── valeriaMudarEtapa ────────────────────────────────────────────────────────
-exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
+const _mudarEtapaHandler = async (req, res) => {
     const ppl = await (0, pipeline_1.pipeline)(req, res, "valeriaMudarEtapa");
     if (!ppl)
         return;
@@ -165,9 +165,11 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         return (0, response_1.ok)({ leadId: lead.id, etapaAnterior: etapaAtual, etapaAtual: destino }, { communicableToCustomer: false, verified: true });
     });
     res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
-});
+};
+exports._mudarEtapaHandler = _mudarEtapaHandler;
+exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(_mudarEtapaHandler);
 // ── valeriaFechamento ────────────────────────────────────────────────────────
-exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
+const _fechamentoHandler = async (req, res) => {
     const ppl = await (0, pipeline_1.pipeline)(req, res, "valeriaFechamento");
     if (!ppl)
         return;
@@ -284,5 +286,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         });
     });
     res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
-});
+};
+exports._fechamentoHandler = _fechamentoHandler;
+exports.valeriaFechamento = RUN_OPTS.https.onRequest(_fechamentoHandler);
 //# sourceMappingURL=crm_etapas.js.map

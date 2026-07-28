@@ -17,7 +17,7 @@
  *   valeriaFechamento        — B3: ganho / perda / reabertura com validações
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.valeriaFechamento = exports.valeriaMudarEtapa = exports.valeriaAtualizarBriefing = exports.valeriaWebhookChatvolt = exports.valeriaStatus = exports.valeriaConsultarStatus = exports.valeriaProximaAcao = exports.valeriaTransferirHumano = exports.valeriaRegistrarMensagem = exports.valeriaCriarOportunidade = exports.valeriaCriarOrcamento = exports.valeriaCalcularOrcamento = exports.valeriaCatalogo = exports.valeriaUpsertCliente = exports.valeriaGetContexto = void 0;
+exports.valeriaStatus = exports.valeriaConsultarStatus = exports.valeriaProximaAcao = exports.valeriaTransferirHumano = exports.valeriaRegistrarMensagem = exports.valeriaCriarOportunidade = exports.valeriaCriarOrcamento = exports.valeriaCalcularOrcamento = exports.valeriaCatalogo = exports.valeriaUpsertCliente = exports.valeriaGetContexto = exports.valeriaFechamento = exports.valeriaMudarEtapa = exports.valeriaAtualizarBriefing = exports.valeriaWebhookChatvolt = void 0;
 // ── Funções originais (v2.0.0) ────────────────────────────────────────────────
 var valeria_1 = require("./valeria");
 Object.defineProperty(exports, "valeriaGetContexto", { enumerable: true, get: function () { return valeria_1.valeriaGetContexto; } });
@@ -32,13 +32,10 @@ Object.defineProperty(exports, "valeriaProximaAcao", { enumerable: true, get: fu
 Object.defineProperty(exports, "valeriaConsultarStatus", { enumerable: true, get: function () { return valeria_1.valeriaConsultarStatus; } });
 Object.defineProperty(exports, "valeriaStatus", { enumerable: true, get: function () { return valeria_1.valeriaStatus; } });
 // ── B1: Webhook Chatvolt ──────────────────────────────────────────────────────
-var webhook_1 = require("./webhook");
-Object.defineProperty(exports, "valeriaWebhookChatvolt", { enumerable: true, get: function () { return webhook_1.valeriaWebhookChatvolt; } });
+Object.defineProperty(exports, "valeriaWebhookChatvolt", { enumerable: true, get: function () { return valeria_1.valeriaWebhookChatvolt; } });
 // ── B2: Briefing progressivo ──────────────────────────────────────────────────
-var briefing_1 = require("./briefing");
-Object.defineProperty(exports, "valeriaAtualizarBriefing", { enumerable: true, get: function () { return briefing_1.valeriaAtualizarBriefing; } });
+Object.defineProperty(exports, "valeriaAtualizarBriefing", { enumerable: true, get: function () { return valeria_1.valeriaAtualizarBriefing; } });
 // ── B3: Etapas e Fechamento CRM ───────────────────────────────────────────────
-var crm_etapas_1 = require("./crm_etapas");
-Object.defineProperty(exports, "valeriaMudarEtapa", { enumerable: true, get: function () { return crm_etapas_1.valeriaMudarEtapa; } });
-Object.defineProperty(exports, "valeriaFechamento", { enumerable: true, get: function () { return crm_etapas_1.valeriaFechamento; } });
+Object.defineProperty(exports, "valeriaMudarEtapa", { enumerable: true, get: function () { return valeria_1.valeriaMudarEtapa; } });
+Object.defineProperty(exports, "valeriaFechamento", { enumerable: true, get: function () { return valeria_1.valeriaFechamento; } });
 //# sourceMappingURL=index.js.map

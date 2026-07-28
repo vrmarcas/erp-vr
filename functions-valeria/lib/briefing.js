@@ -132,7 +132,7 @@ function calcularCompletude(briefing) {
     return { completude, camposFaltando: faltando };
 }
 // ── Handler ───────────────────────────────────────────────────────────────────
-exports.valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res) => {
+const _briefingHandler = async (req, res) => {
     const ppl = await (0, pipeline_1.pipeline)(req, res, "valeriaAtualizarBriefing");
     if (!ppl)
         return;
@@ -233,5 +233,7 @@ exports.valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res) => 
         });
     });
     res.status(result.success ? 200 : 500).json(result);
-});
+};
+exports._briefingHandler = _briefingHandler;
+exports.valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(_briefingHandler);
 //# sourceMappingURL=briefing.js.map
