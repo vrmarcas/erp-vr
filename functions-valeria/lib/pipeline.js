@@ -41,8 +41,8 @@ async function pipeline(req, res, functionName) {
         return null;
     }
     const ctx = ctxResult.ctx;
-    // 3. Agente/organização autorizados
-    const agentResult = (0, auth_1.validateAgent)(ctx.agentId, ctx.organizationId, functionName);
+    // 3. Agente/organização autorizados (fail-closed — async lê do Firestore)
+    const agentResult = await (0, auth_1.validateAgent)(ctx.agentId, ctx.organizationId, functionName);
     if (!agentResult.ok) {
         (0, auth_1.sendAuthError)(res, agentResult);
         return null;

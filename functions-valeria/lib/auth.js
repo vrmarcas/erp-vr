@@ -52,13 +52,45 @@ const response_1 = require("./response");
 // Nomes dos secrets no Secret Manager (Gen 1: injetados como process.env)
 exports.BEARER_SECRET = "VALERIA_BEARER_SECRET";
 exports.BEARER_SECRET_PREV = "VALERIA_BEARER_SECRET_PREV";
-// Lista de agentes/organizações autorizados.
-// Em produção, leia do Firestore (erp_vr/valeria_authorized_agents) para permitir
-// mudanças sem re-deploy. Para homologação, usa lista estática.
-const AUTHORIZED_AGENTS = [
-// Será populada via Firestore após homologação
-// { agentId: "cl...", organizationId: "org...", allowedFunctions: undefined }
-];
+/**
+ * AUTHORIZED_AGENTS é lida do Firestore em tempo de execução.
+ * Documento: erp_vr/valeria_authorized_agents  →  { agents: [...] }
+ *
+ * Fail-closed: se o documento não existir ou estiver vazio, TODA chamada
+ * é rejeitada com 403. Isso previne operação acidental sem configuração.
+ *
+ * Para adicionar um agente autorizado, crie/atualize o documento no console
+ * do Firebase sem necessidade de re-deploy.
+ */
+let _agentsCache = null;
+let _agentsCacheAt = 0;
+const AGENTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+async function loadAuthorizedAgents() {
+    const now = Date.now();
+    if (_agentsCache !== null && now - _agentsCacheAt < AGENTS_CACHE_TTL) {
+        return _agentsCache;
+    }
+    try {
+        const admin = await Promise.resolve().then(() => __importStar(require("firebase-admin")));
+        const db = admin.default.firestore();
+        const doc = await db.collection("erp_vr").doc("valeria_authorized_agents").get();
+        if (!doc.exists) {
+            console.warn("[auth] valeria_authorized_agents não encontrado — acesso bloqueado (fail-closed)");
+            _agentsCache = [];
+            _agentsCacheAt = now;
+            return [];
+        }
+        const agents = (doc.data()?.agents ?? []);
+        _agentsCache = agents;
+        _agentsCacheAt = now;
+        return agents;
+    }
+    catch (e) {
+        console.error("[auth] Erro ao carregar authorized agents:", e.message);
+        // Fail-closed em caso de erro de leitura
+        return [];
+    }
+}
 // ── Comparação timing-safe ────────────────────────────────────────────────────
 function timingSafeCompare(a, b) {
     const bufA = Buffer.from(a, "utf8");
@@ -103,10 +135,14 @@ function validateBearer(req) {
 }
 /**
  * Valida que o agentId e organizationId recebidos no payload são autorizados.
- * Se AUTHORIZED_AGENTS estiver vazio (modo homologação), aceita qualquer par
- * mas registra warning.
+ *
+ * FAIL-CLOSED: se a lista de agentes autorizados estiver vazia (Firestore não
+ * configurado), TODA chamada é rejeitada. Não existe modo homologação permissivo.
+ *
+ * Para autorizar um agente, crie o documento erp_vr/valeria_authorized_agents
+ * no Firestore com o campo: agents: [{ agentId, organizationId, allowedFunctions? }]
  */
-function validateAgent(agentId, organizationId, functionName) {
+async function validateAgent(agentId, organizationId, functionName) {
     if (!agentId) {
         return {
             ok: false,
@@ -123,13 +159,17 @@ function validateAgent(agentId, organizationId, functionName) {
             }),
         };
     }
-    // Lista estática vazia = modo homologação (aceita qualquer agente conhecido)
-    if (AUTHORIZED_AGENTS.length === 0) {
-        // Em homologação, aceitar — mas sinalizar com warning no log
-        console.warn(`[auth] AUTHORIZED_AGENTS vazio — agentId=${agentId} aceito sem validação (homologação)`);
-        return { ok: true };
+    const agents = await loadAuthorizedAgents();
+    // Fail-closed: lista vazia = não configurado = bloquear
+    if (agents.length === 0) {
+        console.error(`[auth] BLOQUEADO — lista de agentes não configurada. agentId=${agentId}`);
+        return {
+            ok: false,
+            status: 403,
+            body: (0, response_1.err)("FORBIDDEN", "Integração não autorizada. Configure erp_vr/valeria_authorized_agents no Firestore."),
+        };
     }
-    const agent = AUTHORIZED_AGENTS.find((a) => a.agentId === agentId && a.organizationId === organizationId);
+    const agent = agents.find((a) => a.agentId === agentId && a.organizationId === organizationId);
     if (!agent) {
         return {
             ok: false,
