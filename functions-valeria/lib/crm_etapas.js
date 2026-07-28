@@ -107,7 +107,7 @@ function findLead(leads, conversationId) {
     return { idx, lead: leads[idx] };
 }
 // ── valeriaMudarEtapa ────────────────────────────────────────────────────────
-exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
+const _mudarEtapaHandler = async (req, res) => {
     const ppl = await (0, pipeline_1.pipeline)(req, res, "valeriaMudarEtapa");
     if (!ppl)
         return;
@@ -137,7 +137,7 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
     }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const found = findLead(leads, ctx.conversationId);
         if (!found) {
             return (0, response_1.err)("NOT_FOUND", "Lead não encontrado para esta conversa. Use valeriaCriarOportunidade primeiro.", { communicableToCustomer: false });
@@ -161,13 +161,15 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
             leads[idx].responsavel = responsavel;
         leads[idx].historico = [...(lead.historico ?? []), entry];
         leads[idx].updatedAt = now;
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         return (0, response_1.ok)({ leadId: lead.id, etapaAnterior: etapaAtual, etapaAtual: destino }, { communicableToCustomer: false, verified: true });
     });
     res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
-});
+};
+exports._mudarEtapaHandler = _mudarEtapaHandler;
+exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(_mudarEtapaHandler);
 // ── valeriaFechamento ────────────────────────────────────────────────────────
-exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
+const _fechamentoHandler = async (req, res) => {
     const ppl = await (0, pipeline_1.pipeline)(req, res, "valeriaFechamento");
     if (!ppl)
         return;
@@ -200,7 +202,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
     }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const found = findLead(leads, ctx.conversationId);
         if (!found) {
             return (0, response_1.err)("NOT_FOUND", "Lead não encontrado para esta conversa. Use valeriaCriarOportunidade primeiro.", { communicableToCustomer: false });
@@ -255,7 +257,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
             // Retorna à fila ativa
             leads[idx].proximaAcao = body["proximaAcao"] ?? "Contato de reabertura";
         }
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         // Alerta para equipe nos casos de GANHO e PERDIDO
         if (resultado !== "reaberto") {
             await admin.firestore().collection("valeria_alertas").add({
@@ -284,5 +286,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         });
     });
     res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
-});
+};
+exports._fechamentoHandler = _fechamentoHandler;
+exports.valeriaFechamento = RUN_OPTS.https.onRequest(_fechamentoHandler);
 //# sourceMappingURL=crm_etapas.js.map

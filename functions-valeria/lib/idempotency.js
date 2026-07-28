@@ -71,12 +71,39 @@ async function withIdempotency(opts, fn) {
     const docKey = buildIdempKey(idempotencyKey, conversationId, functionName);
     const ref = db.collection(IDEM_COL).doc(docKey);
     const now = Date.now();
-    // 1. Verificar se já existe resultado
-    const existing = await ref.get();
-    if (existing.exists) {
-        const data = existing.data();
-        if (data.expiresAt > now && data.functionName === functionName) {
-            // Retorna resultado anterior com warning
+    // 1. Reserva atômica via create() — elimina race condition TOCTOU.
+    //    Somente uma requisição consegue criar o placeholder; as demais recebem
+    //    ALREADY_EXISTS e lêem o resultado já armazenado.
+    const placeholder = {
+        status: "processing",
+        createdAt: now,
+        expiresAt: now + TTL_MS,
+        functionName,
+        conversationId,
+        result: null,
+    };
+    try {
+        await ref.create(placeholder);
+        // Somos os primeiros — prosseguir para executar fn()
+    }
+    catch (_createErr) {
+        // Documento já existe
+        const snap = await ref.get();
+        if (snap.exists) {
+            const data = snap.data();
+            // Expirado — apagar e reiniciar
+            if (data.expiresAt <= now) {
+                await ref.delete();
+                return withIdempotency({ idempotencyKey, conversationId, functionName }, fn);
+            }
+            // Em processamento por outra requisição paralela
+            if (data.status === "processing") {
+                return {
+                    success: false,
+                    warnings: ["IDEMPOTENT_PROCESSING: operação em andamento, tente novamente em instantes."],
+                };
+            }
+            // Resultado já disponível — retornar com warning
             const previous = data.result;
             return {
                 ...previous,
@@ -86,20 +113,27 @@ async function withIdempotency(opts, fn) {
                 ],
             };
         }
-        // Expirado — pode re-executar
+        // Doc sumiu entre create e get (raro) — executar sem garantia
     }
-    // 2. Executar a função
-    const result = await fn();
-    // 3. Armazenar apenas em caso de sucesso (não persiste erros transitórios)
-    if (result.success) {
-        await ref.set({
-            result,
-            createdAt: now,
-            expiresAt: now + TTL_MS,
-            functionName,
-            conversationId,
-        });
+    // 2. Executar a função (detentores da reserva)
+    let result;
+    try {
+        result = await fn();
     }
+    catch (fnErr) {
+        // Remover placeholder para permitir retry
+        await ref.delete().catch(() => undefined);
+        throw fnErr;
+    }
+    // 3. Substituir placeholder pelo resultado real
+    await ref.set({
+        status: "done",
+        result,
+        createdAt: now,
+        expiresAt: now + TTL_MS,
+        functionName,
+        conversationId,
+    });
     return result;
 }
 // ── Extração do Idempotency-Key do header ─────────────────────────────────────

@@ -119,7 +119,7 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
   const result = await withIdempotency(
     { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" },
     async () => {
-      const leads = (await fsRead<CrmLead[]>("crm_leads")) ?? [];
+      const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
       const found = findLead(leads, ctx.conversationId);
 
       if (!found) {
@@ -151,7 +151,7 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
       leads[idx].historico = [...(lead.historico ?? []), entry];
       leads[idx].updatedAt = now;
 
-      await fsWrite("crm_leads", leads);
+      await fsWrite("valeria_leads", leads);
 
       return ok(
         { leadId: lead.id, etapaAnterior: etapaAtual, etapaAtual: destino },
@@ -215,7 +215,7 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
   const result = await withIdempotency(
     { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" },
     async () => {
-      const leads = (await fsRead<CrmLead[]>("crm_leads")) ?? [];
+      const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
       const found = findLead(leads, ctx.conversationId);
 
       if (!found) {
@@ -282,7 +282,7 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         leads[idx].proximaAcao = (body["proximaAcao"] as string) ?? "Contato de reabertura";
       }
 
-      await fsWrite("crm_leads", leads);
+      await fsWrite("valeria_leads", leads);
 
       // Alerta para equipe nos casos de GANHO e PERDIDO
       if (resultado !== "reaberto") {
