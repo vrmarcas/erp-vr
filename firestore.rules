@@ -96,16 +96,28 @@ service cloud.firestore {
       allow write: if false;     // somente Cloud Functions
     }
 
-    // ── valeria_idempotency: somente Cloud Functions ─────────────────────────
-    match /valeria_idempotency/{docId} {
+    // ── valeria_idem_keys: idempotência — somente Cloud Functions ────────────
+    match /valeria_idem_keys/{docId} {
       allow read:  if isAdmin();
       allow write: if false;
     }
 
-    // ── valeria_ratelimit: somente Cloud Functions ───────────────────────────
-    match /valeria_ratelimit/{docId} {
+    // ── valeria_rate_limits: rate limiting — somente Cloud Functions ─────────
+    match /valeria_rate_limits/{docId} {
       allow read:  if isAdmin();
       allow write: if false;
+    }
+
+    // ── valeria_conversations: histórico de conversas ────────────────────────
+    match /valeria_conversations/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions
+    }
+
+    // ── valeria_msgs: mensagens individuais ──────────────────────────────────
+    match /valeria_msgs/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions
     }
 
     // ── valeria_alertas: leitura admin/master ────────────────────────────────
@@ -123,8 +135,9 @@ service cloud.firestore {
     // ── Demais coleções (comportamento inalterado) ──────────────────────────
     match /{col}/{docId=**} {
       allow read, write: if isAuthenticated() && !(col in [
-        'erp_vr', 'valeria_simulations', 'valeria_idempotency',
-        'valeria_ratelimit', 'valeria_alertas', 'interacoes_valeria',
+        'erp_vr', 'valeria_simulations', 'valeria_idem_keys',
+        'valeria_rate_limits', 'valeria_alertas', 'interacoes_valeria',
+        'valeria_conversations', 'valeria_msgs',
         'marketing_connections', 'marketing_daily_metrics', 'marketing_sync_logs'
       ]);
     }
