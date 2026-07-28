@@ -399,22 +399,35 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
     }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOrcamento" }, async () => {
-        // Recuperar simulação persistida — NÃO recalcular com campos da IA
-        const sim = await getSimulation(simulationId);
-        if (!sim) {
-            return (0, response_1.err)("SIMULATION_NOT_FOUND", "simulationId não encontrado. Execute valeriaCalcularOrcamento primeiro.", { communicableToCustomer: false });
+        // Recuperar simulação e marcar como usada em transação atômica (anti double-spend)
+        let sim;
+        try {
+            await db.runTransaction(async (tx) => {
+                const simRef = db.collection(SIM_COL).doc(simulationId);
+                const simDoc = await tx.get(simRef);
+                if (!simDoc.exists) throw Object.assign(new Error(), { _code: "SIMULATION_NOT_FOUND" });
+                const simData = simDoc.data();
+                if (simData.conversationId !== ctx.conversationId)
+                    throw Object.assign(new Error(), { _code: "SIMULATION_MISMATCH" });
+                if (simData.expiresAt < Date.now())
+                    throw Object.assign(new Error(), { _code: "SIMULATION_EXPIRED" });
+                if (simData.usado)
+                    throw Object.assign(new Error(), { _code: "SIMULATION_ALREADY_USED" });
+                tx.update(simRef, { usado: true });
+                sim = simData;
+            });
+        } catch (e) {
+            const code = e._code;
+            if (code === "SIMULATION_NOT_FOUND")
+                return (0, response_1.err)("SIMULATION_NOT_FOUND", "simulationId não encontrado. Execute valeriaCalcularOrcamento primeiro.", { communicableToCustomer: false });
+            if (code === "SIMULATION_MISMATCH")
+                return (0, response_1.err)("SIMULATION_MISMATCH", "simulationId pertence a outra conversa.", { communicableToCustomer: false });
+            if (code === "SIMULATION_EXPIRED")
+                return (0, response_1.err)("SIMULATION_EXPIRED", "Simulação expirada (válida por 1h). Execute valeriaCalcularOrcamento novamente.", { communicableToCustomer: true });
+            if (code === "SIMULATION_ALREADY_USED")
+                return (0, response_1.err)("SIMULATION_ALREADY_USED", "Esta simulação já foi usada para criar um orçamento.", { communicableToCustomer: false });
+            throw e; // erro inesperado do Firestore
         }
-        if (sim.conversationId !== ctx.conversationId) {
-            return (0, response_1.err)("SIMULATION_MISMATCH", "simulationId pertence a outra conversa.", { communicableToCustomer: false });
-        }
-        if (sim.expiresAt < Date.now()) {
-            return (0, response_1.err)("SIMULATION_EXPIRED", "Simulação expirada (válida por 1h). Execute valeriaCalcularOrcamento novamente.", { communicableToCustomer: true });
-        }
-        if (sim.usado) {
-            return (0, response_1.err)("SIMULATION_ALREADY_USED", "Esta simulação já foi usada para criar um orçamento.", { communicableToCustomer: false });
-        }
-        // Marcar como usada atomicamente ANTES de criar o orçamento
-        await admin.firestore().collection(SIM_COL).doc(simulationId).update({ usado: true });
         const orcamentos = (await fsRead("orcamentos")) ?? [];
         const maxN = orcamentos.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
         const orc = {
