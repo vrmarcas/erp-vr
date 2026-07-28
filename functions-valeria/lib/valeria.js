@@ -134,7 +134,7 @@ exports.valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         }
         let lead = null;
         if (leadId) {
-            const leads = await fsRead("crm_leads");
+            const leads = await fsRead("valeria_leads");
             lead = leads?.find((l) => l.id === leadId) ?? null;
         }
         res.json((0, response_1.ok)({ conversationId: ctx.conversationId, cliente, lead }, { communicableToCustomer: false, verified: !!cliente }));
@@ -224,14 +224,14 @@ exports.valeriaCatalogo = RUN_OPTS.https.onRequest(async (req, res) => {
     if (!ppl)
         return;
     try {
-        const produtos = (await fsRead("produtos")) ?? [];
-        const catalogo = produtos.map((p) => ({
-            nome: p["nome"] ?? p["tipo"] ?? "Produto",
-            categoria: p["categoria"] ?? p["tipo"] ?? "",
-            unidade: p["unidade"] ?? "m²",
-            observacao: "Solicitar orçamento formal para valores.",
-            // nunca expõe preco, custo, markup, fórmulas
-        }));
+        // erp_orc_produtos: array de strings ou objetos {nome,...}
+        const produtosRaw = (await fsRead("erp_orc_produtos")) ?? [];
+        const catalogo = produtosRaw.map((p) => {
+            const nome      = typeof p === "string" ? p : (p["nome"] ?? p["tipo"] ?? "Produto");
+            const categoria = typeof p === "string" ? ""  : (p["categoria"] ?? "");
+            const unidade   = typeof p === "string" ? "m²" : (p["unidade"] ?? "m²");
+            return { nome, categoria, unidade, observacao: "Solicitar orçamento formal para valores." };
+        });
         res.json((0, response_1.ok)({ catalogo, total: catalogo.length }, { communicableToCustomer: true, verified: true }));
     }
     catch (e) {
@@ -404,7 +404,7 @@ exports.valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res) => 
     }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOportunidade" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const now = new Date().toISOString();
         // Vínculo primário: conversationId. Fallback: channelPhone
         let idx = leads.findIndex((l) => l.conversationId === ctx.conversationId);
@@ -444,7 +444,7 @@ exports.valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res) => 
             leads.unshift(lead);
             acao = "criado";
         }
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         await admin.firestore().collection("valeria_conversations")
             .doc(ctx.conversationId)
             .set({ leadId: lead.id, updatedAt: Date.now() }, { merge: true });
@@ -540,14 +540,14 @@ exports.valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res) => {
     const motivo = body["motivo"] ?? "sem motivo";
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaTransferirHumano" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const now = new Date().toISOString();
         const idx = leads.findIndex((l) => l.conversationId === ctx.conversationId);
         if (idx >= 0) {
             leads[idx].status = "aguardando_humano";
             leads[idx].historico = [...(leads[idx].historico ?? []),
                 { ts: now, acao: "transferido_humano", agentId: ctx.agentId, detalhe: motivo }];
-            await fsWrite("crm_leads", leads);
+            await fsWrite("valeria_leads", leads);
         }
         await admin.firestore().collection("valeria_alertas").add({
             tipo: "transferir_humano", conversationId: ctx.conversationId,
@@ -578,7 +578,7 @@ exports.valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
     }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaProximaAcao" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const idx = leads.findIndex((l) => l.conversationId === ctx.conversationId);
         if (idx < 0) {
             return (0, response_1.ok)({ warning: "Lead não encontrado para esta conversa." }, { warnings: ["Lead não encontrado — use valeriaCriarOportunidade primeiro."] });
@@ -587,7 +587,7 @@ exports.valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         leads[idx].dataProximaAcao = body["data"] ?? new Date().toISOString();
         leads[idx].historico = [...(leads[idx].historico ?? []),
             { ts: new Date().toISOString(), acao: `proxima_acao: ${acao}`, agentId: ctx.agentId }];
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         return (0, response_1.ok)({ agendado: true, acao }, { communicableToCustomer: false });
     });
     res.status(result.success ? 200 : 500).json(result);
@@ -799,7 +799,7 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
     if (destino === "GANHO" || destino === "PERDIDO" || destino === "REABERTO") { res.status(400).json((0, response_1.err)("VALIDATION_ERROR", `Para marcar como ${destino}, use valeriaFechamento (exige evidência ou motivo obrigatório).`)); return; }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const found = _b3_findLead(leads, ctx.conversationId);
         if (!found) return (0, response_1.err)("NOT_FOUND", "Lead não encontrado para esta conversa. Use valeriaCriarOportunidade primeiro.", { communicableToCustomer: false });
         const { idx, lead } = found;
@@ -812,7 +812,7 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         if (responsavel) leads[idx].responsavel = responsavel;
         leads[idx].historico = [...(lead.historico ?? []), entry];
         leads[idx].updatedAt = now;
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         return (0, response_1.ok)({ leadId: lead.id, etapaAnterior: etapaAtual, etapaAtual: destino }, { communicableToCustomer: false, verified: true });
     });
     res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
@@ -833,7 +833,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
     if (resultado === "reaberto" && (!justif || justif.length < 3)) { res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "Reabrir oportunidade exige campo 'justificativa' (mínimo 3 caracteres).", { missingFields: ["justificativa"] })); return; }
     const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
     const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" }, async () => {
-        const leads = (await fsRead("crm_leads")) ?? [];
+        const leads = (await fsRead("valeria_leads")) ?? [];
         const found = _b3_findLead(leads, ctx.conversationId);
         if (!found) return (0, response_1.err)("NOT_FOUND", "Lead não encontrado para esta conversa. Use valeriaCriarOportunidade primeiro.", { communicableToCustomer: false });
         const { idx, lead } = found;
@@ -856,7 +856,7 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         if (resultado === "ganho" && orcId) leads[idx].orcamentoGanhoId = orcId;
         if (resultado === "perda" && motivo) leads[idx].motivoPerda = motivo;
         if (resultado === "reaberto") { delete leads[idx].motivoPerda; delete leads[idx].orcamentoGanhoId; leads[idx].reaberturaJustificativa = justif; leads[idx].proximaAcao = body["proximaAcao"] ?? "Contato de reabertura"; }
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         if (resultado !== "reaberto") {
             await admin.firestore().collection("valeria_alertas").add({ tipo: `crm_${resultado}`, conversationId: ctx.conversationId, leadId: lead.id, agentId: ctx.agentId, detalhe, ts: Date.now(), createdAt: now, lido: false });
         }

@@ -107,7 +107,7 @@ function extractAnexosMeta(raw) {
     }));
 }
 // ── Handler principal ─────────────────────────────────────────────────────────
-const _webhookHandler = async (req, res) => {
+exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
     // Preflight CORS (mesmo CORS_ORIGIN do pipeline)
     if (req.method === "OPTIONS") {
         res.set("Access-Control-Allow-Origin", "https://app.chatvolt.ai");
@@ -222,7 +222,5 @@ const _webhookHandler = async (req, res) => {
     });
     // 200 sempre (incluindo replay idempotente)
     res.status(result.success ? 200 : 500).json(result);
-};
-exports._webhookHandler = _webhookHandler;
-exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(_webhookHandler);
+});
 //# sourceMappingURL=webhook.js.map

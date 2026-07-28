@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Funções auxiliares ──────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isCompany(companyId) {
+      return isAuthenticated() && request.auth.token.companyId == companyId;
+    }
+
+    function isMaster() {
+      return isAuthenticated() && request.auth.token.role == 'master';
+    }
+
+    // [S1] Admin = role 'admin' ou 'master' (via Firebase Auth custom claims)
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'master'
+      );
+    }
+
+    // ── marketing_connections ───────────────────────────────────────────────
+    match /marketing_connections/{docId} {
+      allow read: if isAuthenticated()
+                  && isCompany(resource.data.companyId);
+      allow write: if false;
+    }
+
+    // ── marketing_daily_metrics ─────────────────────────────────────────────
+    match /marketing_daily_metrics/{docId} {
+      allow read: if isAuthenticated()
+                  && isCompany(resource.data.companyId);
+      allow write: if false;
+    }
+
+    // ── marketing_sync_logs ─────────────────────────────────────────────────
+    match /marketing_sync_logs/{docId} {
+      allow read: if isMaster();
+      allow write: if false;
+    }
+
+    // ── erp_vr: coleção principal do ERP ───────────────────────────────────
+    // Leitura: qualquer autenticado (sem alteração de comportamento)
+    // Escrita em documentos críticos: somente admin/master
+    // Escrita nos demais documentos: qualquer autenticado (comportamento anterior)
+    match /erp_vr/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (
+        !(docId in ['erp_config', 'erp_usuarios', 'erp_permissoes', 'fin_tx']) ||
+        isAdmin()
+      );
+    }
+
+    // ── Demais coleções (comportamento inalterado) ──────────────────────────
+    // Mantém leitura e escrita autenticada para tudo fora de erp_vr
+    match /{col}/{docId=**} {
+      allow read, write: if isAuthenticated() && col != 'erp_vr';
+    }
+
+  }
+}

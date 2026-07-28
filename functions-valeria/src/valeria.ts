@@ -112,7 +112,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
 
       let lead: CrmLead | null = null;
       if (leadId) {
-        const leads = await fsRead<CrmLead[]>("crm_leads");
+        const leads = await fsRead<CrmLead[]>("valeria_leads");
         lead = leads?.find((l) => l.id === leadId) ?? null;
       }
 
@@ -212,14 +212,14 @@ export const valeriaCatalogo = RUN_OPTS.https.onRequest(async (req, res) => {
     if (!ppl) return;
 
     try {
-      const produtos = (await fsRead<Record<string, unknown>[]>("produtos")) ?? [];
-      const catalogo = produtos.map((p) => ({
-        nome:       p["nome"]      ?? p["tipo"]  ?? "Produto",
-        categoria:  p["categoria"] ?? p["tipo"]  ?? "",
-        unidade:    p["unidade"]   ?? "m²",
-        observacao: "Solicitar orçamento formal para valores.",
-        // nunca expõe preco, custo, markup, fórmulas
-      }));
+      // erp_orc_produtos: array de strings ou objetos {nome,...}
+      const produtosRaw = (await fsRead<unknown[]>("erp_orc_produtos")) ?? [];
+      const catalogo = produtosRaw.map((p) => {
+        const nome      = typeof p === "string" ? p : ((p as Record<string,unknown>)["nome"] ?? (p as Record<string,unknown>)["tipo"] ?? "Produto");
+        const categoria = typeof p === "string" ? ""  : ((p as Record<string,unknown>)["categoria"] ?? "");
+        const unidade   = typeof p === "string" ? "m²" : ((p as Record<string,unknown>)["unidade"] ?? "m²");
+        return { nome, categoria, unidade, observacao: "Solicitar orçamento formal para valores." };
+      });
       res.json(ok({ catalogo, total: catalogo.length }, { communicableToCustomer: true, verified: true }));
     } catch (e) {
       console.error("[valeriaCatalogo]", (e as Error).message);
@@ -414,7 +414,7 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOportunidade" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("crm_leads")) ?? [];
+        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
         const now   = new Date().toISOString();
         // Vínculo primário: conversationId. Fallback: channelPhone
         let idx = leads.findIndex((l) => l.conversationId === ctx.conversationId);
@@ -455,7 +455,7 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
           acao = "criado";
         }
 
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
         await admin.firestore().collection("valeria_conversations")
           .doc(ctx.conversationId)
           .set({ leadId: lead.id, updatedAt: Date.now() }, { merge: true });
@@ -562,7 +562,7 @@ export const valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res)
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaTransferirHumano" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("crm_leads")) ?? [];
+        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
         const now   = new Date().toISOString();
         const idx   = leads.findIndex((l) => l.conversationId === ctx.conversationId);
 
@@ -570,7 +570,7 @@ export const valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res)
           leads[idx].status    = "aguardando_humano";
           leads[idx].historico = [...(leads[idx].historico ?? []),
             { ts: now, acao: "transferido_humano", agentId: ctx.agentId, detalhe: motivo }];
-          await fsWrite("crm_leads", leads);
+          await fsWrite("valeria_leads", leads);
         }
 
         await admin.firestore().collection("valeria_alertas").add({
@@ -604,7 +604,7 @@ export const valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
     const result = await withIdempotency<{ warning?: string; agendado?: boolean; acao?: string }>(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaProximaAcao" },
       async () => {
-        const leads = (await fsRead<CrmLead[]>("crm_leads")) ?? [];
+        const leads = (await fsRead<CrmLead[]>("valeria_leads")) ?? [];
         const idx   = leads.findIndex((l) => l.conversationId === ctx.conversationId);
 
         if (idx < 0) {
@@ -618,7 +618,7 @@ export const valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         leads[idx].dataProximaAcao = (body["data"] as string) ?? new Date().toISOString();
         leads[idx].historico       = [...(leads[idx].historico ?? []),
           { ts: new Date().toISOString(), acao: `proxima_acao: ${acao}`, agentId: ctx.agentId }];
-        await fsWrite("crm_leads", leads);
+        await fsWrite("valeria_leads", leads);
 
         return ok({ agendado: true, acao }, { communicableToCustomer: false });
       }

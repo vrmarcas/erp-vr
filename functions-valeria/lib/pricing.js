@@ -52,7 +52,7 @@ const COL = "erp_vr";
 // ── Leitura de configuração ────────────────────────────────────────────────────
 async function loadErpConfig() {
     const db = admin.firestore();
-    const doc = await db.collection(COL).doc("cfg").get();
+    const doc = await db.collection(COL).doc("erp_config").get();
     if (!doc.exists)
         return null;
     const raw = doc.data()?.data;
