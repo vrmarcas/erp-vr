@@ -106,9 +106,10 @@ Já implementado com `ref.create()` em `valeria_idempotency/{key}` — não regr
 - Collections da Valéria (`valeria_simulations`, `valeria_idempotency`, etc.): `write: false` (somente Cloud Functions via service account)
 
 ### ✅ 7. Repositório reproduzível
-- `package.json` e `package-lock.json` já presentes em `functions-valeria/`
-- `tsconfig.json` existente e correto
-- Node engine: `"node": "22"` no package.json
+- Node engine: `"node": "22"` no `package.json`
+- **Fase 1.2:** `package.json`, `package-lock.json` e `tsconfig.json` rastreados via `git add -f`
+  (estavam em `.git/info/exclude` linhas 8-10 — ausentes do HEAD até esta fase)
+- Build reproduzível a partir de `git archive HEAD` confirmado pós-commit (ver ponto 11)
 
 ### ✅ 8. git_commit_push.js smart detection
 **Antes:** lista fixa de 2 arquivos (`valeria.ts` + `valeria.js`)
@@ -132,6 +133,53 @@ Já implementado com `ref.create()` em `valeria_idempotency/{key}` — não regr
 - Adicionada seção completa de Integração Valéria
 - Documentado novo `git_commit_push.js` com auto-detect
 - Tasks atualizadas para #172
+
+### ✅ 11. Reprodutibilidade do build e destino (Fase 1.2)
+
+**Causa do bloqueio:** `package.json`, `package-lock.json` e `tsconfig.json` listados em
+`.git/info/exclude` (linhas 8-10) — nunca estiveram no HEAD. Um clone isolado (`git archive`)
+não tinha inputs suficientes para executar `npm run build`. O destino Firebase também estava
+indefinido: nenhum `.firebaserc` existe e o comando documentado não incluía `--project`.
+
+**Decisões tomadas:**
+- Sem `.firebaserc` — projeto Firebase sempre passado via `--project erp-vrmarcas`
+- Os 3 arquivos de build adicionados ao HEAD via `git add -f`
+- Comandos de deploy sem `--project` considerados **inválidos** a partir desta fase
+
+**Arquivos rastreados e auditados (sem alteração de conteúdo):**
+
+| Arquivo | Tamanho | SHA-256 | `.git/info/exclude` |
+|---|---|---|---|
+| `functions-valeria/package.json` | 662 B | `b546290e4b496ee510f3a7dbafe652350c2fd12e807ff0e1fdf54552d55f7220` | linha 8 |
+| `functions-valeria/package-lock.json` | 231 483 B | `f56aee604cff10531475e40328db48c57babde61aa76a5f719972c8183396ff1` | linha 9 |
+| `functions-valeria/tsconfig.json` | 369 B | `8f622286fa4e1e38f806b1553adc979370ec87092477be8a8f78b74609c0af99` | linha 10 |
+
+**Prova de reprodutibilidade (pré-commit, diretório isolado com `mktemp -d`):**
+
+```
+# Tentativa 1: git archive HEAD (sem os 3 arquivos) → build impossível
+git archive HEAD | tar -x -C $TMPDIR
+ls $TMPDIR/functions-valeria/package.json
+# EXIT=1 — arquivo ausente; npm run build não pode executar
+
+# Tentativa 2: git archive HEAD + cópia manual dos 3 arquivos
+cp package.json package-lock.json tsconfig.json $TMPDIR/functions-valeria/
+npm --prefix $TMPDIR/functions-valeria install --silent
+npm --prefix $TMPDIR/functions-valeria run build
+# BUILD EXIT=0 — lib/valeria.js gerado
+
+npm --prefix $TMPDIR/functions-valeria test
+# Tests: 66 passed, 66 total (2 suites) ✅
+```
+
+**Pós-commit:** `git archive HEAD` entrega os 3 arquivos sem cópia manual —
+confirmado em Etapa 10 do procedimento de Fase 1.2.
+
+**Projeto Firebase confirmado sem ambiguidade em 4 fontes rastreadas:**
+- `PROMPT_MASTER.md:204` — "Projeto Firebase: `erp-vrmarcas`"
+- `functions-valeria/openapi.yaml:29` — `https://us-central1-erp-vrmarcas.cloudfunctions.net`
+- `index.html:1176` — `projectId: "erp-vrmarcas"`
+- `functions-valeria/VEREDITO_PRE_HOMOLOGACAO.md:131` — correção `erp-vr` → `erp-vrmarcas`
 
 ---
 
@@ -319,10 +367,16 @@ node functions-valeria/validate_functions.js
 > e comprovada, não uma simples adição ao `.gitignore`.
 
 ```bash
-firebase deploy --only functions:valeria --config firebase-valeria.json
+firebase deploy --only functions:valeria --config firebase-valeria.json --project erp-vrmarcas
 ```
 Isso deploya apenas o codebase `valeria` — não toca nas functions do ERP principal.
 O hook `predeploy` executa `npm --prefix "$RESOURCE_DIR" run build` antes do upload.
+
+> **IMPORTANTE — `--project erp-vrmarcas` é obrigatório (Fase 1.2)**
+>
+> Não existe `.firebaserc` neste repositório. O projeto Firebase deve ser passado
+> explicitamente via `--project erp-vrmarcas` em todo comando de deploy.
+> Comandos sem este flag são **inválidos** e serão rejeitados pelo firebase-tools.
 
 ### Deploy das Firestore Rules
 ```bash
@@ -383,7 +437,7 @@ grep "const db = admin.firestore();" lib/valeria.js
 
 # 5. Só depois de todas as verificações passarem, deployar
 cd /tmp/rollback-valeria
-firebase deploy --only functions:valeria --config firebase-valeria.json
+firebase deploy --only functions:valeria --config firebase-valeria.json --project erp-vrmarcas
 
 # 6. Remover o worktree
 git worktree remove /tmp/rollback-valeria
@@ -457,7 +511,11 @@ recebem leads da Valéria automaticamente via `crm_leads` — isso é ADIÇÃO, 
 | `functions-valeria/validate_functions.js` | NOVO — validador de 15 endpoints |
 | `functions-valeria/migrate_valeria_leads.js` | NOVO — script de migração |
 | `PROMPT_MASTER.md` | Atualizado: project ID correto + seção Valéria |
+| `functions-valeria/package.json` | **NOVO NO HEAD** — rastreado via `git add -f` (Fase 1.2) |
+| `functions-valeria/package-lock.json` | **NOVO NO HEAD** — rastreado via `git add -f` (Fase 1.2) |
+| `functions-valeria/tsconfig.json` | **NOVO NO HEAD** — rastreado via `git add -f` (Fase 1.2) |
+| `functions-valeria/VEREDITO_PRE_HOMOLOGACAO.md` | Atualizado: ponto 7 corrigido, ponto 11 adicionado, deploy commands com `--project` (Fase 1.2) |
 
 ---
 
-*Gerado em: 2026-07-28 | Sem push, sem deploy. Aguardando aprovação.*
+*Gerado em: 2026-07-28 | Atualizado: 2026-07-29 (Fase 1.2 — reprodutibilidade do build e destino) | Sem push, sem deploy. Aguardando aprovação.*
