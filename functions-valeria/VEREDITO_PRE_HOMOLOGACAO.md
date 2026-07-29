@@ -298,10 +298,31 @@ node functions-valeria/validate_functions.js
 ```
 
 ### Deploy das Cloud Functions
+
+> **IMPORTANTE — build automático ativo desde Fase 1.1**
+>
+> `firebase-valeria.json` contém agora o hook `predeploy`:
+> ```json
+> "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
+> ```
+> O deploy executa `tsc` automaticamente antes de empacotar as Functions.
+> Uma falha de TypeScript (exit code ≠ 0) cancela o deploy imediatamente,
+> antes de qualquer upload. Nenhuma publicação ocorre com código inválido.
+>
+> **`src/` é a fonte autoritativa.** O JavaScript em `lib/` é gerado pelo
+> hook antes de cada deploy. O script npm `predeploy` em `package.json`
+> NÃO substitui o hook de `firebase-valeria.json` — são mecanismos distintos.
+>
+> **`lib/` permanece versionado provisoriamente.** Alterações funcionais em
+> `src/` devem ter o JavaScript correspondente revisado antes do commit.
+> A eventual retirada de `lib/` do versionamento exige uma migração separada
+> e comprovada, não uma simples adição ao `.gitignore`.
+
 ```bash
 firebase deploy --only functions:valeria --config firebase-valeria.json
 ```
 Isso deploya apenas o codebase `valeria` — não toca nas functions do ERP principal.
+O hook `predeploy` executa `npm --prefix "$RESOURCE_DIR" run build` antes do upload.
 
 ### Deploy das Firestore Rules
 ```bash
@@ -316,18 +337,64 @@ As mudanças deste ciclo são apenas nas Cloud Functions e Firestore Rules.
 
 ## PLANO DE ROLLBACK
 
-### Rollback das Cloud Functions
+### ⚠️ PROCEDIMENTO DE ROLLBACK INVÁLIDO — NÃO USAR
+
+O procedimento abaixo **NÃO É MAIS VÁLIDO** e **NÃO DEVE SER EXECUTADO**:
+
 ```bash
-# Opção 1: Re-deploy da versão anterior (via Firebase Console)
-Firebase Console → Functions → Versões anteriores → Reverter
-
-# Opção 2: Snapshot das funções antes do deploy
-firebase functions:config:get > functions_config_backup.json
-# (antes do deploy)
-
-# Depois, se precisar:
+# ❌ INVÁLIDO — não executar
 git checkout <sha-anterior> -- functions-valeria/lib/
 firebase deploy --only functions:valeria --config firebase-valeria.json
+```
+
+**Por que é inválido:** com o hook `predeploy` ativo, o deploy recompila
+`src/` antes de publicar. Um rollback parcial de `lib/` seria anulado
+imediatamente: o hook reconstruiria `lib/` usando o `src/` atual.
+Misturar `src/` de um commit com `lib/` de outro cria estado inconsistente.
+
+O commit pai `ef2c90403727c23813291dc5da79b264ab618221` **não pode ser
+tratado como rollback válido**: contém a versão de `src/valeria.ts` com
+o bug `ReferenceError: db is not defined`, que falha em `TS2304` com o
+compilador atual — o hook rejeitaria o deploy imediatamente.
+
+### Rollback das Cloud Functions — Procedimento Seguro
+
+Um rollback seguro requer uma revisão completa e isolada do repositório.
+O SHA escolhido para rollback deve passar TypeScript, testes e build antes
+de ser elegível. Nenhum procedimento deve misturar `src/` de um commit
+com `lib/` de outro.
+
+**Procedimento (não executar agora — apenas documentado):**
+```bash
+# 1. Criar worktree temporário ou clonar em diretório isolado
+git worktree add /tmp/rollback-valeria <sha-do-rollback>
+cd /tmp/rollback-valeria/functions-valeria
+
+# 2. Instalar dependências (necessário se for clone isolado)
+npm ci
+
+# 3. Verificar TypeScript, testes e build ANTES de qualquer publicação
+./node_modules/.bin/tsc --noEmit --pretty false
+./node_modules/.bin/jest --runInBand
+npm run build
+
+# 4. Confirmar que o build passa e que lib/valeria.js contém o estado correto
+grep "const db = admin.firestore();" lib/valeria.js
+
+# 5. Só depois de todas as verificações passarem, deployar
+cd /tmp/rollback-valeria
+firebase deploy --only functions:valeria --config firebase-valeria.json
+
+# 6. Remover o worktree
+git worktree remove /tmp/rollback-valeria
+```
+
+> Nenhuma publicação foi executada durante a validação desta Fase 1.1.
+
+### Rollback das Cloud Functions — Opção Firebase Console
+```bash
+# Re-deploy da versão anterior via Firebase Console (sem git)
+Firebase Console → Functions → Versões anteriores → Reverter
 ```
 
 ### Rollback das Firestore Rules
