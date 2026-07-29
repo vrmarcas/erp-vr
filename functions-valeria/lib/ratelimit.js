@@ -106,7 +106,10 @@ async function checkRateLimit(req, res, opts) {
     // 2. Limite global por token
     const globalOk = await checkAndIncrement(`token:${opts.tokenKey}`, LIMIT_GLOBAL);
     if (!globalOk) {
-        res.status(429).set("Retry-After", String(WINDOW_MS / 1000)).json((0, response_1.err)("RATE_LIMIT_EXCEEDED", `Limite de ${LIMIT_GLOBAL} requisições/minuto excedido.`, {
+        res
+            .status(429)
+            .set("Retry-After", String(WINDOW_MS / 1000))
+            .json((0, response_1.err)("RATE_LIMIT_EXCEEDED", `Limite de ${LIMIT_GLOBAL} requisições/minuto excedido.`, {
             communicableToCustomer: false,
         }));
         return false;
@@ -115,7 +118,10 @@ async function checkRateLimit(req, res, opts) {
     if (opts.conversationId) {
         const convOk = await checkAndIncrement(`conv:${opts.conversationId}`, LIMIT_CONV);
         if (!convOk) {
-            res.status(429).set("Retry-After", String(WINDOW_MS / 1000)).json((0, response_1.err)("RATE_LIMIT_EXCEEDED", `Limite de ${LIMIT_CONV} requisições/minuto por conversa excedido.`, {
+            res
+                .status(429)
+                .set("Retry-After", String(WINDOW_MS / 1000))
+                .json((0, response_1.err)("RATE_LIMIT_EXCEEDED", `Limite de ${LIMIT_CONV} requisições/minuto por conversa excedido.`, {
                 communicableToCustomer: false,
             }));
             return false;

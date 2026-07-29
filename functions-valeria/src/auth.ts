@@ -207,6 +207,21 @@ export function extractContext(body: Record<string, unknown>): CtxResult {
       }),
     };
   }
+  // Validação de formato: tamanho, chars de controle e separador de path Firestore
+  if (conversationId.length > 512) {
+    return {
+      ok: false,
+      status: 400,
+      body: err("VALIDATION_ERROR", "conversationId excede 512 caracteres."),
+    };
+  }
+  if (/[\x00-\x1f\x7f/]/.test(conversationId)) {
+    return {
+      ok: false,
+      status: 400,
+      body: err("VALIDATION_ERROR", "conversationId contém caracteres inválidos (controle ou '/')."),
+    };
+  }
   if (!agentId || !organizationId) {
     return {
       ok: false,

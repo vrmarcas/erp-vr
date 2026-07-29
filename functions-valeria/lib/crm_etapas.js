@@ -144,8 +144,14 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", `Para marcar como ${destino}, use valeriaFechamento (exige evidência ou motivo obrigatório).`));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" }, async () => {
+    const rawKeyM = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyVM = (0, idempotency_1.validateIdempotencyKey)(rawKeyM);
+    if (!keyVM.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyVM.error));
+        return;
+    }
+    const payloadHashM = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyVM.key, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa", payloadHash: payloadHashM }, async () => {
         const dict = (await fsRead("crm_leads")) ?? {};
         const found = findLead(dict, ctx.conversationId);
         if (!found) {
@@ -177,8 +183,9 @@ exports.valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         dict[id] = lead;
         await fsWrite("crm_leads", dict);
         return (0, response_1.ok)({ leadId: lead.id, etapaAnterior: valeriaStatus, etapaAtual: destino }, { communicableToCustomer: false, verified: true });
-    });
-    res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
+    }, res);
+    const statusM = result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : (0, idempotency_1.idempotencyHttpStatus)(result, 422));
+    res.status(statusM).json(result);
 });
 // ── valeriaFechamento ────────────────────────────────────────────────────────
 exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
@@ -212,8 +219,14 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "Reabrir oportunidade exige campo 'justificativa' (mínimo 3 caracteres).", { missingFields: ["justificativa"] }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" }, async () => {
+    const rawKeyF = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyVF = (0, idempotency_1.validateIdempotencyKey)(rawKeyF);
+    if (!keyVF.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyVF.error));
+        return;
+    }
+    const payloadHashF = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyVF.key, conversationId: ctx.conversationId, functionName: "valeriaFechamento", payloadHash: payloadHashF }, async () => {
         const dict = (await fsRead("crm_leads")) ?? {};
         const found = findLead(dict, ctx.conversationId);
         if (!found) {
@@ -296,7 +309,8 @@ exports.valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
             humanValidationRequired: resultado === "ganho",
             verified: true,
         });
-    });
-    res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
+    }, res);
+    const statusF = result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : (0, idempotency_1.idempotencyHttpStatus)(result, 422));
+    res.status(statusF).json(result);
 });
 //# sourceMappingURL=crm_etapas.js.map

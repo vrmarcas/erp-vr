@@ -1,9 +1,17 @@
 openapi: 3.1.0
 info:
   title: Valéria Cloud Functions API
-  version: 2.1.0
+  version: 2.2.0
   description: |
     API de integração entre o Chatvolt (agente Valéria) e o ERP VR Marcas.
+
+    **v2.2.0 — Fase 2.1: Idempotência forçada:**
+    - `Idempotency-Key` agora **obrigatória** em todos os endpoints de escrita
+    - `messageId` **obrigatório** em `valeriaRegistrarMensagem`
+    - `conversationId` não pode conter `/` ou chars de controle (max 512)
+    - Resposta 409 `IDEMPOTENCY_CONFLICT` quando mesma chave + payload diferente
+    - Resposta 423 `IDEMPOTENCY_PROCESSING` quando operação em andamento
+    - Header `X-Idempotent-Replay: true` em respostas do cache
 
     **v2.1.0 — Novos endpoints (B1–B4):**
     - `valeriaWebhookChatvolt` — recebe eventos push do Chatvolt (B1)
@@ -80,6 +88,14 @@ components:
             - FORBIDDEN_FIELD
             - METHOD_NOT_ALLOWED
             - INTERNAL_ERROR
+            - NOT_FOUND
+            - IDEMPOTENCY_CONFLICT
+            - IDEMPOTENCY_PROCESSING
+            - SIMULATION_NOT_FOUND
+            - SIMULATION_EXPIRED
+            - SIMULATION_ALREADY_USED
+            - SIMULATION_MISMATCH
+            - INVALID_TRANSITION
         message:
           type: string
         details:
@@ -121,7 +137,11 @@ components:
       properties:
         conversationId:
           type: string
-          description: Identificador primário da conversa (provido pelo Chatvolt)
+          maxLength: 512
+          description: |
+            Identificador primário da conversa (provido pelo Chatvolt).
+            **Restrições de formato:** máx 512 chars, sem chars de controle (0x00–0x1F, 0x7F)
+            e sem barra `/` (separador de path Firestore). Violações retornam 400.
           example: "conv_abc123"
         agentId:
           type: string
@@ -192,6 +212,74 @@ components:
           type: string
         communicableToCustomer:
           type: boolean
+
+  parameters:
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 256
+        description: >
+          Chave de idempotência (obrigatória em todos os endpoints de escrita).
+          Máx 256 chars, sem chars de controle. SHA-256 composto com
+          functionName + conversationId é usado para escopo por conversa.
+      example: "req_uuid_or_messageId"
+
+  headers:
+    XIdempotentReplay:
+      description: Presente quando a resposta é do cache (replay idempotente)
+      schema:
+        type: string
+        enum: ["true"]
+
+  responses:
+    Error400:
+      description: Erro de validação (campo inválido/ausente, conversationId com formato inválido)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          example:
+            success: false
+            error: { code: "VALIDATION_ERROR", message: "Idempotency-Key é obrigatória." }
+            communicableToCustomer: false
+            humanValidationRequired: false
+    Error401:
+      description: Bearer token inválido ou expirado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    Error409:
+      description: Idempotency conflict — mesma chave usada com payload diferente
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          example:
+            success: false
+            error: { code: "IDEMPOTENCY_CONFLICT", message: "Idempotency-Key já utilizada com payload diferente." }
+            communicableToCustomer: false
+            humanValidationRequired: false
+    Error423:
+      description: Operação em andamento (processing lock) — retry após instantes
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          example:
+            success: false
+            error: { code: "IDEMPOTENCY_PROCESSING", message: "Operação em andamento. Tente novamente em instantes." }
+            communicableToCustomer: false
+            humanValidationRequired: false
+    Error429:
+      description: Rate limit excedido (300 req/min global ou 30 req/min por conversationId)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    Error500:
+      description: Erro interno do servidor
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
 
 paths:
   /valeriaStatus:
@@ -266,10 +354,7 @@ paths:
       summary: Criar ou atualizar cliente e vincular ao conversationId
       tags: [Clientes]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
-          description: Chave para garantir idempotência (recomendado)
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -332,6 +417,15 @@ paths:
                               conversationIds:
                                 type: array
                                 items: { type: string }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaCatalogo:
     post:
@@ -376,9 +470,7 @@ paths:
         o preço final. Retorna `simulationId` para uso em `valeriaCriarOrcamento`.
       tags: [Orçamento]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -421,11 +513,15 @@ paths:
                     properties:
                       data:
                         $ref: "#/components/schemas/OrcamentoEnviado"
-        "400":
-          description: NEEDS_INFORMATION ou HUMAN_VALIDATION_REQUIRED
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaCriarOrcamento:
     post:
@@ -437,11 +533,7 @@ paths:
         recalculado pelo motor usando o `simulationId`.
       tags: [Orçamento]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema: { type: string }
-          description: Obrigatório para evitar criação duplicada
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -481,20 +573,28 @@ paths:
                     properties:
                       data:
                         $ref: "#/components/schemas/OrcamentoEnviado"
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
         "400":
-          description: Campo proibido detectado (total/valor/preco/price/amount/finalPrice)
+          description: >
+            Campo proibido (FORBIDDEN_FIELD), validação ausente (VALIDATION_ERROR),
+            ou conversationId com formato inválido
           content:
             application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/ApiResponseBase"
-              example:
-                success: false
-                error:
-                  code: "FORBIDDEN_FIELD"
-                  message: "Campos não permitidos: [total]. O preço é calculado pelo motor oficial."
-                communicableToCustomer: false
-                humanValidationRequired: false
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "422":
+          description: >
+            Erro de negócio na transação (SIMULATION_NOT_FOUND, SIMULATION_EXPIRED,
+            SIMULATION_ALREADY_USED, SIMULATION_MISMATCH)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaCriarOportunidade:
     post:
@@ -510,9 +610,7 @@ paths:
         `valeriaAtualizarBriefing`, que é o endpoint correto para isso.
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -559,11 +657,15 @@ paths:
                         properties:
                           leadId: { type: string }
                           acao: { type: string, enum: [criado, atualizado] }
-        "400":
-          description: "nome ausente, ou nem tel nem channelPhone informados"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaRegistrarMensagem:
     post:
@@ -571,10 +673,7 @@ paths:
       summary: Registrar mensagem no histórico da oportunidade
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
-          description: messageId é usado como chave de idempotência
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -583,15 +682,18 @@ paths:
               allOf:
                 - $ref: "#/components/schemas/ConversationContext"
                 - type: object
-                  required: [mensagem]
+                  required: [mensagem, messageId]
                   properties:
                     mensagem:
                       type: string
-                      description: Conteúdo da mensagem (campo obrigatório real — não "texto")
+                      description: Conteúdo da mensagem (obrigatório)
                       example: "Quero fazer uma placa de 100x100mm"
                     messageId:
                       type: string
-                      description: Usado como chave de idempotência quando presente
+                      description: >
+                        **Obrigatório.** Identificador único da mensagem. Usado como
+                        chave de idempotência fallback quando o header Idempotency-Key
+                        não está presente. Ausência retorna 400.
                     direcao:
                       type: string
                       enum: [entrada, saida]
@@ -631,11 +733,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiResponseBase" }
-        "400":
-          description: "mensagem ausente"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaTransferirHumano:
     post:
@@ -643,9 +749,7 @@ paths:
       summary: Solicitar transferência para atendente humano
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -671,6 +775,15 @@ paths:
                         properties:
                           transferido: { type: boolean }
                           conversationId: { type: string }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaProximaAcao:
     post:
@@ -678,9 +791,7 @@ paths:
       summary: Registrar próxima ação de follow-up para o lead
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -699,6 +810,15 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiResponseBase" }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaConsultarStatus:
     post:
@@ -769,10 +889,7 @@ paths:
         ```
       tags: [Webhook]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
-          description: messageId do evento. Se ausente, chave gerada deterministicamente.
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -853,6 +970,15 @@ paths:
                           conversationId: { type: string }
                           messageId:      { type: string }
                           pong:           { type: boolean, description: "Presente apenas no health check" }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaAtualizarBriefing:
     post:
@@ -871,9 +997,7 @@ paths:
         Histórico de alterações append-only com ts + camposAlterados + agentId.
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -912,6 +1036,15 @@ paths:
                           classificacao:  { type: string, enum: [catalogo, semi_personalizada, personalizada] }
                           camposFaltando: { type: array, items: { type: string } }
                           camposAlterados: { type: array, items: { type: string } }
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaMudarEtapa:
     post:
@@ -931,9 +1064,7 @@ paths:
         Isolamento: só altera o lead da conversa autenticada (conversationId).
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -966,18 +1097,25 @@ paths:
                           leadId:       { type: string }
                           etapaAnterior:{ type: string }
                           etapaAtual:   { type: string }
-        "422":
-          description: Transição inválida
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "404":
+          description: Lead não encontrado para esta conversa
           content:
             application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/ApiResponseBase"
-              example:
-                success: false
-                error:
-                  code: "INVALID_TRANSITION"
-                  message: "Transição 'NOVO_LEAD' → 'NEGOCIACAO' não é permitida."
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "409": { $ref: "#/components/responses/Error409" }
+        "422":
+          description: Transição inválida (INVALID_TRANSITION)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
   /valeriaFechamento:
     post:
@@ -999,9 +1137,7 @@ paths:
         - Não é possível alterar lead de outra conversa
       tags: [CRM]
       parameters:
-        - name: Idempotency-Key
-          in: header
-          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
       requestBody:
         required: true
         content:
@@ -1059,10 +1195,25 @@ paths:
                           resultado:    { type: string }
                           etapaAnterior:{ type: string }
                           etapaAtual:   { type: string }
-        "400":
-          description: Validação faltando (motivo, orcamentoId, justificativa)
+          headers:
+            X-Idempotent-Replay:
+              $ref: "#/components/headers/XIdempotentReplay"
+        "400": { $ref: "#/components/responses/Error400" }
+        "401": { $ref: "#/components/responses/Error401" }
+        "404":
+          description: Lead não encontrado para esta conversa
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "409": { $ref: "#/components/responses/Error409" }
         "422":
-          description: Transição inválida
+          description: Transição inválida (INVALID_TRANSITION)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "423": { $ref: "#/components/responses/Error423" }
+        "429": { $ref: "#/components/responses/Error429" }
+        "500": { $ref: "#/components/responses/Error500" }
 
 tags:
   - name: Diagnóstico

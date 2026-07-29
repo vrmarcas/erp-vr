@@ -227,8 +227,14 @@ exports.valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) => {
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "channelPhone ou tel é obrigatório.", { missingFields: ["channelPhone"] }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaUpsertCliente" }, async () => {
+    const rawKey0 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV0 = (0, idempotency_1.validateIdempotencyKey)(rawKey0);
+    if (!keyV0.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV0.error));
+        return;
+    }
+    const payloadHash0 = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV0.key, conversationId: ctx.conversationId, functionName: "valeriaUpsertCliente", payloadHash: payloadHash0 }, async () => {
         const clientes = (await fsRead("clientes")) ?? [];
         const t = normTel(tel);
         const idx = clientes.findIndex((c) => normTel(c.tel ?? "") === t);
@@ -274,7 +280,7 @@ exports.valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) => {
             .set({ clienteId: cliente.id, agentId: ctx.agentId, updatedAt: Date.now() }, { merge: true });
         return (0, response_1.ok)({ acao, clienteId: cliente.id, cliente }, { communicableToCustomer: false, verified: true });
     });
-    res.status(result.success ? 200 : 500).json(result);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. CATÁLOGO (sem preços)
@@ -317,8 +323,14 @@ exports.valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res) => 
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "itens[] é obrigatório.", { missingFields: ["itens"] }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCalcularOrcamento" }, async () => {
+    const rawKey1 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV1 = (0, idempotency_1.validateIdempotencyKey)(rawKey1);
+    if (!keyV1.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV1.error));
+        return;
+    }
+    const payloadHash1 = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV1.key, conversationId: ctx.conversationId, functionName: "valeriaCalcularOrcamento", payloadHash: payloadHash1 }, async () => {
         // Campos de preço bloqueados: o motor calcula exclusivamente server-side.
         // rsm2 nos itens também é ignorado — preço vem do catálogo (matKey).
         const sanitizedItens = itens.map((it) => { const { rsm2: _r, ...rest } = it; return rest; });
@@ -358,7 +370,7 @@ exports.valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res) => 
             }
         }
     });
-    res.status(result.success ? 200 : 422).json(result);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 422)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. CRIAR ORÇAMENTO FORMAL (somente com simulationId + recálculo pelo motor)
@@ -397,15 +409,28 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "Campos obrigatórios ausentes.", { missingFields: missing }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOrcamento" }, async () => {
-        // Recuperar simulação e marcar como usada em transação atômica (anti double-spend)
+    const rawKey2 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV2 = (0, idempotency_1.validateIdempotencyKey)(rawKey2);
+    if (!keyV2.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV2.error));
+        return;
+    }
+    const payloadHash2 = (0, idempotency_1.buildPayloadHash)(body);
+    // ID estável gerado antes da transação — garante idempotência da escrita
+    const orcId = uid("orc");
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV2.key, conversationId: ctx.conversationId, functionName: "valeriaCriarOrcamento", payloadHash: payloadHash2 }, async () => {
+        // Referências definidas fora da callback para uso no tx
+        const db = admin.firestore();
+        const simRef = db.collection(SIM_COL).doc(simulationId);
+        const orcRef = db.collection(COL).doc("orcamentos");
+        const convRef = db.collection("valeria_conversations").doc(ctx.conversationId);
+        // Transação única: lê sim + orcamentos, valida, escreve tudo atomicamente.
+        // Garante: simulação não pode ser consumida sem que o orçamento seja criado.
         let sim;
+        let orc;
         try {
-            const db = admin.firestore();
             await db.runTransaction(async (tx) => {
-                const simRef = db.collection(SIM_COL).doc(simulationId);
-                const simDoc = await tx.get(simRef);
+                const [simDoc, orcDoc] = await Promise.all([tx.get(simRef), tx.get(orcRef)]);
                 if (!simDoc.exists)
                     throw Object.assign(new Error(), { _code: "SIMULATION_NOT_FOUND" });
                 const simData = simDoc.data();
@@ -415,8 +440,46 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
                     throw Object.assign(new Error(), { _code: "SIMULATION_EXPIRED" });
                 if (simData.usado)
                     throw Object.assign(new Error(), { _code: "SIMULATION_ALREADY_USED" });
+                const orcRaw = orcDoc.exists
+                    ? orcDoc.data()
+                    : null;
+                const existingOrcs = (() => {
+                    try {
+                        return orcRaw?.data ? JSON.parse(orcRaw.data) : [];
+                    }
+                    catch {
+                        return [];
+                    }
+                })();
+                const maxN = existingOrcs.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
+                const newOrc = {
+                    id: orcId,
+                    n: maxN + 1,
+                    nomeCliente: nomeCliente,
+                    telCliente: telCliente,
+                    emailCliente: body["emailCliente"] ?? "",
+                    descricao: body["descricao"] ?? "",
+                    itens: simData.itensNormalizados,
+                    total: simData.finalPrice,
+                    totalCost: simData.finalPrice,
+                    pricingVersion: simData.pricingVersion,
+                    quoteEngine: "erp_official",
+                    simulationId: simulationId,
+                    communicableToCustomer: true,
+                    status: "pre_orc_valeria",
+                    data: new Date().toISOString(),
+                    marca: body["marca"] ?? "vr",
+                    origem: "valeria",
+                    conversationId: ctx.conversationId,
+                    agentId: ctx.agentId,
+                    organizationId: ctx.organizationId,
+                };
+                existingOrcs.unshift(newOrc);
                 tx.update(simRef, { usado: true });
+                tx.set(orcRef, { data: JSON.stringify(existingOrcs), ts: Date.now() });
+                tx.set(convRef, { orcamentoId: orcId, updatedAt: Date.now() }, { merge: true });
                 sim = simData;
+                orc = newOrc;
             });
         }
         catch (e) {
@@ -429,40 +492,12 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
                 return (0, response_1.err)("SIMULATION_EXPIRED", "Simulação expirada (válida por 1h). Execute valeriaCalcularOrcamento novamente.", { communicableToCustomer: true });
             if (code === "SIMULATION_ALREADY_USED")
                 return (0, response_1.err)("SIMULATION_ALREADY_USED", "Esta simulação já foi usada para criar um orçamento.", { communicableToCustomer: false });
-            throw e; // erro inesperado do Firestore
+            throw e;
         }
-        const orcamentos = (await fsRead("orcamentos")) ?? [];
-        const maxN = orcamentos.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
-        const orc = {
-            id: uid("orc"),
-            n: maxN + 1,
-            nomeCliente: nomeCliente,
-            telCliente: telCliente,
-            emailCliente: body["emailCliente"] ?? "",
-            descricao: body["descricao"] ?? "",
-            itens: sim.itensNormalizados, // itens do servidor, não da IA
-            total: sim.finalPrice, // preço do servidor
-            totalCost: sim.finalPrice,
-            pricingVersion: sim.pricingVersion,
-            quoteEngine: "erp_official",
-            simulationId: simulationId,
-            communicableToCustomer: true,
-            status: "pre_orc_valeria",
-            data: new Date().toISOString(),
-            marca: body["marca"] ?? "vr",
-            origem: "valeria",
-            conversationId: ctx.conversationId,
-            agentId: ctx.agentId,
-            organizationId: ctx.organizationId,
-        };
-        orcamentos.unshift(orc);
-        await fsWrite("orcamentos", orcamentos);
-        await admin.firestore().collection("valeria_conversations")
-            .doc(ctx.conversationId)
-            .set({ orcamentoId: orc.id, updatedAt: Date.now() }, { merge: true });
+        void sim; // usado internamente pela transação
         return (0, response_1.ok)({ orcamentoId: orc.id, n: orc.n, total: orc.total, pricingVersion: orc.pricingVersion }, { communicableToCustomer: true, verified: true });
-    });
-    res.status(result.success ? 201 : 422).json(result);
+    }, res);
+    res.status(result.success ? 201 : (0, idempotency_1.idempotencyHttpStatus)(result, 422)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. CRIAR / ATUALIZAR OPORTUNIDADE CRM
@@ -487,8 +522,14 @@ exports.valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res) => 
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "channelPhone é obrigatório.", { missingFields: ["channelPhone"] }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCriarOportunidade" }, async () => {
+    const rawKey3 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV3 = (0, idempotency_1.validateIdempotencyKey)(rawKey3);
+    if (!keyV3.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV3.error));
+        return;
+    }
+    const payloadHash3 = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV3.key, conversationId: ctx.conversationId, functionName: "valeriaCriarOportunidade", payloadHash: payloadHash3 }, async () => {
         // Lê o dict unificado crm_leads (mesmo documento que o Kanban do ERP usa)
         const dict = (await fsRead("crm_leads")) ?? {};
         const now = new Date().toISOString();
@@ -568,8 +609,8 @@ exports.valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res) => 
             .doc(ctx.conversationId)
             .set({ leadId: lead.id, updatedAt: Date.now() }, { merge: true });
         return (0, response_1.ok)({ acao, leadId: lead.id }, { communicableToCustomer: false, verified: true });
-    });
-    res.status(result.success ? 200 : 500).json(result);
+    }, res);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. REGISTRAR MENSAGEM / INTERAÇÃO
@@ -590,38 +631,60 @@ exports.valeriaRegistrarMensagem = RUN_OPTS.https.onRequest(async (req, res) => 
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "mensagem é obrigatória.", { missingFields: ["mensagem"] }));
         return;
     }
+    if (!messageId) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "messageId é obrigatório.", { missingFields: ["messageId"] }));
+        return;
+    }
+    // Chave de idempotência: header tem precedência, senão usa messageId
+    const rawKey4 = (0, idempotency_1.extractIdempotencyKey)(req) ?? messageId;
+    const keyV4 = (0, idempotency_1.validateIdempotencyKey)(rawKey4);
+    if (!keyV4.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV4.error));
+        return;
+    }
+    const payloadHash4 = (0, idempotency_1.buildPayloadHash)(body);
     // B4 — campos ampliados (backward-compatible: todos opcionais)
     const tipo = body["tipo"] ?? "texto";
     const direcao = body["direcao"] ?? "entrada";
     const origem = body["origem"] ?? "manual";
     const statusProc = body["statusProcessamento"] ?? "processado";
-    // Anexos: somente metadados (nunca conteúdo binário)
+    // Anexos: somente metadados; omite campos ausentes para evitar undefined no Firestore
     const anexosRaw = body["anexos"] ?? body["attachments"];
     const anexosMeta = Array.isArray(anexosRaw)
-        ? anexosRaw.map((a) => ({
-            url: a["url"],
-            mimeType: (a["mimeType"] ?? a["mime_type"] ?? a["type"]),
-            tamanho: (a["tamanho"] ?? a["size"]),
-            nome: (a["nome"] ?? a["name"] ?? a["filename"]),
-            transcricao: a["transcricao"],
-        }))
+        ? anexosRaw.map((a) => {
+            const url = a["url"];
+            const mimeType = (a["mimeType"] ?? a["mime_type"] ?? a["type"]);
+            const tamanho = (a["tamanho"] ?? a["size"]);
+            const nome = (a["nome"] ?? a["name"] ?? a["filename"]);
+            const transcricao = a["transcricao"];
+            return {
+                ...(url !== undefined && { url }),
+                ...(mimeType !== undefined && { mimeType }),
+                ...(tamanho !== undefined && { tamanho }),
+                ...(nome !== undefined && { nome }),
+                ...(transcricao !== undefined && { transcricao }),
+            };
+        })
         : undefined;
+    // bloqueioInfo: omite campos ausentes para evitar undefined no Firestore
+    const bloqueioMotivo = body["bloqueioMotivo"];
+    const bloqueioTipo = body["bloqueioTipo"];
+    const bloqueioDetalhes = body["bloqueioDetalhes"];
     const bloqueioInfo = tipo === "bloqueio"
         ? {
-            motivo: body["bloqueioMotivo"],
-            tipo: body["bloqueioTipo"],
-            detalhes: body["bloqueioDetalhes"],
+            ...(bloqueioMotivo !== undefined && { motivo: bloqueioMotivo }),
+            ...(bloqueioTipo !== undefined && { tipo: bloqueioTipo }),
+            ...(bloqueioDetalhes !== undefined && { detalhes: bloqueioDetalhes }),
         }
         : undefined;
     const transcricao = body["transcricao"];
     const eventType = body["eventType"];
-    const idempKey = messageId ?? (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaRegistrarMensagem" }, async () => {
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV4.key, conversationId: ctx.conversationId, functionName: "valeriaRegistrarMensagem", payloadHash: payloadHash4 }, async () => {
         const doc = {
             conversationId: ctx.conversationId,
             agentId: ctx.agentId,
             organizationId: ctx.organizationId,
-            messageId: messageId ?? uid("msg"),
+            messageId,
             mensagem,
             direcao,
             tipo,
@@ -640,8 +703,8 @@ exports.valeriaRegistrarMensagem = RUN_OPTS.https.onRequest(async (req, res) => 
             doc["eventType"] = eventType;
         await admin.firestore().collection("valeria_msgs").add(doc);
         return (0, response_1.ok)({ registrado: true, tipo, direcao, origem }, { communicableToCustomer: false });
-    });
-    res.status(result.success ? 200 : 500).json(result);
+    }, res);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 8. TRANSFERIR PARA HUMANO
@@ -657,8 +720,14 @@ exports.valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res) => {
     }
     const body = req.body;
     const motivo = body["motivo"] ?? "sem motivo";
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaTransferirHumano" }, async () => {
+    const rawKey5 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV5 = (0, idempotency_1.validateIdempotencyKey)(rawKey5);
+    if (!keyV5.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV5.error));
+        return;
+    }
+    const payloadHash5 = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV5.key, conversationId: ctx.conversationId, functionName: "valeriaTransferirHumano", payloadHash: payloadHash5 }, async () => {
         const dict = (await fsRead("crm_leads")) ?? {};
         const now = new Date().toISOString();
         const found = findLeadByConv(dict, ctx.conversationId);
@@ -682,8 +751,8 @@ exports.valeriaTransferirHumano = RUN_OPTS.https.onRequest(async (req, res) => {
             ts: Date.now(), createdAt: now, lido: false,
         });
         return (0, response_1.ok)({ transferido: true }, { communicableToCustomer: true, humanValidationRequired: true });
-    });
-    res.status(result.success ? 200 : 500).json(result);
+    }, res);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 9. PRÓXIMA AÇÃO
@@ -703,8 +772,14 @@ exports.valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "acao é obrigatória.", { missingFields: ["acao"] }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaProximaAcao" }, async () => {
+    const rawKey6 = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyV6 = (0, idempotency_1.validateIdempotencyKey)(rawKey6);
+    if (!keyV6.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyV6.error));
+        return;
+    }
+    const payloadHash6 = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyV6.key, conversationId: ctx.conversationId, functionName: "valeriaProximaAcao", payloadHash: payloadHash6 }, async () => {
         const dict = (await fsRead("crm_leads")) ?? {};
         const found = findLeadByConv(dict, ctx.conversationId);
         if (!found) {
@@ -724,7 +799,7 @@ exports.valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         await fsWrite("crm_leads", dict);
         return (0, response_1.ok)({ agendado: true, acao }, { communicableToCustomer: false });
     });
-    res.status(result.success ? 200 : 500).json(result);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // 10. CONSULTAR STATUS (por conversationId — sem telefone livre)

@@ -23,7 +23,12 @@ import * as admin      from "firebase-admin";
 import * as crypto     from "crypto";
 
 import { pipeline }                         from "./pipeline";
-import { withIdempotency }                  from "./idempotency";
+import {
+  withIdempotency,
+  validateIdempotencyKey,
+  buildPayloadHash,
+  idempotencyHttpStatus,
+}                                           from "./idempotency";
 import { ok, err }                          from "./response";
 import {
   SUPPORTED_WEBHOOK_EVENTS,
@@ -80,13 +85,18 @@ export function mapEventToInteracao(
 function extractAnexosMeta(raw: unknown): AnexoMeta[] {
   if (!Array.isArray(raw)) return [];
   return (raw as Record<string, unknown>[]).map((a) => {
-    const transcricao = a["transcricao"] as string | undefined;
+    const url         = a["url"]                                      as string | undefined;
+    const mimeType    = (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined;
+    const tamanho     = (a["tamanho"]  ?? a["size"])                   as number | undefined;
+    const nome        = (a["nome"]     ?? a["name"] ?? a["filename"])  as string | undefined;
+    const transcricao = a["transcricao"]                               as string | undefined;
+    // Omite campos ausentes — Firestore Admin SDK rejeita valores undefined
     return {
-      url:        a["url"]        as string | undefined,
-      mimeType:   (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined,
-      tamanho:    (a["tamanho"]  ?? a["size"])                   as number | undefined,
-      nome:       (a["nome"]     ?? a["name"] ?? a["filename"])  as string | undefined,
-      ...(transcricao !== undefined ? { transcricao } : {}),
+      ...(url         !== undefined && { url }),
+      ...(mimeType    !== undefined && { mimeType }),
+      ...(tamanho     !== undefined && { tamanho }),
+      ...(nome        !== undefined && { nome }),
+      ...(transcricao !== undefined && { transcricao }),
     } as AnexoMeta;
   });
 }
@@ -146,14 +156,22 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
   const dataRef = (body["data"] ?? body["date"] ?? body["ts"]) as string | undefined
     ?? new Date().toISOString();
 
-  const idempKey = explicitMsgId
+  const derivedKey = explicitMsgId
     ?? buildWebhookIdempKey(eventType, ctx.conversationId, ctx.agentId, dataRef);
+
+  const keyVW = validateIdempotencyKey(derivedKey);
+  if (!keyVW.ok) {
+    res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: keyVW.error } });
+    return;
+  }
+  const payloadHashW = buildPayloadHash(body as Record<string, unknown>);
 
   const result = await withIdempotency(
     {
-      idempotencyKey: idempKey,
+      idempotencyKey: keyVW.key,
       conversationId: ctx.conversationId,
       functionName:   "valeriaWebhookChatvolt",
+      payloadHash:    payloadHashW,
     },
     async () => {
       const db     = admin.firestore();
@@ -172,12 +190,15 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       // Metadados de anexos — NUNCA conteúdo
       const anexos: AnexoMeta[] = extractAnexosMeta(body["anexos"] ?? body["attachments"]);
 
-      // Info de bloqueio
+      // Info de bloqueio: omite campos ausentes para evitar undefined no Firestore
+      const bmotivo   = (body["bloqueioMotivo"] ?? body["blockReason"]) as string | undefined;
+      const btipo     = (body["bloqueioTipo"]   ?? body["blockType"])   as string | undefined;
+      const bdetalhes = body["bloqueioDetalhes"]                        as string | undefined;
       const bloqueioInfo: BloqueioInfo | undefined = tipo === "bloqueio"
         ? {
-            motivo:   (body["bloqueioMotivo"] ?? body["blockReason"]) as string | undefined,
-            tipo:     (body["bloqueioTipo"]   ?? body["blockType"])   as string | undefined,
-            detalhes: body["bloqueioDetalhes"]                        as string | undefined,
+            ...(bmotivo   !== undefined && { motivo:   bmotivo }),
+            ...(btipo     !== undefined && { tipo:     btipo }),
+            ...(bdetalhes !== undefined && { detalhes: bdetalhes }),
           }
         : undefined;
 
@@ -185,7 +206,7 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       await db.collection("valeria_webhook_events").add({
         eventType,
         conversationId:  ctx.conversationId,
-        messageId:       explicitMsgId ?? idempKey,
+        messageId:       explicitMsgId ?? keyVW.key,
         agentId:         ctx.agentId,
         organizationId:  ctx.organizationId,
         channel:         body["channel"] ?? body["canal"] ?? null,
@@ -209,7 +230,7 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         conversationId:      ctx.conversationId,
         agentId:             ctx.agentId,
         organizationId:      ctx.organizationId,
-        messageId:           explicitMsgId ?? idempKey,
+        messageId:           explicitMsgId ?? keyVW.key,
         mensagem:            mensagemLog ?? `[${eventType}]`,
         direcao,
         tipo,
@@ -227,14 +248,14 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           received:       true,
           eventType,
           conversationId: ctx.conversationId,
-          messageId:      explicitMsgId ?? idempKey,
+          messageId:      explicitMsgId ?? keyVW.key,
           idempotente:    !explicitMsgId, // avisa se chave foi gerada deterministicamente
         },
         { communicableToCustomer: false, verified: true }
       );
-    }
+    },
+    res
   );
 
-  // 200 sempre (incluindo replay idempotente)
-  res.status(result.success ? 200 : 500).json(result);
+  res.status(result.success ? 200 : idempotencyHttpStatus(result, 500)).json(result);
 });

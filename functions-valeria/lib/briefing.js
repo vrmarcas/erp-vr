@@ -152,8 +152,14 @@ exports.valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res) => 
         res.status(400).json((0, response_1.err)("VALIDATION_ERROR", "Nenhum campo de briefing foi informado. Envie pelo menos um dos campos: produto, familia, larguraMm, alturaMm, quantidade, material, acabamento, prazo, referencia, observacoes.", { missingFields: CAMPOS_BRIEFING }));
         return;
     }
-    const idempKey = (0, idempotency_1.extractIdempotencyKey)(req);
-    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaAtualizarBriefing" }, async () => {
+    const rawKeyB = (0, idempotency_1.extractIdempotencyKey)(req);
+    const keyVB = (0, idempotency_1.validateIdempotencyKey)(rawKeyB);
+    if (!keyVB.ok) {
+        res.status(400).json((0, response_1.err)("VALIDATION_ERROR", keyVB.error));
+        return;
+    }
+    const payloadHashB = (0, idempotency_1.buildPayloadHash)(body);
+    const result = await (0, idempotency_1.withIdempotency)({ idempotencyKey: keyVB.key, conversationId: ctx.conversationId, functionName: "valeriaAtualizarBriefing", payloadHash: payloadHashB }, async () => {
         const db = admin.firestore();
         const ref = db.collection(BRIEFING_COL).doc(ctx.conversationId);
         const snap = await ref.get();
@@ -231,7 +237,7 @@ exports.valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res) => 
                 ? [`Campos ainda faltando: ${camposFaltando.join(", ")}.`]
                 : undefined,
         });
-    });
-    res.status(result.success ? 200 : 500).json(result);
+    }, res);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 //# sourceMappingURL=briefing.js.map

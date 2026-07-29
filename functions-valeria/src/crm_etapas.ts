@@ -22,7 +22,13 @@ import * as functions from "firebase-functions";
 import * as admin      from "firebase-admin";
 
 import { pipeline }          from "./pipeline";
-import { withIdempotency, extractIdempotencyKey } from "./idempotency";
+import {
+  withIdempotency,
+  extractIdempotencyKey,
+  validateIdempotencyKey,
+  buildPayloadHash,
+  idempotencyHttpStatus,
+} from "./idempotency";
 import { ok, err }           from "./response";
 import type {
   CrmLead,
@@ -126,9 +132,12 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
     return;
   }
 
-  const idempKey = extractIdempotencyKey(req);
+  const rawKeyM = extractIdempotencyKey(req);
+  const keyVM = validateIdempotencyKey(rawKeyM);
+  if (!keyVM.ok) { res.status(400).json(err("VALIDATION_ERROR", keyVM.error)); return; }
+  const payloadHashM = buildPayloadHash(body as Record<string, unknown>);
   const result = await withIdempotency(
-    { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa" },
+    { idempotencyKey: keyVM.key, conversationId: ctx.conversationId, functionName: "valeriaMudarEtapa", payloadHash: payloadHashM },
     async () => {
       const dict  = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
       const found = findLead(dict, ctx.conversationId);
@@ -174,10 +183,14 @@ export const valeriaMudarEtapa = RUN_OPTS.https.onRequest(async (req, res) => {
         { leadId: lead.id, etapaAnterior: valeriaStatus, etapaAtual: destino },
         { communicableToCustomer: false, verified: true }
       );
-    }
+    },
+    res
   );
 
-  res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
+  const statusM = result.success ? 200 : (
+    result.error?.code === "NOT_FOUND" ? 404 : idempotencyHttpStatus(result, 422)
+  );
+  res.status(statusM).json(result);
 });
 
 // ── valeriaFechamento ────────────────────────────────────────────────────────
@@ -228,9 +241,12 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
     return;
   }
 
-  const idempKey = extractIdempotencyKey(req);
+  const rawKeyF = extractIdempotencyKey(req);
+  const keyVF = validateIdempotencyKey(rawKeyF);
+  if (!keyVF.ok) { res.status(400).json(err("VALIDATION_ERROR", keyVF.error)); return; }
+  const payloadHashF = buildPayloadHash(body as Record<string, unknown>);
   const result = await withIdempotency(
-    { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaFechamento" },
+    { idempotencyKey: keyVF.key, conversationId: ctx.conversationId, functionName: "valeriaFechamento", payloadHash: payloadHashF },
     async () => {
       const dict  = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
       const found = findLead(dict, ctx.conversationId);
@@ -332,8 +348,12 @@ export const valeriaFechamento = RUN_OPTS.https.onRequest(async (req, res) => {
           verified: true,
         }
       );
-    }
+    },
+    res
   );
 
-  res.status(result.success ? 200 : (result.error?.code === "NOT_FOUND" ? 404 : 422)).json(result);
+  const statusF = result.success ? 200 : (
+    result.error?.code === "NOT_FOUND" ? 404 : idempotencyHttpStatus(result, 422)
+  );
+  res.status(statusF).json(result);
 });

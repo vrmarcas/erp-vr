@@ -99,13 +99,18 @@ function extractAnexosMeta(raw) {
     if (!Array.isArray(raw))
         return [];
     return raw.map((a) => {
+        const url = a["url"];
+        const mimeType = (a["mimeType"] ?? a["mime_type"] ?? a["type"]);
+        const tamanho = (a["tamanho"] ?? a["size"]);
+        const nome = (a["nome"] ?? a["name"] ?? a["filename"]);
         const transcricao = a["transcricao"];
+        // Omite campos ausentes — Firestore Admin SDK rejeita valores undefined
         return {
-            url: a["url"],
-            mimeType: (a["mimeType"] ?? a["mime_type"] ?? a["type"]),
-            tamanho: (a["tamanho"] ?? a["size"]),
-            nome: (a["nome"] ?? a["name"] ?? a["filename"]),
-            ...(transcricao !== undefined ? { transcricao } : {}),
+            ...(url !== undefined && { url }),
+            ...(mimeType !== undefined && { mimeType }),
+            ...(tamanho !== undefined && { tamanho }),
+            ...(nome !== undefined && { nome }),
+            ...(transcricao !== undefined && { transcricao }),
         };
     });
 }
@@ -151,12 +156,19 @@ exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
         ?? (body["messageId"] ?? body["message_id"]);
     const dataRef = (body["data"] ?? body["date"] ?? body["ts"])
         ?? new Date().toISOString();
-    const idempKey = explicitMsgId
+    const derivedKey = explicitMsgId
         ?? buildWebhookIdempKey(eventType, ctx.conversationId, ctx.agentId, dataRef);
+    const keyVW = (0, idempotency_1.validateIdempotencyKey)(derivedKey);
+    if (!keyVW.ok) {
+        res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: keyVW.error } });
+        return;
+    }
+    const payloadHashW = (0, idempotency_1.buildPayloadHash)(body);
     const result = await (0, idempotency_1.withIdempotency)({
-        idempotencyKey: idempKey,
+        idempotencyKey: keyVW.key,
         conversationId: ctx.conversationId,
         functionName: "valeriaWebhookChatvolt",
+        payloadHash: payloadHashW,
     }, async () => {
         const db = admin.firestore();
         const now = Date.now();
@@ -168,19 +180,22 @@ exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
         const mensagemLog = direcao === "entrada" ? mensagemCliente : respostaAgente;
         // Metadados de anexos — NUNCA conteúdo
         const anexos = extractAnexosMeta(body["anexos"] ?? body["attachments"]);
-        // Info de bloqueio
+        // Info de bloqueio: omite campos ausentes para evitar undefined no Firestore
+        const bmotivo = (body["bloqueioMotivo"] ?? body["blockReason"]);
+        const btipo = (body["bloqueioTipo"] ?? body["blockType"]);
+        const bdetalhes = body["bloqueioDetalhes"];
         const bloqueioInfo = tipo === "bloqueio"
             ? {
-                motivo: (body["bloqueioMotivo"] ?? body["blockReason"]),
-                tipo: (body["bloqueioTipo"] ?? body["blockType"]),
-                detalhes: body["bloqueioDetalhes"],
+                ...(bmotivo !== undefined && { motivo: bmotivo }),
+                ...(btipo !== undefined && { tipo: btipo }),
+                ...(bdetalhes !== undefined && { detalhes: bdetalhes }),
             }
             : undefined;
         // ── 1. Persiste evento bruto (path rápido, não bloqueador) ────────────
         await db.collection("valeria_webhook_events").add({
             eventType,
             conversationId: ctx.conversationId,
-            messageId: explicitMsgId ?? idempKey,
+            messageId: explicitMsgId ?? keyVW.key,
             agentId: ctx.agentId,
             organizationId: ctx.organizationId,
             channel: body["channel"] ?? body["canal"] ?? null,
@@ -203,7 +218,7 @@ exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
             conversationId: ctx.conversationId,
             agentId: ctx.agentId,
             organizationId: ctx.organizationId,
-            messageId: explicitMsgId ?? idempKey,
+            messageId: explicitMsgId ?? keyVW.key,
             mensagem: mensagemLog ?? `[${eventType}]`,
             direcao,
             tipo,
@@ -219,11 +234,10 @@ exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
             received: true,
             eventType,
             conversationId: ctx.conversationId,
-            messageId: explicitMsgId ?? idempKey,
+            messageId: explicitMsgId ?? keyVW.key,
             idempotente: !explicitMsgId, // avisa se chave foi gerada deterministicamente
         }, { communicableToCustomer: false, verified: true });
-    });
-    // 200 sempre (incluindo replay idempotente)
-    res.status(result.success ? 200 : 500).json(result);
+    }, res);
+    res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 //# sourceMappingURL=webhook.js.map

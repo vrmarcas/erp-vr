@@ -150,6 +150,7 @@ function makeReq(overrides: Partial<FakeReq> = {}): FakeReq {
     headers: {
       authorization: `Bearer ${FAKE_SECRET}`,
       "content-type": "application/json",
+      "idempotency-key": "regression-test-key-fixed",
     },
     body: {
       conversationId: FAKE_CONV_ID,

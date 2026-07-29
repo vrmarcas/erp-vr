@@ -19,7 +19,13 @@ import * as functions from "firebase-functions";
 import * as admin      from "firebase-admin";
 
 import { pipeline }          from "./pipeline";
-import { withIdempotency, extractIdempotencyKey } from "./idempotency";
+import {
+  withIdempotency,
+  extractIdempotencyKey,
+  validateIdempotencyKey,
+  buildPayloadHash,
+  idempotencyHttpStatus,
+} from "./idempotency";
 import { ok, err }           from "./response";
 import type {
   BriefingData,
@@ -143,9 +149,12 @@ export const valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res
     return;
   }
 
-  const idempKey = extractIdempotencyKey(req);
+  const rawKeyB = extractIdempotencyKey(req);
+  const keyVB = validateIdempotencyKey(rawKeyB);
+  if (!keyVB.ok) { res.status(400).json(err("VALIDATION_ERROR", keyVB.error)); return; }
+  const payloadHashB = buildPayloadHash(body as Record<string, unknown>);
   const result = await withIdempotency(
-    { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaAtualizarBriefing" },
+    { idempotencyKey: keyVB.key, conversationId: ctx.conversationId, functionName: "valeriaAtualizarBriefing", payloadHash: payloadHashB },
     async () => {
       const db       = admin.firestore();
       const ref      = db.collection(BRIEFING_COL).doc(ctx.conversationId);
@@ -232,8 +241,9 @@ export const valeriaAtualizarBriefing = RUN_OPTS.https.onRequest(async (req, res
             : undefined,
         }
       );
-    }
+    },
+    res
   );
 
-  res.status(result.success ? 200 : 500).json(result);
+  res.status(result.success ? 200 : idempotencyHttpStatus(result, 500)).json(result);
 });
