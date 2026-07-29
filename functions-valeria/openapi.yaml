@@ -155,7 +155,7 @@ components:
           example: 2
         matKey:
           type: string
-          description: Chave do material na config (ex: cfg_0)
+          description: "Chave do material na config (ex: cfg_0)"
           example: "cfg_0"
         rsm2:
           type: number
@@ -195,11 +195,19 @@ components:
 
 paths:
   /valeriaStatus:
-    get:
+    post:
       operationId: valeriaStatus
       summary: Health check da API
+      description: |
+        **Requer autenticação Bearer e contexto de conversa completo**, como
+        todos os demais endpoints — não há modo público/sem autenticação.
       tags: [Diagnóstico]
-      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationContext"
       responses:
         "200":
           description: API online
@@ -214,7 +222,7 @@ paths:
                         type: object
                         properties:
                           status: { type: string, example: "ok" }
-                          version: { type: string, example: "2.0.0" }
+                          projeto: { type: string, example: "ERP VR Marcas" }
 
   /valeriaGetContexto:
     post:
@@ -270,14 +278,31 @@ paths:
               allOf:
                 - $ref: "#/components/schemas/ConversationContext"
                 - type: object
+                  required: [nome]
                   properties:
                     nome: { type: string, example: "João Silva" }
-                    telefone:
+                    tel:
                       type: string
-                      description: Usado como fallback. channelPhone tem precedência.
+                      description: |
+                        Telefone do cliente. Obrigatório SOMENTE se channelPhone não
+                        estiver presente no contexto — channelPhone (Chatvolt) tem
+                        precedência quando ambos existem. É um erro 400
+                        (VALIDATION_ERROR) se nenhum dos dois for enviado.
+                      example: "+5511999990001"
                     email: { type: string, format: email }
-                    cpfCnpj: { type: string }
-                    tipo: { type: string, enum: [PF, PJ] }
+                    doc:
+                      type: string
+                      description: CPF ou CNPJ (sem validação de formato no servidor)
+                    tipo: { type: string, enum: [PF, PJ], description: "Padrão: PF" }
+                    cidade: { type: string }
+                    contato: { type: string, description: "Nome de um contato adicional (ex. em empresas)" }
+            example:
+              conversationId: "conv_abc123"
+              agentId: "agent_001"
+              organizationId: "org_vrmarcas"
+              channelPhone: "+5511999990001"
+              nome: "João Silva"
+              email: "joao@exemplo.invalid"
       responses:
         "200":
           description: Cliente upserted
@@ -292,8 +317,21 @@ paths:
                         type: object
                         properties:
                           clienteId: { type: string }
-                          conversationId: { type: string }
-                          action: { type: string, enum: [created, updated] }
+                          acao: { type: string, enum: [criado, atualizado] }
+                          cliente:
+                            type: object
+                            description: Registro completo do cliente após a operação
+                            properties:
+                              id: { type: string }
+                              nome: { type: string }
+                              tipo: { type: string }
+                              cidade: { type: string }
+                              tel: { type: string }
+                              email: { type: string }
+                              doc: { type: string }
+                              conversationIds:
+                                type: array
+                                items: { type: string }
 
   /valeriaCatalogo:
     post:
@@ -461,7 +499,15 @@ paths:
   /valeriaCriarOportunidade:
     post:
       operationId: valeriaCriarOportunidade
-      summary: Criar ou atualizar oportunidade CRM vinculada ao conversationId
+      summary: Criar ou atualizar oportunidade (lead) CRM vinculada ao conversationId
+      description: |
+        Cria ou atualiza um lead em `crm_leads` (mesmo dict que o Kanban do ERP
+        lê). A busca por lead existente usa primeiro `conversationId`, depois
+        telefone normalizado como fallback.
+
+        **Este endpoint não recebe dados de produto/demanda.** Informações
+        como produto, medidas, material, prazo etc. devem ser enviadas via
+        `valeriaAtualizarBriefing`, que é o endpoint correto para isso.
       tags: [CRM]
       parameters:
         - name: Idempotency-Key
@@ -475,13 +521,29 @@ paths:
               allOf:
                 - $ref: "#/components/schemas/ConversationContext"
                 - type: object
-                  required: [produto, interesse]
+                  required: [nome]
                   properties:
-                    produto:     { type: string, example: "Placa acrílica" }
-                    interesse:   { type: string, example: "Luminoso para loja" }
-                    etapa:       { type: string, example: "CONTATO" }
-                    origem:      { type: string, example: "WhatsApp" }
-                    observacoes: { type: string }
+                    nome:
+                      type: string
+                      example: "João Silva"
+                    tel:
+                      type: string
+                      description: |
+                        Obrigatório SOMENTE se channelPhone não estiver presente no
+                        contexto — channelPhone tem precedência. Erro 400 se nenhum
+                        dos dois for enviado.
+                      example: "+5511999990001"
+                    email: { type: string, format: email }
+                    observacoes:     { type: string }
+                    proximaAcao:     { type: string, example: "Ligar em 3 dias" }
+                    dataProximaAcao: { type: string, format: date-time }
+            example:
+              conversationId: "conv_abc123"
+              agentId: "agent_001"
+              organizationId: "org_vrmarcas"
+              channelPhone: "+5511999990001"
+              nome: "João Silva"
+              observacoes: "Interesse em luminoso para loja"
       responses:
         "200":
           description: Oportunidade criada/atualizada
@@ -496,8 +558,12 @@ paths:
                         type: object
                         properties:
                           leadId: { type: string }
-                          conversationId: { type: string }
-                          action: { type: string, enum: [created, updated] }
+                          acao: { type: string, enum: [criado, atualizado] }
+        "400":
+          description: "nome ausente, ou nem tel nem channelPhone informados"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
 
   /valeriaRegistrarMensagem:
     post:
@@ -517,14 +583,56 @@ paths:
               allOf:
                 - $ref: "#/components/schemas/ConversationContext"
                 - type: object
-                  required: [messageId, texto, sentido]
+                  required: [mensagem]
                   properties:
-                    messageId: { type: string }
-                    texto:     { type: string }
-                    sentido:   { type: string, enum: [entrada, saida] }
+                    mensagem:
+                      type: string
+                      description: Conteúdo da mensagem (campo obrigatório real — não "texto")
+                      example: "Quero fazer uma placa de 100x100mm"
+                    messageId:
+                      type: string
+                      description: Usado como chave de idempotência quando presente
+                    direcao:
+                      type: string
+                      enum: [entrada, saida]
+                      description: "Padrão: entrada"
+                    tipo:
+                      type: string
+                      description: 'Padrão: "texto". Ex.: texto, follow_up, bloqueio, nota'
+                    origem:
+                      type: string
+                      description: 'Padrão: "manual". Ex.: chatvolt, whatsapp, manual'
+                    statusProcessamento: { type: string, description: 'Padrão: "processado"' }
+                    anexos:
+                      type: array
+                      description: Somente metadados — nunca conteúdo binário. Aceita também `attachments` como alias.
+                      items:
+                        type: object
+                        properties:
+                          url:      { type: string }
+                          mimeType: { type: string, description: "Aceita também mime_type ou type" }
+                          tamanho:  { type: number, description: "Aceita também size" }
+                          nome:     { type: string, description: "Aceita também name ou filename" }
+                          transcricao: { type: string, description: "Omitido quando não fornecido" }
+                    transcricao: { type: string, description: "Transcrição de áudio, quando tipo é relacionado a áudio" }
+                    bloqueioMotivo: { type: string, description: "Usado quando tipo=bloqueio" }
+                    bloqueioTipo: { type: string }
+                    bloqueioDetalhes: { type: string }
+            example:
+              conversationId: "conv_abc123"
+              agentId: "agent_001"
+              organizationId: "org_vrmarcas"
+              messageId: "msg_xyz789"
+              mensagem: "Quero fazer uma placa de 100x100mm"
+              direcao: "entrada"
       responses:
         "200":
           description: Mensagem registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "400":
+          description: "mensagem ausente"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiResponseBase" }
@@ -803,7 +911,7 @@ paths:
                           completude:     { type: number, description: "0–100" }
                           classificacao:  { type: string, enum: [catalogo, semi_personalizada, personalizada] }
                           camposFaltando: { type: array, items: { type: string } }
-                          camposAlterados:{ type: array, items: { type: string } }
+                          camposAlterados: { type: array, items: { type: string } }
 
   /valeriaMudarEtapa:
     post:

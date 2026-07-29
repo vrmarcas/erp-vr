@@ -56,6 +56,20 @@ function buildIdempKey(idempotencyKey, conversationId, functionName) {
     const raw = `${functionName}:${conversationId}:${idempotencyKey}`;
     return crypto.createHash("sha256").update(raw).digest("hex");
 }
+// ── Sanitização para persistência no Firestore ────────────────────────────────
+/**
+ * Remove propriedades `undefined` (inclusive aninhadas) transformando o valor
+ * na mesma representação JSON que já é enviada por HTTP via res.json(), que
+ * o Firestore Admin SDK aceita (ele rejeita `undefined` explícito por padrão).
+ * Preserva null, false, 0 e strings vazias — apenas `undefined` é removido.
+ */
+function toPersistableResult(value) {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+        throw new Error("Idempotency result is not JSON-serializable.");
+    }
+    return JSON.parse(serialized);
+}
 // ── Wrapper de idempotência ───────────────────────────────────────────────────
 /**
  * Executa fn() com garantia de idempotência.
@@ -126,9 +140,10 @@ async function withIdempotency(opts, fn) {
         throw fnErr;
     }
     // 3. Substituir placeholder pelo resultado real
+    const persistableResult = toPersistableResult(result);
     await ref.set({
         status: "done",
-        result,
+        result: persistableResult,
         createdAt: now,
         expiresAt: now + TTL_MS,
         functionName,

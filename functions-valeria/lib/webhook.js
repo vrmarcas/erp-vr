@@ -98,13 +98,16 @@ function mapEventToInteracao(eventType) {
 function extractAnexosMeta(raw) {
     if (!Array.isArray(raw))
         return [];
-    return raw.map((a) => ({
-        url: a["url"],
-        mimeType: (a["mimeType"] ?? a["mime_type"] ?? a["type"]),
-        tamanho: (a["tamanho"] ?? a["size"]),
-        nome: (a["nome"] ?? a["name"] ?? a["filename"]),
-        transcricao: a["transcricao"],
-    }));
+    return raw.map((a) => {
+        const transcricao = a["transcricao"];
+        return {
+            url: a["url"],
+            mimeType: (a["mimeType"] ?? a["mime_type"] ?? a["type"]),
+            tamanho: (a["tamanho"] ?? a["size"]),
+            nome: (a["nome"] ?? a["name"] ?? a["filename"]),
+            ...(transcricao !== undefined ? { transcricao } : {}),
+        };
+    });
 }
 // ── Handler principal ─────────────────────────────────────────────────────────
 exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
@@ -207,8 +210,8 @@ exports.valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) => {
             origem: "chatvolt",
             statusProcessamento: "pendente",
             eventType,
-            anexosMeta: anexos.length > 0 ? anexos : undefined,
-            bloqueioInfo,
+            ...(anexos.length > 0 ? { anexosMeta: anexos } : {}),
+            ...(bloqueioInfo !== undefined ? { bloqueioInfo } : {}),
             ts: now,
             createdAt: nowIso,
         });

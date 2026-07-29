@@ -79,13 +79,16 @@ export function mapEventToInteracao(
  */
 function extractAnexosMeta(raw: unknown): AnexoMeta[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as Record<string, unknown>[]).map((a) => ({
-    url:        a["url"]        as string | undefined,
-    mimeType:   (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined,
-    tamanho:    (a["tamanho"]  ?? a["size"])                   as number | undefined,
-    nome:       (a["nome"]     ?? a["name"] ?? a["filename"])  as string | undefined,
-    transcricao: a["transcricao"]                              as string | undefined,
-  }));
+  return (raw as Record<string, unknown>[]).map((a) => {
+    const transcricao = a["transcricao"] as string | undefined;
+    return {
+      url:        a["url"]        as string | undefined,
+      mimeType:   (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined,
+      tamanho:    (a["tamanho"]  ?? a["size"])                   as number | undefined,
+      nome:       (a["nome"]     ?? a["name"] ?? a["filename"])  as string | undefined,
+      ...(transcricao !== undefined ? { transcricao } : {}),
+    } as AnexoMeta;
+  });
 }
 
 // ── Handler principal ─────────────────────────────────────────────────────────
@@ -213,8 +216,8 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         origem:              "chatvolt",
         statusProcessamento: "pendente",
         eventType,
-        anexosMeta:          anexos.length > 0 ? anexos : undefined,
-        bloqueioInfo,
+        ...(anexos.length > 0 ? { anexosMeta: anexos } : {}),
+        ...(bloqueioInfo !== undefined ? { bloqueioInfo } : {}),
         ts:                  now,
         createdAt:           nowIso,
       });
