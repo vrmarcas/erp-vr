@@ -402,10 +402,12 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
         // Recuperar simulação e marcar como usada em transação atômica (anti double-spend)
         let sim;
         try {
+            const db = admin.firestore();
             await db.runTransaction(async (tx) => {
                 const simRef = db.collection(SIM_COL).doc(simulationId);
                 const simDoc = await tx.get(simRef);
-                if (!simDoc.exists) throw Object.assign(new Error(), { _code: "SIMULATION_NOT_FOUND" });
+                if (!simDoc.exists)
+                    throw Object.assign(new Error(), { _code: "SIMULATION_NOT_FOUND" });
                 const simData = simDoc.data();
                 if (simData.conversationId !== ctx.conversationId)
                     throw Object.assign(new Error(), { _code: "SIMULATION_MISMATCH" });
@@ -416,7 +418,8 @@ exports.valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {
                 tx.update(simRef, { usado: true });
                 sim = simData;
             });
-        } catch (e) {
+        }
+        catch (e) {
             const code = e._code;
             if (code === "SIMULATION_NOT_FOUND")
                 return (0, response_1.err)("SIMULATION_NOT_FOUND", "simulationId não encontrado. Execute valeriaCalcularOrcamento primeiro.", { communicableToCustomer: false });

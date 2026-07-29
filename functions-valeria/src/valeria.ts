@@ -415,6 +415,7 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
         // Recuperar simulação e marcar como usada em transação atômica (anti double-spend)
         let sim!: PricingSimulation;
         try {
+          const db = admin.firestore();
           await db.runTransaction(async (tx) => {
             const simRef = db.collection(SIM_COL).doc(simulationId!);
             const simDoc = await tx.get(simRef);
