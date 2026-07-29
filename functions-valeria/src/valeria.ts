@@ -275,7 +275,8 @@ export const valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) =>
           { acao, clienteId: cliente.id, cliente },
           { communicableToCustomer: false, verified: true }
         );
-      }
+      },
+      res
     );
 
     res.status(result.success ? 200 : idempotencyHttpStatus(result, 500)).json(result);
@@ -375,7 +376,8 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
             );
           }
         }
-      }
+      },
+      res
     );
 
     res.status(result.success ? 200 : idempotencyHttpStatus(result, 422)).json(result);
@@ -826,7 +828,8 @@ export const valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         await fsWrite("crm_leads", dict);
 
         return ok({ agendado: true, acao }, { communicableToCustomer: false });
-      }
+      },
+      res
     );
 
     res.status(result.success ? 200 : idempotencyHttpStatus(result, 500)).json(result);

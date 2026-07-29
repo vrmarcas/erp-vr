@@ -279,7 +279,7 @@ exports.valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) => {
             .doc(ctx.conversationId)
             .set({ clienteId: cliente.id, agentId: ctx.agentId, updatedAt: Date.now() }, { merge: true });
         return (0, response_1.ok)({ acao, clienteId: cliente.id, cliente }, { communicableToCustomer: false, verified: true });
-    });
+    }, res);
     res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -369,7 +369,7 @@ exports.valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res) => 
                 }, { communicableToCustomer: true, verified: true });
             }
         }
-    });
+    }, res);
     res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 422)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -798,7 +798,7 @@ exports.valeriaProximaAcao = RUN_OPTS.https.onRequest(async (req, res) => {
         dict[id] = lead;
         await fsWrite("crm_leads", dict);
         return (0, response_1.ok)({ agendado: true, acao }, { communicableToCustomer: false });
-    });
+    }, res);
     res.status(result.success ? 200 : (0, idempotency_1.idempotencyHttpStatus)(result, 500)).json(result);
 });
 // ─────────────────────────────────────────────────────────────────────────────
