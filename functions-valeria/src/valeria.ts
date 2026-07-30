@@ -564,6 +564,8 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
         if (found) {
           // Atualizar lead existente (mantém campos ERP; atualiza sub-objeto valeria)
           const existing = found.lead;
+          // leads antigos podem não ter `id` como campo — garantir que nunca seja undefined
+          existing.id = existing.id ?? found.id;
           existing.nome  = nome;
           existing.tel   = tel;
           if (body["email"]) existing.email = body["email"] as string;
