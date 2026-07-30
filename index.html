@@ -144,7 +144,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 }
 
 .content { position: absolute; top: 52px; left: 0; right: 0; bottom: 0; overflow-y: auto; padding: 18px 20px; }
-#pg-marketing { position: fixed; left: 220px; right: 0; top: 52px; bottom: 0; overflow-y: auto; padding: 18px 20px; background: var(--bg); z-index: 1; }
 
 /* =========================================================
    PAGES
@@ -1183,6 +1182,11 @@ if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
 var _db = firebase.firestore();
 var _COL = "erp_vr"; // coleção Firestore
 var _cloudReady = false;
+// [S4] Array de funções unsubscribe — cancelar todos os onSnapshot ao sair da página
+var _CLOUD_UNSUBS = [];
+window.addEventListener('pagehide', function() {
+  _CLOUD_UNSUBS.forEach(function(u){ try{ u(); }catch(e){} });
+});
 // ── TOMBSTONES DE ESTOQUE ────────────────────────────────────────────
 // Problema: clientes com versão ANTIGA do ERP aberta gravam o STOCK inteiro
 // da memória deles (desatualizada), fazendo itens excluídos "voltarem".
@@ -1219,7 +1223,7 @@ function _stockTombSave() {
   });
   if(typeof _cloudSave === 'function') _cloudSave('stock_deleted', _STOCK_TOMB);
 }
-_db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
+_CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
   if(doc.exists && doc.data() && doc.data().data){
     try{
       var d = JSON.parse(doc.data().data);
@@ -1228,7 +1232,7 @@ _db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
   }
   _stockTombLoaded = true;
   if(_stockApplyTomb()){ try{ stockRenderItems(); }catch(e){} }
-},function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; });
+},function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; }));
 
 // Listener de estoque em tempo real — registrado imediatamente, sem esperar _cloudReady
 // Isso garante que todos os usuários vejam mudanças em tempo real
@@ -1254,10 +1258,10 @@ function _stockAplicarSnapshot(doc){
     }
   }
 }
-_db.collection(_COL).doc('stock').onSnapshot(
+_CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
   function(doc){ try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); } },
   function(e){ console.warn('[Stock] onSnapshot erro:',e); }
-);
+));
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
 // não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza
@@ -1300,7 +1304,7 @@ function _cloudLoad(key, cb) {
 // Listener em tempo real
 function _cloudWatch(key, callback) {
   if(!_db) return;
-  return _db.collection(_COL).doc(key).onSnapshot(function(doc) {
+  var unsub = _db.collection(_COL).doc(key).onSnapshot(function(doc) {
     if(doc.exists && doc.data() && doc.data().data) {
       try {
         var raw = doc.data().data;
@@ -1309,6 +1313,8 @@ function _cloudWatch(key, callback) {
       } catch(e){}
     }
   }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); });
+  _CLOUD_UNSUBS.push(unsub); // [S4] acumular para cleanup no pagehide
+  return unsub;
 }
 
 // Carregar todos os dados da nuvem ao iniciar
@@ -1336,7 +1342,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'reativ');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -1421,7 +1427,7 @@ function _cloudLoadAll() {
       if(d&&typeof d==='object') _POSV_DATA=d;
     });
     _cloudWatch("erp_orc_produtos", function(d){
-      if(d&&Array.isArray(d)&&d.length){ ORC_PRODUTOS=d; try{orcRefreshProdSelects();}catch(e){} }
+      if(d&&Array.isArray(d)&&d.length){ ORC_PRODUTOS=d.map(function(p){return typeof p==='string'?p:(p.nome||p.name||String(p));}).filter(Boolean); try{orcRefreshProdSelects();}catch(e){} }
     });
     _cloudWatch("erp_mach_presets", function(d){
       if(d&&Array.isArray(d)) _MACH_PRESETS=d;
@@ -1468,7 +1474,7 @@ function _cloudLoadAll() {
   _cloudLoad("erp_client_history", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _CLIENT_HIST=d; done(); });
   _cloudLoad("erp_bank_config", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _BANK_DATA=d; done(); });
   _cloudLoad("erp_posvendas", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _POSV_DATA=d; done(); });
-  _cloudLoad("erp_orc_produtos", function(d){ if(d&&Array.isArray(d)&&d.length) ORC_PRODUTOS=d; done(); });
+  _cloudLoad("erp_orc_produtos", function(d){ if(d&&Array.isArray(d)&&d.length) ORC_PRODUTOS=d.map(function(p){return typeof p==='string'?p:(p.nome||p.name||String(p));}).filter(Boolean); done(); });
   _cloudLoad("erp_mach_presets", function(d){ if(d&&Array.isArray(d)&&d.length) _MACH_PRESETS=d; done(); });
   _cloudLoad("erp_mat_prices", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _MAT_PRICES=d; done(); });
   _cloudLoad("erp_permissoes", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _PERM_DATA=d; done(); });
@@ -1693,7 +1699,7 @@ function _cloudAuthAviso(msg){
       <div class="sb-item" id="sbMktIntg"  onclick="navMkt('integracoes',this)"><span class="ico">🔗</span> Conexões & Ads</div>
       <div class="sb-item" id="sbMktIntel" onclick="navMkt('inteligencia',this)"><span class="ico">💡</span> Inteligência & Tendências</div>
       <div class="sb-item" id="sbMktDash"  onclick="navMkt('dashboard',this)"><span class="ico">📊</span> Dashboard de Conversão</div>
-    <div class="sb-item" id="sbMktLeads" onclick="navMkt('leadsSite',this)">🛒 Leads do Site</div>
+      <div class="sb-item" id="sbMktLeads" onclick="navMkt('leadsSite',this)"><span class="ico">🛒</span> Leads do Site</div>
     </div>
 
     <div class="sb-section" onclick="sbToggle('financeiro')"><span>Financeiro</span><span class="sb-arrow">▼</span></div>
@@ -3394,7 +3400,11 @@ function _cloudAuthAviso(msg){
 
       <!-- Tab bar + actions -->
       <div style="display:flex;align-items:center;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">
-                <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
+        <button id="crmTabSite" onclick="crmSetBrand('site')"
+          style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:800;cursor:pointer;border-bottom:3px solid #059669;margin-bottom:-2px;color:#065F46;display:flex;align-items:center;gap:6px">
+          🛒 Leads do Site <span style="background:#DCFCE7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px" id="crmSiteCount">0</span>
+        </button>
+        <button id="crmTabReativ" onclick="crmSetBrand('reativ')"
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
           🔄 Reativação <span style="background:#D1FAE5;color:#065F46;border-radius:20px;padding:1px 7px;font-size:10px" id="crmReativCount">0</span>
         </button>
@@ -3423,7 +3433,97 @@ function _cloudAuthAviso(msg){
         <div id="crmKpiVT" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"></div>
         <div style="overflow-x:auto;padding-bottom:8px"><div class="crm-board" id="crmBoardVT"></div></div>
       </div>
-      
+      <div id="crmBrandSite" style="display:none">
+        <!-- KPI bar -->
+        <div id="crmKpiSite" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px"></div>
+
+        <!-- Topbar ações -->
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <input id="siteLeadSearch" type="text" placeholder="🔍 Buscar por nome, email, tel..."
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"
+            oninput="siteLeadRender()">
+          <select id="siteLeadFiltroStatus" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todos os status</option>
+            <option value="novo">🆕 Novo</option>
+            <option value="contatado">📞 Contatado</option>
+            <option value="qualificado">⭐ Qualificado</option>
+            <option value="convertido">✅ Convertido</option>
+            <option value="inativo">❌ Inativo</option>
+          </select>
+          <select id="siteLeadFiltroOrigem" onchange="siteLeadRender()"
+            style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+            <option value="">Todas as origens</option>
+            <option value="cadastro">👤 Cadastro</option>
+            <option value="compra">🛍 Compra</option>
+            <option value="newsletter">📧 Newsletter</option>
+            <option value="manual">✏️ Manual</option>
+          </select>
+          <button class="topbar-btn" style="font-size:11px" onclick="siteLeadNovoModal()">+ Novo Lead</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteShopifyPanel()">🔄 Sync Shopify</button>
+          <button class="topbar-btn ghost" style="font-size:11px" onclick="siteImportCSV()">📥 Importar CSV</button>
+        </div>
+
+        <!-- Shopify sync panel (hidden by default) -->
+        <div id="siteShopifyPanelDiv" style="display:none;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-size:20px">🛒</span>
+            <div>
+              <div style="font-weight:800;font-size:13px">Sincronizar com Shopify</div>
+              <div style="font-size:10px;color:var(--muted)">Puxe os clientes do vitredecor.com automaticamente</div>
+            </div>
+            <button onclick="document.getElementById('siteShopifyPanelDiv').style.display='none'" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted)">✕</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">URL da loja (.myshopify.com)</label>
+              <input id="shopifyStoreUrl" type="text" placeholder="vitredecor.myshopify.com"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Admin API Access Token</label>
+              <input id="shopifyToken" type="password" placeholder="shpat_xxxxxxxxxxxx"
+                style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;background:var(--bg);color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#92400E;line-height:1.5">
+            <strong>Como obter o token:</strong> No painel Shopify → Configurações → Aplicativos → Desenvolver aplicativos → Criar aplicativo → 
+            em "Permissões da API Admin" ative <em>read_customers</em> e <em>read_orders</em> → Instalar → copiar o "Token de acesso da API Admin".
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button onclick="siteShopifySync()" style="padding:9px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:12px">🔄 Sincronizar Agora</button>
+            <button onclick="siteSalvarConfig()" style="padding:9px 14px;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;font-weight:700;cursor:pointer;font-size:11px;color:var(--text)">💾 Salvar Config</button>
+            <span id="shopifySyncStatus" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <!-- CSV import -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Ou importe um CSV exportado do Shopify (Clientes → Exportar):</div>
+            <input type="file" id="siteCSVInput" accept=".csv" onchange="siteParseCSV(this)" style="font-size:11px">
+          </div>
+        </div>
+
+        <!-- Leads table -->
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cliente</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Contato</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Origem</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Pedidos</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Status</th>
+                <th style="padding:10px 12px;text-align:left;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Cadastro</th>
+                <th style="padding:10px 12px;text-align:center;font-weight:700;color:var(--muted);font-size:10px;text-transform:uppercase">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="siteLeadsTbody">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
+                Nenhum lead ainda. Clique em <strong>Sync Shopify</strong> para importar clientes do site ou em <strong>+ Novo Lead</strong> para adicionar manualmente.
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <!-- ── BASE DE CLIENTES — Reativação ── -->
       <div id="crmBrandReativ" style="display:none">
@@ -4845,15 +4945,22 @@ function _cloudAuthAviso(msg){
           </div>
         </div>
 
+        <!-- ── ABA 9: INTEGRAÇÕES ── -->
         <div id="cfgPg9" class="cfg-pg" style="display:none">
           <div class="card">
             <div class="card-h"><div class="card-h-left">🔌 Integrações — Valéria AI</div></div>
-            <p style="font-size:12px;color:var(--muted);margin:0 0 14px 0">Configure a chave de autenticação usada pelo agente de WhatsApp (Valéria / Chatvolt).</p>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 14px 0">Configure a chave de autenticação usada pelo agente de WhatsApp (Valéria / Chatvolt) para acessar este ERP.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-              <div><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">API KEY (Chatvolt / Valéria)</label>
-                <input type="password" id="cfgIntegApiKey" placeholder="Chave secreta..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box"></div>
-              <div><label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">WEBHOOK URL (opcional)</label>
-                <input type="text" id="cfgIntegWebhook" placeholder="https://..." style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box"></div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">API KEY (Chatvolt / Valéria)</label>
+                <input type="password" id="cfgIntegApiKey" placeholder="Chave secreta da integração..."
+                  style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box">
+              </div>
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px">WEBHOOK URL (opcional)</label>
+                <input type="text" id="cfgIntegWebhook" placeholder="https://..."
+                  style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);box-sizing:border-box">
+              </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
               <button onclick="cfgIntegSalvar()" style="padding:7px 18px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>
@@ -4861,12 +4968,14 @@ function _cloudAuthAviso(msg){
               <span id="cfgIntegStatus" style="font-size:11px;color:var(--muted)"></span>
             </div>
             <div style="margin-top:18px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
-              <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">MOTOR API — TESTE</div>
-              <button onclick="(function(){var r=window.calcularOrcamentoAPI({itens:[{larg:100,alt:100,qty:1}]});document.getElementById('cfgIntegTestOut').textContent=JSON.stringify(r,null,2);})()" style="padding:5px 14px;background:none;border:1.5px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer">▶ Testar motor</button>
-              <pre id="cfgIntegTestOut" style="font-size:10px;color:var(--muted);margin-top:8px;white-space:pre-wrap"></pre>
+              <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">MOTOR DE ORÇAMENTO — TESTE</div>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Teste rápido: <code>window.calcularOrcamentoAPI({itens:[{larg:100,alt:100,qty:1,matKey:'cfg_0'}]})</code></div>
+              <button onclick="(function(){ var r=window.calcularOrcamentoAPI({itens:[{larg:100,alt:100,qty:1}]}); document.getElementById('cfgIntegTestOut').textContent=JSON.stringify(r,null,2); })()" style="padding:5px 14px;background:none;border:1.5px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer">▶ Testar motor</button>
+              <pre id="cfgIntegTestOut" style="font-size:10px;color:var(--muted);margin-top:8px;white-space:pre-wrap;word-break:break-all"></pre>
             </div>
           </div>
         </div>
+
     </div><!-- /pg-config-orc -->
 
     <!-- ================================================
@@ -5110,7 +5219,6 @@ function _cloudAuthAviso(msg){
               <option value="comercial">💼 Comercial</option>
               <option value="producao">🔧 Produção</option>
               <option value="financeiro">💳 Financeiro</option>
-          <option value="marketing">📣 Marketing</option>
               <option value="master">👑 Master</option>
               <option value="admin">🔐 Admin</option>
             </select>
@@ -5979,7 +6087,10 @@ function _cloudAuthAviso(msg){
         <div class="gen-modal-title" id="cliDetNome">—</div>
         <div id="cliDetSub" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
       </div>
-      <button class="gen-close" onclick="cliCloseDetalhe()">✕</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="topbar-btn" style="font-size:12px;padding:6px 12px" onclick="cliEditar(window._cliDetId)">✏️ Editar</button>
+        <button class="gen-close" onclick="cliCloseDetalhe()">✕</button>
+      </div>
     </div>
     <div class="gen-modal-body" id="cliDetBody"></div>
   </div>
@@ -6060,24 +6171,28 @@ function navFin(tab, el) {
 
 // ── MARKETING: navegação por sub-aba ────────────────────────────────────────
 function navMkt(tab, el) {
+  if(tab === 'leadsSite') {
+    // Leads do Site fica na aba CRM, brand "site"
+    nav('crm', el);
+    setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand('site'); }, 150);
+    return;
+  }
   window._mktPendingTab = tab;
   nav('marketing', el);
   var subtitles = {integracoes:'Conexões & Ads', inteligencia:'Inteligência & Tendências', dashboard:'Dashboard de Conversão'};
   var titleEl = document.getElementById('topbarTitle');
   if(titleEl && subtitles[tab]) titleEl.textContent = subtitles[tab];
-  setTimeout(function(){ if(typeof mktTab==='function') mktTab(tab); }, 90);
 }
 
 function mktTab(tab) {
-  ['integracoes','inteligencia','dashboard','leadsSite'].forEach(function(t){
+  ['integracoes','inteligencia','dashboard'].forEach(function(t){
     var content = document.getElementById('mktTabContent-'+t);
     var btn     = document.getElementById('mktTabBtn-'+t);
     if(content) content.style.display = (t === tab) ? '' : 'none';
     if(btn){ btn.classList.toggle('on', t === tab); }
   });
-  if(tab === 'inteligencia' && typeof _mktRenderInteligencia==='function') _mktRenderInteligencia();
-  if(tab === 'dashboard' && typeof _mktRenderDashboard==='function') _mktRenderDashboard();  if(tab === 'leadsSite') { try{siteLeadRender();siteKpiRender();}catch(e){} }
-
+  if(tab === 'inteligencia') _mktRenderInteligencia();
+  if(tab === 'dashboard')    _mktRenderDashboard();
 }
 
 // Calendário B2B e radar de tendências
@@ -6184,6 +6299,7 @@ function _mktRenderInteligencia() {
       +'</div>';
   }).join('');
 }
+
 // Dashboard de Conversão — Ads vs ERP real
 function _mktRenderDashboard() {
   var metrics = _mktMetrics || [];
@@ -6329,6 +6445,14 @@ function _mktRenderDashboard() {
     }
   }
 }
+
+// Navigation
+
+// ══════════════════════════════════════════════════════════════
+// IMPORT DE CLIENTES POR PLANILHA
+// ══════════════════════════════════════════════════════════════
+var _cliImportRows = [];
+
 function cliOpenImport() {
   _cliImportRows = [];
   document.getElementById('cliImportPreview').style.display = 'none';
@@ -7625,7 +7749,11 @@ function planAplicar() {
     // planPecasManual = só as extras manuais — restaurado ao reabrir (evita duplicação do catálogo)
     var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
     row.dataset.planPecasManual = JSON.stringify(_onlyManual);
-    var _pSumBox=document.getElementById('planSumBox'); if(_pSumBox&&_pSumBox.dataset.planImg) row.dataset.planImg=_pSumBox.dataset.planImg;
+    // Custo e área das peças manuais (para orcRecalc precificar por espessura correta)
+    var _pSumBox=document.getElementById('planSumBox');
+    row.dataset.planManualMatCost = _pSumBox ? (parseFloat(_pSumBox.dataset.planManualMatCost)||0) : 0;
+    row.dataset.planManualAreaM2  = _pSumBox ? (parseFloat(_pSumBox.dataset.planManualAreaM2)||0)  : 0;
+    if(_pSumBox&&_pSumBox.dataset.planImg) row.dataset.planImg=_pSumBox.dataset.planImg;
   }
 
   // ocultar inputs larg/alt e mostrar badge de planificado
@@ -7656,7 +7784,7 @@ function planAplicar() {
 
 function planLimpar(idx) {
   var row = document.getElementById('oir_'+idx);
-  if(row) { delete row.dataset.planArea; delete row.dataset.planPecas; }
+  if(row) { delete row.dataset.planArea; delete row.dataset.planPecas; delete row.dataset.planManualMatCost; delete row.dataset.planManualAreaM2; }
   var lInput = document.getElementById('oi_larg_'+idx);
   var aInput = document.getElementById('oi_alt_'+idx);
   if(lInput) lInput.style.display='';
@@ -7719,7 +7847,11 @@ function orcRecalc() {
     const priceM2 = _matGetRsm2(matKey, idx);
     const planArea = parseFloat(row.dataset.planArea)||0;
     const useArea  = planArea > 0 ? planArea : (larg*alt);
-    const matCost = (useArea/10000) * priceM2 * qty;
+    // Peças manuais têm preço próprio por espessura — subtrair área manual da base
+    const planManualMatCost = parseFloat(row.dataset.planManualMatCost)||0;
+    const planManualAreaM2  = planArea>0 ? (parseFloat(row.dataset.planManualAreaM2)||0) : 0;
+    const baseAreaM2 = Math.max(0, useArea/10000 - planManualAreaM2);
+    const matCost = (baseAreaM2 * priceM2 + planManualMatCost) * qty;
     matTotal  += matCost;
     areaTotal += useArea*qty;
     qtyTotal  += qty;
@@ -7827,34 +7959,64 @@ function orcRecalc() {
 }
 
 // ── Motor de Orçamento API (Valéria / Cloud Functions) ──────────────────────
+// Calcula preço sem tocar no DOM. Usa _cfgData para parâmetros financeiros.
+// params: { itens:[{larg,alt,qty,matKey,planArea?}], descPct?,descRS?,acresPct?,acresRS?,extras? }
+// retorna: { finalPrice, totalCost, matTotal, breakdown }
 window.calcularOrcamentoAPI = function(params) {
   try {
-    var p=params||{}, itens=Array.isArray(p.itens)?p.itens:[];
-    var _cfgFin=(_cfgData&&_cfgData.financeiro)||{};
-    var overhead=((_cfgFin.overhead!=null?_cfgFin.overhead:41.16))/100;
-    var vrml=((_cfgFin.vrml!=null?_cfgFin.vrml:20))/100;
-    var impostos=((_cfgFin.impostos!=null?_cfgFin.impostos:0))/100;
-    var factor=1-(overhead+vrml+impostos); if(factor<=0)factor=0.01;
-    var mats=((_cfgData&&_cfgData.materiais)||[]);
-    function _gmp(mk){
-      if(!mk)return 0;
-      if(mk.indexOf('cfg_')===0){var mi=parseInt(mk.replace('cfg_',''));var mr=mats[mi];if(mr){var a=(mr.comp||0)*(mr.larg||0)/10000;return a>0?(mr.preco||0)/a:0;}}
+    var p        = params || {};
+    var itens    = Array.isArray(p.itens) ? p.itens : [];
+    var _cfgFin  = (_cfgData && _cfgData.financeiro) || {};
+    var overhead = ((_cfgFin.overhead != null ? _cfgFin.overhead : 41.16)) / 100;
+    var vrml     = ((_cfgFin.vrml     != null ? _cfgFin.vrml     : 20))    / 100;
+    var impostos = ((_cfgFin.impostos != null ? _cfgFin.impostos : 0))     / 100;
+    var factor   = 1 - (overhead + vrml + impostos);
+    if (factor <= 0) factor = 0.01;
+
+    var mats = ((_cfgData && _cfgData.materiais) || []);
+    function _getMatPrice(matKey) {
+      if (!matKey) return 0;
+      if (matKey.indexOf('cfg_') === 0) {
+        var mi = parseInt(matKey.replace('cfg_', ''));
+        var mr = mats[mi];
+        if (mr) {
+          var area = (mr.comp || 0) * (mr.larg || 0) / 10000;
+          return area > 0 ? (mr.preco || 0) / area : 0;
+        }
+      }
       return 0;
     }
-    var matTotal=0;
-    itens.forEach(function(it){
-      var qty=parseFloat(it.qty)||1,larg=parseFloat(it.larg)||0,alt=parseFloat(it.alt)||0;
-      var useArea=parseFloat(it.planArea)>0?parseFloat(it.planArea):(larg*alt);
-      matTotal+=(useArea/10000)*(parseFloat(it.rsm2)||_gmp(it.matKey))*qty;
+
+    var matTotal = 0, areaTotal = 0;
+    itens.forEach(function(it) {
+      var qty      = parseFloat(it.qty)  || 1;
+      var larg     = parseFloat(it.larg) || 0;
+      var alt      = parseFloat(it.alt)  || 0;
+      var useArea  = parseFloat(it.planArea) > 0 ? parseFloat(it.planArea) : (larg * alt);
+      var priceM2  = parseFloat(it.rsm2) || _getMatPrice(it.matKey);
+      matTotal  += (useArea / 10000) * priceM2 * qty;
+      areaTotal += useArea * qty;
     });
-    var extrasTotal=parseFloat(p.extras)||0,totalCost=matTotal+extrasTotal;
-    var descPct=parseFloat(p.descPct)||0,descRS=parseFloat(p.descRS)||0;
-    var acresPct=parseFloat(p.acresPct)||0,acresRS=parseFloat(p.acresRS)||0;
-    var finalPrice=(totalCost/factor)*(1-descPct/100)-descRS;
-    finalPrice=finalPrice*(1+acresPct/100)+acresRS;
-    if(finalPrice<0)finalPrice=0;
-    return{finalPrice:Math.round(finalPrice*100)/100,totalCost:Math.round(totalCost*100)/100,matTotal:Math.round(matTotal*100)/100,breakdown:{overhead:overhead*100,vrml:vrml*100,impostos:impostos*100,factor:Math.round(factor*10000)/100,extrasTotal:extrasTotal}};
-  }catch(e){return{finalPrice:0,totalCost:0,matTotal:0,error:e.message};}
+
+    var extrasTotal = parseFloat(p.extras) || 0;
+    var totalCost   = matTotal + extrasTotal;
+    var descPct     = parseFloat(p.descPct)  || 0;
+    var descRS      = parseFloat(p.descRS)   || 0;
+    var acresPct    = parseFloat(p.acresPct) || 0;
+    var acresRS     = parseFloat(p.acresRS)  || 0;
+    var finalPrice  = (totalCost / factor) * (1 - descPct / 100) - descRS;
+    finalPrice = finalPrice * (1 + acresPct / 100) + acresRS;
+    if (finalPrice < 0) finalPrice = 0;
+
+    return {
+      finalPrice : Math.round(finalPrice  * 100) / 100,
+      totalCost  : Math.round(totalCost   * 100) / 100,
+      matTotal   : Math.round(matTotal    * 100) / 100,
+      breakdown  : { overhead: overhead*100, vrml: vrml*100, impostos: impostos*100, factor: Math.round(factor*10000)/100, extrasTotal: extrasTotal }
+    };
+  } catch(e) {
+    return { finalPrice: 0, totalCost: 0, matTotal: 0, error: e.message };
+  }
 };
 
 // Per-item extras store
@@ -8396,6 +8558,7 @@ function orcUpdateSummary() {
 function orcCalcEntradaResto() {
   var c = window._orcCalc||{};
   var total = c.finalPrice||0;
+  if(!total) return;
   var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
   var resto = Math.max(0, total - entrada);
   var el = document.getElementById('orcEntradaResto');
@@ -8890,7 +9053,8 @@ function crmSetBrand(b) {
   var panels = {
     'crmBrandVR':    isVR,
     'crmBrandVT':    false,
-    'crmBrandSite':  false,    'crmBrandDia':   isDia,
+    'crmBrandSite':  isSite,
+    'crmBrandDia':   isDia,
     'crmBrandReativ':isReativ,
     'crmBrandProsp': isProsp
   };
@@ -10169,14 +10333,50 @@ function kbProdCheckStock() {
 function kbConfirmarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   var obs = (document.getElementById('kbProdObs')||{}).value||'';
+  var _editMode = _kbProdEditMode; // captura antes de qualquer mutação
+
+  // [S2] Helper: UI + auditLog + toast — chamado após sucesso (retalho: síncrono; matKey: dentro do .then())
+  function _finalizar() {
+    if (!_editMode) {
+      os.status = 'producao';
+      var stag = document.getElementById('kstag-' + _kbOsId);
+      if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
+      document.getElementById('kbOsStag').className = 'stag sp';
+      document.getElementById('kbOsStag').textContent = 'Em Produção';
+      var ib = document.getElementById('kbIniciarProdBox'); if (ib) ib.style.display = 'none';
+    }
+    var mb = document.getElementById('kbMatProdBox');
+    var ml = document.getElementById('kbMatProdLabel');
+    var mq = document.getElementById('kbMatProdQtyLabel');
+    if (mb) mb.style.display = '';
+    if (ml) ml.textContent = os.matProd.label;
+    if (mq) {
+      if (os.matProd.isRetalho) {
+        mq.textContent = '✂️ Usando retalho';
+      } else {
+        var _qtylabel = os.matProd.qty === 1 ? '1 chapa' : os.matProd.qty + ' chapas';
+        if (os.matProd.qty < 1 || os.matProd.qty !== Math.floor(os.matProd.qty)) _qtylabel = os.matProd.qty + ' chapa(s)';
+        mq.textContent = _qtylabel + (obs?' · '+obs:'');
+      }
+    }
+    kbCloseProd();
+    if(os.matProd){
+      var _c=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
+      if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+os.matProd.label+_rest;}}}
+    }
+    renderOsTable();
+    syncSidebarBadges();
+    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + os.matProd.label);
+    showToast(_editMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
+  }
 
   if (_kbProdTipo === 'retalho') {
+    // Branch retalho: sem alteração de comportamento
     var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
     var rList  = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
     if (isNaN(retIdx) || !rList[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
     var retalho = rList[retIdx];
-    // Se editando, restaurar retalho anterior
-    if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
+    if (_editMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
       var rOld = rList[os.matProd.retalhoIdx];
       if (rOld) { rOld.qty++; if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
     }
@@ -10184,74 +10384,52 @@ function kbConfirmarProd() {
     if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS);
     _retalhoLog('retalho-saida', retalho.mat, retalho.label+' '+retalho.dims+' cm', retalho.codigo||'', os.num||os.id||'');
     os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
+    _finalizar();
   } else {
+    // [S2] Branch matKey: baixa atômica via runTransaction
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
     var qty    = parseFloat((document.getElementById('kbProdQty')||{}).value)||1;
-    var chapasRetirar = Math.ceil(qty); // chapas inteiras a retirar do estoque
-    var sobra = +(chapasRetirar - qty).toFixed(4); // fração que sobra
+    var chapasRetirar = Math.ceil(qty);
+    var sobra = +(chapasRetirar - qty).toFixed(4);
     if (!matKey) { showToast('Selecione o material', 'warn'); return; }
     if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
+    // Pré-check rápido via memória (falha imediata para UX; a transação confirma no servidor)
     if (STOCK[matKey].qty < chapasRetirar) { showToast('Estoque insuficiente (' + STOCK[matKey].qty + ' chapas disponíveis)', 'warn'); return; }
-    // Se editando, restaurar baixa anterior
-    if (_kbProdEditMode && os.matProd && !os.matProd.isRetalho && os.matProd.matKey) {
-      var prevKey = os.matProd.matKey;
-      var prevChapas = os.matProd.chapasRetiradas || os.matProd.qty || 1;
-      if (STOCK[prevKey]) {
-        STOCK[prevKey].qty += prevChapas;
-        stockUpdateDisplay(prevKey);
-        _stockLog('entrada', prevKey, prevChapas, os.num, 'Correção — material trocado na OS');
+    var _prevKey    = (_editMode && os.matProd && !os.matProd.isRetalho) ? os.matProd.matKey : null;
+    var _prevChapas = _prevKey ? (os.matProd.chapasRetiradas || os.matProd.qty || 1) : 0;
+    var stockRef = _db.collection(_COL).doc('stock');
+    _db.runTransaction(function(txn) {
+      return txn.get(stockRef).then(function(snap) {
+        var sd;
+        try { sd = JSON.parse((snap.exists && snap.data() && snap.data().data) ? snap.data().data : '{}'); } catch(e) { sd = {}; }
+        // Restaurar baixa anterior atomicamente (edição de material)
+        if (_prevKey && sd[_prevKey]) sd[_prevKey].qty = (sd[_prevKey].qty||0) + _prevChapas;
+        if (!sd[matKey]) throw new Error('Material não encontrado no estoque');
+        if ((sd[matKey].qty||0) < chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[matKey].qty||0) + ' chapas disponíveis)');
+        sd[matKey].qty = (sd[matKey].qty||0) - chapasRetirar;
+        txn.update(stockRef, { data: JSON.stringify(sd) });
+        return sd;
+      });
+    }).then(function(sd) {
+      // Sincronizar memória local (onSnapshot também atualizará em breve)
+      if (_prevKey && STOCK[_prevKey]) {
+        STOCK[_prevKey].qty += _prevChapas;
+        stockUpdateDisplay(_prevKey);
+        _stockLog('entrada', _prevKey, _prevChapas, os.num, 'Correção — material trocado na OS');
       }
-    }
-    // Fazer baixa (chapas inteiras)
-    STOCK[matKey].qty -= chapasRetirar;
-    stockUpdateDisplay(matKey);
-    stockSaveData();
-    _stockLog('saida', matKey, chapasRetirar, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''));
-    // Sobra → adicionar como retalho automaticamente
-    if (sobra > 0.01 && typeof retalhoAdicionar === 'function') {
-      var _matLabel = STOCK[matKey].label + (STOCK[matKey].cor?' — '+STOCK[matKey].cor:'');
-      retalhoAdicionar(matKey, 'sobra ' + sobra.toFixed(2) + ' chapa — OS #' + (os.num||os.id));
-    }
-    os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' ' + STOCK[matKey].cor : '') + (STOCK[matKey].esp ? ' — ' + STOCK[matKey].esp + 'mm' : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
+      if (STOCK[matKey]) STOCK[matKey].qty = sd[matKey].qty;
+      stockUpdateDisplay(matKey);
+      _stockLog('saida', matKey, chapasRetirar, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''));
+      if (sobra > 0.01 && typeof retalhoAdicionar === 'function') {
+        retalhoAdicionar(matKey, 'sobra ' + sobra.toFixed(2) + ' chapa — OS #' + (os.num||os.id));
+      }
+      os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' ' + STOCK[matKey].cor : '') + (STOCK[matKey].esp ? ' — ' + STOCK[matKey].esp + 'mm' : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
+      _finalizar();
+    }).catch(function(e) {
+      showToast(e.message || 'Erro ao dar baixa no estoque', 'err');
+    });
+    return; // branch async — _finalizar() será chamado no .then()
   }
-
-  // Se não estava em produção ainda, mudar status
-  if (!_kbProdEditMode) {
-    os.status = 'producao';
-    // Atualizar tag no kanban
-    var stag = document.getElementById('kstag-' + _kbOsId);
-    if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
-    document.getElementById('kbOsStag').className = 'stag sp';
-    document.getElementById('kbOsStag').textContent = 'Em Produção';
-    // Ocultar botão Iniciar Produção
-    var ib = document.getElementById('kbIniciarProdBox'); if (ib) ib.style.display = 'none';
-  }
-
-  // Atualizar exibição do material
-  var mb = document.getElementById('kbMatProdBox');
-  var ml = document.getElementById('kbMatProdLabel');
-  var mq = document.getElementById('kbMatProdQtyLabel');
-  if (mb) mb.style.display = '';
-  if (ml) ml.textContent = os.matProd.label;
-  if (mq) {
-    if (os.matProd.isRetalho) {
-      mq.textContent = '✂️ Usando retalho';
-    } else {
-      var _qtylabel = os.matProd.qty === 1 ? '1 chapa' : os.matProd.qty + ' chapas';
-      if (os.matProd.qty < 1 || os.matProd.qty !== Math.floor(os.matProd.qty)) _qtylabel = os.matProd.qty + ' chapa(s)';
-      mq.textContent = _qtylabel + (obs?' · '+obs:'');
-    }
-  }
-
-  kbCloseProd();
-  if(os.matProd){
-    var _c=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
-    if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+os.matProd.label+_rest;}}}
-  }
-  renderOsTable();
-  syncSidebarBadges();
-  if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + os.matProd.label);
-  showToast(_kbProdEditMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
 }
 
 function kbReceberSaldo() {
@@ -10432,7 +10610,7 @@ function dashRender() {
   // ── KPI 2: Ticket médio — usa KB_OS.finalPrice (valor real do pedido) ───────
   // FIN_TX registra eventos de pagamento (pode ser parcial/entrada), distorcendo a média.
   // KB_OS.finalPrice = valor total de cada OS → fonte correta para ticket médio.
-  var _osComValor = osList.filter(function(o){ return (o.finalPrice||o.total||0) > 0; });
+  var _osComValor = osList.filter(function(o){ return (o.finalPrice||o.total||o.valor||o.totalGeral||0) > 0; });
   var _osMesOk = _osComValor.filter(function(o){
     if(!mesFiltro) return true;
     var _d = o.data || o.createdAt || '';
@@ -10442,9 +10620,9 @@ function dashRender() {
   });
   var _osVR  = _osMesOk.filter(function(o){ return (o.mk||o.marca||'vr')==='vr'; });
   var _osVit = _osMesOk.filter(function(o){ return (o.mk||o.marca||'')==='vit'||(o.mk||o.marca||'')==='vitre'; });
-  var tkVR    = _osVR.length  ? _osVR.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osVR.length   : 0;
-  var tkVit   = _osVit.length ? _osVit.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osVit.length : 0;
-  var tkGeral = _osMesOk.length ? _osMesOk.reduce(function(s,o){return s+(o.finalPrice||o.total||0);},0)/_osMesOk.length : 0;
+  var tkVR    = _osVR.length  ? _osVR.reduce(function(s,o){return s+(o.finalPrice||o.total||o.valor||o.totalGeral||0);},0)/_osVR.length   : 0;
+  var tkVit   = _osVit.length ? _osVit.reduce(function(s,o){return s+(o.finalPrice||o.total||o.valor||o.totalGeral||0);},0)/_osVit.length : 0;
+  var tkGeral = _osMesOk.length ? _osMesOk.reduce(function(s,o){return s+(o.finalPrice||o.total||o.valor||o.totalGeral||0);},0)/_osMesOk.length : 0;
   var dkTicket = document.getElementById('dkTicket');
   var dkTicketSub = document.getElementById('dkTicketSub');
   var dkTicketBar = document.getElementById('dkTicketBar');
@@ -12224,6 +12402,7 @@ function finRender() {
     if(aCompensar&&isMaster){
       antBtn=' <button data-os="'+String(t.os).replace(/"/g,'&quot;')+'" data-val="'+t.valor+'" onclick="finAntecipar(this.dataset.os,+this.dataset.val)" style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid #D97706;background:#FEF3C7;color:#92400E;cursor:pointer;font-weight:700" title="Antecipar recebimento (aplica taxa MP/Nu)">⚡ Antecipar</button>';
     }
+    var editBtn = isMaster ? ' <button onclick="finEditTX(\''+String(t.os).replace(/'/g,"\\'")+"','"+String(t.data).replace(/'/g,"\\'")+"'"+',\''+String(t.cliente).replace(/'/g,"\\'")+'\')" style="font-size:9px;padding:2px 5px;border-radius:5px;border:1px solid #1D4ED8;background:#EFF6FF;color:#1D4ED8;cursor:pointer" title="Editar transação">✏️</button>' : '';
     var delBtn = isMaster ? ' <button onclick="finDeleteTX(\''+String(t.os).replace(/'/g,"\\'")+"','"+String(t.data).replace(/'/g,"\\'")+"'"+',\''+String(t.cliente).replace(/'/g,"\\'")+'\')" style="font-size:9px;padding:2px 5px;border-radius:5px;border:1px solid #DC2626;background:#FEF2F2;color:#DC2626;cursor:pointer" title="Excluir transação">🗑</button>' : '';
     return '<tr>'
       +'<td>'+t.data+'</td>'
@@ -12232,10 +12411,31 @@ function finRender() {
       +'<td><span style="background:'+(t.marca==='vr'?'#EDE9FE':'#FCE7F3')+';color:'+(t.marca==='vr'?'#5B21B6':'#9D174D')+';padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">'+(t.marca==='vr'?'VR':'Vitre')+'</span></td>'
       +'<td style="font-weight:700;color:var(--ok)">'+finFmt(t.valor)+'</td>'
       +'<td style="color:'+(cM[t.metodo]||'#6B7280')+';font-size:11px">'+(t.metodo||'—')+'</td>'
-      +'<td>'+statusBadge+antBtn+delBtn+'</td>'
+      +'<td>'+statusBadge+antBtn+editBtn+delBtn+'</td>'
       +'</tr>';
   }).join('');
 }
+function finRenderTx() { finRender(); }
+
+// ── Editar transação FIN_TX (master/admin only) ───────────────────────────────
+function finEditTX(osRef, data, cliente) {
+  var idx = FIN_TX.findIndex(function(t){ return String(t.os)===String(osRef)&&t.data===data&&t.cliente===cliente; });
+  if(idx<0){ showToast('Transação não encontrada','err'); return; }
+  var t = FIN_TX[idx];
+  var novoValor = prompt('Valor (R$):', t.valor);
+  if(novoValor===null) return;
+  var v = parseFloat(String(novoValor).replace(',','.'));
+  if(isNaN(v)||v<=0){ showToast('Valor inválido','err'); return; }
+  var novaData = prompt('Data (dd/mm):', t.data);
+  if(novaData===null) return;
+  var novoMetodo = prompt('Método (PIX / Dinheiro / Cartão):', t.metodo||'PIX');
+  if(novoMetodo===null) return;
+  FIN_TX[idx] = Object.assign({}, t, { valor:v, data:novaData.trim()||t.data, metodo:novoMetodo.trim()||t.metodo });
+  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
+  finRender(); try{ finDashKPIs(); dashRender(); }catch(e){}
+  showToast('Transação atualizada','ok');
+}
+
 // ── Excluir transação FIN_TX (master/admin only) ─────────────────────────────
 function finDeleteTX(osRef, data, cliente) {
   if(!confirm('Excluir transação OS #'+osRef+' ('+cliente+' — '+data+')?\nEssa ação não pode ser desfeita.')) return;
@@ -13039,6 +13239,7 @@ function renderClientes() {
   cliSetupTableDelegation();
 }
 function cliOpenDetalhe(id) {
+  window._cliDetId = id;
   var c=CLIENTES_DATA.find(function(x){return x.id===id;}); if(!c) return;
   document.getElementById('cliDetNome').textContent=c.nome;
   document.getElementById('cliDetSub').textContent=c.tipo+' · '+c.cidade+' · '+c.marca.toUpperCase();
@@ -13770,14 +13971,34 @@ function retalhoSalvar() {
 }
 
 function retalhoGerarCodigo(mat) {
+  // Versão síncrona — usada apenas para preview de UI (best-effort, lê memória)
   var prefix = RETALHO_PREFIXO[mat] || mat.toUpperCase().slice(0,3);
-  // Encontrar próximo número para este prefixo
   var usados = RETALHOS
     .map(function(r){ return r.codigo||''; })
     .filter(function(c){ return c.indexOf(prefix+'-')===0; })
     .map(function(c){ return parseInt(c.split('-')[1])||0; });
   var prox = usados.length ? Math.max.apply(null,usados)+1 : 1;
   return prefix+'-'+String(prox).padStart(3,'0');
+}
+
+// [S3] Versão atômica — usada ao salvar de verdade (incremento no servidor, sem duplicatas)
+function _retalhoNextCod(mat, cb) {
+  var prefix = RETALHO_PREFIXO[mat] || mat.toUpperCase().slice(0,3);
+  if (!_db || !_cloudReady) { cb(retalhoGerarCodigo(mat)); return; } // fallback offline
+  var seqRef = _db.collection(_COL).doc('retalhos_seq');
+  _db.runTransaction(function(txn) {
+    return txn.get(seqRef).then(function(snap) {
+      var data = (snap.exists && snap.data()) ? snap.data() : {};
+      var next = (data[prefix] || 0) + 1;
+      var upd = {}; upd[prefix] = next;
+      txn.set(seqRef, upd, { merge: true });
+      return next;
+    });
+  }).then(function(next) {
+    cb(prefix + '-' + String(next).padStart(3, '0'));
+  }).catch(function() {
+    cb(retalhoGerarCodigo(mat)); // fallback em caso de erro de rede
+  });
 }
 
 function retalhoRender() {
@@ -13809,12 +14030,14 @@ function retalhoAdicionar(mat, dims) {
   if(!dims||!dims.trim()) return;
   var label=STOCK[mat]?STOCK[mat].label:mat;
   var hoje=new Date(), d=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  var cod = retalhoGerarCodigo(mat);
-  RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d,codigo:cod});
-  retalhoSalvar();
-  retalhoRender();
-  _retalhoLog('retalho-entrada', mat, label+' '+dims.trim()+' cm', cod, '');
-  showToast('Retalho '+label+' ('+dims+' cm) — Cód: '+cod+' adicionado!','ok');
+  // [S3] Código gerado atomicamente no servidor para evitar duplicatas
+  _retalhoNextCod(mat, function(cod) {
+    RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d,codigo:cod});
+    retalhoSalvar();
+    retalhoRender();
+    _retalhoLog('retalho-entrada', mat, label+' '+dims.trim()+' cm', cod, '');
+    showToast('Retalho '+label+' ('+dims+' cm) — Cód: '+cod+' adicionado!','ok');
+  });
 }
 
 function retalhoRemover(idx) {
@@ -13834,6 +14057,7 @@ function retalhoConfirmarUso(idx) {
 function retalhoEditarAbrir(idx) {
   var r = RETALHOS[idx]; if(!r) return;
   document.getElementById('retalhoEditIdx').value = idx;
+  // populate mat select
   var sel = document.getElementById('retalhoEditMat');
   if(sel) {
     sel.innerHTML = Object.keys(STOCK).map(function(k){
@@ -13898,16 +14122,18 @@ function retalhoAdicionarManual() {
   var label = STOCK[mat] ? STOCK[mat].label : mat;
   var hoje  = new Date();
   var d     = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  var cod   = retalhoGerarCodigo(mat);
-  RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:cod});
-  retalhoSalvar();
-  retalhoRender();
-  _retalhoLog('retalho-entrada', mat, label+' '+dims+' cm', cod, '');
-  // Reset form
-  var dEl = document.getElementById('retalhoFormDims'); if(dEl) dEl.value = '';
-  var oEl = document.getElementById('retalhoFormObs');  if(oEl) oEl.value = '';
-  document.getElementById('retalhoFormWrap').style.display = 'none';
-  showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+cod, 'ok');
+  // [S3] Código gerado atomicamente no servidor para evitar duplicatas
+  _retalhoNextCod(mat, function(cod) {
+    RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:cod});
+    retalhoSalvar();
+    retalhoRender();
+    _retalhoLog('retalho-entrada', mat, label+' '+dims+' cm', cod, '');
+    // Reset form
+    var dEl = document.getElementById('retalhoFormDims'); if(dEl) dEl.value = '';
+    var oEl = document.getElementById('retalhoFormObs');  if(oEl) oEl.value = '';
+    document.getElementById('retalhoFormWrap').style.display = 'none';
+    showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+cod, 'ok');
+  });
 }
 
 function stockSaidaToggleRetalho() { stockSaidaCalc(); }
@@ -13968,7 +14194,7 @@ function _stockFazSaida() {
   var _rc=(document.getElementById('stRetalhoComp')||{}).value;
   if(_larg&&_comp){ var _dimObs=_larg+'×'+_comp+'cm'; if(_qtdP&&parseInt(_qtdP)>1)_dimObs+=' ×'+_qtdP+'pçs'; if(_rl&&_rc)_dimObs+=' | retalho:'+_rl+'×'+_rc+'cm'; _obsVinc=_dimObs+(_obsVinc?' · '+_obsVinc:''); }
   _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
-  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp','stRetalhoCodPreview'].forEach(function(id){var el=document.getElementById(id);if(el)el.value=''});
+  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp','stRetalhoCodPreview'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
   var _qpEl=document.getElementById('stSaidaQtdPecas');if(_qpEl)_qpEl.value='1';
   showToast('Saída de '+qty.toFixed(2)+' chapa(s) de '+STOCK[matKey].label+' registrada','ok');
   syncSidebarBadges();
@@ -15065,7 +15291,7 @@ var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
 var _SEC_INACT_MINS = 5;
-var _SEC_LOCKOUT = {count:0,until:0};
+var _SEC_LOCKOUT = {count:0,until:0}; // in-memory — não resetável via sessionStorage.clear()
 var _chatvoltAgentId = '';
 var _chatvoltMarca   = 'vr';
 var _chatvoltFase    = 'ia_novo';
@@ -15210,11 +15436,13 @@ function orcClienteSelecionar(idx) {
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
   if(!nome || nome==='(não informado)' || nome==='Cliente') return;
-  var _telNorm=(orc.tel||'').replace(/\D/g,''),_emailNorm=(orc.email||'').toLowerCase().trim();
-  var existe=CLIENTES_DATA.find(function(c){
-    if((c.nome||'').toLowerCase().trim()===nome.toLowerCase())return true;
-    if(_telNorm&&_telNorm.length>=8&&(c.tel||'').replace(/\D/g,'')===_telNorm)return true;
-    if(_emailNorm&&_emailNorm.indexOf('@')>0&&(c.email||'').toLowerCase().trim()===_emailNorm)return true;
+  // Upsert: busca por nome OU telefone OU email (evita duplicatas da Valéria)
+  var _telNorm = (orc.tel||'').replace(/\D/g,'');
+  var _emailNorm = (orc.email||'').toLowerCase().trim();
+  var existe = CLIENTES_DATA.find(function(c){
+    if((c.nome||'').toLowerCase().trim() === nome.toLowerCase()) return true;
+    if(_telNorm && _telNorm.length >= 8 && (c.tel||'').replace(/\D/g,'') === _telNorm) return true;
+    if(_emailNorm && _emailNorm.indexOf('@') > 0 && (c.email||'').toLowerCase().trim() === _emailNorm) return true;
     return false;
   });
   if(existe) {
@@ -16203,11 +16431,38 @@ function cfgTab(n) {
   if(n===9) cfgIntegLoad();
 }
 
-var _CFG_INTEG={};
-function cfgIntegLoad(){try{var d=JSON.parse(localStorage.getItem('erp_integ_cfg')||'{}');_CFG_INTEG=d;var kEl=document.getElementById('cfgIntegApiKey'),wEl=document.getElementById('cfgIntegWebhook');if(kEl&&d.apiKey)kEl.value=d.apiKey;if(wEl&&d.webhook)wEl.value=d.webhook;var st=document.getElementById('cfgIntegStatus');if(st)st.textContent=d.apiKey?'✅ Chave configurada':'';}catch(e){}}
-function cfgIntegSalvar(){var k=(document.getElementById('cfgIntegApiKey')||{}).value||'',w=(document.getElementById('cfgIntegWebhook')||{}).value||'';_CFG_INTEG={apiKey:k,webhook:w,updatedAt:new Date().toISOString()};localStorage.setItem('erp_integ_cfg',JSON.stringify(_CFG_INTEG));var st=document.getElementById('cfgIntegStatus');if(st)st.textContent=k?'✅ Chave salva':'⚠️ Sem chave';showToast('Config Integrações salva','ok');if(typeof secAuditLog==='function')secAuditLog('integ_cfg_saved','API key atualizada');}
-function cfgIntegMostrarKey(){var el=document.getElementById('cfgIntegApiKey');if(el)el.type=el.type==='password'?'text':'password';}
-window._getIntegConfig=function(){return{webhook:(_CFG_INTEG||{}).webhook||''};};
+// ── Integrações (Valéria / Chatvolt) ──────────────────────────────────────
+var _CFG_INTEG = {};
+function cfgIntegLoad() {
+  try {
+    var d = JSON.parse(localStorage.getItem('erp_integ_cfg') || '{}');
+    _CFG_INTEG = d;
+    var kEl = document.getElementById('cfgIntegApiKey');
+    var wEl = document.getElementById('cfgIntegWebhook');
+    if (kEl && d.apiKey) kEl.value = d.apiKey;
+    if (wEl && d.webhook) wEl.value = d.webhook;
+    var st = document.getElementById('cfgIntegStatus');
+    if (st) st.textContent = d.apiKey ? '✅ Chave configurada' : '';
+  } catch(e) {}
+}
+function cfgIntegSalvar() {
+  var k = (document.getElementById('cfgIntegApiKey')||{}).value||'';
+  var w = (document.getElementById('cfgIntegWebhook')||{}).value||'';
+  _CFG_INTEG = { apiKey: k, webhook: w, updatedAt: new Date().toISOString() };
+  localStorage.setItem('erp_integ_cfg', JSON.stringify(_CFG_INTEG));
+  var st = document.getElementById('cfgIntegStatus');
+  if (st) st.textContent = k ? '✅ Chave salva' : '⚠️ Sem chave';
+  showToast('Config Integrações salva', 'ok');
+  if (typeof secAuditLog === 'function') secAuditLog('integ_cfg_saved', 'API key de integração atualizada');
+}
+function cfgIntegMostrarKey() {
+  var el = document.getElementById('cfgIntegApiKey');
+  if (el) el.type = el.type === 'password' ? 'text' : 'password';
+}
+// Expõe config de integração para Cloud Functions (sem expor a key internamente)
+window._getIntegConfig = function() { return { webhook: (_CFG_INTEG||{}).webhook||'' }; };
+// ─────────────────────────────────────────────────────────────────────────
+
 function cfgRenderTables() {
   try {
   // Garantir _cfgData com arrays válidos antes de qualquer coisa
@@ -16618,20 +16873,26 @@ var MODULOS = [
   { id:'clientes',   nome:'Clientes' },
   { id:'estoque',    nome:'Estoque' },
   { id:'financeiro', nome:'Financeiro' },
-  { id:'config',     nome:'Configurações' },
-  { id:'marketing',  nome:'Marketing' }
+  { id:'config',     nome:'Configurações' }
 ];
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id), marketing: ['dashboard','marketing','orcamento'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
-function usrLoadPerms(){ return _PERM_DATA ? JSON.parse(JSON.stringify(_PERM_DATA)) : JSON.parse(JSON.stringify(PERM_DEFAULT)); }
+function usrLoadPerms(){
+  var base = JSON.parse(JSON.stringify(PERM_DEFAULT));
+  if(!_PERM_DATA) return base;
+  // Merge: _PERM_DATA sobrescreve apenas os módulos que contém
+  var saved = JSON.parse(JSON.stringify(_PERM_DATA));
+  Object.keys(saved).forEach(function(mod){ base[mod] = saved[mod]; });
+  return base;
+}
 
-var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro', marketing:'📣 Marketing' };
-var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46', marketing:'#D97706' };
+var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
+var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
 
 function usrRender() {
   var users = usrLoadUsuarios();
@@ -16639,7 +16900,7 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:var(--ok);font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:'+(u.ativo===0||u.ativo==='0'?'var(--danger)':'var(--ok)')+';font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
   }).join('');
 }
 
@@ -18398,8 +18659,8 @@ function secApplyPerms(funcao){
   // Hard deny per role — cannot be overridden by saved permissions
   var HARD_DENY = {
     comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1,'marketing':1},
-    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'marketing':1}
+    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
+    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
   };
   var denied = HARD_DENY[funcao]||{};
   function getPermForMod(mod, page){
@@ -18428,8 +18689,6 @@ function secApplyPerms(funcao){
   document.querySelectorAll('.sb-item[onclick]').forEach(function(item){
     applyToItem(item, /nav\('([^']+)'/);
   });
-  // Marketing group visibility (uses navMkt, not nav)
-  (function(){var mp=perms['marketing'],ok=mp&&mp[funcao]&&!denied['marketing'];var g=document.getElementById('sbG-marketing');if(g){g.style.display=ok?'':'none';var p=g.previousElementSibling;if(p&&p.classList.contains('sb-section'))p.style.display=ok?'':'none';}})();
   // Mobile side panel items
   document.querySelectorAll('#mobileSidePanel .mdrw-item[id]').forEach(function(item){
     var page=(item.id||'').replace('mspItem-','');
@@ -19496,6 +19755,32 @@ function crmRenderOrcPend() {
 // ============================================================
 var MAT_PRICE_KEY = 'erp_mat_prices';
 function _matPricesGet() { return Object.assign({},_MAT_PRICES); }
+
+// ── Helper: lista de espessuras configuradas com preço/m² (ORC_MATS + Config Materiais)
+function _planGetEspOptions() {
+  var opts = [];
+  // Materiais padrão ORC_MATS (lê preço do input op_*)
+  ORC_MATS.forEach(function(m) {
+    if(!m.esp) return;
+    var el = document.getElementById(m.field);
+    var p = el ? (parseFloat(el.value)||100) : 100;
+    opts.push({espMm: m.esp, label: m.label, priceM2: p});
+  });
+  // Materiais da Config Orçamento (Firestore/cfgLoad)
+  try {
+    var cfgMats = (_cfgData&&_cfgData.materiais&&_cfgData.materiais.length)
+      ? _cfgData.materiais : (cfgLoad().materiais||[]);
+    cfgMats.forEach(function(m) {
+      if(!m||!m.nome||m.nome==='Novo material') return;
+      var espMm = parseFloat(m.esp||m.espessura||0)||0;
+      if(!espMm) return;
+      var areaM2 = (parseFloat(m.comp)||0)*(parseFloat(m.larg)||0)/10000;
+      var p = areaM2>0 ? (parseFloat(m.custo)||0)/areaM2 : (parseFloat(m.custo)||100);
+      if(p>0) opts.push({espMm: espMm, label: m.nome, priceM2: p});
+    });
+  } catch(e) {}
+  return opts;
+}
 function cfgCarregarMatPrecos() {
   var d = _matPricesGet();
   var map = ['ac3','ac5','ac8','ac10','ps3','mt2'];
@@ -19550,11 +19835,18 @@ function planRenderManual() {
   if(!wrap) return;
   if(!planManualPieces.length) { if(hint) hint.style.display=''; wrap.innerHTML=''; return; }
   if(hint) hint.style.display='none';
+  // Espessuras dinâmicas das Config Orçamento
+  var espOpts = (typeof _planGetEspOptions==='function') ? _planGetEspOptions() : [];
   wrap.innerHTML = planManualPieces.map(function(p,i){
-    return '<div style="display:grid;grid-template-columns:2fr 0.6fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
+    var espHtml = '<option value="">esp</option>' + espOpts.map(function(o){
+      var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
+      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
+    }).join('');
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
-      +'<select oninput="planManualPieces['+i+'].esp=this.value;_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'      +'<option value="">esp</option>'      +[2,3,4,5,6,8,10,12].map(function(v){return '<option value="'+v+'"'+(parseInt(p.esp||0)===v?' selected':'')+'>'+v+'mm</option>';}).join('')      +'</select>'
+      +'<select oninput="planManualPieces['+i+'].esp=this.value;planManualPieces['+i+'].precoM2=parseFloat(this.options[this.selectedIndex].dataset.rsm2||0);_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
+      +espHtml+'</select>'
       +'<input type="number" placeholder="Larg cm" value="'+(p.larg||'')+'" min="0" step="0.1"'
       +' oninput="planManualPieces['+i+'].larg=parseFloat(this.value)||0;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
@@ -19571,17 +19863,25 @@ function planRenderManual() {
 
 function _planCalcAndMerge() {
   // run original planCalc (which populates tbody/tfoot/sumBox),
-  // then append manual pieces to existing totals
+  // then append manual pieces with their own espessura cost
   if(!_planCalcOrig) return;
   _planCalcOrig();
   var manualArea = 0, manualQty = 0;
   var tbody = document.getElementById('planPiecesBody');
+  // Preço/m² do material principal do item
+  var _matElM = _planIdx!==null ? document.getElementById('oi_mat_'+_planIdx) : null;
+  var _matKeyM = _matElM ? _matElM.value : 'ac3';
+  var _priceM2M = _matGetRsm2(_matKeyM, _planIdx);
+  var manualCost = 0;
   planManualPieces.forEach(function(p){
     if(p.larg>0 && p.alt>0) {
       var area = p.larg * p.alt * p.qty; manualArea+=area; manualQty+=p.qty;
+      var pm2 = parseFloat(p.precoM2||0) || _priceM2M;
+      manualCost += (area/10000) * pm2;
       var tr = document.createElement('tr');
       tr.style.background='rgba(91,33,182,.05)';
-      tr.innerHTML='<td><em style="color:var(--muted);font-size:10px">[manual]</em> '+p.nome+'</td>'
+      tr.innerHTML='<td><em style="color:var(--muted);font-size:10px">[manual]</em> '+p.nome
+        +(p.esp?' <span style="font-size:9px;color:var(--brand-mid)">('+p.esp+'mm·R$'+Math.round(pm2)+'/m²)</span>':'')+'</td>'
         +'<td style="text-align:center">'+p.qty+'×</td>'
         +'<td class="area-td">'+p.larg.toFixed(1)+'</td>'
         +'<td class="area-td">'+p.alt.toFixed(1)+'</td>'
@@ -19591,19 +19891,26 @@ function _planCalcAndMerge() {
     }
   });
   if(!manualArea) return;
-  // merge with existing totals from sumBox
+  // merge com base totals (totalArea set by _planCalcOrig)
   var sumBox = document.getElementById('planSumBox');
-  var prevTot = sumBox ? parseFloat(sumBox.dataset.planTotCm||'0') : 0;
-  var prevQty = sumBox ? parseInt(sumBox.dataset.planTotQty||'0') : 0;
+  var prevTot = sumBox ? parseFloat(sumBox.dataset.totalArea||'0') : 0;   // FIX: era planTotCm (bug)
+  var prevQty = sumBox ? parseInt(sumBox.dataset.totalQty||'0') : 0;
   var newArea = prevTot + manualArea;
   var newQty  = prevQty + manualQty;
+  // Custo base (área base × preço do material principal) + custo peças manuais
+  var baseCost = (prevTot/10000) * _priceM2M;
+  var totalCusto = baseCost + manualCost;
   if(sumBox) {
-    sumBox.dataset.planTotCm  = newArea;
-    sumBox.dataset.planTotQty = newQty;
+    sumBox.dataset.totalArea = newArea;          // FIX: inclui área manual agora
+    sumBox.dataset.totalQty  = newQty;
+    sumBox.dataset.planManualMatCost = manualCost;
+    sumBox.dataset.planManualAreaM2  = manualArea/10000;
     var aEl=document.getElementById('planSumArea');
     var pEl=document.getElementById('planSumPecas');
+    var cEl=document.getElementById('planSumCusto');
     if(aEl) aEl.textContent=(newArea/10000).toFixed(4)+' m²  ('+Math.round(newArea)+' cm²)';
-    if(pEl) pEl.textContent=newQty+' peças (inclui '+manualQty+' manual'+(manualQty>1?'is':'+')+')';
+    if(pEl) pEl.textContent=newQty+' peças (inclui '+manualQty+(manualQty>1?' manuais':' manual')+')';
+    if(cEl) cEl.textContent='💵 Custo do material ≈ R$ '+totalCusto.toFixed(2).replace('.',',');
     sumBox.style.display='flex';
     var btn=document.getElementById('planAplicarBtn');
     if(btn){btn.disabled=false;btn.style.opacity='1';}
@@ -19911,7 +20218,7 @@ function _planRecompute() {
   var ebEl=document.getElementById('planEspBreakdown');
   if(ebEl){
     var espKeys=Object.keys(espMap).map(Number).sort(function(a,b){return a-b;});
-    ebEl.innerHTML=espKeys.length?espKeys.map(function(k){return '\uD83D\uDCCF Chapa '+k+'mm: '+(espMap[k]/10000).toFixed(4)+' m\xB2';}).join(' &nbsp;|&nbsp; '):'';
+    ebEl.innerHTML=espKeys.length?espKeys.map(function(k){return '📏 Chapa '+k+'mm: '+(espMap[k]/10000).toFixed(4)+' m²';}).join(' &nbsp;|&nbsp; '):'';
   }
 
   var sumBox = document.getElementById('planSumBox');
@@ -19920,7 +20227,20 @@ function _planRecompute() {
   var matKey2= matEl2 ? matEl2.value : 'ac3';
   var mObj2  = ORC_MATS.find(function(m){return m.key===matKey2;});
   var priceM2= _matGetRsm2(matKey2, _planIdx);
-  var custoMat2 = (totalArea/10000) * priceM2;
+  // Custo base (peças automáticas) × preço do material principal
+  var _baseAreaRpc = 0;
+  _planEditPieces.forEach(function(p){ if(!p._deleted) _baseAreaRpc += p.larg*p.alt*p.qty; });
+  var _baseCostRpc = (_baseAreaRpc/10000) * priceM2;
+  // Custo peças manuais × preço da espessura de cada peça
+  var _manualCostRpc = 0, _manualAreaM2Rpc = 0;
+  planManualPieces.forEach(function(p){
+    if(p.larg>0&&p.alt>0){
+      var _a=p.larg*p.alt*(p.qty||1);
+      _manualAreaM2Rpc += _a/10000;
+      _manualCostRpc += (_a/10000) * (parseFloat(p.precoM2||0)||priceM2);
+    }
+  });
+  var custoMat2 = _baseCostRpc + _manualCostRpc;
   var _cfg2=(_cfgData&&_cfgData.financeiro)||{};
   var oh2=(_cfg2.overhead!=null?_cfg2.overhead:(parseFloat((document.getElementById('cfgOverhead')||{}).value)||41.16))/100;
   var vr2=(_cfg2.vrml!=null?_cfg2.vrml:(parseFloat((document.getElementById('cfgVrml')||{}).value)||20))/100;
@@ -19941,6 +20261,8 @@ function _planRecompute() {
   sumBox.dataset.totalArea = totalArea;
   sumBox.dataset.totalQty  = totalQty;
   sumBox.dataset.pcs = JSON.stringify(_planEditPieces);
+  sumBox.dataset.planManualMatCost = _manualCostRpc;
+  sumBox.dataset.planManualAreaM2  = _manualAreaM2Rpc;
   sumBox.style.display='flex';
   var btn2=document.getElementById('planAplicarBtn');
   if(btn2){btn2.disabled=false;btn2.style.opacity='1';}
@@ -21673,6 +21995,7 @@ var _MKT_PER_PAGE   = 15;
 var _mktUnsubscribe = null;
 
 function mktInit() {
+  // Respeitar aba solicitada via navMkt, senão padrão integracoes
   var targetTab = window._mktPendingTab || 'integracoes';
   window._mktPendingTab = null;
   mktTab(targetTab);
@@ -21810,7 +22133,6 @@ async function mktConnectMeta() {
   var btn=document.getElementById('mktMetaConnectBtn');
   if(btn){btn.disabled=true;btn.textContent='Aguarde...';}
   try {
-    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('getMetaAuthUrl');
     var r=await fn({});
     window.open(r.data.url,'_blank','width=600,height=700');
@@ -21822,7 +22144,6 @@ async function mktConnectGoogle() {
   var btn=document.getElementById('mktGoogleConnectBtn');
   if(btn){btn.disabled=true;btn.textContent='Aguarde...';}
   try {
-    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('getGoogleAuthUrl');
     var r=await fn({});
     window.open(r.data.url,'_blank','width=600,height=700');
@@ -21840,7 +22161,6 @@ async function mktForceSync() {
   var btn=document.getElementById('mktSyncBtn');
   if(btn){btn.disabled=true;btn.textContent='⏳ Sincronizando...';}
   try {
-    if(typeof firebase.functions!=='function'){throw new Error('Integração não configurada');}
     var fn=firebase.functions().httpsCallable('forceMarketingSync');
     var companyId=(_currentSession&&(_currentSession.companyId||_currentSession.empresa))||'vr';
     var r=await fn({companyId});
