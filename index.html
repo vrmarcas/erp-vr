@@ -144,6 +144,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 }
 
 .content { position: absolute; top: 52px; left: 0; right: 0; bottom: 0; overflow-y: auto; padding: 18px 20px; }
+#pg-marketing { position: fixed; left: 220px; right: 0; top: 52px; bottom: 0; overflow-y: auto; padding: 18px 20px; background: var(--bg); z-index: 1; }
 
 /* =========================================================
    PAGES
@@ -1281,6 +1282,9 @@ function _cloudSave(key, data) {
         console.warn("[Cloud] Erro ao salvar "+key+":", e);
         if(e && (e.code==='resource-exhausted' || (e.message||'').indexOf('Quota')>=0)){
           if(typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
+        } else if(e && (e.code==='permission-denied' || (e.message||'').indexOf('permission')>=0 || (e.message||'').indexOf('PERMISSION_DENIED')>=0)){
+          if(typeof showToast==='function') showToast('🔒 Sem permissão para salvar "'+key+'" — contate o administrador','err');
+          console.error('[Cloud] PERMISSÃO NEGADA ao salvar '+key+'. Verifique as Firestore Rules.');
         }
       });
   } catch(e) { console.warn("[Cloud] _cloudSave falhou:", e); }
@@ -1427,7 +1431,7 @@ function _cloudLoadAll() {
       if(d&&typeof d==='object') _POSV_DATA=d;
     });
     _cloudWatch("erp_orc_produtos", function(d){
-      if(d&&Array.isArray(d)&&d.length){ ORC_PRODUTOS=d.map(function(p){return typeof p==='string'?p:(p.nome||p.name||String(p));}).filter(Boolean); try{orcRefreshProdSelects();}catch(e){} }
+      if(d&&Array.isArray(d)&&d.length){ ORC_PRODUTOS=d.map(function(p){return typeof p==='string'?p:(p.nome||p.name||String(p));}).filter(Boolean); try{orcRefreshProdSelects();}catch(ex){} }
     });
     _cloudWatch("erp_mach_presets", function(d){
       if(d&&Array.isArray(d)) _MACH_PRESETS=d;
@@ -5207,7 +5211,7 @@ function _cloudAuthAviso(msg){
     </div><!-- /planProdOverlay -->
 
     <!-- Overlay Novo Usuário -->
-    <div class="gen-overlay" id="usrOverlay" onclick="if(event.target===this)usrNovoClose()">
+    <div class="gen-overlay" id="usrOverlay">
       <div class="gen-modal" style="max-width:440px">
         <input type="hidden" id="usrEditIdx" value="">
         <div class="gen-modal-hdr"><span id="usrOverlayTitulo" style="font-weight:800">👤 Novo Usuário</span><button class="gen-modal-close" onclick="usrNovoClose()">✕</button></div>
@@ -15371,6 +15375,32 @@ function orcSalvarOrcamento() {
   orcLinkClienteOrcamento(orc);
   // Auto-cadastra cliente se ainda não existir
   orcAutoSalvarCliente(orc);
+  // Auto-cria lead no CRM com etapa 'orc_emitido' (se ainda não existir para este cliente/marca)
+  (function(){
+    var _marcaOrc = orc.marca;
+    var _nomeOrc  = orc.cliente;
+    if(!_nomeOrc || _nomeOrc==='(não informado)') return;
+    var _jaExiste = Object.keys(CRM_LEADS).some(function(k){
+      var l=CRM_LEADS[k];
+      return l && l.nome && l.nome.toLowerCase()===_nomeOrc.toLowerCase() && l.marca===_marcaOrc;
+    });
+    if(!_jaExiste) {
+      var _lid = 'orc_' + (++crmLeadIdCounter);
+      CRM_LEADS[_lid] = {
+        nome:_nomeOrc, tipo:_marcaOrc==='vr'?'B2B':'B2C', marca:_marcaOrc,
+        sub:'ORC-'+num+' · '+orc.produto,
+        contato:_nomeOrc, tel:orc.tel||'—', email:orc.email||'—',
+        temp:'quente', score:65,
+        resumo_ia:'Orçamento #'+num+' emitido pelo ERP.',
+        valor_potencial:'R$ '+orcFmt(orc.valorFinal||orc.valorBase||0),
+        cor:'#FCA5A5', origem:'orcamento', etapa:'orc_emitido', tempo:'agora',
+        dores:orc.produto?[orc.produto]:[],
+        intencao:{produto:orc.produto||'—',material:'—',medidas:'—',quantidade:'—'}
+      };
+      if(typeof crmSaveLeads==='function') crmSaveLeads();
+      try{ if(document.getElementById('pg-crm')&&document.getElementById('pg-crm').style.display!=='none') crmSetBrand(crmActiveBrand||'vr'); }catch(ex){}
+    }
+  })();
   if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
   showToast('Orçamento #'+num+' salvo! Veja em "Orçamentos Enviados".','ok');
 }
@@ -16865,20 +16895,21 @@ var USR_KEY  = 'erp_usuarios';
 var PERM_KEY = 'erp_permissoes';
 
 var MODULOS = [
-  { id:'dashboard',  nome:'Dashboard' },
-  { id:'kanban',     nome:'Kanban OS' },
-  { id:'os-list',    nome:'Todas as OS' },
-  { id:'orcamento',  nome:'Orçamentos' },
-  { id:'crm',        nome:'CRM' },
-  { id:'clientes',   nome:'Clientes' },
-  { id:'estoque',    nome:'Estoque' },
-  { id:'financeiro', nome:'Financeiro' },
-  { id:'config',     nome:'Configurações' }
+  { id:'dashboard',    nome:'Dashboard' },
+  { id:'kanban',       nome:'Kanban OS' },
+  { id:'os-list',      nome:'Todas as OS' },
+  { id:'orcamento',    nome:'Orçamentos' },
+  { id:'crm',          nome:'CRM' },
+  { id:'clientes',     nome:'Clientes' },
+  { id:'estoque',      nome:'Estoque' },
+  { id:'financeiro',   nome:'Financeiro' },
+  { id:'fornecedores', nome:'Fornecedores' },
+  { id:'config',       nome:'Configurações' }
 ];
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
