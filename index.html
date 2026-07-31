@@ -1557,28 +1557,84 @@ function _cloudAuthAviso(msg){
   var ct=document.getElementById('cloudTxt');
   if(ct){ ct.textContent = msg; ct.style.color = '#DC2626'; }
 }
+// ── FASE 5: Firebase Auth real — sem signInAnonymously ───────────────────────
+// onAuthStateChanged é a única entrada para _cloudIniciar().
+// signInWithEmailAndPassword é chamado por authLogin() quando o usuário faz login.
 (function _cloudAuthStart(){
-  var resolveu = false;
-  firebase.auth().signInAnonymously()
-    .then(function(){ resolveu = true; _cloudIniciar(); })
-    .catch(function(e){ resolveu = true; console.warn("[Cloud] Auth falhou:", e); _cloudAuthAviso('erro de conexão'); });
-  // Fallback 1: se o login travar (>8s), tentar sem persistência (evita travas de storage)
-  setTimeout(function(){
-    if(resolveu || _cloudIniciou) return;
-    console.warn('[Cloud] Auth travado >8s — tentando fallback sem persistência');
-    try{
-      firebase.auth().setPersistence('none')
-        .then(function(){ return firebase.auth().signInAnonymously(); })
-        .then(function(){ _cloudIniciar(); })
-        .catch(function(e){ console.warn('[Cloud] Fallback auth falhou:', e); });
-    }catch(e){ console.warn('[Cloud] Fallback auth exceção:', e); }
-  }, 8000);
-  // Fallback 2: aviso ao usuário se nada conectou em 20s
-  setTimeout(function(){
-    if(_cloudIniciou) return;
-    _cloudAuthAviso('sem conexão — verifique antivírus/firewall');
+  // Aviso de timeout se Firebase SDK não inicializar em 20s
+  var _authTimeout = setTimeout(function(){
+    if(!_cloudIniciou) _cloudAuthAviso('sem conexão — verifique antivírus/firewall');
   }, 20000);
+
+  firebase.auth().onAuthStateChanged(function(user){
+    if(user && user.providerData && user.providerData.length &&
+       user.providerData[0].providerId !== 'anonymous'){
+      // Sessão Firebase válida (email/password ou outro provider real)
+      clearTimeout(_authTimeout);
+      user.getIdTokenResult().then(function(result){
+        var role = result.claims.role;
+        if(!role || ['master','admin','comercial','producao','financeiro'].indexOf(role) < 0){
+          // Autenticado mas sem role — tela de acesso negado
+          console.warn('[Cloud] Usuário sem role atribuída:', user.email);
+          _cloudAuthAviso('sem perfil — contate o administrador');
+          _authShowAccessDenied('Sua conta ainda não tem um perfil de acesso atribuído. Contate o administrador.');
+          return;
+        }
+        if(!_cloudIniciou) _cloudIniciar();
+        // Renovação automática do token a cada 50 min (Firebase renova em 1h)
+        _cloudStartTokenRenewal();
+      }).catch(function(e){
+        console.warn('[Cloud] Erro ao ler token:', e);
+        _cloudAuthAviso('erro ao verificar perfil');
+      });
+    } else {
+      // Não autenticado (ou anônimo rejeitado) — aguarda authLogin()
+      // _cloudIniciar() NÃO é chamado aqui
+      if(_cloudIniciou) {
+        // Sessão Firebase expirou durante uso → forçar logout do ERP
+        console.warn('[Cloud] Sessão Firebase encerrada externamente — deslogando ERP');
+        if(typeof authLogout === 'function') authLogout();
+      }
+    }
+  });
 })();
+
+// Renovação proativa do token Firebase (evita expiração silenciosa durante uso)
+var _tokenRenewalTimer = null;
+function _cloudStartTokenRenewal(){
+  if(_tokenRenewalTimer) clearInterval(_tokenRenewalTimer);
+  _tokenRenewalTimer = setInterval(function(){
+    var u = firebase.auth().currentUser;
+    if(u) u.getIdToken(true).then(function(){ console.log('[Cloud] Token renovado.'); }).catch(function(e){ console.warn('[Cloud] Falha ao renovar token:', e); });
+  }, 50 * 60 * 1000); // 50 minutos
+}
+
+// Tela de acesso negado (exibida dentro do authOverlay)
+function _authShowAccessDenied(msg){
+  var ov = document.getElementById('authOverlay');
+  if(ov) ov.classList.add('show');
+  var errEl = document.getElementById('authErr');
+  if(errEl) errEl.textContent = '⛔ ' + (msg || 'Acesso negado');
+  var warnEl = document.getElementById('authWarn');
+  if(warnEl) warnEl.textContent = '';
+  var btnEl = document.getElementById('authBtn');
+  if(btnEl) btnEl.disabled = true;
+}
+
+// Mensagens de erro Firebase → PT-BR
+function _authFirebaseError(code){
+  var map = {
+    'auth/user-not-found':         '❌ E-mail não cadastrado no sistema',
+    'auth/wrong-password':         '❌ Senha incorreta',
+    'auth/invalid-credential':     '❌ E-mail ou senha incorretos',
+    'auth/user-disabled':          '⛔ Conta desativada — contate o administrador',
+    'auth/too-many-requests':      '⛔ Muitas tentativas — aguarde alguns minutos',
+    'auth/network-request-failed': '⚠ Sem conexão — verifique sua internet',
+    'auth/invalid-email':          '❌ E-mail inválido',
+    'auth/email-already-in-use':   '❌ E-mail já cadastrado'
+  };
+  return map[code] || ('❌ Erro de autenticação (' + code + ')');
+}
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -18566,16 +18622,32 @@ function authUserChanged(){
   var p=document.getElementById('authPwd');   if(p){ p.value=''; p.focus(); }
 }
 
-// ── Stubs Firebase (formulário de recuperação de senha) ───────────────────────
+// ── Recuperação de senha via Firebase Auth ────────────────────────────────────
 function fbResetSenha(){
   var emailEl=document.getElementById('authEmail');
   var email=(emailEl&&emailEl.value||'').trim();
-  if(!email){ 
-    var e=document.getElementById('authErr'); 
-    if(e) e.textContent='Informe o e-mail para redefinir a senha'; 
-    return; 
+  if(!email){
+    var e=document.getElementById('authErr');
+    if(e) e.textContent='Informe o e-mail para redefinir a senha';
+    return;
   }
-  showToast('Entre em contato com o administrador do sistema para redefinir sua senha.','warn');
+  var btnReset = document.querySelector('[onclick*="fbResetSenha"]');
+  if(btnReset) btnReset.disabled = true;
+  firebase.auth().sendPasswordResetEmail(email)
+    .then(function(){
+      showToast('E-mail de redefinição enviado para '+email,'ok');
+      var errEl=document.getElementById('authErr');
+      if(errEl) errEl.textContent='';
+      var warnEl=document.getElementById('authWarn');
+      if(warnEl) warnEl.textContent='📧 Verifique sua caixa de entrada (e spam)';
+    })
+    .catch(function(e){
+      var errEl=document.getElementById('authErr');
+      if(errEl) errEl.textContent = _authFirebaseError(e.code);
+    })
+    .finally(function(){
+      if(btnReset) btnReset.disabled = false;
+    });
 }
 function fbReenviarVerificacao(){ showToast('Função não disponível nesta versão.','warn'); }
 function fbVoltarLogin(){
@@ -18583,73 +18655,98 @@ function fbVoltarLogin(){
   var f=document.getElementById('authLoginForm');  if(f) f.style.display='block';
 }
 
-// ── Login ─────────────────────────────────────────────────────────────────────
+// ── Login — FASE 5: signInWithEmailAndPassword ────────────────────────────────
 function authLogin(){
   if(secCheckLockout()) return;
-  // Se Firebase ainda carregando e não há usuários locais, avisar
-  if(!_cloudReady && !usrLoadUsuarios().length){
-    var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='';
-  }
   var emailEl=document.getElementById('authEmail');
   var pwdEl  =document.getElementById('authPwd');
   var errEl  =document.getElementById('authErr');
+  var btnEl  =document.getElementById('authBtn');
   var email  =(emailEl&&emailEl.value||'').trim().toLowerCase();
   var pwd    =(pwdEl&&pwdEl.value||'');
   if(!email){ errEl.textContent='Informe seu e-mail'; if(emailEl) emailEl.focus(); return; }
   if(!pwd)  { errEl.textContent='Informe a senha';   if(pwdEl)   pwdEl.focus();   return; }
 
-  var ok=false, funcao='master', nome='Master';
-  // Busca usuário por e-mail (novo) ou nome (retrocompat)
-  var users=usrLoadUsuarios();
-  var u=users.find(function(u){
-    if(u.email && u.email.toLowerCase()===email) return true;
-    if(u.nome  && u.nome.toLowerCase() ===email) return true;
-    return false;
-  });
-  if(u){
-    var pwdT = pwd.trim();
-    ok=(u.senha===pwd)||(u.senha===pwdT)||(secHash(pwd)===u.senha)||(secHash(pwdT)===u.senha);
-    funcao=u.funcao; nome=u.nome;
-  } else {
-    // Nenhum usuário encontrado → tenta conta master
-    ok=(secHash(pwd)===secGetMasterHash());
-    funcao='master'; nome='Master';
-  }
+  // Desabilita botão durante request
+  if(btnEl) btnEl.disabled = true;
+  if(errEl) errEl.textContent = '';
 
-  if(ok){
-    secSetLockout({count:0,until:0});
-    _currentSession={user:nome,funcao:funcao,loginTime:Date.now(),lastActivity:Date.now()};
-    secSetSession(_currentSession);
-    secAuditLog('login','Login — '+nome+' ('+( FUNCAO_LABEL[funcao]||funcao)+')');
-    var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
-    if(pwdEl) pwdEl.value='';
-    authApplySession();
-    secStartInactivityTimer();
-    showToast('Bem-vindo, '+nome+'!','ok');
-    // Redirecionar cargo comercial para área comercial (não dashboard principal)
-    if(funcao==='comercial'){
-      var sbCom=null;
-      document.querySelectorAll('.sb-item').forEach(function(el){
-        if((el.getAttribute('onclick')||'').indexOf("'comercial'")>=0) sbCom=el;
-      });
-      if(sbCom) nav('comercial',sbCom); else nav('comercial',null);
-    }
-  } else {
-    var lo=secGetLockout();
-    lo.count=(lo.count||0)+1;
-    if(lo.count>=3){
-      lo.until=Date.now()+5*60*1000;
-      secSetLockout(lo);
-      errEl.textContent='';
-      secAuditLog('login_lockout','Conta bloqueada após 3 tentativas — usuario: '+key);
-      secCheckLockout();
-    } else {
-      secSetLockout(lo);
-      errEl.textContent='❌ E-mail ou senha incorretos — verifique se está usando o e-mail cadastrado';
-      var warnEl=document.getElementById('authWarn'); if(warnEl) warnEl.textContent='⚠ '+lo.count+'/3 tentativas';
-      if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
-    }
-  }
+  // ── 1. Autenticar com Firebase Auth ─────────────────────────────────────────
+  firebase.auth().signInWithEmailAndPassword(email, pwd)
+    .then(function(cred){
+      // ── 2. Ler claims do token para obter a role ───────────────────────────
+      return cred.user.getIdTokenResult(true);
+    })
+    .then(function(result){
+      var role  = result.claims.role  || '';
+      var dname = result.claims.name  || email.split('@')[0];
+      var valid = ['master','admin','comercial','producao','financeiro'];
+
+      // ── 3. Verificar role ─────────────────────────────────────────────────
+      if(!role || valid.indexOf(role) < 0){
+        firebase.auth().signOut();
+        if(errEl) errEl.textContent = '⛔ Conta sem perfil atribuído — contate o administrador';
+        if(btnEl) btnEl.disabled = false;
+        return;
+      }
+
+      // ── 4. Verificar se usuário está ativo em erp_usuarios (extra check) ──
+      var users = usrLoadUsuarios();
+      var uRec  = users.find(function(u){ return u.email && u.email.toLowerCase()===email; });
+      if(uRec && (uRec.ativo===0 || uRec.ativo==='0')){
+        firebase.auth().signOut();
+        if(errEl) errEl.textContent = '⛔ Conta desativada — contate o administrador';
+        if(btnEl) btnEl.disabled = false;
+        secAuditLog('login_denied','Conta desativada tentou login: '+email);
+        return;
+      }
+
+      // ── 5. Sessão OK ──────────────────────────────────────────────────────
+      var nome = (uRec && uRec.nome) || dname;
+      secSetLockout({count:0,until:0});
+      _currentSession = {
+        user: nome, email: email, funcao: role,
+        loginTime: Date.now(), lastActivity: Date.now()
+      };
+      secSetSession(_currentSession);
+      secAuditLog('login','Login — '+nome+' ('+( FUNCAO_LABEL[role]||role)+') via Firebase Auth');
+      var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
+      if(pwdEl) pwdEl.value='';
+      if(btnEl) btnEl.disabled = false;
+      authApplySession();
+      secStartInactivityTimer();
+      _cloudStartTokenRenewal();
+      showToast('Bem-vindo, '+nome+'!','ok');
+      // Redirecionar comercial para área comercial
+      if(role==='comercial'){
+        var sbCom=null;
+        document.querySelectorAll('.sb-item').forEach(function(el){
+          if((el.getAttribute('onclick')||'').indexOf("'comercial'")>=0) sbCom=el;
+        });
+        if(sbCom) nav('comercial',sbCom); else nav('comercial',null);
+      }
+    })
+    .catch(function(e){
+      // ── Tratar erros Firebase ──────────────────────────────────────────────
+      if(btnEl) btnEl.disabled = false;
+      var msg = _authFirebaseError(e.code);
+      if(errEl) errEl.textContent = msg;
+      // Lockout local complementar (3 tentativas)
+      var lo=secGetLockout();
+      lo.count=(lo.count||0)+1;
+      if(lo.count>=3){
+        lo.until=Date.now()+5*60*1000;
+        secSetLockout(lo);
+        if(errEl) errEl.textContent='';
+        secAuditLog('login_lockout','3 tentativas incorretas — email: '+email);
+        secCheckLockout();
+      } else {
+        secSetLockout(lo);
+        var warnEl=document.getElementById('authWarn');
+        if(warnEl) warnEl.textContent='⚠ '+lo.count+'/3 tentativas';
+        if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+      }
+    });
 }
 
 // ── Aplicar permissões após login ─────────────────────────────────────────────
@@ -18747,6 +18844,9 @@ function authLogout(){
   secAuditLog('logout','Logout — '+(_currentSession?_currentSession.user:'?'));
   secClearSession();
   _currentSession=null;
+  // Encerrar sessão Firebase Auth (FASE 5)
+  if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); }
   secStopInactivityTimer();
   var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
   // Restore all sidebar items
@@ -18789,16 +18889,49 @@ function authUnlock(){
     var u=users.find(function(u){ return u.nome===_currentSession.user; });
     if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
   }
-  if(ok){
-    var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
-    _currentSession.lastActivity=Date.now();
-    secSetSession(_currentSession);
-    secStartInactivityTimer();
-    secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
-    if(pwdEl) pwdEl.value='';
+  // FASE 5: na lock screen, a senha deve ser revalidada via Firebase Auth
+  // para garantir que o token Firebase está ativo.
+  // Validação local é mantida como fallback offline (ex: sem internet).
+  var fbUser = firebase.auth().currentUser;
+  if(fbUser && _currentSession && _currentSession.email){
+    // Tentativa via Firebase Auth (online)
+    var emailForUnlock = _currentSession.email;
+    firebase.auth().signInWithEmailAndPassword(emailForUnlock, pwd)
+      .then(function(cred){ return cred.user.getIdToken(true); })
+      .then(function(){
+        var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
+        _currentSession.lastActivity=Date.now();
+        secSetSession(_currentSession);
+        secStartInactivityTimer();
+        _cloudStartTokenRenewal();
+        secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
+        if(pwdEl) pwdEl.value='';
+      })
+      .catch(function(e){
+        if(errEl) errEl.textContent = _authFirebaseError(e.code) || '❌ Senha incorreta';
+        if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+      });
   } else {
-    if(errEl) errEl.textContent='❌ Senha incorreta';
-    if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+    // Fallback offline: validação local (erp_usuarios)
+    var ok=false;
+    if(_currentSession&&_currentSession.funcao==='master'){
+      ok=(secHash(pwd)===secGetMasterHash());
+    } else if(_currentSession){
+      var users=usrLoadUsuarios();
+      var u=users.find(function(u){ return u.nome===_currentSession.user; });
+      if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
+    }
+    if(ok){
+      var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
+      _currentSession.lastActivity=Date.now();
+      secSetSession(_currentSession);
+      secStartInactivityTimer();
+      secAuditLog('unlock','Tela desbloqueada (offline) — '+_currentSession.user);
+      if(pwdEl) pwdEl.value='';
+    } else {
+      if(errEl) errEl.textContent='❌ Senha incorreta';
+      if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+    }
   }
 }
 
