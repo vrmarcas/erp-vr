@@ -1,0 +1,109 @@
+name: Deploy ERP VR — Firebase CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: "20"
+  FIREBASE_PROJECT: "erp-vr"
+
+jobs:
+  # ── JOB 1: Lint & Build das Cloud Functions ─────────────────────────────────
+  lint-and-build:
+    name: Lint & Build Functions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Instalar dependências das Functions
+        working-directory: functions
+        run: npm ci
+
+      - name: Lint TypeScript
+        working-directory: functions
+        run: npm run lint
+
+      - name: Build TypeScript → JavaScript
+        working-directory: functions
+        run: npm run build
+
+      - name: Upload artefato compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: functions-lib
+          path: functions/lib/
+          retention-days: 1
+
+  # ── JOB 2: Deploy no Firebase (apenas em push para main) ────────────────────
+  deploy:
+    name: Deploy Firebase
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Instalar dependências das Functions
+        working-directory: functions
+        run: npm ci
+
+      - name: Download artefato compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: functions-lib
+          path: functions/lib/
+
+      # Autenticar com Google Cloud via Service Account
+      - name: Autenticar no Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Instalar Firebase CLI
+        run: npm install -g firebase-tools@latest
+
+      # Deploy: Hosting (index.html) + Firestore Rules + Cloud Functions
+      - name: Deploy Firebase Hosting
+        run: firebase deploy --only hosting --project ${{ env.FIREBASE_PROJECT }} --non-interactive
+
+      - name: Deploy Firestore Rules
+        run: firebase deploy --only firestore:rules --project ${{ env.FIREBASE_PROJECT }} --non-interactive
+
+      - name: Deploy Cloud Functions
+        run: |
+          firebase deploy --only functions \
+            --project ${{ env.FIREBASE_PROJECT }} \
+            --non-interactive
+        env:
+          # As secrets de runtime são configuradas via Firebase Secrets,
+          # não via env vars do GitHub — apenas GCP_SA_KEY é necessário aqui.
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+
+      - name: Notificar sucesso
+        if: success()
+        run: echo "✅ Deploy concluído com sucesso para o projeto ${{ env.FIREBASE_PROJECT }}"
+
+      - name: Notificar falha
+        if: failure()
+        run: echo "❌ Deploy falhou — verificar logs acima"
