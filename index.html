@@ -18556,6 +18556,29 @@ function vendedorRemover(btn) {
   showToast('Vendedor "'+nome+'" removido','warn');
 }
 // ────────────────────────────────────────────────────────────────────────
+// Tenta setar custom claim via adminUpdateUserRole Cloud Function.
+// Garante compatibilidade com authLogin legado (que exige claims no token).
+// Se a CF nao estiver disponivel, o novo authLogin le de erp_usuarios.funcao.
+// Parametros: uid do novo usuario (de cred.user.uid) e role desejada.
+function _usrSetClaimViaFunction(uid, role) {
+  if(!uid || !role) return;
+  try {
+    var fn = firebase.app().functions('us-central1');
+    if(!fn) return;
+    var setRole = fn.httpsCallable('adminUpdateUserRole');
+    setRole({ targetUid: uid, newRole: role })
+      .then(function() {
+        console.log('[usrSalvar] Claim setado via CF: uid=' + uid + ' role=' + role);
+      })
+      .catch(function(e) {
+        // CF nao disponivel antes do deploy das funcoes — nao e critico.
+        // O novo authLogin le funcao de erp_usuarios, entao o login funciona sem claim.
+        console.info('[usrSalvar] adminUpdateUserRole indisponivel (pre-deploy):', e.code || e.message);
+      });
+  } catch(e) {
+    console.info('[usrSalvar] _usrSetClaimViaFunction ignorado:', e.message);
+  }
+}
 
 function usrSalvar() {
   var nome = (document.getElementById('usrNome')||{}).value||'';
@@ -18596,7 +18619,7 @@ function usrSalvar() {
 
     // ── Criar conta Firebase Auth via secondary app (admin não perde sessão) ──
     // O secondary app é criado com a mesma config do app principal, mas isolado.
-    (function(nomeCriado, emailCriado, senhaCriada) {
+    (function(nomeCriado, emailCriado, senhaCriada, funcaoCriada) {
       try {
         var _fbCfg = firebase.app().options;
         var _secAppName = 'usrCreate_' + Date.now();
@@ -18604,19 +18627,26 @@ function usrSalvar() {
         showToast('Criando acesso para "' + nomeCriado + '"…', 'ok');
         _secApp.auth().createUserWithEmailAndPassword(emailCriado, senhaCriada)
           .then(function(cred) {
-            return cred.user.updateProfile({ displayName: nomeCriado });
+            var newUid = cred.user.uid;
+            return cred.user.updateProfile({ displayName: nomeCriado }).then(function(){ return newUid; });
           })
-          .then(function() {
-            return _secApp.auth().signOut();
+          .then(function(newUid) {
+            return _secApp.auth().signOut().then(function(){ return newUid; });
           })
-          .then(function() {
+          .then(function(newUid) {
             _secApp.delete().catch(function(){});
             showToast('✅ "' + nomeCriado + '" criado! Já pode acessar o sistema.', 'ok');
+            // Setar custom claim via CF (compatibilidade com authLogin legado que exige claims)
+            // Se a CF nao estiver disponivel, o novo authLogin usa erp_usuarios.funcao
+            _usrSetClaimViaFunction(newUid, funcaoCriada);
           })
           .catch(function(err) {
             _secApp.delete().catch(function(){});
             if(err.code === 'auth/email-already-in-use') {
               showToast('ℹ️ "' + nomeCriado + '" salvo — e-mail já tinha conta, acesso mantido.', 'warn');
+              // Conta existente: buscar uid via getUser nao e possivel no client
+              // O novo authLogin le funcao de erp_usuarios — login funcionara sem claim
+              console.info('[usrSalvar] Conta existente para', emailCriado, '— claim nao atualizado via client');
             } else {
               showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas conta de acesso não criada: ' + (err.message || err.code), 'warn');
               console.warn('[usrSalvar] Firebase Auth create error:', err);
@@ -18626,7 +18656,7 @@ function usrSalvar() {
         showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas falha ao iniciar criação de acesso: ' + initErr.message, 'warn');
         console.warn('[usrSalvar] secondary app init error:', initErr);
       }
-    })(nome.trim(), email, senha);
+    })(nome.trim(), email, senha, funcao);
   }
 
   if(typeof _cloudSave==='function' && _cloudReady){
