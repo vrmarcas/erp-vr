@@ -19,6 +19,7 @@ const COMMIT_MSG = process.argv[2] ||
 // Arquivos/padrões a EXCLUIR do commit automático (nunca devem ir para o repo)
 const EXCLUDE_PATTERNS = [
   /^\.git\//,
+  /^\.github\//,                 // workflows precisam de escopo 'workflow' no PAT
   /node_modules\//,
   /\.bat$/,
   /^functions-valeria\/lib\//,   // compilados — incluídos separadamente se necessário
