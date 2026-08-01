@@ -5215,19 +5215,16 @@ function _authFirebaseError(code){
             <input type="text" id="planProdDesc" placeholder="Ex: Frente, laterais, base e fundo" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
           </div>
 
-          <!-- SVG de planificação -->
+          <!-- Arquivos de Corte / Planificação por Espessura -->
           <div class="fg">
-            <label>SVG de Planificação <span style="font-size:10px;color:var(--muted);font-weight:400">(opcional — exibido no modal de planificação da OS)</span></label>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <label style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1.5px dashed var(--border);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;color:var(--muted)">
-                📎 Selecionar arquivo .svg
-                <input type="file" id="planProdSvgInput" accept=".svg,image/svg+xml" style="display:none" onchange="planProdSvgChange(this)">
-              </label>
-              <span id="planProdSvgNome" style="font-size:11px;color:var(--muted)">Nenhum arquivo</span>
-              <button id="planProdSvgClear" onclick="planProdSvgClear()" style="display:none;background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Remover</button>
-              <button id="planProdSvgParseBtn" onclick="planSvgParseNow()" style="display:none;background:var(--primary);color:#fff;border:none;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:600">🔍 Extrair Peças do SVG</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <label style="margin:0">📐 Arquivos de Corte por Espessura <span style="font-size:10px;color:var(--muted);font-weight:400">(opcional — exibido no modal de planificação da OS)</span></label>
+              <button class="topbar-btn" style="font-size:11px;padding:4px 10px" onclick="planProdAddEsp(event)">+ Adicionar Espessura</button>
             </div>
-            <div id="planProdSvgPreview" style="display:none;margin-top:8px;max-height:120px;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding:6px;text-align:center"></div>
+            <div id="planProdEspList" style="display:flex;flex-direction:column;gap:10px"></div>
+            <div id="planProdEspEmpty" style="font-size:11px;color:var(--muted);text-align:center;padding:12px;border:1.5px dashed var(--border);border-radius:8px;margin-top:4px">
+              Nenhuma espessura adicionada. Clique em "+ Adicionar Espessura" para vincular arquivos SVG por espessura de chapa.
+            </div>
           </div>
 
           <!-- Pré-visualização com dimensões de exemplo -->
@@ -7615,16 +7612,24 @@ function planAbrir(idx) {
   }
   planRenderManual();
 
-  // SVG template do produto
+  // SVG template do produto — suporta múltiplas espessuras
   var _planSvgBox = document.getElementById('planSvgBox');
   var _planSvgContent = document.getElementById('planSvgContent');
   if(_planSvgBox && _planSvgContent) {
     var _custProds = planProdLoad();
     var _cprod = _custProds.find(function(x){ return x.nome===produto; });
-    if(_cprod && _cprod.svg) {
-      _planSvgContent.innerHTML = _cprod.svg;
-      var _svgEl = _planSvgContent.querySelector('svg');
-      if(_svgEl) { _svgEl.style.maxWidth='100%'; _svgEl.style.maxHeight='280px'; }
+    var _plans = (_cprod && _cprod.planificacoes && _cprod.planificacoes.filter(function(x){return x.svgData;})) || [];
+    // retrocompat: produto antigo com campo svg único
+    if(!_plans.length && _cprod && _cprod.svg) _plans = [{espessuraMm:0, descricao:'', svgData:_cprod.svg}];
+    if(_plans.length) {
+      _planSvgContent.innerHTML = _plans.map(function(pl, i) {
+        var lbl = pl.espessuraMm ? (pl.espessuraMm+'mm'+(pl.descricao?' — '+pl.descricao:'')) : (pl.descricao || ('Planificação '+(i+1)));
+        return '<div style="margin-bottom:'+(i<_plans.length-1?'12px':'0')+'">'
+          +(lbl?'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">'+lbl+'</div>':'')
+          +'<div style="overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+pl.svgData+'</div>'
+          +'</div>';
+      }).join('');
+      _planSvgContent.querySelectorAll('svg').forEach(function(s){s.style.maxWidth='100%';s.style.maxHeight='180px';});
       _planSvgBox.style.display = '';
     } else {
       _planSvgContent.innerHTML = '';
@@ -20846,7 +20851,7 @@ function cfgResetProdutos() {
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
 var _planProdPecas  = [];
-var _planProdSvgData = null; // SVG text content for planificação template
+var _planPlanificacoes = []; // Array de {espessuraMm, descricao, svgData, svgNome} — múltiplas espessuras
 
 var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
 
@@ -20867,7 +20872,7 @@ function planProdRender() {
           +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+'</div>'
           +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
           +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
-          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(p.svg?'<span style="font-size:10px;background:#EDE9FE;border:1px solid #C4B5FD;border-radius:10px;padding:2px 8px;color:#5B21B6">📄 SVG</span>':'')+'</div>'
+          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){var n=(p.planificacoes&&p.planificacoes.filter(function(x){return x.svgData;}).length)||((p.svg&&!(p.planificacoes&&p.planificacoes.length))?1:0);return n?'<span style="font-size:10px;background:#EDE9FE;border:1px solid #C4B5FD;border-radius:10px;padding:2px 8px;color:#5B21B6">📐 '+(n>1?n+'× SVG':'SVG')+'</span>':'';})()+'</div>'
           +'</div>'
           +'<div style="display:flex;gap:6px">'
           +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
@@ -20892,25 +20897,112 @@ function planProdRender() {
   }
 }
 
-function planProdSvgChange(input) {
+// ── Funções de múltiplas espessuras ──────────────────────────
+function planProdRenderEspList() {
+  var list  = document.getElementById('planProdEspList');
+  var empty = document.getElementById('planProdEspEmpty');
+  if(!list) return;
+  if(!_planPlanificacoes.length) {
+    list.innerHTML = '';
+    if(empty) empty.style.display = '';
+    return;
+  }
+  if(empty) empty.style.display = 'none';
+  list.innerHTML = _planPlanificacoes.map(function(e,i) {
+    var hasSvg = !!e.svgData;
+    var svgPrev = hasSvg
+      ? '<div style="margin-top:6px;max-height:90px;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:4px;text-align:center">'+e.svgData+'</div>'
+      : '';
+    return '<div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg)">'
+      +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">'
+        +'<div style="display:flex;flex-direction:column;gap:3px">'
+          +'<label style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Espessura (mm)</label>'
+          +'<input type="number" min="1" max="50" step="0.5" value="'+cfgEsc(String(e.espessuraMm||''))+'" placeholder="Ex: 8"'
+          +' style="width:80px;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;background:var(--surface);color:var(--text)"'
+          +' oninput="_planEspSet('+i+',\'espessuraMm\',this.value)">'
+        +'</div>'
+        +'<div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:160px">'
+          +'<label style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Descrição da Parte</label>'
+          +'<input type="text" value="'+cfgEsc(e.descricao||'')+'" placeholder="Ex: Corpo Estrutural, Gavetas, Divisórias"'
+          +' style="width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--surface);color:var(--text)"'
+          +' oninput="_planEspSet('+i+',\'descricao\',this.value)">'
+        +'</div>'
+        +'<button onclick="planProdEspRemove('+i+')" title="Remover espessura"'
+        +' style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;flex-shrink:0">🗑 Remover</button>'
+      +'</div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        +'<label style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1.5px dashed var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:11px;color:var(--muted)">'
+          +'📎 '+(hasSvg?'Trocar .svg':'Selecionar arquivo .svg')
+          +'<input type="file" accept=".svg,image/svg+xml" style="display:none" onchange="planProdEspSvgChange('+i+',this)">'
+        +'</label>'
+        +(hasSvg
+          ? '<span style="font-size:11px;color:#059669;font-weight:600">✅ '+cfgEsc(e.svgNome||'SVG salvo')+'</span>'
+            +'<button onclick="planProdEspSvgClear('+i+')" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Remover SVG</button>'
+            +'<button onclick="planProdEspParseNow('+i+')" style="background:var(--primary);color:#fff;border:none;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:600">🔍 Extrair Peças</button>'
+          : '<span style="font-size:11px;color:var(--muted)">Nenhum arquivo</span>'
+        )
+      +'</div>'
+      +svgPrev
+      +'</div>';
+  }).join('');
+  list.querySelectorAll('svg').forEach(function(s){s.style.maxWidth='100%';s.style.maxHeight='80px';});
+}
+
+function _planEspSet(idx, key, val) {
+  if(_planPlanificacoes[idx]) _planPlanificacoes[idx][key] = val;
+}
+
+function planProdAddEsp(e) {
+  if(e && e.preventDefault) e.preventDefault();
+  _planPlanificacoes.push({espessuraMm:'', descricao:'', svgData:null, svgNome:''});
+  planProdRenderEspList();
+}
+
+function planProdEspRemove(idx) {
+  _planPlanificacoes.splice(idx,1);
+  planProdRenderEspList();
+}
+
+function planProdEspSvgChange(idx, input) {
   var file = input.files && input.files[0];
   if(!file) return;
   var reader = new FileReader();
-  reader.onload = function(e) {
-    _planProdSvgData = e.target.result;
-    var nome = document.getElementById('planProdSvgNome');
-    if(nome) nome.textContent = file.name;
-    var clr = document.getElementById('planProdSvgClear');
-    if(clr) clr.style.display = '';
-    var prev = document.getElementById('planProdSvgPreview');
-    if(prev) { prev.style.display = ''; prev.innerHTML = _planProdSvgData; var svg=prev.querySelector('svg'); if(svg){svg.style.maxWidth='100%';svg.style.maxHeight='100px';} }
-    // Botão de extração
-    var parseBtn = document.getElementById('planProdSvgParseBtn');
-    if(parseBtn) parseBtn.style.display = '';
-    // Auto-parse
-    setTimeout(function(){ planSvgParsePecas(_planProdSvgData); }, 200);
+  reader.onload = function(ev) {
+    if(!_planPlanificacoes[idx]) return;
+    _planPlanificacoes[idx].svgData = ev.target.result;
+    _planPlanificacoes[idx].svgNome = file.name;
+    planProdRenderEspList();
+    setTimeout(function(){ planSvgParsePecas(ev.target.result); }, 200);
   };
   reader.readAsText(file);
+}
+
+function planProdEspSvgClear(idx) {
+  if(_planPlanificacoes[idx]) { _planPlanificacoes[idx].svgData=null; _planPlanificacoes[idx].svgNome=''; }
+  planProdRenderEspList();
+}
+
+function planProdEspParseNow(idx) {
+  var e = _planPlanificacoes[idx];
+  if(e && e.svgData) planSvgParsePecas(e.svgData);
+}
+
+// Retrocompatibilidade: mantém planSvgParseNow apontando para primeira espessura (se existir)
+function planSvgParseNow() {
+  if(_planPlanificacoes.length && _planPlanificacoes[0].svgData) planSvgParsePecas(_planPlanificacoes[0].svgData);
+}
+
+// Carrega planificacoes no estado interno (ao abrir modal de edição)
+function _planEspReset(planificacoes, legacySvg) {
+  if(planificacoes && planificacoes.length) {
+    _planPlanificacoes = JSON.parse(JSON.stringify(planificacoes));
+  } else if(legacySvg) {
+    // Produto antigo com campo svg único — migrar para array com 1 entrada
+    _planPlanificacoes = [{espessuraMm:'', descricao:'', svgData:legacySvg, svgNome:'SVG salvo'}];
+  } else {
+    _planPlanificacoes = [];
+  }
+  planProdRenderEspList();
 }
 
 // ── Parser SVG → Peças ────────────────────────────────────────────────────────
@@ -21113,31 +21205,7 @@ function planSvgParsePecas(svgText) {
   showToast('✅ '+deduped.length+' peças extraídas do SVG ('+espGroups.filter(function(g){return g.esp;}).length+' espessura(s) detectada(s))','ok');
 }
 
-function planSvgParseNow() { planSvgParsePecas(_planProdSvgData); }
-function planProdSvgClear() {
-  _planProdSvgData = null;
-  var inp = document.getElementById('planProdSvgInput'); if(inp) inp.value='';
-  var nome = document.getElementById('planProdSvgNome'); if(nome) nome.textContent='Nenhum arquivo';
-  var clr = document.getElementById('planProdSvgClear'); if(clr) clr.style.display='none';
-  var prev = document.getElementById('planProdSvgPreview'); if(prev){prev.style.display='none';prev.innerHTML='';}
-  var parseBtn = document.getElementById('planProdSvgParseBtn'); if(parseBtn) parseBtn.style.display='none';
-}
-function _planProdSvgReset(svgData) {
-  _planProdSvgData = svgData||null;
-  var inp = document.getElementById('planProdSvgInput'); if(inp) inp.value='';
-  var nome = document.getElementById('planProdSvgNome');
-  var clr = document.getElementById('planProdSvgClear');
-  var prev = document.getElementById('planProdSvgPreview');
-  if(svgData) {
-    if(nome) nome.textContent = '✅ SVG salvo';
-    if(clr) clr.style.display = '';
-    if(prev) { prev.style.display=''; prev.innerHTML=svgData; var svg=prev.querySelector('svg'); if(svg){svg.style.maxWidth='100%';svg.style.maxHeight='100px';} }
-  } else {
-    if(nome) nome.textContent='Nenhum arquivo';
-    if(clr) clr.style.display='none';
-    if(prev) {prev.style.display='none';prev.innerHTML='';}
-  }
-}
+// (planProdSvgClear e _planProdSvgReset substituídos por _planEspReset / planProdEspSvgClear acima)
 
 function planProdNovoOpen() {
   _planProdEditId = null;
@@ -21146,7 +21214,7 @@ function planProdNovoOpen() {
   document.getElementById('planProdNome').value  = '';
   document.getElementById('planProdDesc').value  = '';
   document.getElementById('planProdDim3d').checked = true;
-  _planProdSvgReset(null);
+  _planEspReset(null, null);
   planProdRenderPecas();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -21162,7 +21230,7 @@ function planProdEditar(id) {
   document.getElementById('planProdNome').value  = p.nome||'';
   document.getElementById('planProdDesc').value  = p.desc||'';
   document.getElementById('planProdDim3d').checked = !!p.dim3d;
-  _planProdSvgReset(p.svg||null);
+  _planEspReset(p.planificacoes||null, p.svg||null);
   planProdRenderPecas();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -21170,7 +21238,7 @@ function planProdEditar(id) {
 
 function planProdFechar() {
   document.getElementById('planProdOverlay').classList.remove('open');
-  _planProdEditId = null; _planProdPecas = []; _planProdSvgData = null;
+  _planProdEditId = null; _planProdPecas = []; _planPlanificacoes = [];
 }
 
 function planProdAddPeca() {
@@ -21293,13 +21361,19 @@ function planProdSalvar() {
   if(hasBlankFormula) { showToast('Preencha as fórmulas de largura e altura em todas as peças','err'); return; }
 
   var prods = planProdLoad();
+  // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
+  var _planifs = _planPlanificacoes
+    .filter(function(e){ return e.svgData || e.espessuraMm || e.descricao; })
+    .map(function(e){ return {espessuraMm:parseFloat(e.espessuraMm)||0, descricao:(e.descricao||'').trim(), svgData:e.svgData||null, svgNome:e.svgNome||''}; });
   var prod = {
     id:    _planProdEditId || 'pp_'+Date.now(),
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
     pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||''}; }),
-    svg:   _planProdSvgData||undefined
+    planificacoes: _planifs,
+    // retrocompat: primeira espessura com SVG mantém campo "svg" para código legado
+    svg: (_planifs.find(function(e){return e.svgData;})||{}).svgData || undefined
   };
 
   if(_planProdEditId) {
