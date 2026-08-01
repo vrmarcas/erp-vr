@@ -1,0 +1,975 @@
+openapi: 3.1.0
+info:
+  title: Valéria Cloud Functions API
+  version: 2.1.0
+  description: |
+    API de integração entre o Chatvolt (agente Valéria) e o ERP VR Marcas.
+
+    **v2.1.0 — Novos endpoints (B1–B4):**
+    - `valeriaWebhookChatvolt` — recebe eventos push do Chatvolt (B1)
+    - `valeriaAtualizarBriefing` — briefing progressivo com merge inteligente (B2)
+    - `valeriaMudarEtapa` — transição controlada de etapa CRM (B3)
+    - `valeriaFechamento` — ganho / perda / reabertura com validações obrigatórias (B3)
+    - `valeriaRegistrarMensagem` ampliado — imagem, áudio, transcrição, bloqueio, follow-up (B4)
+
+    **Autenticação:** Bearer token via Firebase Secret Manager
+    (`VALERIA_BEARER_SECRET` / `VALERIA_BEARER_SECRET_PREV`).
+
+    **Origem permitida:** `https://app.chatvolt.ai` (CORS restrito).
+
+    **Contrato:** Todas as respostas seguem `ApiResponse<T>` com campos obrigatórios
+    `success`, `meta`, `verified`, `communicableToCustomer`, `humanValidationRequired`.
+
+    **Rate limits:**
+    - 300 req/min por token (global)
+    - 30 req/min por `conversationId`
+    - Payload máximo: 256 KB
+
+servers:
+  - url: https://us-central1-erp-vrmarcas.cloudfunctions.net
+    description: Produção (Firebase Gen 2)
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Token secreto gerado pelo Secret Manager.
+        Exemplo (FICTÍCIO): `Bearer vr_SECRET_FICTICIO_NAO_USAR_EM_PRODUCAO`
+
+  schemas:
+    ApiMeta:
+      type: object
+      required: [requestId, source, apiVersion, timestamp]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        source:
+          type: string
+          example: "valeria-api"
+        apiVersion:
+          type: string
+          example: "2.0.0"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-07-27T10:00:00.000Z"
+
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - VALIDATION_ERROR
+            - NEEDS_INFORMATION
+            - HUMAN_VALIDATION_REQUIRED
+            - UNSUPPORTED
+            - TEMPORARILY_UNAVAILABLE
+            - PAYLOAD_TOO_LARGE
+            - RATE_LIMIT_EXCEEDED
+            - FORBIDDEN_FIELD
+            - METHOD_NOT_ALLOWED
+            - INTERNAL_ERROR
+        message:
+          type: string
+        details:
+          type: string
+          description: Detalhes adicionais (nunca expõe stack trace, secrets ou margens)
+
+    ApiResponseBase:
+      type: object
+      required: [success, meta, verified, communicableToCustomer, humanValidationRequired]
+      properties:
+        success:
+          type: boolean
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+        verified:
+          type: boolean
+          description: True se a operação foi verificada com sucesso
+        communicableToCustomer:
+          type: boolean
+          description: True se a mensagem pode ser comunicada ao cliente final
+        humanValidationRequired:
+          type: boolean
+          description: True se um agente humano deve revisar a operação
+        missingFields:
+          type: array
+          items:
+            type: string
+          description: Campos ausentes ou inválidos (quando applicable)
+        warnings:
+          type: array
+          items:
+            type: string
+        error:
+          $ref: "#/components/schemas/ApiError"
+
+    ConversationContext:
+      type: object
+      required: [conversationId, agentId, organizationId]
+      properties:
+        conversationId:
+          type: string
+          description: Identificador primário da conversa (provido pelo Chatvolt)
+          example: "conv_abc123"
+        agentId:
+          type: string
+          example: "agent_001"
+        organizationId:
+          type: string
+          example: "org_vrmarcas"
+        channelPhone:
+          type: string
+          description: Telefone do canal (confiável — vem do Chatvolt, não do payload do cliente)
+          example: "+5511999990001"
+        messageId:
+          type: string
+          example: "msg_xyz789"
+
+    QuoteItem:
+      type: object
+      required: [qty]
+      properties:
+        larg:
+          type: number
+          description: Largura em mm
+          example: 100
+        alt:
+          type: number
+          description: Altura em mm
+          example: 100
+        qty:
+          type: integer
+          description: Quantidade
+          example: 2
+        matKey:
+          type: string
+          description: Chave do material na config (ex: cfg_0)
+          example: "cfg_0"
+        rsm2:
+          type: number
+          description: Preço por m² (quando matKey não aplicável)
+          example: 200.0
+        planArea:
+          type: number
+          description: Área planificada em mm² (sobrescreve larg×alt)
+
+    OrcamentoEnviado:
+      type: object
+      required: [simulationId, pricingVersion, quoteEngine, conversationId, agentId, organizationId, communicableToCustomer]
+      properties:
+        simulationId:
+          type: string
+          description: ID da simulação gerada pelo motor (validade 24h)
+          example: "sim_a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        pricingVersion:
+          type: string
+          description: Fingerprint da config financeira usada no cálculo
+          example: "41.16_20_0"
+        finalPrice:
+          type: number
+          description: Preço final calculado pelo motor (R$)
+          example: 387.50
+        quoteEngine:
+          type: string
+          enum: [erp_official, human_authorized]
+        conversationId:
+          type: string
+        agentId:
+          type: string
+        organizationId:
+          type: string
+        communicableToCustomer:
+          type: boolean
+
+paths:
+  /valeriaStatus:
+    get:
+      operationId: valeriaStatus
+      summary: Health check da API
+      tags: [Diagnóstico]
+      security: []
+      responses:
+        "200":
+          description: API online
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status: { type: string, example: "ok" }
+                          version: { type: string, example: "2.0.0" }
+
+  /valeriaGetContexto:
+    post:
+      operationId: valeriaGetContexto
+      summary: Recupera cliente e lead vinculados ao conversationId
+      tags: [Contexto]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+            example:
+              conversationId: "conv_abc123"
+              agentId: "agent_001"
+              organizationId: "org_vrmarcas"
+              channelPhone: "+5511999990001"
+      responses:
+        "200":
+          description: Contexto encontrado (ou não vinculado)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          conversationId: { type: string }
+                          clienteId: { type: string, nullable: true }
+                          leadId: { type: string, nullable: true }
+                          orcamentoId: { type: string, nullable: true }
+                          linked: { type: boolean }
+
+  /valeriaUpsertCliente:
+    post:
+      operationId: valeriaUpsertCliente
+      summary: Criar ou atualizar cliente e vincular ao conversationId
+      tags: [Clientes]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+          description: Chave para garantir idempotência (recomendado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  properties:
+                    nome: { type: string, example: "João Silva" }
+                    telefone:
+                      type: string
+                      description: Usado como fallback. channelPhone tem precedência.
+                    email: { type: string, format: email }
+                    cpfCnpj: { type: string }
+                    tipo: { type: string, enum: [PF, PJ] }
+      responses:
+        "200":
+          description: Cliente upserted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          clienteId: { type: string }
+                          conversationId: { type: string }
+                          action: { type: string, enum: [created, updated] }
+
+  /valeriaCatalogo:
+    post:
+      operationId: valeriaCatalogo
+      summary: Retorna catálogo de produtos (sem preços)
+      tags: [Catálogo]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationContext"
+      responses:
+        "200":
+          description: Catálogo retornado (sem preços — preços são calculados pelo motor)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          produtos:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id: { type: string }
+                                nome: { type: string }
+                                categoria: { type: string }
+                                disponivel: { type: boolean }
+
+  /valeriaCalcularOrcamento:
+    post:
+      operationId: valeriaCalcularOrcamento
+      summary: Calcular orçamento pelo motor oficial (retorna simulationId)
+      description: |
+        **NUNCA** aceita preço externo. O motor lê a config do Firestore e calcula
+        o preço final. Retorna `simulationId` para uso em `valeriaCriarOrcamento`.
+      tags: [Orçamento]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [itens]
+                  properties:
+                    itens:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/QuoteItem"
+                    extras:
+                      type: number
+                      description: Custo extra em R$ (laser, adesivo, etc)
+                    descPct: { type: number, description: "Desconto em %" }
+                    descRS:  { type: number, description: "Desconto em R$" }
+                    acresPct: { type: number, description: "Acréscimo em %" }
+                    acresRS:  { type: number, description: "Acréscimo em R$" }
+            example:
+              conversationId: "conv_abc123"
+              agentId: "agent_001"
+              organizationId: "org_vrmarcas"
+              itens:
+                - larg: 100
+                  alt: 100
+                  qty: 2
+                  matKey: "cfg_0"
+      responses:
+        "200":
+          description: Cálculo concluído
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrcamentoEnviado"
+        "400":
+          description: NEEDS_INFORMATION ou HUMAN_VALIDATION_REQUIRED
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /valeriaCriarOrcamento:
+    post:
+      operationId: valeriaCriarOrcamento
+      summary: Criar orçamento formal a partir de simulationId
+      description: |
+        **BLOQUEADOR CRÍTICO:** Rejeita qualquer campo de preço livre (`total`,
+        `valor`, `preco`, `price`, `amount`, `finalPrice`). O preço é sempre
+        recalculado pelo motor usando o `simulationId`.
+      tags: [Orçamento]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+          description: Obrigatório para evitar criação duplicada
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [simulationId, nomeCliente, itens]
+                  properties:
+                    simulationId:
+                      type: string
+                      description: Retornado por valeriaCalcularOrcamento
+                      example: "sim_a1b2c3d4-..."
+                    nomeCliente:
+                      type: string
+                      example: "João Silva"
+                    itens:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/QuoteItem"
+                    extras:  { type: number }
+                    descPct: { type: number }
+                    descRS:  { type: number }
+                    acresPct: { type: number }
+                    acresRS:  { type: number }
+                    observacoes: { type: string }
+      responses:
+        "200":
+          description: Orçamento criado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrcamentoEnviado"
+        "400":
+          description: Campo proibido detectado (total/valor/preco/price/amount/finalPrice)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+              example:
+                success: false
+                error:
+                  code: "FORBIDDEN_FIELD"
+                  message: "Campos não permitidos: [total]. O preço é calculado pelo motor oficial."
+                communicableToCustomer: false
+                humanValidationRequired: false
+
+  /valeriaCriarOportunidade:
+    post:
+      operationId: valeriaCriarOportunidade
+      summary: Criar ou atualizar oportunidade CRM vinculada ao conversationId
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [produto, interesse]
+                  properties:
+                    produto:     { type: string, example: "Placa acrílica" }
+                    interesse:   { type: string, example: "Luminoso para loja" }
+                    etapa:       { type: string, example: "CONTATO" }
+                    origem:      { type: string, example: "WhatsApp" }
+                    observacoes: { type: string }
+      responses:
+        "200":
+          description: Oportunidade criada/atualizada
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          leadId: { type: string }
+                          conversationId: { type: string }
+                          action: { type: string, enum: [created, updated] }
+
+  /valeriaRegistrarMensagem:
+    post:
+      operationId: valeriaRegistrarMensagem
+      summary: Registrar mensagem no histórico da oportunidade
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+          description: messageId é usado como chave de idempotência
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [messageId, texto, sentido]
+                  properties:
+                    messageId: { type: string }
+                    texto:     { type: string }
+                    sentido:   { type: string, enum: [entrada, saida] }
+      responses:
+        "200":
+          description: Mensagem registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /valeriaTransferirHumano:
+    post:
+      operationId: valeriaTransferirHumano
+      summary: Solicitar transferência para atendente humano
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  properties:
+                    motivo: { type: string, example: "Cliente solicita orçamento especial" }
+      responses:
+        "200":
+          description: Transferência registrada
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          transferido: { type: boolean }
+                          conversationId: { type: string }
+
+  /valeriaProximaAcao:
+    post:
+      operationId: valeriaProximaAcao
+      summary: Registrar próxima ação de follow-up para o lead
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [acao]
+                  properties:
+                    acao: { type: string, example: "Ligar em 3 dias" }
+                    data: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Ação registrada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /valeriaConsultarStatus:
+    post:
+      operationId: valeriaConsultarStatus
+      summary: Consultar status de OS/orçamento por conversationId
+      description: |
+        **Não aceita** busca por telefone livre. Usa exclusivamente `conversationId`
+        para evitar vazamento de dados entre conversas.
+      tags: [Consultas]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationContext"
+      responses:
+        "200":
+          description: Status da conversa
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          conversationId: { type: string }
+                          clienteId: { type: string, nullable: true }
+                          leadId: { type: string, nullable: true }
+                          orcamentoId: { type: string, nullable: true }
+                          statusOs: { type: string, nullable: true }
+                          etapaKanban: { type: string, nullable: true }
+
+  /valeriaWebhookChatvolt:
+    post:
+      operationId: valeriaWebhookChatvolt
+      summary: Recebe eventos push do Chatvolt (B1)
+      description: |
+        Endpoint de webhook registrado na organização/agente Chatvolt.
+        O Chatvolt envia um POST para esta URL quando um evento ocorre.
+
+        **Responde em < 5 s:** valida → persiste evento bruto → log leve → 200 OK.
+        Processamento pesado é feito fora do caminho crítico.
+
+        **Health check:** Se o Chatvolt enviar POST sem `eventType`, retorna
+        `{ pong: true, supportedEvents: [...] }` — use para confirmar conectividade.
+
+        **Eventos suportados:**
+        - `USER_MESSAGE_RECEIVED` — mensagem recebida do usuário
+        - `AGENT_USER_MESSAGE` — mensagem enviada pela agente
+        - `AGENT_MESSAGE_SENDED` — confirmação de envio
+        - `AGENT_MESSAGE_FOLLOW_UP` — follow-up automático
+        - `AGENT_MESSAGE_BLOCKED` — mensagem bloqueada
+        - `AGENT_MESSAGE_NOTED` — nota interna
+
+        **Eventos desconhecidos:** acknowledges (200) mas marca `processed: false`.
+        **Idempotência:** usa `messageId` quando disponível; caso ausente, gera chave
+        determinística via SHA-256(eventType + conversationId + agentId + data).
+        **Anexos:** registra somente metadados (URL, MIME, tamanho). Nunca baixa conteúdo.
+
+        **Variáveis contextuais do Chatvolt (HTTP Tool):**
+        ```
+        conversationId  → {conversation-id}        (nunca "Provided By User")
+        channelPhone    → {user-phone-number}       (nunca "Provided By User")
+        channel         → {conversation-channel}    (nunca "Provided By User")
+        ```
+      tags: [Webhook]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+          description: messageId do evento. Se ausente, chave gerada deterministicamente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  properties:
+                    eventType:
+                      type: string
+                      enum:
+                        - USER_MESSAGE_RECEIVED
+                        - AGENT_USER_MESSAGE
+                        - AGENT_MESSAGE_SENDED
+                        - AGENT_MESSAGE_FOLLOW_UP
+                        - AGENT_MESSAGE_BLOCKED
+                        - AGENT_MESSAGE_NOTED
+                      description: Tipo do evento. Ausente = health check.
+                    messageId: { type: string }
+                    channel:   { type: string }
+                    mensagemCliente: { type: string }
+                    respostaAgente:  { type: string }
+                    status:    { type: string }
+                    prioridade:{ type: string }
+                    responsavel:{ type: string }
+                    data:      { type: string, format: date-time }
+                    variaveis: { type: object }
+                    anexos:
+                      type: array
+                      description: Somente metadados — nunca conteúdo binário
+                      items:
+                        type: object
+                        properties:
+                          url:        { type: string }
+                          mimeType:   { type: string }
+                          tamanho:    { type: number }
+                          nome:       { type: string }
+                          transcricao:{ type: string }
+                    bloqueioInfo:
+                      type: object
+                      properties:
+                        motivo:  { type: string }
+                        tipo:    { type: string }
+                        detalhes:{ type: string }
+            examples:
+              health_check:
+                summary: Health check (sem eventType)
+                value:
+                  conversationId: "conv_abc123"
+                  agentId: "agent_001"
+                  organizationId: "org_vrmarcas"
+              user_message:
+                summary: Mensagem do usuário
+                value:
+                  conversationId: "conv_abc123"
+                  agentId: "agent_001"
+                  organizationId: "org_vrmarcas"
+                  eventType: "USER_MESSAGE_RECEIVED"
+                  messageId: "msg_xyz789"
+                  channelPhone: "+5511999990001"
+                  mensagemCliente: "Quero fazer uma placa de 100x100mm"
+      responses:
+        "200":
+          description: Evento recebido (incluindo health check e replay idempotente)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          received:       { type: boolean }
+                          eventType:      { type: string }
+                          conversationId: { type: string }
+                          messageId:      { type: string }
+                          pong:           { type: boolean, description: "Presente apenas no health check" }
+
+  /valeriaAtualizarBriefing:
+    post:
+      operationId: valeriaAtualizarBriefing
+      summary: Atualização parcial progressiva de briefing (B2)
+      description: |
+        Merge inteligente: só atualiza campos explicitamente enviados com valor válido.
+        Nunca sobrescreve dado existente com vazio, null ou string genérica
+        ("não informado", "n/a", "-", etc.).
+
+        Calcula % de completude (0–100) e classifica a demanda:
+        - `catalogo` — produto padrão sem material/acabamento especial
+        - `semi_personalizada` — produto padrão com inox, espelho, LED, 3D, etc.
+        - `personalizada` — produto custom, "sob medida", sem produto definido
+
+        Histórico de alterações append-only com ts + camposAlterados + agentId.
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  description: Pelo menos 1 campo de briefing deve ser enviado
+                  properties:
+                    produto:    { type: string, example: "Placa acrílica" }
+                    familia:    { type: string, example: "Comunicação Visual" }
+                    larguraMm:  { type: number, example: 1000, description: "Largura em mm (> 0)" }
+                    alturaMm:   { type: number, example: 500,  description: "Altura em mm (> 0)" }
+                    quantidade: { type: integer, example: 3 }
+                    material:   { type: string, example: "Acrílico 3mm cristal" }
+                    acabamento: { type: string, example: "Bordas polidas" }
+                    prazo:      { type: string, example: "5 dias úteis" }
+                    referencia: { type: string, example: "Logo cliente JPEG enviado" }
+                    observacoes:{ type: string }
+      responses:
+        "200":
+          description: Briefing atualizado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          briefingId:     { type: string }
+                          completude:     { type: number, description: "0–100" }
+                          classificacao:  { type: string, enum: [catalogo, semi_personalizada, personalizada] }
+                          camposFaltando: { type: array, items: { type: string } }
+                          camposAlterados:{ type: array, items: { type: string } }
+
+  /valeriaMudarEtapa:
+    post:
+      operationId: valeriaMudarEtapa
+      summary: Transição controlada de etapa CRM (B3)
+      description: |
+        Altera a etapa do lead respeitando a matriz de transições:
+
+        ```
+        NOVO_LEAD → CONTATO_FEITO → BRIEFING_COLETADO → ORCAMENTO_ENVIADO
+                  ↘ PERDIDO         ↘ PERDIDO             ↘ NEGOCIACAO → GANHO
+                                                            ↘ PERDIDO → REABERTO
+        ```
+
+        **GANHO e PERDIDO devem ser feitos via `valeriaFechamento`** (exigem evidência/motivo).
+        Transições inválidas retornam 422 `INVALID_TRANSITION`.
+        Isolamento: só altera o lead da conversa autenticada (conversationId).
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [etapa]
+                  properties:
+                    etapa:
+                      type: string
+                      enum: [CONTATO_FEITO, BRIEFING_COLETADO, ORCAMENTO_ENVIADO, NEGOCIACAO]
+                      example: "BRIEFING_COLETADO"
+                    responsavel: { type: string }
+                    observacao:  { type: string }
+      responses:
+        "200":
+          description: Etapa alterada
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          leadId:       { type: string }
+                          etapaAnterior:{ type: string }
+                          etapaAtual:   { type: string }
+        "422":
+          description: Transição inválida
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+              example:
+                success: false
+                error:
+                  code: "INVALID_TRANSITION"
+                  message: "Transição 'NOVO_LEAD' → 'NEGOCIACAO' não é permitida."
+
+  /valeriaFechamento:
+    post:
+      operationId: valeriaFechamento
+      summary: Ganho / Perda / Reabertura de oportunidade CRM (B3)
+      description: |
+        Fecha ou reabre uma oportunidade com validações obrigatórias:
+
+        - **ganho** — exige `orcamentoId` (evidência do orçamento aceito).
+          Cria alerta para equipe. `communicableToCustomer: true`.
+        - **perda** — exige `motivo` (mínimo 3 caracteres).
+          Cria alerta para equipe.
+        - **reaberto** — exige `justificativa` (mínimo 3 caracteres).
+          Só aplicável a leads GANHO ou PERDIDO.
+
+        **Restrições:**
+        - Não é possível marcar GANHO sem orcamentoId (sem evidência)
+        - Não é possível registrar pagamento — isso é exclusivo do ERP
+        - Não é possível alterar lead de outra conversa
+      tags: [CRM]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ConversationContext"
+                - type: object
+                  required: [resultado]
+                  properties:
+                    resultado:
+                      type: string
+                      enum: [ganho, perda, reaberto]
+                    orcamentoId:
+                      type: string
+                      description: Obrigatório quando resultado=ganho
+                    motivo:
+                      type: string
+                      description: Obrigatório quando resultado=perda (mín 3 chars)
+                    justificativa:
+                      type: string
+                      description: Obrigatório quando resultado=reaberto (mín 3 chars)
+                    proximaAcao:
+                      type: string
+                      description: Próxima ação ao reabrir (opcional)
+            examples:
+              ganho:
+                value:
+                  conversationId: "conv_abc123"
+                  agentId: "agent_001"
+                  organizationId: "org_vrmarcas"
+                  resultado: "ganho"
+                  orcamentoId: "orc_abc123"
+              perda:
+                value:
+                  conversationId: "conv_abc123"
+                  agentId: "agent_001"
+                  organizationId: "org_vrmarcas"
+                  resultado: "perda"
+                  motivo: "Cliente optou por fornecedor local com menor preço"
+      responses:
+        "200":
+          description: Fechamento registrado
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          leadId:       { type: string }
+                          resultado:    { type: string }
+                          etapaAnterior:{ type: string }
+                          etapaAtual:   { type: string }
+        "400":
+          description: Validação faltando (motivo, orcamentoId, justificativa)
+        "422":
+          description: Transição inválida
+
+tags:
+  - name: Diagnóstico
+    description: Health check e monitoramento
+  - name: Contexto
+    description: Recuperação de vínculo conversationId → cliente/lead
+  - name: Clientes
+    description: Upsert de clientes
+  - name: Catálogo
+    description: Consulta de produtos (sem preços)
+  - name: Orçamento
+    description: Motor oficial de cálculo e criação de orçamentos
+  - name: CRM
+    description: Oportunidades, briefing, mensagens, etapas, fechamento
+  - name: Webhook
+    description: Recepção de eventos push do Chatvolt
+  - name: Consultas
+    description: Status por conversationId
