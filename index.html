@@ -17036,7 +17036,18 @@ function usrRender() {
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
     var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
-    return '<tr><td style="font-weight:700">'+cfgEsc(u.nome)+'</td><td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td><td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td><td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td><td><span style="color:'+(u.ativo===0||u.ativo==='0'?'var(--danger)':'var(--ok)')+';font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td><td style="display:flex;gap:6px;align-items:center"><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button><button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')">🔑 Senha</button><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button></td></tr>';
+    return '<tr>'
+      +'<td style="font-weight:700">'+cfgEsc(u.nome)+'</td>'
+      +'<td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td>'
+      +'<td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td>'
+      +'<td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td>'
+      +'<td><span style="color:'+(u.ativo===0||u.ativo==='0'?'var(--danger)':'var(--ok)')+';font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td>'
+      +'<td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">'
+        +'<button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrEditarAbrir('+i+')">✏️ Editar</button>'
+        +'<button style="background:none;border:1px solid var(--brand-mid);color:var(--brand-mid);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRedefinirSenha('+i+')" title="Envia e-mail de redefinição de senha">🔑 Senha</button>'
+        +'<button style="background:none;border:1px solid #D97706;color:#D97706;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:11px" onclick="usrRecriarAcesso('+i+')" title="Recria conta Firebase Auth para este usuário (use se o usuário não consegue logar)">🔓 Recriar Acesso</button>'
+        +'<button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px" onclick="usrDel('+i+')">Excluir</button>'
+      +'</td></tr>';
   }).join('');
 }
 
@@ -17078,14 +17089,71 @@ function usrSalvarPerms() {
 function usrRedefinirSenha(idx) {
   var users = usrLoadUsuarios();
   var u = users[idx]; if(!u) return;
-  var novaSenha = prompt('Nova senha para "' + u.nome + '" (mínimo 4 caracteres):');
-  if(novaSenha === null) return; // cancelou
+  if(!u.email) { showToast('Usuário sem e-mail cadastrado','err'); return; }
+  if(!confirm('Enviar e-mail de redefinição de senha para "' + u.nome + '" (' + u.email + ')?')) return;
+
+  // Enviar e-mail de redefinição via Firebase Auth (única forma válida no sistema atual)
+  firebase.auth().sendPasswordResetEmail(u.email)
+    .then(function() {
+      showToast('✅ E-mail de redefinição enviado para ' + u.email, 'ok');
+      if(typeof secAuditLog==='function') secAuditLog('pwd_reset_sent','Reset de senha enviado para: '+u.nome+' ('+u.email+')');
+    })
+    .catch(function(err) {
+      if(err.code === 'auth/user-not-found') {
+        // Usuário não tem conta Firebase Auth ainda — criar a conta primeiro
+        showToast('⚠️ Este usuário ainda não tem conta de acesso criada. Use "Recriar Acesso" ou crie novamente.','warn');
+      } else {
+        showToast('❌ Falha ao enviar e-mail: ' + (err.message || err.code), 'err');
+      }
+    });
+}
+
+// Recria conta Firebase Auth para usuário existente que não consegue logar
+// (usa secondary app para não deslogar o admin)
+function usrRecriarAcesso(idx) {
+  var users = usrLoadUsuarios();
+  var u = users[idx]; if(!u) return;
+  if(!u.email) { showToast('Usuário sem e-mail cadastrado','err'); return; }
+  var novaSenha = prompt('Defina uma senha temporária para "' + u.nome + '" (mínimo 6 caracteres):\n\nO usuário deverá trocar a senha no primeiro acesso.');
+  if(novaSenha === null) return;
   novaSenha = novaSenha.trim();
-  if(novaSenha.length < 4) { showToast('Senha muito curta — mínimo 4 caracteres','err'); return; }
-  users[idx].senha = secHash(novaSenha);
-  _USR_DATA=users;
-  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
-  showToast('Senha de "' + u.nome + '" redefinida!', 'ok');
+  if(novaSenha.length < 6) { showToast('Senha deve ter no mínimo 6 caracteres','err'); return; }
+
+  showToast('Criando acesso para "' + u.nome + '"…', 'ok');
+  try {
+    var _fbCfg = firebase.app().options;
+    var _secApp = firebase.initializeApp(_fbCfg, 'usrRecriar_' + Date.now());
+    _secApp.auth().createUserWithEmailAndPassword(u.email, novaSenha)
+      .then(function(cred) {
+        return cred.user.updateProfile({ displayName: u.nome });
+      })
+      .then(function() {
+        return _secApp.auth().signOut();
+      })
+      .then(function() {
+        _secApp.delete().catch(function(){});
+        // Atualizar hash no Firestore
+        users[idx].senha = secHash(novaSenha);
+        _USR_DATA = users;
+        if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_usuarios', users);
+        showToast('✅ Acesso criado para "'+u.nome+'"! Informe a senha temporária ao usuário.','ok');
+        if(typeof secAuditLog==='function') secAuditLog('user_access_created','Acesso Firebase criado para: '+u.nome+' ('+u.email+')');
+      })
+      .catch(function(err) {
+        _secApp.delete().catch(function(){});
+        if(err.code === 'auth/email-already-in-use') {
+          // Conta já existe — apenas enviar reset de senha
+          firebase.auth().sendPasswordResetEmail(u.email)
+            .then(function(){ showToast('ℹ️ Conta já existe. E-mail de redefinição enviado para '+u.email,'warn'); })
+            .catch(function(){ showToast('ℹ️ Conta já existe no Firebase. Peça ao usuário para usar "Esqueci minha senha".','warn'); });
+        } else {
+          showToast('❌ Falha ao criar acesso: '+(err.message||err.code),'err');
+          console.warn('[usrRecriarAcesso] error:', err);
+        }
+      });
+  } catch(initErr) {
+    showToast('❌ Falha ao iniciar criação: '+initErr.message,'err');
+  }
 }
 
 function usrNovoOpen(){
@@ -18524,8 +18592,41 @@ function usrSalvar() {
     if(users.find(function(u){ return u.email&&u.email===email; })){ showToast('E-mail já cadastrado','err'); return; }
     users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:secHash(senha), criado:new Date().toLocaleDateString('pt-BR') });
     _USR_DATA=users;
-    showToast('Usuário "'+nome+'" criado!','ok');
     if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
+
+    // ── Criar conta Firebase Auth via secondary app (admin não perde sessão) ──
+    // O secondary app é criado com a mesma config do app principal, mas isolado.
+    (function(nomeCriado, emailCriado, senhaCriada) {
+      try {
+        var _fbCfg = firebase.app().options;
+        var _secAppName = 'usrCreate_' + Date.now();
+        var _secApp = firebase.initializeApp(_fbCfg, _secAppName);
+        showToast('Criando acesso para "' + nomeCriado + '"…', 'ok');
+        _secApp.auth().createUserWithEmailAndPassword(emailCriado, senhaCriada)
+          .then(function(cred) {
+            return cred.user.updateProfile({ displayName: nomeCriado });
+          })
+          .then(function() {
+            return _secApp.auth().signOut();
+          })
+          .then(function() {
+            _secApp.delete().catch(function(){});
+            showToast('✅ "' + nomeCriado + '" criado! Já pode acessar o sistema.', 'ok');
+          })
+          .catch(function(err) {
+            _secApp.delete().catch(function(){});
+            if(err.code === 'auth/email-already-in-use') {
+              showToast('ℹ️ "' + nomeCriado + '" salvo — e-mail já tinha conta, acesso mantido.', 'warn');
+            } else {
+              showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas conta de acesso não criada: ' + (err.message || err.code), 'warn');
+              console.warn('[usrSalvar] Firebase Auth create error:', err);
+            }
+          });
+      } catch(initErr) {
+        showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas falha ao iniciar criação de acesso: ' + initErr.message, 'warn');
+        console.warn('[usrSalvar] secondary app init error:', initErr);
+      }
+    })(nome.trim(), email, senha);
   }
 
   if(typeof _cloudSave==='function' && _cloudReady){
