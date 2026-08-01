@@ -54,9 +54,12 @@ try {
   process.exit(1);
 }
 
+// Exports internos do CommonJS — não são endpoints reais
+const INTERNAL_EXPORTS = ['__esModule'];
+
 // ── Comparar ──────────────────────────────────────────────────────────────────
 const inYamlNotIndex  = yamlFunctions.filter(f => !indexExports.includes(f));
-const inIndexNotYaml  = indexExports.filter(f => !yamlFunctions.includes(f));
+const inIndexNotYaml  = indexExports.filter(f => !yamlFunctions.includes(f) && !INTERNAL_EXPORTS.includes(f));
 const inBoth          = yamlFunctions.filter(f => indexExports.includes(f));
 
 console.log("\n=== validate_functions.js ===\n");
@@ -78,7 +81,8 @@ if (inYamlNotIndex.length > 0) {
 }
 
 if (inIndexNotYaml.length > 0) {
-  console.log("\n⚠️  Exportadas no index.js mas NÃO declaradas no functions.yaml:");
+  hasError = true;
+  console.log("\n❌ Exportadas no index.js mas NÃO declaradas no functions.yaml:");
   inIndexNotYaml.forEach(f => console.log("   ", f));
 }
 
