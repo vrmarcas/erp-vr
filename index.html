@@ -1260,7 +1260,11 @@ function _stockAplicarSnapshot(doc){
   }
 }
 _CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
-  function(doc){ try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); } },
+  function(doc){
+    // Marcar como confirmado quando o dado vier do servidor (não do cache IndexedDB)
+    if(doc.metadata && !doc.metadata.fromCache) _stockServerConfirmed = true;
+    try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); }
+  },
   function(e){ console.warn('[Stock] onSnapshot erro:',e); }
 ));
 
@@ -1313,7 +1317,9 @@ function _cloudWatch(key, callback) {
       try {
         var raw = doc.data().data;
         _cloudLastPayload[key] = raw; // registrar para o anti-eco
-        callback(JSON.parse(raw));
+        // Passa fromCache como 2º argumento — callbacks que não precisam ignoram silenciosamente
+        var fromCache = doc.metadata ? doc.metadata.fromCache : false;
+        callback(JSON.parse(raw), fromCache);
       } catch(e){}
     }
   }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); });
@@ -1362,7 +1368,7 @@ function _cloudLoadAll() {
         var local=usrLoadUsuarios();
         var merged=d.slice();
         local.forEach(function(lu){ if(!merged.find(function(cu){ return cu.email===lu.email; })) merged.push(lu); });
-        try{ }catch(e){}
+        _USR_DATA = merged;
         try{ usrRender(); }catch(e){}
         try{ orcPopulateVendedores(); }catch(e){}
         try{ vendedoresRender(); }catch(e){}
@@ -1375,7 +1381,7 @@ function _cloudLoadAll() {
     _cloudWatch("erp_metas_vendedor", function(d){
       if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; }
     });
-    _cloudWatch("erp_config", function(d){
+    _cloudWatch("erp_config", function(d, fromCache){
       if(d && typeof d==='object'){
         // Mesclar profundo: preserva comp/larg/custo/esp/rsm2 dos materiais locais
         var local = cfgLoad();
@@ -1403,6 +1409,8 @@ function _cloudLoadAll() {
           if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
         });
         _cfgData = merged;
+        // Só marcar como carregado quando dado vier do servidor — cache local pode estar desatualizado
+        if(!fromCache) _cfgDataLoaded = true;
         // Migração automática: impostos foi inicializado como 0 pelo bug do loop; corrigir para 7
         if (!merged._impostos_migrated && merged.financeiro && !merged.financeiro.impostos) {
           _cfgData.financeiro.impostos = 7;
@@ -1492,7 +1500,7 @@ function _cloudLoadAll() {
   _cloudLoad("shopify_cfg", function(d){ if(d&&typeof d==='object') _SHOPIFY_CFG=d; done(); });
   _cloudLoad("crm_site_leads", function(d){ if(d&&Array.isArray(d)) SITE_LEADS=d; done(); });
   _cloudLoad("erp_usuarios", function(d){
-    if(d&&d.length){ _USR_DATA=d; var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none'; }
+    if(d&&d.length){ _USR_DATA=d; var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none'; try{ usrRender(); }catch(e){} }
     done();
   });
   _cloudLoad("erp_config", function(d){
@@ -1520,6 +1528,7 @@ function _cloudLoadAll() {
         if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
       });
       _cfgData = merged;
+      _cfgDataLoaded = true;
       try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
     }
     done();
@@ -1548,6 +1557,7 @@ function _cloudIniciar(){
         if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
       });
       _cfgData = merged;
+      _cfgDataLoaded = true;
     }
   });
   setTimeout(_cloudLoadAll, 800);
@@ -1557,28 +1567,91 @@ function _cloudAuthAviso(msg){
   var ct=document.getElementById('cloudTxt');
   if(ct){ ct.textContent = msg; ct.style.color = '#DC2626'; }
 }
+// ── FASE 5: Firebase Auth real — sem signInAnonymously ───────────────────────
+// onAuthStateChanged é a única entrada para _cloudIniciar().
+// signInWithEmailAndPassword é chamado por authLogin() quando o usuário faz login.
 (function _cloudAuthStart(){
-  var resolveu = false;
-  firebase.auth().signInAnonymously()
-    .then(function(){ resolveu = true; _cloudIniciar(); })
-    .catch(function(e){ resolveu = true; console.warn("[Cloud] Auth falhou:", e); _cloudAuthAviso('erro de conexão'); });
-  // Fallback 1: se o login travar (>8s), tentar sem persistência (evita travas de storage)
-  setTimeout(function(){
-    if(resolveu || _cloudIniciou) return;
-    console.warn('[Cloud] Auth travado >8s — tentando fallback sem persistência');
-    try{
-      firebase.auth().setPersistence('none')
-        .then(function(){ return firebase.auth().signInAnonymously(); })
-        .then(function(){ _cloudIniciar(); })
-        .catch(function(e){ console.warn('[Cloud] Fallback auth falhou:', e); });
-    }catch(e){ console.warn('[Cloud] Fallback auth exceção:', e); }
-  }, 8000);
-  // Fallback 2: aviso ao usuário se nada conectou em 20s
-  setTimeout(function(){
-    if(_cloudIniciou) return;
-    _cloudAuthAviso('sem conexão — verifique antivírus/firewall');
+  // Aviso de timeout se Firebase SDK não inicializar em 20s
+  var _authTimeout = setTimeout(function(){
+    if(!_cloudIniciou) _cloudAuthAviso('sem conexão — verifique antivírus/firewall');
   }, 20000);
+
+  firebase.auth().onAuthStateChanged(function(user){
+    if(user && user.providerData && user.providerData.length &&
+       user.providerData[0].providerId !== 'anonymous'){
+      // Sessão Firebase válida (email/password ou outro provider real)
+      clearTimeout(_authTimeout);
+      // Controle de acesso por função é feito via erp_usuarios no Firestore.
+      // Custom claims (role) são opcionais — se presentes e inválidas, bloqueia;
+      // se ausentes, libera normalmente (todos os usuários criados pelo admin têm acesso).
+      user.getIdTokenResult(true).then(function(result){
+        var role = result.claims.role;
+        if(role && ['master','admin','comercial','producao','financeiro'].indexOf(role) < 0){
+          // Token tem role mas ela é inválida (corrompido/estranho) — bloquear
+          console.warn('[Cloud] Role inválida no token:', role, user.email);
+          _cloudAuthAviso('perfil inválido — contate o administrador');
+          _authShowAccessDenied('Perfil de acesso inválido. Contate o administrador.');
+          return;
+        }
+        // Sem role (normal para usuários existentes) ou role válida — iniciar sistema
+        if(!_cloudIniciou) _cloudIniciar();
+        // Renovação automática do token a cada 50 min (Firebase renova em 1h)
+        _cloudStartTokenRenewal();
+      }).catch(function(e){
+        // Falha ao ler token — iniciar mesmo assim (auth já verificou email/senha)
+        console.warn('[Cloud] Aviso ao ler token, iniciando mesmo assim:', e);
+        if(!_cloudIniciou) _cloudIniciar();
+        _cloudStartTokenRenewal();
+      });
+    } else {
+      // Não autenticado (ou anônimo rejeitado) — aguarda authLogin()
+      // _cloudIniciar() NÃO é chamado aqui
+      if(_cloudIniciou && _currentSession) {
+        // Sessão Firebase expirou durante uso → forçar logout do ERP
+        // Guard _currentSession evita double-call quando o próprio authLogout faz signOut
+        console.warn('[Cloud] Sessão Firebase encerrada externamente — deslogando ERP');
+        if(typeof authLogout === 'function') authLogout();
+      }
+    }
+  });
 })();
+
+// Renovação proativa do token Firebase (evita expiração silenciosa durante uso)
+var _tokenRenewalTimer = null;
+function _cloudStartTokenRenewal(){
+  if(_tokenRenewalTimer) clearInterval(_tokenRenewalTimer);
+  _tokenRenewalTimer = setInterval(function(){
+    var u = firebase.auth().currentUser;
+    if(u) u.getIdToken(true).then(function(){ console.log('[Cloud] Token renovado.'); }).catch(function(e){ console.warn('[Cloud] Falha ao renovar token:', e); });
+  }, 50 * 60 * 1000); // 50 minutos
+}
+
+// Tela de acesso negado (exibida dentro do authOverlay)
+function _authShowAccessDenied(msg){
+  var ov = document.getElementById('authOverlay');
+  if(ov) ov.classList.add('show');
+  var errEl = document.getElementById('authErr');
+  if(errEl) errEl.textContent = '⛔ ' + (msg || 'Acesso negado');
+  var warnEl = document.getElementById('authWarn');
+  if(warnEl) warnEl.textContent = '';
+  var btnEl = document.getElementById('authBtn');
+  if(btnEl) btnEl.disabled = true;
+}
+
+// Mensagens de erro Firebase → PT-BR
+function _authFirebaseError(code){
+  var map = {
+    'auth/user-not-found':         '❌ E-mail não cadastrado no sistema',
+    'auth/wrong-password':         '❌ Senha incorreta',
+    'auth/invalid-credential':     '❌ E-mail ou senha incorretos',
+    'auth/user-disabled':          '⛔ Conta desativada — contate o administrador',
+    'auth/too-many-requests':      '⛔ Muitas tentativas — aguarde alguns minutos',
+    'auth/network-request-failed': '⚠ Sem conexão — verifique sua internet',
+    'auth/invalid-email':          '❌ E-mail inválido',
+    'auth/email-already-in-use':   '❌ E-mail já cadastrado'
+  };
+  return map[code] || ('❌ Erro de autenticação (' + code + ')');
+}
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -7015,7 +7088,7 @@ function nav(page, el) {
   // Ao entrar no orçamento, sempre resetar para step 1
   if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){} }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
-  if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); }
+  if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); setTimeout(function(){ try{ if(_cfgDataLoaded) cfgRenderTables(); }catch(e){} }, 3500); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
   if (page === 'kanban')       { setTimeout(function(){ if(typeof kbRender==='function') kbRender(); try{renderOsTable();syncSidebarBadges();}catch(e){} }, 0); }
@@ -11059,6 +11132,7 @@ var _STOCK_DEFAULTS = {
   acm: {label:'ACM 3mm',              qty:25, min:10, max:50, esp:3,  cor:'Natural'}
 };
 var STOCK = {}; // Inicia vazio — preenchido pelo Firebase. Defaults aplicados só se Firebase retornar nada.
+var _stockServerConfirmed = false; // True após receber dados confirmados pelo servidor (não apenas cache local)
 
 function stockSaveData() {
   if(!_db) return;
@@ -12914,13 +12988,14 @@ function relatoriosRender() {
 function stockRenderItems() {
   var el = document.getElementById('stockItemsList');
   if (!el) return;
+  // Aguardar confirmação do servidor antes de renderizar — evita exibir dados do cache local desatualizado
+  if(!_stockServerConfirmed) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">⏳ Carregando estoque...</div>';
+    return;
+  }
   var keys = Object.keys(STOCK);
   if (!keys.length) {
-    // Se Firebase ainda não carregou, mostrar loading; se já carregou e está mesmo vazio, orientar usuário
-    var msg = _cloudReady
-      ? 'Nenhum material cadastrado. Clique em "+ Novo Material".'
-      : '⏳ Carregando estoque...';
-    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">'+msg+'</div>';
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">Nenhum material cadastrado. Clique em "+ Novo Material".</div>';
     return;
   }
   el.innerHTML = keys.map(function(key) {
@@ -16190,7 +16265,13 @@ function cfgLoad() {
 function cfgSave(d) {
   _cfgData=d;
   if(typeof _cloudSave==='function' && _cloudReady) {
-    // Proteção: nunca salvar materiais vazios no Firebase (evita perda de dados)
+    // Proteção dupla: (1) nunca salvar antes de Firestore carregar — evita sobrescrever 27 com 5
+    if(!_cfgDataLoaded){
+      console.warn('[CFG] cfgSave bloqueado: Firestore ainda não carregou. Tente novamente em instantes.');
+      showToast('Aguarde o carregamento dos dados antes de salvar','warn');
+      return;
+    }
+    // (2) nunca salvar materiais vazios no Firebase (evita perda de dados)
     var toSave = d;
     if(!d.materiais || !d.materiais.length) {
       toSave = Object.assign({}, d);
@@ -16497,8 +16578,17 @@ function cfgRenderTables() {
   try {
   // Garantir _cfgData com arrays válidos antes de qualquer coisa
   if(!_cfgData) _cfgData = JSON.parse(JSON.stringify(CFG_DEFAULT));
-  if(!Array.isArray(_cfgData.materiais) || !_cfgData.materiais.length)
+  // Proteção: só usar defaults se Firestore já respondeu — evita substituir 27 materiais por 5 defaults
+  if(!Array.isArray(_cfgData.materiais) || !_cfgData.materiais.length){
+    if(!_cfgDataLoaded){
+      // Firestore ainda não respondeu — exibir loading e aguardar (cloud watch vai chamar de volta)
+      var mb0=document.getElementById('matBody');
+      if(mb0) mb0.innerHTML='<tr><td colspan="9" style="color:var(--muted);padding:16px;text-align:center">⏳ Carregando materiais do servidor...</td></tr>';
+      console.log('[CFG] cfgRenderTables: aguardando Firestore...');
+      return;
+    }
     _cfgData.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+  }
   if(!Array.isArray(_cfgData.maquinas) || !_cfgData.maquinas.length)
     _cfgData.maquinas = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
   if(!Array.isArray(_cfgData.maodeobra) || !_cfgData.maodeobra.length)
@@ -16580,6 +16670,7 @@ function cfgRowMob(i,r){ return '<tr id="mobR'+i+'"><td><input style="border:non
 function cfgEsc(s){ return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 var _cfgData = null;
+var _cfgDataLoaded = false; // True somente após receber dados reais do Firestore
 function cfgCell(tipo,idx,campo,val) {
   if(!_cfgData) _cfgData = cfgLoad();
   var arr = tipo==='mat'?_cfgData.materiais : tipo==='maq'?_cfgData.maquinas : _cfgData.maodeobra;
@@ -18533,10 +18624,11 @@ function authInit(){
       secStartInactivityTimer();
       return;
     } else {
-      // Sessão existe mas expirou — mostrar lock (não login completo)
-      _currentSession=stored;
+      // Sessão expirada — forçar login completo (F5 não deve bypass o lock)
+      secClearSession();
+      _currentSession=null;
       secPopulateUserSelect();
-      authLock();
+      var ov2=document.getElementById('authOverlay'); if(ov2) ov2.classList.add('show');
       return;
     }
   }
@@ -18566,16 +18658,32 @@ function authUserChanged(){
   var p=document.getElementById('authPwd');   if(p){ p.value=''; p.focus(); }
 }
 
-// ── Stubs Firebase (formulário de recuperação de senha) ───────────────────────
+// ── Recuperação de senha via Firebase Auth ────────────────────────────────────
 function fbResetSenha(){
   var emailEl=document.getElementById('authEmail');
   var email=(emailEl&&emailEl.value||'').trim();
-  if(!email){ 
-    var e=document.getElementById('authErr'); 
-    if(e) e.textContent='Informe o e-mail para redefinir a senha'; 
-    return; 
+  if(!email){
+    var e=document.getElementById('authErr');
+    if(e) e.textContent='Informe o e-mail para redefinir a senha';
+    return;
   }
-  showToast('Entre em contato com o administrador do sistema para redefinir sua senha.','warn');
+  var btnReset = document.querySelector('[onclick*="fbResetSenha"]');
+  if(btnReset) btnReset.disabled = true;
+  firebase.auth().sendPasswordResetEmail(email)
+    .then(function(){
+      showToast('E-mail de redefinição enviado para '+email,'ok');
+      var errEl=document.getElementById('authErr');
+      if(errEl) errEl.textContent='';
+      var warnEl=document.getElementById('authWarn');
+      if(warnEl) warnEl.textContent='📧 Verifique sua caixa de entrada (e spam)';
+    })
+    .catch(function(e){
+      var errEl=document.getElementById('authErr');
+      if(errEl) errEl.textContent = _authFirebaseError(e.code);
+    })
+    .finally(function(){
+      if(btnReset) btnReset.disabled = false;
+    });
 }
 function fbReenviarVerificacao(){ showToast('Função não disponível nesta versão.','warn'); }
 function fbVoltarLogin(){
@@ -18583,73 +18691,122 @@ function fbVoltarLogin(){
   var f=document.getElementById('authLoginForm');  if(f) f.style.display='block';
 }
 
-// ── Login ─────────────────────────────────────────────────────────────────────
+// ── Login — FASE 5: signInWithEmailAndPassword ────────────────────────────────
 function authLogin(){
   if(secCheckLockout()) return;
-  // Se Firebase ainda carregando e não há usuários locais, avisar
-  if(!_cloudReady && !usrLoadUsuarios().length){
-    var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='';
-  }
   var emailEl=document.getElementById('authEmail');
   var pwdEl  =document.getElementById('authPwd');
   var errEl  =document.getElementById('authErr');
+  var btnEl  =document.getElementById('authBtn');
   var email  =(emailEl&&emailEl.value||'').trim().toLowerCase();
   var pwd    =(pwdEl&&pwdEl.value||'');
   if(!email){ errEl.textContent='Informe seu e-mail'; if(emailEl) emailEl.focus(); return; }
   if(!pwd)  { errEl.textContent='Informe a senha';   if(pwdEl)   pwdEl.focus();   return; }
 
-  var ok=false, funcao='master', nome='Master';
-  // Busca usuário por e-mail (novo) ou nome (retrocompat)
-  var users=usrLoadUsuarios();
-  var u=users.find(function(u){
-    if(u.email && u.email.toLowerCase()===email) return true;
-    if(u.nome  && u.nome.toLowerCase() ===email) return true;
-    return false;
-  });
-  if(u){
-    var pwdT = pwd.trim();
-    ok=(u.senha===pwd)||(u.senha===pwdT)||(secHash(pwd)===u.senha)||(secHash(pwdT)===u.senha);
-    funcao=u.funcao; nome=u.nome;
-  } else {
-    // Nenhum usuário encontrado → tenta conta master
-    ok=(secHash(pwd)===secGetMasterHash());
-    funcao='master'; nome='Master';
-  }
+  // Desabilita botão durante request
+  if(btnEl) btnEl.disabled = true;
+  if(errEl) errEl.textContent = '';
 
-  if(ok){
-    secSetLockout({count:0,until:0});
-    _currentSession={user:nome,funcao:funcao,loginTime:Date.now(),lastActivity:Date.now()};
-    secSetSession(_currentSession);
-    secAuditLog('login','Login — '+nome+' ('+( FUNCAO_LABEL[funcao]||funcao)+')');
-    var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
-    if(pwdEl) pwdEl.value='';
-    authApplySession();
-    secStartInactivityTimer();
-    showToast('Bem-vindo, '+nome+'!','ok');
-    // Redirecionar cargo comercial para área comercial (não dashboard principal)
-    if(funcao==='comercial'){
-      var sbCom=null;
-      document.querySelectorAll('.sb-item').forEach(function(el){
-        if((el.getAttribute('onclick')||'').indexOf("'comercial'")>=0) sbCom=el;
-      });
-      if(sbCom) nav('comercial',sbCom); else nav('comercial',null);
-    }
-  } else {
-    var lo=secGetLockout();
-    lo.count=(lo.count||0)+1;
-    if(lo.count>=3){
-      lo.until=Date.now()+5*60*1000;
-      secSetLockout(lo);
-      errEl.textContent='';
-      secAuditLog('login_lockout','Conta bloqueada após 3 tentativas — usuario: '+key);
-      secCheckLockout();
-    } else {
-      secSetLockout(lo);
-      errEl.textContent='❌ E-mail ou senha incorretos — verifique se está usando o e-mail cadastrado';
-      var warnEl=document.getElementById('authWarn'); if(warnEl) warnEl.textContent='⚠ '+lo.count+'/3 tentativas';
-      if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
-    }
-  }
+  // ── 1. Autenticar com Firebase Auth ─────────────────────────────────────────
+  firebase.auth().signInWithEmailAndPassword(email, pwd)
+    .then(function(cred){
+      // ── 2. Buscar role em erp_usuarios no Firestore (fonte de verdade) ─────
+      // Custom claims não são usadas — a role vem do cadastro no ERP.
+      return _db.collection(_COL).doc('erp_usuarios').get()
+        .then(function(doc){
+          var users = [];
+          if(doc.exists && doc.data() && doc.data().data){
+            try { users = JSON.parse(doc.data().data); } catch(e){}
+          }
+          // Fallback para cache em memória se o Firestore falhar
+          if(!users.length) users = _USR_DATA.slice();
+          return { fbUser: cred.user, users: users };
+        })
+        .catch(function(){
+          return { fbUser: cred.user, users: _USR_DATA.slice() };
+        });
+    })
+    .then(function(ctx){
+      var users = ctx.users;
+      var valid = ['master','admin','comercial','producao','financeiro'];
+
+      // ── 3. Localizar usuário pelo e-mail em erp_usuarios ──────────────────
+      var uRec = users.find(function(u){ return u.email && u.email.toLowerCase()===email; });
+
+      // ── 4. Verificar se usuário está ativo (só se existir no cadastro) ────
+      if(uRec && (uRec.ativo===0 || uRec.ativo==='0')){
+        firebase.auth().signOut();
+        if(errEl) errEl.textContent = '⛔ Conta desativada — contate o administrador';
+        if(btnEl) btnEl.disabled = false;
+        secAuditLog('login_denied','Conta desativada tentou login: '+email);
+        return;
+      }
+
+      // ── 5. Obter role: do cadastro ERP ou master como fallback ────────────
+      // Se o e-mail não está em erp_usuarios mas é um usuário Firebase válido,
+      // entra como master para poder se auto-cadastrar na tela de usuários.
+      var role = uRec ? (uRec.funcao || 'master').toLowerCase() : 'master';
+      if(valid.indexOf(role) < 0) role = 'master';
+
+      // ── 5.5. Auto-registrar em erp_usuarios se não cadastrado ────────────
+      // Garante que qualquer usuário Firebase válido apareça na lista de usuários
+      if(!uRec && typeof _db !== 'undefined') {
+        try {
+          var autoNome = email.split('@')[0];
+          var newUserRec = { nome: autoNome, email: email, funcao: role, ativo: 1, autoRegistrado: true, criadoEm: new Date().toISOString() };
+          var updatedUsers = users.concat([newUserRec]);
+          _USR_DATA = updatedUsers;
+          _db.collection(_COL).doc('erp_usuarios').set({ data: JSON.stringify(updatedUsers) });
+          console.log('[Auth] Usuário auto-registrado em erp_usuarios:', email);
+        } catch(ae) { console.warn('[Auth] Auto-registro falhou:', ae); }
+      }
+
+      // ── 6. Sessão OK ──────────────────────────────────────────────────────
+      var nome = (uRec && uRec.nome) || email.split('@')[0];
+      secSetLockout({count:0,until:0});
+      _currentSession = {
+        user: nome, email: email, funcao: role,
+        loginTime: Date.now(), lastActivity: Date.now()
+      };
+      secSetSession(_currentSession);
+      secAuditLog('login','Login — '+nome+' ('+( FUNCAO_LABEL[role]||role)+') via Firebase Auth');
+      var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
+      if(pwdEl) pwdEl.value='';
+      if(btnEl) btnEl.disabled = false;
+      authApplySession();
+      secStartInactivityTimer();
+      _cloudStartTokenRenewal();
+      showToast('Bem-vindo, '+nome+'!','ok');
+      // Redirecionar comercial para área comercial
+      if(role==='comercial'){
+        var sbCom=null;
+        document.querySelectorAll('.sb-item').forEach(function(el){
+          if((el.getAttribute('onclick')||'').indexOf("'comercial'")>=0) sbCom=el;
+        });
+        if(sbCom) nav('comercial',sbCom); else nav('comercial',null);
+      }
+    })
+    .catch(function(e){
+      // ── Tratar erros Firebase ──────────────────────────────────────────────
+      if(btnEl) btnEl.disabled = false;
+      var msg = _authFirebaseError(e.code);
+      if(errEl) errEl.textContent = msg;
+      // Lockout local complementar (3 tentativas)
+      var lo=secGetLockout();
+      lo.count=(lo.count||0)+1;
+      if(lo.count>=3){
+        lo.until=Date.now()+5*60*1000;
+        secSetLockout(lo);
+        if(errEl) errEl.textContent='';
+        secAuditLog('login_lockout','3 tentativas incorretas — email: '+email);
+        secCheckLockout();
+      } else {
+        secSetLockout(lo);
+        var warnEl=document.getElementById('authWarn');
+        if(warnEl) warnEl.textContent='⚠ '+lo.count+'/3 tentativas';
+        if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+      }
+    });
 }
 
 // ── Aplicar permissões após login ─────────────────────────────────────────────
@@ -18747,6 +18904,9 @@ function authLogout(){
   secAuditLog('logout','Logout — '+(_currentSession?_currentSession.user:'?'));
   secClearSession();
   _currentSession=null;
+  // Encerrar sessão Firebase Auth (FASE 5)
+  if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); }
   secStopInactivityTimer();
   var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
   // Restore all sidebar items
@@ -18789,16 +18949,49 @@ function authUnlock(){
     var u=users.find(function(u){ return u.nome===_currentSession.user; });
     if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
   }
-  if(ok){
-    var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
-    _currentSession.lastActivity=Date.now();
-    secSetSession(_currentSession);
-    secStartInactivityTimer();
-    secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
-    if(pwdEl) pwdEl.value='';
+  // FASE 5: na lock screen, a senha deve ser revalidada via Firebase Auth
+  // para garantir que o token Firebase está ativo.
+  // Validação local é mantida como fallback offline (ex: sem internet).
+  var fbUser = firebase.auth().currentUser;
+  if(fbUser && _currentSession && _currentSession.email){
+    // Tentativa via Firebase Auth (online)
+    var emailForUnlock = _currentSession.email;
+    firebase.auth().signInWithEmailAndPassword(emailForUnlock, pwd)
+      .then(function(cred){ return cred.user.getIdToken(true); })
+      .then(function(){
+        var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
+        _currentSession.lastActivity=Date.now();
+        secSetSession(_currentSession);
+        secStartInactivityTimer();
+        _cloudStartTokenRenewal();
+        secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
+        if(pwdEl) pwdEl.value='';
+      })
+      .catch(function(e){
+        if(errEl) errEl.textContent = _authFirebaseError(e.code) || '❌ Senha incorreta';
+        if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+      });
   } else {
-    if(errEl) errEl.textContent='❌ Senha incorreta';
-    if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+    // Fallback offline: validação local (erp_usuarios)
+    var ok=false;
+    if(_currentSession&&_currentSession.funcao==='master'){
+      ok=(secHash(pwd)===secGetMasterHash());
+    } else if(_currentSession){
+      var users=usrLoadUsuarios();
+      var u=users.find(function(u){ return u.nome===_currentSession.user; });
+      if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
+    }
+    if(ok){
+      var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
+      _currentSession.lastActivity=Date.now();
+      secSetSession(_currentSession);
+      secStartInactivityTimer();
+      secAuditLog('unlock','Tela desbloqueada (offline) — '+_currentSession.user);
+      if(pwdEl) pwdEl.value='';
+    } else {
+      if(errEl) errEl.textContent='❌ Senha incorreta';
+      if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+    }
   }
 }
 
@@ -18810,7 +19003,7 @@ function secStartInactivityTimer(){
   _secTimer=setInterval(function(){
     if(!_currentSession) return;
     var elapsed=(Date.now()-(_currentSession.lastActivity||Date.now()))/60000;
-    if(elapsed>=mins){ secStopInactivityTimer(); authLock(); }
+    if(elapsed>=mins){ secStopInactivityTimer(); secAuditLog('lock','Sessão expirada por inatividade — logout automático'); authLogout(); }
   },30000);
 }
 function secStopInactivityTimer(){ if(_secTimer){ clearInterval(_secTimer); _secTimer=null; } }
