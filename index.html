@@ -7618,15 +7618,24 @@ function planAbrir(idx) {
   if(_planSvgBox && _planSvgContent) {
     var _custProds = planProdLoad();
     var _cprod = _custProds.find(function(x){ return x.nome===produto; });
-    var _plans = (_cprod && _cprod.planificacoes && _cprod.planificacoes.filter(function(x){return x.svgData;})) || [];
-    // retrocompat: produto antigo com campo svg único
-    if(!_plans.length && _cprod && _cprod.svg) _plans = [{espessuraMm:0, descricao:'', svgData:_cprod.svg}];
+    // Normaliza para formato novo {svgs:[]} independente do formato salvo
+    var _rawPlans = (_cprod && _cprod.planificacoes) || [];
+    var _plans = _rawPlans.map(function(x){
+      if(x.svgs && x.svgs.length) return x;
+      if(x.svgData) return {espessuraMm:x.espessuraMm, descricao:x.descricao, svgs:[{svgData:x.svgData, svgNome:x.svgNome||''}]};
+      return null;
+    }).filter(Boolean);
+    // retrocompat: produto muito antigo com campo svg único
+    if(!_plans.length && _cprod && _cprod.svg) _plans = [{espessuraMm:0, descricao:'', svgs:[{svgData:_cprod.svg}]}];
     if(_plans.length) {
       _planSvgContent.innerHTML = _plans.map(function(pl, i) {
         var lbl = pl.espessuraMm ? (pl.espessuraMm+'mm'+(pl.descricao?' — '+pl.descricao:'')) : (pl.descricao || ('Planificação '+(i+1)));
+        var svgsHtml = (pl.svgs||[]).map(function(s,j){
+          return '<div style="margin-bottom:'+(j<pl.svgs.length-1?'8px':'0')+';overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+s.svgData+'</div>';
+        }).join('');
         return '<div style="margin-bottom:'+(i<_plans.length-1?'12px':'0')+'">'
           +(lbl?'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">'+lbl+'</div>':'')
-          +'<div style="overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+pl.svgData+'</div>'
+          +svgsHtml
           +'</div>';
       }).join('');
       _planSvgContent.querySelectorAll('svg').forEach(function(s){s.style.maxWidth='100%';s.style.maxHeight='180px';});
@@ -20851,7 +20860,7 @@ function cfgResetProdutos() {
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
 var _planProdPecas  = [];
-var _planPlanificacoes = []; // Array de {espessuraMm, descricao, svgData, svgNome} — múltiplas espessuras
+var _planPlanificacoes = []; // Array de {espessuraMm, descricao, svgs:[{svgData,svgNome}]} — múltiplos arquivos por espessura
 
 var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
 
@@ -20872,7 +20881,16 @@ function planProdRender() {
           +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+'</div>'
           +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
           +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
-          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){var n=(p.planificacoes&&p.planificacoes.filter(function(x){return x.svgData;}).length)||((p.svg&&!(p.planificacoes&&p.planificacoes.length))?1:0);return n?'<span style="font-size:10px;background:#EDE9FE;border:1px solid #C4B5FD;border-radius:10px;padding:2px 8px;color:#5B21B6">📐 '+(n>1?n+'× SVG':'SVG')+'</span>':'';})()+'</div>'
+          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){
+  var n=0;
+  if(p.planificacoes&&p.planificacoes.length){
+    p.planificacoes.forEach(function(x){
+      if(x.svgs&&x.svgs.length) n+=x.svgs.length;
+      else if(x.svgData) n+=1; // backward compat formato antigo
+    });
+  } else if(p.svg) { n=1; }
+  return n?'<span style="font-size:10px;background:#EDE9FE;border:1px solid #C4B5FD;border-radius:10px;padding:2px 8px;color:#5B21B6">📐 '+(n>1?n+'× SVG':'SVG')+'</span>':'';
+})()+'</div>'
           +'</div>'
           +'<div style="display:flex;gap:6px">'
           +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
@@ -20909,10 +20927,20 @@ function planProdRenderEspList() {
   }
   if(empty) empty.style.display = 'none';
   list.innerHTML = _planPlanificacoes.map(function(e,i) {
-    var hasSvg = !!e.svgData;
-    var svgPrev = hasSvg
-      ? '<div style="margin-top:6px;max-height:90px;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:4px;text-align:center">'+e.svgData+'</div>'
-      : '';
+    var svgs = e.svgs || [];
+    var svgItems = svgs.map(function(s,j) {
+      var prev = s.svgData
+        ? '<div style="margin:4px 0;max-height:80px;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:3px;text-align:center">'+s.svgData+'</div>'
+        : '';
+      return '<div style="display:flex;flex-direction:column;gap:2px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:5px">'
+        +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+          +'<span style="font-size:11px;color:#059669;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 '+cfgEsc(s.svgNome||'SVG')+'</span>'
+          +'<button onclick="planProdEspParseNow('+i+','+j+')" style="background:var(--primary);color:#fff;border:none;border-radius:6px;padding:3px 9px;font-size:10px;cursor:pointer;font-weight:600;flex-shrink:0">🔍 Extrair Peças</button>'
+          +'<button onclick="planProdEspSvgClear('+i+','+j+')" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;flex-shrink:0">✕</button>'
+        +'</div>'
+        +prev
+        +'</div>';
+    }).join('');
     return '<div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg)">'
       +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">'
         +'<div style="display:flex;flex-direction:column;gap:3px">'
@@ -20930,22 +20958,14 @@ function planProdRenderEspList() {
         +'<button onclick="planProdEspRemove('+i+')" title="Remover espessura"'
         +' style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;flex-shrink:0">🗑 Remover</button>'
       +'</div>'
-      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-        +'<label style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1.5px dashed var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:11px;color:var(--muted)">'
-          +'📎 '+(hasSvg?'Trocar .svg':'Selecionar arquivo .svg')
-          +'<input type="file" accept=".svg,image/svg+xml" style="display:none" onchange="planProdEspSvgChange('+i+',this)">'
-        +'</label>'
-        +(hasSvg
-          ? '<span style="font-size:11px;color:#059669;font-weight:600">✅ '+cfgEsc(e.svgNome||'SVG salvo')+'</span>'
-            +'<button onclick="planProdEspSvgClear('+i+')" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer">✕ Remover SVG</button>'
-            +'<button onclick="planProdEspParseNow('+i+')" style="background:var(--primary);color:#fff;border:none;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:600">🔍 Extrair Peças</button>'
-          : '<span style="font-size:11px;color:var(--muted)">Nenhum arquivo</span>'
-        )
-      +'</div>'
-      +svgPrev
+      +(svgItems||'<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Nenhum arquivo adicionado ainda.</div>')
+      +'<label style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1.5px dashed var(--border);border-radius:8px;padding:5px 12px;cursor:pointer;font-size:11px;color:var(--muted);margin-top:2px">'
+        +'📎 Adicionar arquivo(s) .svg'
+        +'<input type="file" accept=".svg,image/svg+xml" multiple style="display:none" onchange="planProdEspSvgChange('+i+',this)">'
+      +'</label>'
       +'</div>';
   }).join('');
-  list.querySelectorAll('svg').forEach(function(s){s.style.maxWidth='100%';s.style.maxHeight='80px';});
+  list.querySelectorAll('svg').forEach(function(s){s.style.maxWidth='100%';s.style.maxHeight='75px';});
 }
 
 function _planEspSet(idx, key, val) {
@@ -20954,7 +20974,7 @@ function _planEspSet(idx, key, val) {
 
 function planProdAddEsp(e) {
   if(e && e.preventDefault) e.preventDefault();
-  _planPlanificacoes.push({espessuraMm:'', descricao:'', svgData:null, svgNome:''});
+  _planPlanificacoes.push({espessuraMm:'', descricao:'', svgs:[]});
   planProdRenderEspList();
 }
 
@@ -20964,41 +20984,64 @@ function planProdEspRemove(idx) {
 }
 
 function planProdEspSvgChange(idx, input) {
-  var file = input.files && input.files[0];
-  if(!file) return;
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    if(!_planPlanificacoes[idx]) return;
-    _planPlanificacoes[idx].svgData = ev.target.result;
-    _planPlanificacoes[idx].svgNome = file.name;
-    planProdRenderEspList();
-    setTimeout(function(){ planSvgParsePecas(ev.target.result); }, 200);
-  };
-  reader.readAsText(file);
+  var files = input.files;
+  if(!files || !files.length) return;
+  var arr = Array.prototype.slice.call(files);
+  var pending = arr.length;
+  var lastData = null;
+  arr.forEach(function(file) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      if(!_planPlanificacoes[idx]) return;
+      if(!_planPlanificacoes[idx].svgs) _planPlanificacoes[idx].svgs = [];
+      _planPlanificacoes[idx].svgs.push({svgData: ev.target.result, svgNome: file.name});
+      lastData = ev.target.result;
+      pending--;
+      if(pending === 0) {
+        planProdRenderEspList();
+        if(lastData) setTimeout(function(){ planSvgParsePecas(lastData); }, 200);
+      }
+    };
+    reader.readAsText(file);
+  });
 }
 
-function planProdEspSvgClear(idx) {
-  if(_planPlanificacoes[idx]) { _planPlanificacoes[idx].svgData=null; _planPlanificacoes[idx].svgNome=''; }
+function planProdEspSvgClear(idx, svgIdx) {
+  if(_planPlanificacoes[idx] && _planPlanificacoes[idx].svgs) _planPlanificacoes[idx].svgs.splice(svgIdx, 1);
   planProdRenderEspList();
 }
 
-function planProdEspParseNow(idx) {
+function planProdEspParseNow(idx, svgIdx) {
   var e = _planPlanificacoes[idx];
-  if(e && e.svgData) planSvgParsePecas(e.svgData);
+  if(e && e.svgs && e.svgs[svgIdx]) planSvgParsePecas(e.svgs[svgIdx].svgData);
 }
 
-// Retrocompatibilidade: mantém planSvgParseNow apontando para primeira espessura (se existir)
+// Retrocompatibilidade: mantém planSvgParseNow apontando para primeiro SVG da primeira espessura
 function planSvgParseNow() {
-  if(_planPlanificacoes.length && _planPlanificacoes[0].svgData) planSvgParsePecas(_planPlanificacoes[0].svgData);
+  var first = _planPlanificacoes.length && _planPlanificacoes[0].svgs && _planPlanificacoes[0].svgs[0];
+  if(first) planSvgParsePecas(first.svgData);
 }
 
 // Carrega planificacoes no estado interno (ao abrir modal de edição)
+// Suporta dois formatos: novo {svgs:[]} e antigo {svgData, svgNome} (migração automática)
 function _planEspReset(planificacoes, legacySvg) {
   if(planificacoes && planificacoes.length) {
-    _planPlanificacoes = JSON.parse(JSON.stringify(planificacoes));
+    _planPlanificacoes = planificacoes.map(function(p) {
+      var svgArr;
+      if(p.svgs) {
+        // Formato novo — cópia profunda
+        svgArr = JSON.parse(JSON.stringify(p.svgs));
+      } else if(p.svgData) {
+        // Formato antigo (sessão anterior) — migrar para svgs[]
+        svgArr = [{svgData: p.svgData, svgNome: p.svgNome || 'SVG salvo'}];
+      } else {
+        svgArr = [];
+      }
+      return {espessuraMm: p.espessuraMm || '', descricao: p.descricao || '', svgs: svgArr};
+    });
   } else if(legacySvg) {
-    // Produto antigo com campo svg único — migrar para array com 1 entrada
-    _planPlanificacoes = [{espessuraMm:'', descricao:'', svgData:legacySvg, svgNome:'SVG salvo'}];
+    // Produto muito antigo com campo svg único no nível do produto
+    _planPlanificacoes = [{espessuraMm:'', descricao:'', svgs:[{svgData:legacySvg, svgNome:'SVG salvo'}]}];
   } else {
     _planPlanificacoes = [];
   }
@@ -21363,8 +21406,17 @@ function planProdSalvar() {
   var prods = planProdLoad();
   // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
   var _planifs = _planPlanificacoes
-    .filter(function(e){ return e.svgData || e.espessuraMm || e.descricao; })
-    .map(function(e){ return {espessuraMm:parseFloat(e.espessuraMm)||0, descricao:(e.descricao||'').trim(), svgData:e.svgData||null, svgNome:e.svgNome||''}; });
+    .filter(function(e){ return (e.svgs && e.svgs.length) || e.espessuraMm || e.descricao; })
+    .map(function(e){ return {
+      espessuraMm: parseFloat(e.espessuraMm)||0,
+      descricao: (e.descricao||'').trim(),
+      svgs: (e.svgs||[]).map(function(s){ return {svgData:s.svgData||null, svgNome:s.svgNome||''}; })
+    }; });
+  // retrocompat: primeiro SVG encontrado vai para campo "svg" de nível superior (código legado)
+  var _firstSvg = null;
+  for(var _pi=0; _pi<_planifs.length && !_firstSvg; _pi++) {
+    if(_planifs[_pi].svgs && _planifs[_pi].svgs.length) _firstSvg = _planifs[_pi].svgs[0].svgData;
+  }
   var prod = {
     id:    _planProdEditId || 'pp_'+Date.now(),
     nome:  nome.trim(),
@@ -21372,8 +21424,7 @@ function planProdSalvar() {
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
     pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||''}; }),
     planificacoes: _planifs,
-    // retrocompat: primeira espessura com SVG mantém campo "svg" para código legado
-    svg: (_planifs.find(function(e){return e.svgData;})||{}).svgData || undefined
+    svg: _firstSvg || undefined
   };
 
   if(_planProdEditId) {
