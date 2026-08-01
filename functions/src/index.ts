@@ -19,6 +19,16 @@ export { getGoogleAuthUrl, handleGoogleCallback } from "./googleAds";
 // ── Sync automático + Manual ──────────────────────────────────────────────────
 export { syncMarketingMetricsData, forceMarketingSync } from "./syncMetrics";
 
+// ── Admin User Management (FASE 5) ───────────────────────────────────────────
+export {
+  adminCreateUser,
+  adminUpdateUserRole,
+  adminToggleStatus,
+  adminResendInvite,
+  adminRevokeSessions,
+  adminListUsers,
+} from "./adminUsers";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,

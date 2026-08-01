@@ -23,8 +23,9 @@ const SCOPES             = "https://www.googleapis.com/auth/adwords";
 export const getGoogleAuthUrl = onCall(
   { secrets: [GOOGLE_CLIENT_ID], cors: true },
   async (req) => {
-    const companyId = req.auth?.token?.companyId;
-    if (!companyId) throw new HttpsError("unauthenticated", "Empresa não identificada");
+    // ERP single-company: companyId fixo (custom claims não configuradas no projeto)
+    if (!req.auth) throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    const companyId = (req.auth?.token?.companyId as string | undefined) || "vr_marcas";
 
     const redirectUri = _redirectUri(false);
     const state = Buffer.from(JSON.stringify({ companyId })).toString("base64url");

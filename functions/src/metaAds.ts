@@ -21,8 +21,9 @@ const SCOPES = ["ads_management", "ads_read", "read_insights", "business_managem
 export const getMetaAuthUrl = onCall(
   { secrets: [META_APP_ID], cors: true },
   async (req) => {
-    const companyId = req.auth?.token?.companyId;
-    if (!companyId) throw new HttpsError("unauthenticated", "Empresa não identificada");
+    // ERP single-company: companyId fixo (custom claims não configuradas no projeto)
+    if (!req.auth) throw new HttpsError("unauthenticated", "Usuário não autenticado");
+    const companyId = (req.auth?.token?.companyId as string | undefined) || "vr_marcas";
 
     const redirectUri = `${process.env.FUNCTIONS_EMULATOR
       ? "http://localhost:5001/erp-vr/us-central1"
