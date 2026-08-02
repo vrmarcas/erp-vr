@@ -2,63 +2,144 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Funções auxiliares ──────────────────────────────────────
+    // ── Funções auxiliares ──────────────────────────────────────────────────
+
     function isAuthenticated() {
       return request.auth != null;
+    }
+
+    function userRole() {
+      return request.auth.token.role;
     }
 
     function isCompany(companyId) {
       return isAuthenticated() && request.auth.token.companyId == companyId;
     }
 
+    // master: acesso total, inclui gerenciamento de usuários e config
     function isMaster() {
-      return isAuthenticated() && request.auth.token.role == 'master';
+      return isAuthenticated() && userRole() == 'master';
     }
 
-    // [S1] Admin = role 'admin' ou 'master' (via Firebase Auth custom claims)
+    // admin ou master: gerenciam o ERP (config, financeiro, permissões)
     function isAdmin() {
       return isAuthenticated() && (
-        request.auth.token.role == 'admin' ||
-        request.auth.token.role == 'master'
+        userRole() == 'admin' || userRole() == 'master'
       );
     }
 
-    // ── marketing_connections ──────────────────────────────────────
+    // comercial: pode ler/escrever orçamentos, CRM, clientes — não toca em config
+    function isComercial() {
+      return isAuthenticated() && (
+        userRole() == 'comercial' || userRole() == 'admin' || userRole() == 'master'
+      );
+    }
+
+    // produção: acesso operacional (Kanban/OS, estoque)
+    function isProducao() {
+      return isAuthenticated() && (
+        userRole() == 'producao' || userRole() == 'admin' || userRole() == 'master'
+      );
+    }
+
+    // qualquer perfil autorizado
+    function isAnyStaff() {
+      return isAuthenticated() && userRole() in ['master', 'admin', 'comercial', 'producao'];
+    }
+
+    // ── marketing_connections ───────────────────────────────────────────────
     match /marketing_connections/{docId} {
-      allow read: if isAuthenticated()
-                  && isCompany(resource.data.companyId);
-      allow write: if false;
+      allow read:  if isAuthenticated() && isCompany(resource.data.companyId);
+      allow write: if false; // somente backend
     }
 
-    // ── marketing_daily_metrics ─────────────────────────────────────
+    // ── marketing_daily_metrics ─────────────────────────────────────────────
     match /marketing_daily_metrics/{docId} {
-      allow read: if isAuthenticated()
-                  && isCompany(resource.data.companyId);
+      allow read:  if isAuthenticated() && isCompany(resource.data.companyId);
       allow write: if false;
     }
 
-    // ── marketing_sync_logs ─────────────────────────────────────────
+    // ── marketing_sync_logs ─────────────────────────────────────────────────
     match /marketing_sync_logs/{docId} {
-      allow read: if isMaster();
+      allow read:  if isMaster();
       allow write: if false;
     }
 
-    // ── erp_vr: coleção principal do ERP ─────────────────────────
-    // Leitura: qualquer autenticado (sem alteração de comportamento)
-    // Escrita em documentos críticos: somente admin/master
-    // Escrita nos demais documentos: qualquer autenticado (comportamento anterior)
+    // ── erp_vr: coleção principal do ERP ───────────────────────────────────
     match /erp_vr/{docId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (
-        !(docId in ['erp_config', 'erp_usuarios', 'erp_permissoes', 'fin_tx']) ||
-        isAdmin()
-      );
+      // Leitura: qualquer perfil autenticado do ERP
+      allow read: if isAnyStaff();
+
+      // Config estrutural e permissões: somente admin/master
+      allow write: if isAdmin()
+        && docId in ['erp_config', 'erp_usuarios', 'erp_permissoes',
+                     'valeria_authorized_agents'];
+
+      // Financeiro: somente admin/master
+      allow write: if isAdmin() && docId == 'fin_tx';
+
+      // CRM/leads: comercial pode escrever
+      allow write: if isComercial()
+        && docId in ['crm_leads', 'crm_prospects', 'crm_reativacao'];
+
+      // Kanban e estoque: perfis produção e acima
+      allow write: if isProducao()
+        && docId in ['kb_os', 'erp_stock'];
+
+      // Demais documentos erp_vr: admin/master
+      allow write: if isAdmin();
     }
 
-    // ── Demais coleções (comportamento inalterado) ──────────────────
-    // Mantém leitura e escrita autenticada para tudo fora de erp_vr
+    // ── valeria_simulations: somente Cloud Functions (service account) ──────
+    match /valeria_simulations/{docId} {
+      allow read:  if isAdmin(); // admin pode auditar
+      allow write: if false;     // somente Cloud Functions
+    }
+
+    // ── valeria_idem_keys: idempotência — somente Cloud Functions ────────────
+    match /valeria_idem_keys/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── valeria_rate_limits: rate limiting — somente Cloud Functions ─────────
+    match /valeria_rate_limits/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ── valeria_conversations: histórico de conversas ────────────────────────
+    match /valeria_conversations/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions
+    }
+
+    // ── valeria_msgs: mensagens individuais ──────────────────────────────────
+    match /valeria_msgs/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions
+    }
+
+    // ── valeria_alertas: leitura admin/master ────────────────────────────────
+    match /valeria_alertas/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false; // somente Cloud Functions
+    }
+
+    // ── interacoes_valeria: histórico de mensagens ───────────────────────────
+    match /interacoes_valeria/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions
+    }
+
+    // ── Demais coleções (comportamento inalterado) ──────────────────────────
     match /{col}/{docId=**} {
-      allow read, write: if isAuthenticated() && col != 'erp_vr';
+      allow read, write: if isAuthenticated() && !(col in [
+        'erp_vr', 'valeria_simulations', 'valeria_idem_keys',
+        'valeria_rate_limits', 'valeria_alertas', 'interacoes_valeria',
+        'valeria_conversations', 'valeria_msgs',
+        'marketing_connections', 'marketing_daily_metrics', 'marketing_sync_logs'
+      ]);
     }
 
   }
