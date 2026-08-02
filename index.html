@@ -299,7 +299,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .fg label { font-size:11px; font-weight:700; color:var(--muted); }
 .fg input,.fg select,.fg textarea { padding:7px 10px; border:1.5px solid var(--border); border-radius:7px; font-size:12px; background:var(--bg); color:var(--text); transition:.12s; font-family:inherit; }
 .fg input:focus,.fg select:focus { outline:none; border-color:var(--brand-mid); background:var(--surface); box-shadow:0 0 0 3px var(--brand-light); }
-.fg-row { display:flex; gap:8px; } .fg-row .fg { flex:1; }
+.fg-row { display:flex; gap:8px; flex-wrap:wrap; } .fg-row .fg { flex:1; min-width:150px; }
 
 .item-table { width:100%; border-collapse:separate; border-spacing:0; font-size:12px; }
 .item-table thead tr th { padding:6px 6px; background:#FAFAFA; font-weight:700; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; border-bottom:2px solid var(--border); white-space:nowrap; }
@@ -1000,6 +1000,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .sidebar { display: none !important; }
   #mobileMenuBtn { display: flex !important; align-items: center; }
   .main { left: 0 !important; }
+  #pg-marketing { left: 0 !important; }
   .content { padding: 10px 10px 24px; overflow-y: scroll; -webkit-overflow-scrolling: touch; }
   .topbar { padding: 0 12px; height: 52px; min-height: 52px; gap: 8px; }
   .topbar-title { font-size: 14px; }
@@ -1352,7 +1353,7 @@ function _cloudLoadAll() {
     _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'vr');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
@@ -1390,7 +1391,7 @@ function _cloudLoadAll() {
         if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
           merged.materiais = d.materiais.map(function(cm){
             var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
-            if(lm) return Object.assign({}, lm, cm); // local tem prioridade para campos ausentes no cloud
+            if(lm) return Object.assign({}, cm, lm); // BUG #31 fix: local tem prioridade — preserva edições do usuário em curso
             return cm;
           });
           // Adicionar itens locais que não existem no cloud
@@ -5281,8 +5282,8 @@ function _authFirebaseError(code){
     </div><!-- /planProdOverlay -->
 
     <!-- Overlay Novo Usuário -->
-    <div class="gen-overlay" id="usrOverlay">
-      <div class="gen-modal" style="max-width:440px">
+    <div class="gen-overlay" id="usrOverlay" onclick="event.stopPropagation()">
+      <div class="gen-modal" style="max-width:440px" onclick="event.stopPropagation()">
         <input type="hidden" id="usrEditIdx" value="">
         <div class="gen-modal-hdr"><span id="usrOverlayTitulo" style="font-weight:800">👤 Novo Usuário</span><button class="gen-modal-close" onclick="usrNovoClose()">✕</button></div>
         <div style="padding:18px 20px;display:flex;flex-direction:column;gap:12px">
@@ -16108,31 +16109,9 @@ function crmSalvarNovoLead() {
     intencao:{produto:produto||'—',material:'—',medidas:'—',quantidade:'—'}
   };
 
-  if(marca!==crmActiveBrand) crmSetBrand(marca);
-  var col=document.getElementById(colId);
-  if(!col) col=document.getElementById(isVR?'crmCol1':'crmCol1VT');
-  if(col){
-    var card=document.createElement('div');
-    card.className='crm-card';
-    card.style.borderColor=tempCol;
-    card.setAttribute('onclick',"crmOpenCard('"+id+"')");
-    var _s1=document.createElement('div');_s1.className='crm-sel-btn';_s1.title='Selecionar';_s1.textContent='☐';_s1.setAttribute('onclick',"crmSelectToggle('"+id+"',event)");
-    var _n1=document.createElement('div');_n1.className='crm-card-name';_n1.textContent=nome;
-    var _u1=document.createElement('div');_u1.className='crm-card-sub';_u1.textContent=produto||tel||'Lead manual';
-    var _ts=document.createElement('span');_ts.className='temp temp-'+(_nlTemp==='quente'?'q':_nlTemp==='morno'?'m':'f');_ts.textContent=tempLabel;
-    var _mt=document.createElement('div');_mt.className='crm-card-meta';_mt.appendChild(_ts);
-    var _ti=document.createElement('div');_ti.style.cssText='font-size:10px;color:var(--muted);margin-top:5px';_ti.textContent='agora · Score '+CRM_LEADS[id].score;
-    // Score bar visual
-    var _sb=document.createElement('div');_sb.className='crm-score-bar';
-    var _sf=document.createElement('div');_sf.className='crm-score-fill';
-    var _score=CRM_LEADS[id].score||50;
-    _sf.style.width=_score+'%';
-    _sf.style.background=_score>=70?'#059669':_score>=40?'#D97706':'#DC2626';
-    _sb.appendChild(_sf);
-    card.appendChild(_s1);card.appendChild(_n1);card.appendChild(_u1);card.appendChild(_mt);card.appendChild(_ti);card.appendChild(_sb);
-        col.appendChild(card);
-    setTimeout(crmInitDrag,100);
-  }
+  // BUG #25 fix: always render board from CRM_LEADS (new lead already inserted above)
+  // removing manual DOM append that caused race condition with cloudWatch re-render
+  crmSetBrand(marca);
 
   // ── Auto-criar ou vincular cliente ──
   var clienteVinculado = _crmVincularCliente(id, nome, tel, email, marca);
@@ -19003,8 +18982,10 @@ function secApplyPerms(funcao){
     var def = PERM_DEFAULT[mod];
     if(def && def[funcao]===false) return false;
     if(!def || def[funcao]===undefined) return false;
-    // Finally stored perm
-    return !!(perms[mod]&&perms[mod][funcao]);
+    // BUG #27 fix: fall back to PERM_DEFAULT when stored perm is absent
+    // Stored perm only overrides when explicitly set (true/false); absence → use default
+    if(!perms[mod] || perms[mod][funcao]===undefined) return def[funcao]===true;
+    return !!perms[mod][funcao];
   }
   function applyToItem(item, pageExtractor){
     var m=(item.getAttribute('onclick')||'').match(pageExtractor);
