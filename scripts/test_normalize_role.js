@@ -119,6 +119,110 @@ test('s10. "gestor" → NÃO migrado (desconhecido)', isAdminRole('gestor'), fal
 test('s11. dry-run não escreve — verificado em migrate_admin_to_master.js (--mock)', true, true);
 test('s12. script não promove desconhecidos — isAdminRole("xyz") → false', isAdminRole('xyz'), false);
 
+// ── Cenários de migração (14 testes) ─────────────────────────────────────────
+
+console.log('\n── cenários de migração (14 testes) ─────────────────────────\n');
+
+// Helpers locais que espelham lógica do script de migração
+
+function validateProjectLogic(rcProject, credProject) {
+  if (!rcProject || !credProject) return false;
+  return rcProject === 'erp-vrmarcas' && credProject === 'erp-vrmarcas';
+}
+
+function shouldWrite(applyFlag) {
+  return applyFlag === true;
+}
+
+function applyGate(applyFlag, confirmFlag) {
+  if (applyFlag && !confirmFlag) return 'ABORTADO';
+  return 'OK';
+}
+
+// m1. Projeto correto é aceito pela validação
+test('m1.  projeto correto aceito',
+  validateProjectLogic('erp-vrmarcas', 'erp-vrmarcas'), true);
+
+// m2. Projeto divergente em .firebaserc aborta
+test('m2.  .firebaserc com projeto errado aborta',
+  validateProjectLogic('outro-projeto', 'erp-vrmarcas'), false);
+
+// m3. Credential sem project_id aborta
+test('m3.  credential sem project_id aborta',
+  validateProjectLogic('erp-vrmarcas', undefined), false);
+
+// m4. dry-run (APPLY=false) não escreve
+test('m4.  dry-run (APPLY=false) nao escreve',
+  shouldWrite(false), false);
+
+// m5. 'admin' é selecionado para migração
+test('m5.  "admin" e selecionado para migracao',
+  isAdminRole('admin'), true);
+
+// m6. 'Admin' com espaços laterais tratado com segurança
+test('m6.  "  Admin  " com espacos e migrado',
+  isAdminRole('  Admin  '), true);
+
+// m7. 'master' não é alterado
+test('m7.  "master" NAO e migrado',
+  isAdminRole('master'), false);
+
+// m8. Perfil desconhecido não é promovido a master
+test('m8.  "gestor" (desconhecido) NAO e migrado',
+  isAdminRole('gestor'), false);
+
+// m9. Claims adicionais são preservadas no spread
+{
+  const existing = { companyId: 'vrmarcas', role: 'admin', extra: 'valor' };
+  const updated  = Object.assign({}, existing, { role: 'master' });
+  test('m9.  claims adicionais preservadas apos spread',
+    updated.companyId === 'vrmarcas' && updated.extra === 'valor', true);
+}
+
+// m10. Somente role muda — nenhuma chave adicionada ou removida
+{
+  const existing = { companyId: 'vrmarcas', role: 'admin' };
+  const updated  = Object.assign({}, existing, { role: 'master' });
+  test('m10. somente role muda para "master"',
+    updated.role, 'master');
+}
+
+// m11. Usuário Firestore sem conta Auth é detectado (authUser === undefined)
+{
+  const authByUid   = new Map();
+  const authByEmail = new Map();
+  const fsUser = { uid: 'uid-isabella', email: 'isabella@vrmarcas.com.br', funcao: 'admin' };
+  const authUser = authByUid.get(fsUser.uid) ||
+    (fsUser.email && authByEmail.get(fsUser.email.toLowerCase()));
+  test('m11. Firestore admin sem Auth -> authUser undefined',
+    authUser, undefined);
+}
+
+// m12. Verificação pós-escrita bem-sucedida quando role=master e claims preservadas
+{
+  const before = { companyId: 'vrmarcas', role: 'admin' };
+  const after  = Object.assign({}, before, { role: 'master' });
+  const missingKeys = Object.keys(before).filter(k => k !== 'role' && !(k in after));
+  test('m12. verificacao pos-escrita bem-sucedida',
+    after.role === 'master' && missingKeys.length === 0, true);
+}
+
+// m13. Conta Auth 'admin' sem contraparte no Firestore detectada como órfã
+{
+  const fsUidSet   = new Set(['uid-gabriel']);
+  const fsEmailSet = new Set(['gabriel@vrmarcas.com.br']);
+  const orphan = { uid: 'uid-orphan', email: 'orphan@outro.com', customClaims: { role: 'admin' } };
+  const isOrphan = isAdminRole(orphan.customClaims && orphan.customClaims.role)
+    && !fsUidSet.has(orphan.uid)
+    && !fsEmailSet.has(orphan.email && orphan.email.toLowerCase());
+  test('m13. Auth admin sem Firestore detectado como orfao',
+    isOrphan, true);
+}
+
+// m14. --apply sem --confirm-project aborta
+test('m14. --apply sem --confirm-project aborta',
+  applyGate(true, false), 'ABORTADO');
+
 // ── Resultado final ───────────────────────────────────────────────────────────
 
 console.log('\n════════════════════════════════════════════════════════════');

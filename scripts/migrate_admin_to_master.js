@@ -1,46 +1,181 @@
 /**
  * migrate_admin_to_master.js
- * Migra todos os usuários com funcao/role == 'admin' (qualquer capitalização) → 'master'.
+ * Migra todos os usuários com funcao/role == 'admin' → 'master'.
  *
  * Escopo:
  *   1. Firestore — erp_vr/erp_usuarios (campo `data`, JSON serializado)
  *   2. Firebase Auth — custom claim `role`
  *
  * Uso:
- *   node scripts/migrate_admin_to_master.js              → dry-run (nenhuma escrita)
- *   node scripts/migrate_admin_to_master.js --apply      → migração real (aguarda 5s)
- *   node scripts/migrate_admin_to_master.js --mock       → teste local sem Firebase
+ *   node scripts/migrate_admin_to_master.js                                        → dry-run
+ *   node scripts/migrate_admin_to_master.js --apply --confirm-project=erp-vrmarcas → migração real
+ *   node scripts/migrate_admin_to_master.js --mock                                 → testes locais
  *
  * Pré-requisitos para --apply:
  *   GOOGLE_APPLICATION_CREDENTIALS=/caminho/service-account.json
- *   O service account precisa de permissão em Firestore (leitura/escrita em erp_vr)
- *   e Firebase Auth Admin (listUsers, setCustomUserClaims, revokeRefreshTokens).
+ *   O service account precisa de permissão em Firestore e Firebase Auth Admin.
  *
- * Quando remover a compatibilidade legada no código:
- *   1. Executar este script com --apply;
- *   2. Verificar que o resumo final exibe "0 registros a migrar";
- *   3. Confirmar acesso do Gabriel e demais masters;
- *   4. Remover a linha `if (r === "admin") return "master"` de adminUsers.ts;
- *   5. Remover a linha `if (r === 'admin') return 'master'` de index.html (_normalizeRole);
- *   6. Remover 'admin' das funções isAdmin/isComercial/isProducao/isAnyStaff em firestore.rules;
- *   7. Publicar regras e funções atualizadas.
+ * Quando remover a compatibilidade legada:
+ *   1. Executar --apply e verificar "0 registros a migrar";
+ *   2. Confirmar acesso de todos os masters;
+ *   3. Remover `if (r === "admin") return "master"` de adminUsers.ts;
+ *   4. Remover `if (r === 'admin') return 'master'` de index.html (_normalizeRole);
+ *   5. Remover 'admin' de isAdmin/isComercial/isProducao/isAnyStaff em firestore.rules;
+ *   6. Publicar regras e funções atualizadas.
  */
 
 'use strict';
 
-const path  = require('path');
-const APPLY = process.argv.includes('--apply');
-const MOCK  = process.argv.includes('--mock');
+const fs   = require('fs');
+const path = require('path');
 
-// ── Modo mock: testa o comportamento sem Firebase ─────────────────────────────
+const APPLY           = process.argv.includes('--apply');
+const MOCK            = process.argv.includes('--mock');
+const CONFIRM_PROJECT = process.argv.includes('--confirm-project=erp-vrmarcas');
+
+const EXPECTED_PROJECT = 'erp-vrmarcas';
+const FIREBASERC_PATH  = path.join(__dirname, '../.firebaserc');
+const COL_ERP          = 'erp_vr';
+const DOC_USERS        = 'erp_usuarios';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function isAdminRole(v) {
+  return typeof v === 'string' && v.trim().toLowerCase() === 'admin';
+}
+
+function maskEmail(email) {
+  if (!email) return '***';
+  const [local, domain] = String(email).split('@');
+  if (!local || !domain) return '***@***';
+  const visible = local.length > 2 ? local.slice(0, 2) : local[0] || '*';
+  return visible + '***@' + domain;
+}
+
+// ── Modo mock ─────────────────────────────────────────────────────────────────
+
+function runMockTests() {
+  let passed = 0, failed = 0;
+
+  function assert(desc, got, expected) {
+    if (got === expected) {
+      console.log('  ✅ ' + desc);
+      passed++;
+    } else {
+      console.log('  ❌ ' + desc + ' — esperado "' + expected + '", obtido "' + got + '"');
+      failed++;
+    }
+  }
+
+  const KNOWN = ['master', 'comercial', 'producao', 'financeiro'];
+  function normalizeRoleLocal(v) {
+    if (typeof v !== 'string') return null;
+    const r = v.trim().toLowerCase();
+    if (!r) return null;
+    if (r === 'admin') return 'master';
+    if (KNOWN.indexOf(r) >= 0) return r;
+    return null;
+  }
+
+  console.log('\n── normalizeRole ────────────────────────────────────────────');
+  assert('master -> master',         normalizeRoleLocal('master'),     'master');
+  assert('Master -> master',         normalizeRoleLocal('Master'),     'master');
+  assert('admin -> master',          normalizeRoleLocal('admin'),      'master');
+  assert('Admin -> master',          normalizeRoleLocal('Admin'),      'master');
+  assert('comercial -> comercial',   normalizeRoleLocal('comercial'),  'comercial');
+  assert('producao -> producao',     normalizeRoleLocal('producao'),   'producao');
+  assert('financeiro -> financeiro', normalizeRoleLocal('financeiro'), 'financeiro');
+  assert('null -> null',             normalizeRoleLocal(null),         null);
+  assert('vazio -> null',            normalizeRoleLocal(''),           null);
+  assert('desconhecido -> null',     normalizeRoleLocal('gestor'),     null);
+  assert('numero -> null',           normalizeRoleLocal(42),           null);
+
+  console.log('\n── isAdminRole (somente admin e migrado) ───────────────────────');
+  assert('admin migrado',            isAdminRole('admin'),      true);
+  assert('Admin migrado',            isAdminRole('Admin'),      true);
+  assert('master NAO migrado',       isAdminRole('master'),     false);
+  assert('Master NAO migrado',       isAdminRole('Master'),     false);
+  assert('comercial NAO migrado',    isAdminRole('comercial'),  false);
+  assert('null NAO migrado',         isAdminRole(null),         false);
+  assert('vazio NAO migrado',        isAdminRole(''),           false);
+  assert('desconhecido NAO migrado', isAdminRole('gestor'),     false);
+
+  console.log('\n' + '='.repeat(60));
+  console.log(' RESULTADO MOCK: ' + passed + ' passed, ' + failed + ' failed');
+  console.log('='.repeat(60) + '\n');
+  if (failed > 0) process.exit(1);
+}
 
 if (MOCK) {
-  console.log('════════════════════════════════════════════════════════════');
-  console.log(' migrate_admin_to_master.js — MODO MOCK (sem Firebase)');
-  console.log('════════════════════════════════════════════════════════════\n');
+  console.log('='.repeat(60));
+  console.log(' migrate_admin_to_master.js -- MODO MOCK (sem Firebase)');
+  console.log('='.repeat(60) + '\n');
   runMockTests();
   process.exit(0);
 }
+
+// ── Validação de projeto (síncrona, antes do Firebase init) ──────────────────
+
+function validateProject() {
+  console.log('\n--- Validando projeto Firebase ' + '-'.repeat(29));
+
+  // 1. Ler project ID de .firebaserc
+  let rcProject;
+  try {
+    const obj = JSON.parse(fs.readFileSync(FIREBASERC_PATH, 'utf8'));
+    rcProject  = obj && obj.projects && obj.projects.default;
+    if (!rcProject) throw new Error('projects.default ausente em .firebaserc');
+  } catch (e) {
+    console.error('ERRO Falha ao ler .firebaserc: ' + e.message);
+    process.exit(1);
+  }
+
+  // 2. Ler somente project_id do credential JSON — nenhum outro campo e lido ou exibido
+  const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (!credPath) {
+    console.error('ERRO GOOGLE_APPLICATION_CREDENTIALS nao definida.');
+    console.error('   Use --mock para testar sem credenciais.');
+    process.exit(1);
+  }
+  let credProject;
+  try {
+    const obj   = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+    credProject = obj && obj.project_id;
+    if (!credProject) throw new Error('campo project_id ausente no service account JSON');
+  } catch (e) {
+    console.error('ERRO Falha ao ler credential JSON: ' + e.message);
+    process.exit(1);
+  }
+
+  // 3. Comparar ambos com o projeto esperado
+  console.log('   .firebaserc projects.default : "' + rcProject + '"');
+  console.log('   Credential project_id        : "' + credProject + '"');
+
+  if (rcProject !== EXPECTED_PROJECT) {
+    console.error('ERRO .firebaserc aponta para "' + rcProject + '", esperado "' + EXPECTED_PROJECT + '". Abortando.');
+    process.exit(1);
+  }
+  if (credProject !== EXPECTED_PROJECT) {
+    console.error('ERRO Credential project_id="' + credProject + '", esperado "' + EXPECTED_PROJECT + '". Abortando.');
+    process.exit(1);
+  }
+  console.log('OK Projeto Firebase confirmado: ' + EXPECTED_PROJECT);
+}
+
+// ── Porta de segurança: --apply exige --confirm-project ──────────────────────
+
+if (APPLY && !CONFIRM_PROJECT) {
+  console.error('');
+  console.error('ERRO --apply requer --confirm-project=erp-vrmarcas como segundo argumento.');
+  console.error('   Isso previne gravacoes acidentais no projeto errado.');
+  console.error('');
+  console.error('   Uso correto:');
+  console.error('   node scripts/migrate_admin_to_master.js --apply --confirm-project=erp-vrmarcas');
+  console.error('');
+  process.exit(1);
+}
+
+validateProject();
 
 // ── Detectar firebase-admin ────────────────────────────────────────────────────
 
@@ -51,314 +186,272 @@ try {
   try {
     admin = require('firebase-admin');
   } catch (e2) {
-    console.error('❌ firebase-admin não encontrado.');
+    console.error('ERRO firebase-admin nao encontrado.');
     console.error('   Instale: cd functions && npm install');
     console.error('   Ou use --mock para testar sem Firebase.');
     process.exit(1);
   }
 }
 
-// ── Inicializar Admin SDK ──────────────────────────────────────────────────────
+// ── Inicializar Admin SDK com projectId explícito ─────────────────────────────
 
 if (!admin.apps.length) {
-  const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!credPath) {
-    console.error('❌ GOOGLE_APPLICATION_CREDENTIALS não definida.');
-    console.error('   Nenhuma escrita foi realizada.');
-    console.error('   Use --mock para testar o comportamento sem credenciais.');
-    process.exit(1);
-  }
   try {
-    admin.initializeApp({ credential: admin.credential.applicationDefault() });
-    console.log('✅ Admin SDK inicializado via GOOGLE_APPLICATION_CREDENTIALS');
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      projectId:  EXPECTED_PROJECT,
+    });
+    console.log('OK Admin SDK inicializado (projectId: ' + EXPECTED_PROJECT + ')');
   } catch (e) {
-    console.error('❌ Falha ao inicializar Admin SDK:', e.message);
-    console.error('   Nenhuma escrita foi realizada.');
+    console.error('ERRO Falha ao inicializar Admin SDK: ' + e.message);
     process.exit(1);
-  }
-}
-
-// ── Validar projeto ───────────────────────────────────────────────────────────
-
-async function validateProject() {
-  try {
-    const app = admin.app();
-    const projectId = app.options.projectId ||
-      (admin.credential && admin.credential.applicationDefault &&
-       process.env.GCLOUD_PROJECT) ||
-      process.env.FIREBASE_PROJECT_ID;
-    if (projectId) {
-      console.log(`   Projeto Firebase detectado: ${projectId}`);
-    } else {
-      console.warn('   ⚠️  Projeto Firebase não identificado nas opções — verifique o service account.');
-    }
-  } catch (e) {
-    console.warn('   ⚠️  Não foi possível identificar o projeto:', e.message);
   }
 }
 
 const db   = admin.firestore();
 const auth = admin.auth();
 
-const COL_ERP   = 'erp_vr';
-const DOC_USERS = 'erp_usuarios';
+// ── Carregar todas as contas Firebase Auth ────────────────────────────────────
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+async function listAllAuthUsers() {
+  const byUid   = new Map();
+  const byEmail = new Map();
+  let   pageToken;
+  let   total   = 0;
 
-function isAdminRole(v) {
-  // Somente 'admin' (qualquer capitalização) é migrado.
-  // 'master' e demais perfis NÃO são alterados.
-  // Nulos, vazios ou desconhecidos NÃO são promovidos.
-  return typeof v === 'string' && v.trim().toLowerCase() === 'admin';
+  do {
+    const result = await auth.listUsers(1000, pageToken);
+    total += result.users.length;
+    for (const u of result.users) {
+      byUid.set(u.uid, u);
+      if (u.email) byEmail.set(u.email.trim().toLowerCase(), u);
+    }
+    pageToken = result.pageToken;
+  } while (pageToken);
+
+  return { byUid, byEmail, total };
 }
 
-function maskEmail(email) {
-  if (!email) return '***';
-  const [local, domain] = String(email).split('@');
-  if (!local || !domain) return '***@***';
-  const visible = local.length > 2 ? local.slice(0, 2) : local[0] || '*';
-  return `${visible}***@${domain}`;
-}
+// ── PASSO 1: Firestore erp_vr/erp_usuarios ───────────────────────────────────
 
-// ── PASSO 1 — Migrar Firestore erp_vr/erp_usuarios ───────────────────────────
-
-async function migrateFirestore() {
-  console.log('\n─── PASSO 1: Firestore erp_vr/erp_usuarios ─────────────────');
+async function migrateFirestore(authByUid, authByEmail) {
+  console.log('\n--- PASSO 1: Firestore erp_vr/erp_usuarios ' + '-'.repeat(17));
 
   const docRef = db.collection(COL_ERP).doc(DOC_USERS);
   const snap   = await docRef.get();
 
   if (!snap.exists) {
-    console.log('⚠️  Documento não encontrado — nada a migrar no Firestore.');
-    return { found: 0, toMigrate: [] };
+    console.log('   Documento nao encontrado -- nada a migrar no Firestore.');
+    return { found: 0, toMigrate: [], allUsers: [] };
   }
 
   let users;
   try {
-    const raw = snap.data()?.data;
+    const raw = snap.data() && snap.data().data;
     users = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(users)) throw new Error('data não é um array');
+    if (!Array.isArray(users)) throw new Error('data nao e um array');
   } catch (e) {
-    console.error('❌ Falha ao parsear JSON de erp_usuarios:', e.message);
-    return { found: 0, toMigrate: [] };
+    console.error('ERRO Falha ao parsear JSON de erp_usuarios: ' + e.message);
+    return { found: 0, toMigrate: [], allUsers: [] };
   }
 
   const toMigrate = users.filter(u => isAdminRole(u.funcao));
-  console.log(`   Total de usuários no documento : ${users.length}`);
-  console.log(`   Usuários com funcao=="admin"   : ${toMigrate.length}`);
+  console.log('   Total de usuarios no documento : ' + users.length);
+  console.log('   Usuarios com funcao=="admin"   : ' + toMigrate.length);
 
   if (toMigrate.length === 0) {
-    console.log('   ✅ Nenhum usuário admin encontrado — Firestore já está limpo.');
-    return { found: users.length, toMigrate: [] };
+    console.log('   OK Nenhum usuario admin encontrado -- Firestore ja esta limpo.');
+    return { found: users.length, toMigrate: [], allUsers: users };
   }
 
-  toMigrate.forEach(u => {
-    console.log(`   • ${u.nome || '(sem nome)'} <${maskEmail(u.email)}> funcao="${u.funcao}" → "master"`);
-  });
+  // Correlacionar com Auth e reportar status de cada admin Firestore
+  for (const u of toMigrate) {
+    const authUser = (u.uid && authByUid.get(u.uid)) ||
+                     (u.email && authByEmail.get(u.email.trim().toLowerCase()));
+    let authStatus;
+    if (!authUser) {
+      authStatus = 'SEM_CONTA_AUTH -- nao encontrado no Firebase Auth';
+    } else {
+      const role = authUser.customClaims && authUser.customClaims.role;
+      if (role === 'master')      authStatus = 'Auth: ja e master (sem necessidade de migracao no Passo 2)';
+      else if (isAdminRole(role)) authStatus = 'Auth: role=="admin" -- sera migrado no Passo 2';
+      else if (role)              authStatus = 'Auth: role="' + role + '" -- inesperado, verificar manualmente';
+      else                        authStatus = 'Auth: sem claim role definida';
+    }
+    console.log(
+      '   * ' + (u.nome || '(sem nome)') +
+      ' <' + maskEmail(u.email) + '>' +
+      '  funcao="' + u.funcao + '" -> "master"  [' + authStatus + ']'
+    );
+  }
 
   if (!APPLY) {
     console.log('\n   [DRY-RUN] Nenhuma escrita realizada no Firestore.');
-    return { found: users.length, toMigrate };
+    return { found: users.length, toMigrate, allUsers: users };
   }
 
-  // Verificar idempotência: ler novamente dentro da operação para estado fresco
-  const snap2  = await docRef.get();
-  let users2;
+  // Releitura idempotente para garantir estado fresco antes de escrever
+  const snap2 = await docRef.get();
+  let   users2;
   try {
-    users2 = JSON.parse(snap2.data()?.data || '[]');
-  } catch {
+    const raw2 = snap2.data() && snap2.data().data;
+    users2 = raw2 ? JSON.parse(raw2) : users;
+  } catch (_) {
     users2 = users;
   }
 
   let updated = 0;
   users2.forEach(u => {
-    if (isAdminRole(u.funcao)) {
-      u.funcao = 'master';
-      updated++;
-    }
+    if (isAdminRole(u.funcao)) { u.funcao = 'master'; updated++; }
   });
 
-  // Preserva todos os demais campos; atualiza somente funcao=='admin'
   await docRef.set({ data: JSON.stringify(users2), ts: Date.now() });
-  console.log(`   ✅ ${updated} usuário(s) atualizados no Firestore.`);
-  return { found: users.length, toMigrate };
+  console.log('   OK ' + updated + ' usuario(s) atualizados no Firestore.');
+  return { found: users.length, toMigrate, allUsers: users };
 }
 
-// ── PASSO 2 — Migrar custom claims no Firebase Auth ──────────────────────────
+// ── PASSO 2: Firebase Auth custom claims ──────────────────────────────────────
 
-async function migrateAuthClaims() {
-  console.log('\n─── PASSO 2: Firebase Auth custom claims ────────────────────');
-  console.log('   Verificando se Auth custom claims realmente armazenam role...');
+async function migrateAuthClaims(fsUsers, authByUid, authByEmail) {
+  console.log('\n--- PASSO 2: Firebase Auth custom claims ' + '-'.repeat(20));
+
+  // Conjuntos Firestore para detectar contas Auth sem contraparte
+  const fsUidSet   = new Set(fsUsers.map(u => u.uid).filter(Boolean));
+  const fsEmailSet = new Set(
+    fsUsers.map(u => u.email && u.email.trim().toLowerCase()).filter(Boolean)
+  );
 
   const toMigrate = [];
-  const sample    = [];
-  let   pageToken;
-  let   totalUsers = 0;
+  const orphaned  = [];
 
-  do {
-    const result = await auth.listUsers(1000, pageToken);
-    totalUsers += result.users.length;
-
-    for (const user of result.users) {
-      const role = user.customClaims?.role;
-      // Coleta amostra para verificar se o projeto usa claims
-      if (sample.length < 3 && role) sample.push({ email: maskEmail(user.email), role });
-      if (isAdminRole(role)) toMigrate.push(user);
-    }
-    pageToken = result.pageToken;
-  } while (pageToken);
-
-  console.log(`   Total de contas Auth listadas        : ${totalUsers}`);
-
-  if (sample.length > 0) {
-    console.log('   ✅ Auth custom claims em uso — amostra: ' +
-      sample.map(s => `role="${s.role}"`).join(', '));
-  } else {
-    console.log('   ℹ️  Nenhuma claim "role" encontrada — sistema pode usar apenas erp_usuarios.');
-    console.log('   Auth custom claims não precisam ser migradas neste caso.');
+  for (const u of authByUid.values()) {
+    const role = u.customClaims && u.customClaims.role;
+    if (!isAdminRole(role)) continue;
+    toMigrate.push(u);
+    const hasFirestore = fsUidSet.has(u.uid) ||
+      (u.email && fsEmailSet.has(u.email.trim().toLowerCase()));
+    if (!hasFirestore) orphaned.push(u);
   }
 
-  console.log(`   Contas com claim role=="admin"       : ${toMigrate.length}`);
+  console.log('   Total de contas Auth carregadas      : ' + authByUid.size);
+  console.log('   Contas com claim role=="admin"       : ' + toMigrate.length);
 
   if (toMigrate.length === 0) {
-    console.log('   ✅ Nenhuma claim admin encontrada — Auth já está limpo.');
-    return { toMigrate: [] };
+    console.log('   OK Nenhuma claim admin encontrada -- Auth ja esta limpo.');
+  } else {
+    for (const u of toMigrate) {
+      console.log(
+        '   * ' + (u.displayName || '(sem nome)') +
+        ' <' + maskEmail(u.email) + '>' +
+        '  role="' + (u.customClaims && u.customClaims.role) + '" -> "master"'
+      );
+    }
   }
 
-  toMigrate.forEach(u => {
-    console.log(`   • ${u.displayName || '(sem nome)'} <${maskEmail(u.email)}> role="${u.customClaims.role}" → "master"`);
-  });
+  if (orphaned.length > 0) {
+    console.log('\n   DIVERGENCIA -- Contas Auth role=="admin" sem registro no Firestore:');
+    for (const u of orphaned) {
+      console.log(
+        '      * ' + (u.displayName || '(sem nome)') +
+        ' <' + maskEmail(u.email) + '>' +
+        '  uid=' + u.uid
+      );
+    }
+  }
 
   if (!APPLY) {
     console.log('\n   [DRY-RUN] Nenhuma escrita realizada no Auth.');
-    return { toMigrate };
+    return { toMigrate, orphaned };
   }
 
   let updated = 0;
   for (const u of toMigrate) {
-    // Preserva demais claims existentes; apenas substitui role
     const existingClaims = u.customClaims || {};
-    await auth.setCustomUserClaims(u.uid, { ...existingClaims, role: 'master' });
-    await auth.revokeRefreshTokens(u.uid);
-    console.log(`   ✅ ${maskEmail(u.email)} → role="master" (sessões revogadas, re-login necessário)`);
-    updated++;
-  }
+    // spread preserva todas as claims existentes; apenas role e substituida
+    await auth.setCustomUserClaims(u.uid, Object.assign({}, existingClaims, { role: 'master' }));
 
-  console.log(`\n   ✅ ${updated} claim(s) atualizadas no Firebase Auth.`);
-  return { toMigrate };
-}
+    // Verificacao pos-escrita: ler de volta e confirmar role + claims preservadas
+    const refreshed   = await auth.getUser(u.uid);
+    const newClaims   = refreshed.customClaims || {};
+    const missingKeys = Object.keys(existingClaims).filter(k => k !== 'role' && !(k in newClaims));
 
-// ── Testes mock locais (--mock) ───────────────────────────────────────────────
-
-function runMockTests() {
-  let passed = 0, failed = 0;
-
-  function assert(desc, got, expected) {
-    if (got === expected) {
-      console.log(`  ✅ ${desc}`);
-      passed++;
+    if (newClaims.role !== 'master' || missingKeys.length > 0) {
+      const detail = newClaims.role !== 'master'
+        ? 'role="' + newClaims.role + '" apos escrita'
+        : 'claims perdidas: ' + missingKeys.join(', ');
+      console.error('   VERIFICACAO FALHOU: ' + maskEmail(u.email) + ' -- ' + detail);
     } else {
-      console.log(`  ❌ ${desc} — esperado "${expected}", obtido "${got}"`);
-      failed++;
+      await auth.revokeRefreshTokens(u.uid);
+      console.log(
+        '   OK ' + maskEmail(u.email) +
+        ' -> role="master" (' + Object.keys(newClaims).length +
+        ' claims preservadas, sessoes revogadas)'
+      );
+      updated++;
     }
   }
 
-  // Replicar isAdminRole localmente para teste
-  function isAdminRoleLocal(v) {
-    return typeof v === 'string' && v.trim().toLowerCase() === 'admin';
-  }
-
-  // Replicar normalizeRole localmente para teste (espelho de adminUsers.ts e _normalizeRole)
-  const KNOWN = ['master','comercial','producao','financeiro'];
-  function normalizeRole(v) {
-    if (typeof v !== 'string') return null;
-    const r = v.trim().toLowerCase();
-    if (!r) return null;
-    if (r === 'admin') return 'master';
-    if (KNOWN.indexOf(r) >= 0) return r;
-    return null;
-  }
-
-  console.log('\n── normalizeRole ────────────────────────────────────────────');
-  assert('master → master',         normalizeRole('master'),     'master');
-  assert('Master → master',         normalizeRole('Master'),     'master');
-  assert('admin → master',          normalizeRole('admin'),      'master');
-  assert('Admin → master',          normalizeRole('Admin'),      'master');
-  assert('comercial → comercial',   normalizeRole('comercial'),  'comercial');
-  assert('producao → producao',     normalizeRole('producao'),   'producao');
-  assert('financeiro → financeiro', normalizeRole('financeiro'), 'financeiro');
-  assert('null → null',             normalizeRole(null),         null);
-  assert('vazio → null',            normalizeRole(''),           null);
-  assert('desconhecido → null',     normalizeRole('gestor'),     null);
-  assert('número → null',           normalizeRole(42),           null);
-
-  console.log('\n── isAdminRole (somente admin é migrado) ───────────────────');
-  assert('admin migrado',           isAdminRoleLocal('admin'),   true);
-  assert('Admin migrado',           isAdminRoleLocal('Admin'),   true);
-  assert('master NÃO migrado',      isAdminRoleLocal('master'),  false);
-  assert('Master NÃO migrado',      isAdminRoleLocal('Master'),  false);
-  assert('comercial NÃO migrado',   isAdminRoleLocal('comercial'), false);
-  assert('null NÃO migrado',        isAdminRoleLocal(null),      false);
-  assert('vazio NÃO migrado',       isAdminRoleLocal(''),        false);
-  assert('desconhecido NÃO migrado',isAdminRoleLocal('gestor'),  false);
-
-  console.log(`\n════════════════════════════════════════════════════════════`);
-  console.log(` RESULTADO MOCK: ${passed} passed, ${failed} failed`);
-  console.log('════════════════════════════════════════════════════════════\n');
-
-  if (failed > 0) process.exit(1);
+  console.log('\n   OK ' + updated + ' claim(s) atualizadas no Firebase Auth.');
+  return { toMigrate, orphaned };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const mode = APPLY ? '⚠️  APPLY (escrita real)' : '🔍 DRY-RUN (somente leitura)';
-  console.log('════════════════════════════════════════════════════════════');
+  const mode = APPLY ? 'APPLY (escrita real)' : 'DRY-RUN (somente leitura)';
+  console.log('\n' + '='.repeat(60));
   console.log(' migrate_admin_to_master.js');
-  console.log(` Modo: ${mode}`);
-  console.log('════════════════════════════════════════════════════════════');
-
-  await validateProject();
+  console.log(' Modo: ' + mode);
+  console.log('='.repeat(60));
 
   if (APPLY) {
-    console.log('\n⚠️  MODO APPLY ATIVO — as alterações serão gravadas no Firebase.');
-    console.log('   Pressione Ctrl+C nos próximos 5 segundos para cancelar.\n');
+    console.log('\n MODO APPLY ATIVO -- as alteracoes serao gravadas no Firebase.');
+    console.log('   Pressione Ctrl+C nos proximos 5 segundos para cancelar.\n');
     await new Promise(r => setTimeout(r, 5000));
   }
 
   try {
-    const fsResult   = await migrateFirestore();
-    const authResult = await migrateAuthClaims();
+    console.log('\n--- Carregando contas Firebase Auth ' + '-'.repeat(24));
+    const { byUid: authByUid, byEmail: authByEmail, total: totalAuth } =
+      await listAllAuthUsers();
+    console.log('   ' + totalAuth + ' contas listadas.');
+
+    const fsResult   = await migrateFirestore(authByUid, authByEmail);
+    const authResult = await migrateAuthClaims(fsResult.allUsers, authByUid, authByEmail);
 
     const totalFirestore = fsResult.toMigrate.length;
-    const totalAuth      = authResult.toMigrate.length;
+    const totalAuthMig   = authResult.toMigrate.length;
+    const totalOrphaned  = authResult.orphaned.length;
 
-    console.log('\n════════════════════════════════════════════════════════════');
+    console.log('\n' + '='.repeat(60));
     console.log(' RESUMO');
-    console.log('════════════════════════════════════════════════════════════');
-    console.log(` Firestore erp_usuarios — registros a migrar : ${totalFirestore}`);
-    console.log(` Firebase Auth claims   — contas a migrar    : ${totalAuth}`);
+    console.log('='.repeat(60));
+    console.log(' Firestore erp_usuarios -- registros a migrar : ' + totalFirestore);
+    console.log(' Firebase Auth claims   -- contas a migrar    : ' + totalAuthMig);
+    if (totalOrphaned > 0) {
+      console.log(' Auth admins sem Firestore (verificar)         : ' + totalOrphaned);
+    }
 
     if (APPLY) {
-      console.log(' ✅ Migração concluída.');
-      if (totalFirestore === 0 && totalAuth === 0) {
-        console.log('\n ✅ Nenhum registro admin encontrado. Sistema já está migrado.');
-        console.log('    Você pode agora remover a compatibilidade legada do código.');
+      console.log(' OK Migracao concluida.');
+      if (totalFirestore === 0 && totalAuthMig === 0) {
+        console.log('\n OK Nenhum registro admin encontrado. Sistema ja esta migrado.');
+        console.log('    Voce pode agora remover a compatibilidade legada do codigo.');
       }
     } else {
-      if (totalFirestore === 0 && totalAuth === 0) {
-        console.log('\n ✅ Dry-run: nenhum registro admin encontrado. Nada a migrar.');
+      if (totalFirestore === 0 && totalAuthMig === 0) {
+        console.log('\n OK Dry-run: nenhum registro admin encontrado. Nada a migrar.');
       } else {
-        console.log('\n Para executar a migração real:');
+        console.log('\n Para executar a migracao real:');
         console.log('   export GOOGLE_APPLICATION_CREDENTIALS=/caminho/service-account.json');
-        console.log('   node scripts/migrate_admin_to_master.js --apply');
+        console.log('   node scripts/migrate_admin_to_master.js --apply --confirm-project=erp-vrmarcas');
       }
-      console.log('\n ℹ️  Nenhuma escrita foi realizada neste dry-run.');
+      console.log('\n INFO Nenhuma escrita foi realizada neste dry-run.');
     }
-    console.log('════════════════════════════════════════════════════════════\n');
+    console.log('='.repeat(60) + '\n');
   } catch (err) {
-    console.error('\n❌ Erro durante a migração:', err.message);
-    console.error('   Nenhuma escrita parcial deve ter ocorrido (Firestore é atômico).');
+    console.error('\nERRO durante a migracao: ' + err.message);
+    console.error('   Nenhuma escrita parcial deve ter ocorrido (Firestore e atomico).');
     console.error(err.stack);
     process.exit(1);
   }
