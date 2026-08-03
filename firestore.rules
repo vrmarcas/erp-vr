@@ -22,27 +22,32 @@ service cloud.firestore {
     }
 
     // master: gerencia o ERP (config, financeiro, permissões, usuários)
+    // NOTA: 'admin' mantido temporariamente para tokens legados enquanto a migração
+    // (scripts/migrate_admin_to_master.js --apply) não for executada e verificada.
+    // Remover 'admin' destas regras somente após confirmar zero registros remanescentes.
     function isAdmin() {
-      return isAuthenticated() && userRole() == 'master';
+      return isAuthenticated() && (
+        userRole() == 'master' || userRole() == 'admin'
+      );
     }
 
     // comercial: pode ler/escrever orçamentos, CRM, clientes — não toca em config
     function isComercial() {
       return isAuthenticated() && (
-        userRole() == 'comercial' || userRole() == 'master'
+        userRole() == 'comercial' || userRole() == 'master' || userRole() == 'admin'
       );
     }
 
     // produção: acesso operacional (Kanban/OS, estoque)
     function isProducao() {
       return isAuthenticated() && (
-        userRole() == 'producao' || userRole() == 'master'
+        userRole() == 'producao' || userRole() == 'master' || userRole() == 'admin'
       );
     }
 
     // qualquer perfil autorizado
     function isAnyStaff() {
-      return isAuthenticated() && userRole() in ['master', 'comercial', 'producao'];
+      return isAuthenticated() && userRole() in ['master', 'admin', 'comercial', 'producao'];
     }
 
     // ── marketing_connections ───────────────────────────────────────────────

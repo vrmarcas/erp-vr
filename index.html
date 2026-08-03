@@ -1567,6 +1567,18 @@ function _cloudAuthAviso(msg){
   var ct=document.getElementById('cloudTxt');
   if(ct){ ct.textContent = msg; ct.style.color = '#DC2626'; }
 }
+// ── Normalização de role (retrocompatibilidade legada) ────────────────────────
+// 'admin'/'Admin' → 'master'  (remover pós-migração e verificação de zero registros).
+// Valores nulos, vazios ou desconhecidos → null (nunca promovidos para master).
+function _normalizeRole(v) {
+  if (typeof v !== 'string') return null;
+  var r = v.trim().toLowerCase();
+  if (!r) return null;
+  if (r === 'admin') return 'master';   // retrocompatibilidade — remover pós-migração
+  if (['master','comercial','producao','financeiro'].indexOf(r) >= 0) return r;
+  return null;
+}
+
 // ── FASE 5: Firebase Auth real — sem signInAnonymously ───────────────────────
 // onAuthStateChanged é a única entrada para _cloudIniciar().
 // signInWithEmailAndPassword é chamado por authLogin() quando o usuário faz login.
@@ -1585,10 +1597,12 @@ function _cloudAuthAviso(msg){
       // Custom claims (role) são opcionais — se presentes e inválidas, bloqueia;
       // se ausentes, libera normalmente (todos os usuários criados pelo master têm acesso).
       user.getIdTokenResult(true).then(function(result){
-        var role = result.claims.role;
-        if(role && ['master','comercial','producao','financeiro'].indexOf(role) < 0){
-          // Token tem role mas ela é inválida (corrompido/estranho) — bloquear
-          console.warn('[Cloud] Role inválida no token:', role, user.email);
+        var rawRole = result.claims.role;
+        // Normaliza antes de validar: 'admin' legado → 'master'; desconhecido → null.
+        var role = rawRole ? _normalizeRole(rawRole) : null;
+        if(rawRole && !role){
+          // Token tem role mas ela é desconhecida (corrompido/estranho) — bloquear
+          console.warn('[Cloud] Role inválida no token:', rawRole, user.email);
           _cloudAuthAviso('perfil inválido — contate o administrador');
           _authShowAccessDenied('Perfil de acesso inválido. Contate o administrador.');
           return;
@@ -12468,7 +12482,7 @@ function finRender() {
   if(!tx.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
   var cM={PIX:'#059669',Cartão:'#7C3AED',Dinheiro:'#D97706'};
   var hoje=new Date(); hoje.setHours(0,0,0,0);
-  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(['master','Master'].includes(_currentSession.funcao)));
+  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&_normalizeRole(_currentSession.funcao)==='master');
   tbody.innerHTML=tx.slice(0,25).map(function(t,_ti){
     var isCartao=(t.metodo||'').toLowerCase().indexOf('cart')>=0;
     // Lógica de compensação: cartão dentro dos últimos 30 dias → A Compensar
@@ -17034,11 +17048,12 @@ function usrRender() {
   var tb = document.getElementById('usrBody'); if(!tb) return;
   if(!users.length){ tb.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Nenhum usuário cadastrado além do Master.</td></tr>'; return; }
   tb.innerHTML = users.map(function(u,i){
-    var cor = FUNCAO_COLOR[u.funcao]||'#6B7280';
+    var fn = _normalizeRole(u.funcao) || u.funcao; // normaliza admin→master para exibição
+    var cor = FUNCAO_COLOR[fn]||'#6B7280';
     return '<tr>'
       +'<td style="font-weight:700">'+cfgEsc(u.nome)+'</td>'
       +'<td style="font-size:11px;color:var(--muted)">'+(u.email||'—')+'</td>'
-      +'<td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[u.funcao]||u.funcao)+'</span></td>'
+      +'<td><span style="background:'+cor+';color:#fff;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700">'+(FUNCAO_LABEL[fn]||fn)+'</span></td>'
       +'<td style="font-size:11px;color:var(--muted)">'+usrModulosAcesso(u.funcao)+'</td>'
       +'<td><span style="color:'+(u.ativo===0||u.ativo==='0'?'var(--danger)':'var(--ok)')+';font-weight:700;font-size:11px">'+(u.ativo===0||u.ativo==='0'?'● Inativo':'● Ativo')+'</span></td>'
       +'<td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">'
@@ -17052,7 +17067,8 @@ function usrRender() {
 
 function usrModulosAcesso(funcao) {
   var perms = usrLoadPerms();
-  return MODULOS.filter(function(m){ return perms[m.id] && perms[m.id][funcao]; }).map(function(m){ return m.nome; }).join(', ') || '—';
+  var fn = _normalizeRole(funcao) || funcao;
+  return MODULOS.filter(function(m){ return perms[m.id] && perms[m.id][fn]; }).map(function(m){ return m.nome; }).join(', ') || '—';
 }
 
 function usrRenderPerms() {
@@ -17187,7 +17203,7 @@ function usrEditarAbrir(idx) {
   if(eidx) eidx.value=String(idx);
   var nome=document.getElementById('usrNome'); if(nome) nome.value=u.nome||'';
   var email=document.getElementById('usrEmail'); if(email) email.value=u.email||'';
-  var funcao=document.getElementById('usrFuncao'); if(funcao) funcao.value=u.funcao||'comercial';
+  var funcao=document.getElementById('usrFuncao'); if(funcao) funcao.value=_normalizeRole(u.funcao)||'comercial';
   var ativo=document.getElementById('usrAtivo'); if(ativo) ativo.value=(u.ativo===0||u.ativo==='0')?'0':'1';
   o.style.display='flex';
 }
@@ -18570,7 +18586,7 @@ function usrSalvar() {
     // MODO EDIÇÃO — atualiza nome, email, funcao (sem mexer na senha)
     var u = users[editIdx]; if(!u) return;
     // Verificar permissão: apenas master pode editar
-    var myFuncao=(_currentSession&&_currentSession.funcao)||'';
+    var myFuncao=_normalizeRole((_currentSession&&_currentSession.funcao)||'')||'';
     if(myFuncao!=='master'){ showToast('Sem permissão para editar usuários','err'); return; }
     // Proteção contra auto-remoção de privilégios
     var myEmail=(_currentSession&&(_currentSession.email||_currentSession.user))||'';
@@ -18859,7 +18875,8 @@ function authLogin(){
       // ── 5. Obter role: do cadastro ERP ou master como fallback ────────────
       // Se o e-mail não está em erp_usuarios mas é um usuário Firebase válido,
       // entra como master para poder se auto-cadastrar na tela de usuários.
-      var role = uRec ? (uRec.funcao || 'master').toLowerCase() : 'master';
+      // _normalizeRole converte 'admin' legado → 'master' explicitamente.
+      var role = uRec ? (_normalizeRole(uRec.funcao) || 'master') : 'master';
       if(valid.indexOf(role) < 0) role = 'master';
 
       // ── 5.5. Auto-registrar em erp_usuarios se não cadastrado ────────────

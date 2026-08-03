@@ -61,6 +61,26 @@ interface AuditEntry {
   errorCode?: string;
 }
 
+// ── Normalização de role (retrocompatibilidade legada) ────────────────────────
+
+/**
+ * Normaliza role para o valor canônico.
+ * "admin" legado → "master" (compatibilidade transitória até migração completa).
+ * Valores desconhecidos, nulos ou vazios → null (nunca promovidos para master).
+ *
+ * Remover a linha `r === "admin"` somente após:
+ *   1. Executar migrate_admin_to_master.js --apply e verificar zero registros;
+ *   2. Confirmar que nenhum token Firebase ainda carrega role=="admin".
+ */
+function normalizeRole(value: unknown): Role | null {
+  if (typeof value !== "string") return null;
+  const r = value.trim().toLowerCase();
+  if (!r) return null;
+  if (r === "admin") return "master";   // retrocompatibilidade — remover pós-migração
+  if ((VALID_ROLES as readonly string[]).includes(r)) return r as Role;
+  return null;
+}
+
 // ── Helpers de segurança ──────────────────────────────────────────────────────
 
 /** Mascarar e-mail: jo***@email.com */
@@ -103,13 +123,13 @@ function getCallerInfo(context: functions.https.CallableContext) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticação obrigatória.");
   }
   const callerUid  = context.auth.uid;
-  const callerRole = (context.auth.token?.role as string) || null;
+  // Normaliza role bruta: 'admin' legado → 'master'; desconhecido → null.
+  const callerRole = normalizeRole(context.auth.token?.role);
 
-  // Bloquear anônimos (auth existe mas sem role válida)
-  if (!callerRole || !VALID_ROLES.includes(callerRole as Role)) {
+  if (!callerRole) {
     throw new functions.https.HttpsError("permission-denied", "Perfil sem permissão.");
   }
-  return { callerUid, callerRole: callerRole as Role };
+  return { callerUid, callerRole };
 }
 
 function requireAdminOrMaster(context: functions.https.CallableContext) {
