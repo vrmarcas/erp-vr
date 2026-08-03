@@ -2,7 +2,7 @@
  * adminUsers.ts — API administrativa de gestão de usuários
  * FASE 5 / ERP VR Marcas
  *
- * Callable Cloud Functions protegidas — apenas master ou admin autenticado.
+ * Callable Cloud Functions protegidas — apenas master autenticado.
  * Nenhuma credencial, token ou secret incorporado neste arquivo.
  * Secrets ficam no Firebase Secret Manager / variáveis de ambiente do Functions.
  *
@@ -20,7 +20,7 @@ import * as admin from "firebase-admin";
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-const VALID_ROLES = ["master", "admin", "comercial", "producao", "financeiro"] as const;
+const VALID_ROLES = ["master", "comercial", "producao", "financeiro"] as const;
 type Role = typeof VALID_ROLES[number];
 
 const COL_ERP    = "erp_vr";
@@ -114,8 +114,8 @@ function getCallerInfo(context: functions.https.CallableContext) {
 
 function requireAdminOrMaster(context: functions.https.CallableContext) {
   const caller = getCallerInfo(context);
-  if (caller.callerRole !== "master" && caller.callerRole !== "admin") {
-    throw new functions.https.HttpsError("permission-denied", "Requer role admin ou master.");
+  if (caller.callerRole !== "master") {
+    throw new functions.https.HttpsError("permission-denied", "Requer role master.");
   }
   return caller;
 }
@@ -227,7 +227,7 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
   }
   assertValidRole(role);
 
-  // Admin não pode criar master
+  // Somente master pode criar master
   if (role === "master" && caller.callerRole !== "master") {
     throw new functions.https.HttpsError("permission-denied", "Somente master pode criar outro master.");
   }
@@ -398,7 +398,6 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
  *
  * Regras:
  * - Nenhum usuário pode alterar a própria role
- * - Admin não pode promover para master nem rebaixar master
  * - Somente master pode alterar role de/para master
  */
 export const adminUpdateUserRole = functions.https.onCall(async (data, context) => {
@@ -427,16 +426,6 @@ export const adminUpdateUserRole = functions.https.onCall(async (data, context) 
   }
 
   const currentRole = (target.customClaims?.role as string) || null;
-
-  // Admin não pode tocar em master (nem promover para master)
-  if (caller.callerRole === "admin") {
-    if (currentRole === "master") {
-      throw new functions.https.HttpsError("permission-denied", "Admin não pode alterar role de master.");
-    }
-    if (newRole === "master") {
-      throw new functions.https.HttpsError("permission-denied", "Admin não pode promover para master.");
-    }
-  }
 
   // Aplicar nova claim (preserva demais claims existentes)
   const existingClaims = target.customClaims || {};
@@ -490,7 +479,6 @@ export const adminUpdateUserRole = functions.https.onCall(async (data, context) 
  *
  * Regras:
  * - Nenhum usuário pode desativar a própria conta
- * - Admin não pode desativar master
  */
 export const adminToggleStatus = functions.https.onCall(async (data, context) => {
   const caller = requireAdminOrMaster(context);
@@ -513,13 +501,6 @@ export const adminToggleStatus = functions.https.onCall(async (data, context) =>
     target = await admin.auth().getUser(targetUid);
   } catch {
     throw new functions.https.HttpsError("not-found", "Usuário não encontrado.");
-  }
-
-  const targetRole = (target.customClaims?.role as string) || null;
-
-  // Admin não pode desativar master
-  if (caller.callerRole === "admin" && targetRole === "master") {
-    throw new functions.https.HttpsError("permission-denied", "Admin não pode desativar conta master.");
   }
 
   await admin.auth().updateUser(targetUid, { disabled });
@@ -656,13 +637,6 @@ export const adminRevokeSessions = functions.https.onCall(async (data, context) 
     target = await admin.auth().getUser(targetUid);
   } catch {
     throw new functions.https.HttpsError("not-found", "Usuário não encontrado.");
-  }
-
-  const targetRole = (target.customClaims?.role as string) || null;
-
-  // Admin não pode revogar sessões de master
-  if (caller.callerRole === "admin" && targetRole === "master") {
-    throw new functions.https.HttpsError("permission-denied", "Admin não pode revogar sessões de master.");
   }
 
   await admin.auth().revokeRefreshTokens(targetUid);

@@ -1583,10 +1583,10 @@ function _cloudAuthAviso(msg){
       clearTimeout(_authTimeout);
       // Controle de acesso por função é feito via erp_usuarios no Firestore.
       // Custom claims (role) são opcionais — se presentes e inválidas, bloqueia;
-      // se ausentes, libera normalmente (todos os usuários criados pelo admin têm acesso).
+      // se ausentes, libera normalmente (todos os usuários criados pelo master têm acesso).
       user.getIdTokenResult(true).then(function(result){
         var role = result.claims.role;
-        if(role && ['master','admin','comercial','producao','financeiro'].indexOf(role) < 0){
+        if(role && ['master','comercial','producao','financeiro'].indexOf(role) < 0){
           // Token tem role mas ela é inválida (corrompido/estranho) — bloquear
           console.warn('[Cloud] Role inválida no token:', role, user.email);
           _cloudAuthAviso('perfil inválido — contate o administrador');
@@ -5294,7 +5294,6 @@ function _authFirebaseError(code){
               <option value="producao">🔧 Produção</option>
               <option value="financeiro">💳 Financeiro</option>
               <option value="master">👑 Master</option>
-              <option value="admin">🔐 Admin</option>
             </select>
           </div>
           <div class="fg" id="usrStatusWrap"><label>Status</label><select id="usrAtivo"><option value="1">✅ Ativo</option><option value="0">🚫 Inativo</option></select></div>
@@ -12469,7 +12468,7 @@ function finRender() {
   if(!tx.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">Nenhuma transação no período</td></tr>';return;}
   var cM={PIX:'#059669',Cartão:'#7C3AED',Dinheiro:'#D97706'};
   var hoje=new Date(); hoje.setHours(0,0,0,0);
-  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(['master','Master','admin'].includes(_currentSession.funcao)));
+  var isMaster=(typeof _currentSession!=='undefined'&&_currentSession&&(['master','Master'].includes(_currentSession.funcao)));
   tbody.innerHTML=tx.slice(0,25).map(function(t,_ti){
     var isCartao=(t.metodo||'').toLowerCase().indexOf('cart')>=0;
     // Lógica de compensação: cartão dentro dos últimos 30 dias → A Compensar
@@ -12489,7 +12488,7 @@ function finRender() {
     } else {
       statusBadge='<span style="background:#D1FAE5;color:#065F46;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">✅ Recebido</span>';
     }
-    // Antecipar + Delete (master e admin)
+    // Antecipar + Delete (master only)
     var antBtn='';
     if(aCompensar&&isMaster){
       antBtn=' <button data-os="'+String(t.os).replace(/"/g,'&quot;')+'" data-val="'+t.valor+'" onclick="finAntecipar(this.dataset.os,+this.dataset.val)" style="font-size:9px;padding:2px 6px;border-radius:6px;border:1px solid #D97706;background:#FEF3C7;color:#92400E;cursor:pointer;font-weight:700" title="Antecipar recebimento (aplica taxa MP/Nu)">⚡ Antecipar</button>';
@@ -12509,7 +12508,7 @@ function finRender() {
 }
 function finRenderTx() { finRender(); }
 
-// ── Editar transação FIN_TX (master/admin only) ───────────────────────────────
+// ── Editar transação FIN_TX (master only) ────────────────────────────────────
 function finEditTX(osRef, data, cliente) {
   var idx = FIN_TX.findIndex(function(t){ return String(t.os)===String(osRef)&&t.data===data&&t.cliente===cliente; });
   if(idx<0){ showToast('Transação não encontrada','err'); return; }
@@ -12528,7 +12527,7 @@ function finEditTX(osRef, data, cliente) {
   showToast('Transação atualizada','ok');
 }
 
-// ── Excluir transação FIN_TX (master/admin only) ─────────────────────────────
+// ── Excluir transação FIN_TX (master only) ───────────────────────────────────
 function finDeleteTX(osRef, data, cliente) {
   if(!confirm('Excluir transação OS #'+osRef+' ('+cliente+' — '+data+')?\nEssa ação não pode ser desfeita.')) return;
   var idx = FIN_TX.findIndex(function(t){ return String(t.os)===String(osRef)&&t.data===data&&t.cliente===cliente; });
@@ -17014,7 +17013,7 @@ var MODULOS = [
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, admin:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
 });
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
@@ -17027,8 +17026,8 @@ function usrLoadPerms(){
   return base;
 }
 
-var FUNCAO_LABEL = { master:'👑 Master', admin:'🔐 Admin', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
-var FUNCAO_COLOR = { master:'#5B21B6', admin:'#065F46', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
+var FUNCAO_LABEL = { master:'👑 Master', comercial:'💼 Comercial', producao:'🔧 Produção', financeiro:'💳 Financeiro' };
+var FUNCAO_COLOR = { master:'#5B21B6', comercial:'#1E40AF', producao:'#92400E', financeiro:'#065F46' };
 
 function usrRender() {
   var users = usrLoadUsuarios();
@@ -17109,7 +17108,7 @@ function usrRedefinirSenha(idx) {
 }
 
 // Recria conta Firebase Auth para usuário existente que não consegue logar
-// (usa secondary app para não deslogar o admin)
+// (usa secondary app para não deslogar o master)
 function usrRecriarAcesso(idx) {
   var users = usrLoadUsuarios();
   var u = users[idx]; if(!u) return;
@@ -18570,9 +18569,9 @@ function usrSalvar() {
   if(editIdx >= 0) {
     // MODO EDIÇÃO — atualiza nome, email, funcao (sem mexer na senha)
     var u = users[editIdx]; if(!u) return;
-    // Verificar permissão: apenas master/admin podem editar
+    // Verificar permissão: apenas master pode editar
     var myFuncao=(_currentSession&&_currentSession.funcao)||'';
-    if(myFuncao!=='master'&&myFuncao!=='admin'){ showToast('Sem permissão para editar usuários','err'); return; }
+    if(myFuncao!=='master'){ showToast('Sem permissão para editar usuários','err'); return; }
     // Proteção contra auto-remoção de privilégios
     var myEmail=(_currentSession&&(_currentSession.email||_currentSession.user))||'';
     if(u.email===myEmail&&funcao!==myFuncao){ showToast('Você não pode alterar sua própria função','err'); return; }
@@ -18594,7 +18593,7 @@ function usrSalvar() {
     _USR_DATA=users;
     if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
 
-    // ── Criar conta Firebase Auth via secondary app (admin não perde sessão) ──
+    // ── Criar conta Firebase Auth via secondary app (master não perde sessão) ──
     // O secondary app é criado com a mesma config do app principal, mas isolado.
     (function(nomeCriado, emailCriado, senhaCriada) {
       try {
@@ -18843,7 +18842,7 @@ function authLogin(){
     })
     .then(function(ctx){
       var users = ctx.users;
-      var valid = ['master','admin','comercial','producao','financeiro'];
+      var valid = ['master','comercial','producao','financeiro'];
 
       // ── 3. Localizar usuário pelo e-mail em erp_usuarios ──────────────────
       var uRec = users.find(function(u){ return u.email && u.email.toLowerCase()===email; });
