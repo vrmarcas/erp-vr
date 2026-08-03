@@ -18605,13 +18605,20 @@ function usrSalvar() {
     var senha = (document.getElementById('usrSenha')||{}).value||'';
     if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
     if(users.find(function(u){ return u.email&&u.email===email; })){ showToast('E-mail já cadastrado','err'); return; }
-    users.push({ nome:nome.trim(), email:email, funcao:funcao, senha:secHash(senha), criado:new Date().toLocaleDateString('pt-BR') });
+    // funcao vem do select (master/comercial/producao/financeiro) — 'admin' não existe mais.
+    // Defensiva: normaliza e recusa valores fora da lista em vez de gravar lixo.
+    var funcaoNorm = _normalizeRole(funcao);
+    if(!funcaoNorm){ showToast('Função inválida','err'); return; }
+    var novoRec = { nome:nome.trim(), email:email, funcao:funcaoNorm, ativo:1, senha:secHash(senha), criado:new Date().toLocaleDateString('pt-BR') };
+    users.push(novoRec);
     _USR_DATA=users;
-    if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcao+')');
+    if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcaoNorm+')');
 
     // ── Criar conta Firebase Auth via secondary app (master não perde sessão) ──
-    // O secondary app é criado com a mesma config do app principal, mas isolado.
-    (function(nomeCriado, emailCriado, senhaCriada) {
+    // Após criar: registra o uid no perfil (associação inequívoca) e define a
+    // custom claim role via Cloud Function adminUpdateUserRole (Admin SDK).
+    // Falha em qualquer etapa é reportada — nunca informa sucesso parcial como total.
+    (function(nomeCriado, emailCriado, senhaCriada, recRef) {
       try {
         var _fbCfg = firebase.app().options;
         var _secAppName = 'usrCreate_' + Date.now();
@@ -18619,14 +18626,28 @@ function usrSalvar() {
         showToast('Criando acesso para "' + nomeCriado + '"…', 'ok');
         _secApp.auth().createUserWithEmailAndPassword(emailCriado, senhaCriada)
           .then(function(cred) {
-            return cred.user.updateProfile({ displayName: nomeCriado });
+            var novoUid = cred.user.uid;
+            return cred.user.updateProfile({ displayName: nomeCriado })
+              .then(function() { return _secApp.auth().signOut(); })
+              .then(function() { return novoUid; });
           })
-          .then(function() {
-            return _secApp.auth().signOut();
-          })
-          .then(function() {
+          .then(function(novoUid) {
             _secApp.delete().catch(function(){});
-            showToast('✅ "' + nomeCriado + '" criado! Já pode acessar o sistema.', 'ok');
+            // Registrar uid no perfil e persistir
+            recRef.uid = novoUid;
+            if(typeof _cloudSave==='function' && _cloudReady){
+              _cloudSave('erp_usuarios', _USR_DATA.map(function(u){ return Object.assign({},u); }));
+            }
+            // Definir custom claim role via backend (requer caller master com claim)
+            return firebase.functions().httpsCallable('adminUpdateUserRole')({
+              targetUid: novoUid, newRole: recRef.funcao
+            }).then(function() {
+              showToast('✅ "' + nomeCriado + '" criado com perfil e permissão completos!', 'ok');
+            }).catch(function(claimErr) {
+              console.warn('[usrSalvar] Claim não definida:', claimErr && claimErr.code, claimErr && claimErr.message);
+              showToast('⚠️ "' + nomeCriado + '" criado, mas a permissão (claim) não foi definida: ' + ((claimErr&&claimErr.message)||'erro') + '. Use "Reenviar permissão" ou contate o suporte.', 'warn');
+              if(typeof secAuditLog==='function') secAuditLog('user_claim_failed','Claim não definida para '+emailCriado+': '+((claimErr&&claimErr.code)||''));
+            });
           })
           .catch(function(err) {
             _secApp.delete().catch(function(){});
@@ -18635,13 +18656,14 @@ function usrSalvar() {
             } else {
               showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas conta de acesso não criada: ' + (err.message || err.code), 'warn');
               console.warn('[usrSalvar] Firebase Auth create error:', err);
+              if(typeof secAuditLog==='function') secAuditLog('user_auth_failed','Conta Auth não criada para '+emailCriado+': '+(err.code||''));
             }
           });
       } catch(initErr) {
         showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas falha ao iniciar criação de acesso: ' + initErr.message, 'warn');
         console.warn('[usrSalvar] secondary app init error:', initErr);
       }
-    })(nome.trim(), email, senha);
+    })(nome.trim(), email, senha, novoRec);
   }
 
   if(typeof _cloudSave==='function' && _cloudReady){
@@ -18872,24 +18894,25 @@ function authLogin(){
         return;
       }
 
-      // ── 5. Obter role: do cadastro ERP ou master como fallback ────────────
-      // Se o e-mail não está em erp_usuarios mas é um usuário Firebase válido,
-      // entra como master para poder se auto-cadastrar na tela de usuários.
-      // _normalizeRole converte 'admin' legado → 'master' explicitamente.
-      var role = uRec ? (_normalizeRole(uRec.funcao) || 'master') : 'master';
-      if(valid.indexOf(role) < 0) role = 'master';
-
-      // ── 5.5. Auto-registrar em erp_usuarios se não cadastrado ────────────
-      // Garante que qualquer usuário Firebase válido apareça na lista de usuários
-      if(!uRec && typeof _db !== 'undefined') {
-        try {
-          var autoNome = email.split('@')[0];
-          var newUserRec = { nome: autoNome, email: email, funcao: role, ativo: 1, autoRegistrado: true, criadoEm: new Date().toISOString() };
-          var updatedUsers = users.concat([newUserRec]);
-          _USR_DATA = updatedUsers;
-          _db.collection(_COL).doc('erp_usuarios').set({ data: JSON.stringify(updatedUsers) });
-          console.log('[Auth] Usuário auto-registrado em erp_usuarios:', email);
-        } catch(ae) { console.warn('[Auth] Auto-registro falhou:', ae); }
+      // ── 5. Obter role EXCLUSIVAMENTE do cadastro em erp_usuarios ──────────
+      // Conta Firebase sem perfil no ERP é BLOQUEADA — nunca entra como master.
+      // (Auth e Aprova-in compartilham o projeto Firebase; sem este bloqueio,
+      // qualquer conta Auth alheia ao ERP entraria com acesso total.)
+      if(!uRec){
+        firebase.auth().signOut();
+        if(errEl) errEl.textContent = '⛔ Conta sem perfil atribuído — contate o administrador';
+        if(btnEl) btnEl.disabled = false;
+        secAuditLog('login_denied','Conta autenticada sem perfil em erp_usuarios: '+email);
+        return;
+      }
+      // _normalizeRole converte 'admin' legado → 'master'; desconhecido → null.
+      var role = _normalizeRole(uRec.funcao);
+      if(!role || valid.indexOf(role) < 0){
+        firebase.auth().signOut();
+        if(errEl) errEl.textContent = '⛔ Perfil de acesso inválido — contate o administrador';
+        if(btnEl) btnEl.disabled = false;
+        secAuditLog('login_denied','Perfil inválido ("'+(uRec.funcao||'')+'") tentou login: '+email);
+        return;
       }
 
       // ── 6. Sessão OK ──────────────────────────────────────────────────────
