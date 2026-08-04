@@ -182,6 +182,57 @@ por lançamento, não valor parcial dentro de um lançamento; implementar
 pagamento fracionado de uma única CP seria uma funcionalidade nova maior,
 fora do escopo desta rodada — decisão documentada.
 
+## Sanitização de SVG (seção 15, segurança — achado real, não teórico)
+
+Auditoria encontrou **3 pontos** onde `svgData` (conteúdo bruto de arquivo
+`.svg` enviado pelo usuário via `FileReader.readAsText`) era inserido
+diretamente em `innerHTML` sem NENHUMA sanitização — incluindo um ponto
+(`planSvgParsePecas`, linha ~22177) que insere num `<div>` posicionado fora
+da tela (`left:-9999px`), o que **não impede a execução** de `<script>`/
+`on*` — só o torna invisível ao olho. XSS armazenado real: qualquer usuário
+com acesso ao cadastro de produto conseguiria fazer upload de um `.svg`
+com `<script>` e ele executaria para qualquer outro usuário que abrisse a
+planificação, o produto, ou reprocessasse peças.
+
+Corrigido com `svgSanitizar()` (DOMParser/XMLSerializer nativos, sem
+dependência externa): rejeita arquivos que não são SVG XML válido; remove
+`<script>`, `<foreignObject>`, `<iframe>`, `<embed>`, `<object>`, `<link>`,
+`<meta>`, `<style>`; remove todo atributo `on*`; remove `href`/`xlink:href`/
+`src` com `javascript:` ou apontando para URL externa (`http(s)://`).
+Aplicada em 4 pontos: upload (`planProdEspSvgChange`), as duas telas de
+exibição direta (defesa em profundidade — cobre SVGs legados salvos antes
+desta correção existir), e dentro de `planSvgParsePecas` (que sozinha já
+cobre todos os seus call sites, incluindo dados legados).
+
+**Bug real encontrado e corrigido durante o próprio teste**: a primeira
+versão da função buscava tags perigosas via
+`doc.getElementsByTagName('foreignobject')` (minúsculo) — que é
+**case-sensitive em documentos XML/SVG** (diferente de HTML) e não
+encontrava `<foreignObject>` (camelCase, grafia real do spec SVG), então
+essa tag específica passava incólume. Corrigido comparando `nodeName`
+normalizado em minúsculas em vez de confiar no case exato do parâmetro de
+`getElementsByTagName`.
+
+Testes reais executados no navegador (não mirror — Node não tem
+`DOMParser` sem `jsdom`, que não foi instalado por não ser necessário para
+o resto da suíte):
+- 10 amostras (SVG válido, `<script>` minúsculo/maiúsculo, `onload`,
+  `<image onerror>`, `href="javascript:..."`, `<foreignObject>` minúsculo/
+  maiúsculo, `<iframe>`, `<style>@import`) — todas neutralizadas
+  corretamente (zero `<script>`, zero `on*`, zero `javascript:`, zero
+  `foreignObject`, zero `<iframe>`, zero `<style>` no resultado), SVG
+  válido preservado intacto.
+- Arquivo não-SVG, vazio e SVG malformado — todos rejeitados (`null`).
+- **Teste end-to-end real**: `File`+`DataTransfer`+`FileReader` reais
+  (não simulação de string) com um `.svg` contendo `<script>`, `onload` e
+  `<image onerror>` simultaneamente, passado por `planProdEspSvgChange()`
+  → sanitização → armazenamento → `planSvgParsePecas()` (que insere via
+  `innerHTML`) → extração de peças. Resultado: `window.__XSS_EXECUTOU`
+  permaneceu `false` durante todo o pipeline; SVG armazenado ficou limpo
+  (`<image href="x" width="10" height="10"/><rect width="50" height="50"/>`,
+  sem nenhum vetor); sistema continuou funcional (extraiu peças, toast de
+  sucesso) — a sanitização não quebrou o uso legítimo.
+
 ## O que este harness NÃO prova
 
 - Login real via Firebase Auth (não testado — precisaria de credenciais).

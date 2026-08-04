@@ -7689,7 +7689,10 @@ function planAbrir(idx) {
       _planSvgContent.innerHTML = _plans.map(function(pl, i) {
         var lbl = pl.espessuraMm ? (pl.espessuraMm+'mm'+(pl.descricao?' — '+pl.descricao:'')) : (pl.descricao || ('Planificação '+(i+1)));
         var svgsHtml = (pl.svgs||[]).map(function(s,j){
-          return '<div style="margin-bottom:'+(j<pl.svgs.length-1?'8px':'0')+';overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+s.svgData+'</div>';
+          // Sanitiza de novo na exibição (defesa em profundidade — cobre SVGs
+          // legados salvos antes da sanitização existir no upload).
+          var svgSeguro = svgSanitizar(s.svgData) || '';
+          return '<div style="margin-bottom:'+(j<pl.svgs.length-1?'8px':'0')+';overflow:auto;max-height:200px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+svgSeguro+'</div>';
         }).join('');
         return '<div style="margin-bottom:'+(i<_plans.length-1?'12px':'0')+'">'
           +(lbl?'<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">'+lbl+'</div>':'')
@@ -21842,6 +21845,57 @@ function cfgResetProdutos() {
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
 var _planProdPecas  = [];
+// Sanitização de SVG (seção 15 — requisito de segurança explícito): remove
+// vetores de XSS conhecidos antes de ARMAZENAR e novamente antes de EXIBIR
+// (defesa em profundidade — cobre também SVGs legados salvos antes desta
+// correção). Usa DOMParser/XMLSerializer nativos, sem dependência externa.
+// Rejeita (retorna null) qualquer arquivo que não seja um SVG XML válido —
+// inclusive arquivos com extensão .svg mas conteúdo diferente.
+function svgSanitizar(svgText) {
+  if(!svgText || typeof svgText!=='string') return null;
+  var texto = svgText.trim();
+  if(texto.length > 2000000) return null; // 2MB — evita abuso de payload gigante
+  if(!/^(<\?xml[^>]*>\s*)?(<!DOCTYPE[^>]*(\[[\s\S]*?\])?\s*>\s*)?<svg[\s>]/i.test(texto)) return null;
+  if(/<!ENTITY/i.test(texto)) return null; // bloqueia XXE/entity expansion por via das dúvidas
+  try {
+    var doc = new DOMParser().parseFromString(texto, 'image/svg+xml');
+    if(doc.getElementsByTagName('parsererror').length) return null;
+    var svgEl = doc.documentElement;
+    if(!svgEl || svgEl.nodeName.toLowerCase()!=='svg') return null;
+
+    // Remoção por nome de tag em minúsculas — getElementsByTagName é
+    // CASE-SENSITIVE em documentos XML/SVG (diferente de HTML). Buscar só
+    // por 'foreignobject' não encontra <foreignObject> (camelCase real do
+    // spec SVG) e deixava a tag passar — por isso comparamos nodeName
+    // normalizado em vez de confiar em getElementsByTagName(tag) direto.
+    var TAGS_PERIGOSAS = ['script','foreignobject','iframe','embed','object','link','meta','style'];
+    var todosParaFiltrar = doc.getElementsByTagName('*');
+    for(var k=todosParaFiltrar.length-1;k>=0;k--){
+      var elK = todosParaFiltrar[k];
+      var nomeTag = (elK.localName||elK.nodeName||'').toLowerCase();
+      if(TAGS_PERIGOSAS.indexOf(nomeTag)>=0 && elK.parentNode){ elK.parentNode.removeChild(elK); }
+      // <style> é removido por poder conter @import/expression() — CSS de estilo
+      // visual simples é um custo aceitável para eliminar esse vetor.
+    }
+
+    var todos = doc.getElementsByTagName('*');
+    for(var i=0;i<todos.length;i++){
+      var el = todos[i];
+      var attrs = Array.prototype.slice.call(el.attributes||[]);
+      attrs.forEach(function(attr){
+        var nome = attr.name.toLowerCase();
+        var valor = (attr.value||'').trim().replace(/\s+/g,'').toLowerCase();
+        if(nome.indexOf('on')===0){ el.removeAttribute(attr.name); return; } // onload/onclick/onerror/...
+        if((nome==='href'||nome==='xlink:href'||nome==='src') && (valor.indexOf('javascript:')===0 || valor.indexOf('data:text/html')===0)){ el.removeAttribute(attr.name); return; }
+        if((nome==='href'||nome==='xlink:href'||nome==='src') && /^https?:\/\//.test(valor)){ el.removeAttribute(attr.name); return; } // sem referência externa
+      });
+    }
+    var svgFinal = new XMLSerializer().serializeToString(doc.documentElement);
+    if(!svgFinal || !/^<svg[\s>]/i.test(svgFinal.trim())) return null;
+    return svgFinal;
+  } catch(e) { console.warn('[SVG] Falha ao sanitizar:', e); return null; }
+}
+
 var _planPlanificacoes = []; // Array de {espessuraMm, descricao, svgs:[{svgData,svgNome}]} — múltiplos arquivos por espessura
 
 var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
@@ -21911,8 +21965,9 @@ function planProdRenderEspList() {
   list.innerHTML = _planPlanificacoes.map(function(e,i) {
     var svgs = e.svgs || [];
     var svgItems = svgs.map(function(s,j) {
-      var prev = s.svgData
-        ? '<div style="margin:4px 0;max-height:80px;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:3px;text-align:center">'+s.svgData+'</div>'
+      var svgSeguro = s.svgData ? svgSanitizar(s.svgData) : null; // defesa em profundidade — cobre SVGs legados
+      var prev = svgSeguro
+        ? '<div style="margin:4px 0;max-height:80px;overflow:hidden;border:1px solid var(--border);border-radius:6px;background:var(--bg);padding:3px;text-align:center">'+svgSeguro+'</div>'
         : '';
       return '<div style="display:flex;flex-direction:column;gap:2px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:5px">'
         +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
@@ -21971,17 +22026,26 @@ function planProdEspSvgChange(idx, input) {
   var arr = Array.prototype.slice.call(files);
   var pending = arr.length;
   var lastData = null;
+  var rejeitados = [];
   arr.forEach(function(file) {
     var reader = new FileReader();
     reader.onload = function(ev) {
+      var limpo = svgSanitizar(ev.target.result);
+      if(!limpo) {
+        rejeitados.push(file.name);
+        pending--;
+        if(pending===0){ planProdRenderEspList(); if(lastData) setTimeout(function(){ planSvgParsePecas(lastData); }, 200); if(rejeitados.length) showToast('Arquivo(s) rejeitado(s) — não é um SVG válido/seguro: '+rejeitados.join(', '),'err'); }
+        return;
+      }
       if(!_planPlanificacoes[idx]) return;
       if(!_planPlanificacoes[idx].svgs) _planPlanificacoes[idx].svgs = [];
-      _planPlanificacoes[idx].svgs.push({svgData: ev.target.result, svgNome: file.name});
-      lastData = ev.target.result;
+      _planPlanificacoes[idx].svgs.push({svgData: limpo, svgNome: file.name});
+      lastData = limpo;
       pending--;
       if(pending === 0) {
         planProdRenderEspList();
         if(lastData) setTimeout(function(){ planSvgParsePecas(lastData); }, 200);
+        if(rejeitados.length) showToast('Arquivo(s) rejeitado(s) — não é um SVG válido/seguro: '+rejeitados.join(', '),'err');
       }
     };
     reader.readAsText(file);
@@ -22103,6 +22167,13 @@ function _planGuessTipo(wCm, hCm, nomePeca, esp) {
 
 function planSvgParsePecas(svgText) {
   if(!svgText) return;
+  // Sanitiza SEMPRE aqui também — esta função é o ponto real de risco (insere
+  // via innerHTML num <div>, mesmo fora da tela isso ainda executa <script>/
+  // on*), e é chamada tanto com dados recém-sanitizados no upload quanto com
+  // dados legados (produtos salvos antes desta correção existir).
+  var svgTextSeguro = svgSanitizar(svgText);
+  if(!svgTextSeguro) { showToast('SVG inválido ou rejeitado por segurança — nenhum elemento <svg> válido encontrado', 'err'); return; }
+  svgText = svgTextSeguro;
   var parser = new DOMParser();
   var doc = parser.parseFromString(svgText, 'image/svg+xml');
   var svgEl = doc.querySelector('svg');
