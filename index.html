@@ -16030,13 +16030,33 @@ function orcNormalizarTelefoneBR(tel){
   return null; // não bate com nenhum formato BR plausível — não arrisca abrir errado
 }
 
-function orcEnviarOrcamentoWA() {
+async function orcEnviarOrcamentoWA() {
+  // Telefone é validado ANTES de abrir qualquer janela ou reservar número —
+  // não faz sentido gastar uma reserva atômica para um envio que não vai
+  // acontecer.
+  var tel  = (document.getElementById('orcClientTel')||{}).value || '';
+  var telNorm = orcNormalizarTelefoneBR(tel);
+  if(!telNorm){ showToast('Telefone do cliente inválido ou não informado — corrija antes de enviar.','warn'); return; }
+
+  // A janela é aberta AQUI, ainda de forma síncrona dentro do clique do
+  // usuário, e só recebe a URL final depois — abrir a janela só depois do
+  // await abaixo faria navegadores reais tratarem como popup não solicitado
+  // e bloquear (window.open síncrono é isento dessa regra; navegação de uma
+  // janela já aberta via win.location.href também é).
+  var win = window.open('about:blank','_blank');
+
+  var numero;
+  try { numero = await orcObterNumeroOficial(); }
+  catch(e){
+    if(win && !win.closed) win.close();
+    showToast('Não foi possível reservar o número do orçamento — tente novamente.','err');
+    return;
+  }
+
   var c = window._orcCalc || {};
   var nomeCompleto = (document.getElementById('orcClientNome')||document.getElementById('orcClienteNome')||{}).value || '';
   var primeiroNome = nomeCompleto.trim().split(/\s+/)[0] || '';
-  var tel  = (document.getElementById('orcClientTel')||{}).value || '';
   var marca = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
-  var numero = orcGetNumeroPreview();
   var responsavel = orcGetResponsavel(marca);
 
   // Descontos e parcelamento — mesma fonte usada pelo PDF A4
@@ -16090,10 +16110,8 @@ function orcEnviarOrcamentoWA() {
     +'*'+responsavel+'*\n'
     +'*'+marca+'*';
 
-  var telNorm = orcNormalizarTelefoneBR(tel);
-  if(!telNorm){ showToast('Telefone do cliente inválido ou não informado — corrija antes de enviar.','warn'); return; }
   var url = 'https://wa.me/'+telNorm+'?text='+encodeURIComponent(msg);
-  window.open(url,'_blank');
+  if(win && !win.closed) win.location.href = url; else window.open(url,'_blank');
   showToast('Orçamento enviado via WhatsApp!','ok');
 }
 
@@ -16263,7 +16281,24 @@ function orcColetarItensDistribuidos(baseEfetiva){
   });
 }
 
-function orcImprimirOrcamentoPDF() {
+async function orcImprimirOrcamentoPDF() {
+  // Janela aberta AQUI, ainda de forma síncrona dentro do clique do usuário
+  // (antes de qualquer await) — do contrário navegadores reais podem
+  // bloquear o popup depois da reserva atômica do número, que envolve uma
+  // ida real ao Firestore. O conteúdo final é escrito nesta mesma janela
+  // mais abaixo, quando o HTML estiver pronto.
+  var win = window.open('','_blank','width=880,height=960');
+  if(!win){showToast('Permita popups para imprimir','warn');return;}
+  win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Gerando orçamento…</title></head><body style="font-family:Arial,sans-serif;color:#888;padding:60px;text-align:center">Gerando orçamento…</body></html>');
+
+  var numeroPDF;
+  try { numeroPDF = await orcObterNumeroOficial(); }
+  catch(e){
+    win.close();
+    showToast('Não foi possível reservar o número do orçamento — tente novamente.','err');
+    return;
+  }
+
   var c2 = window._orcCalc || {};
   var isVitre = document.body.classList.contains('vitre');
   var marca   = isVitre ? 'Vitre' : 'VR Marcas';
@@ -16323,7 +16358,7 @@ function orcImprimirOrcamentoPDF() {
   // URL relativa dependeria de comportamento de base-URL do navegador.
   var _brandBase = location.origin + '/assets/brand/';
   var responsavelPDF = orcGetResponsavel(marca);
-  var numeroPDF = orcGetNumeroPreview();
+  // numeroPDF já foi reservado no topo da função (await orcObterNumeroOficial()).
   var validadeDiasPDF = orcGetValidadeDias();
 
   // ── VITRE TEMPLATE ──────────────────────────────────────────────
@@ -16461,8 +16496,9 @@ function orcImprimirOrcamentoPDF() {
     +'<div class="no-print" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:12px 28px;background:'+vrDark+';color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">🖨️ Imprimir / Salvar PDF</button></div>'
     +'</div></div></body></html>';
   }
-  var win = window.open('','_blank','width=880,height=960');
-  if(!win){showToast('Permita popups para imprimir','warn');return;}
+  // win já foi aberta no topo da função (antes da reserva do número) — só
+  // falta escrever o HTML final nela.
+  win.document.open();
   win.document.write(html);
   win.document.close();
   // Save to client history (lightweight version stored in localStorage)
@@ -16654,13 +16690,85 @@ var _ORC_ENVIADOS_DATA = [];
 function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }
 function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
 
-// Número do orçamento — gerado na PRIMEIRA vez que é preciso mostrá-lo ao
-// cliente (PDF ou WhatsApp, no passo "Envio ao Cliente", ANTES do
-// orçamento existir salvo) e reaproveitado no salvamento final, para o
-// cliente nunca receber um número diferente do que fica registrado.
-function orcGetNumeroPreview(){
-  if(!window._orcNumeroPreview) window._orcNumeroPreview = String(Date.now()).slice(-6);
-  return window._orcNumeroPreview;
+// Número OFICIAL do orçamento — Rodada E.1 (auditoria): o antigo
+// orcGetNumeroPreview() usava String(Date.now()).slice(-6), que (1) nunca
+// era persistido antes do salvamento, (2) era recalculado do zero a cada
+// refresh, e (3) podia colidir entre dois usuários que gerassem um
+// orçamento na mesma janela de ~16 min (últimos 6 dígitos do epoch em ms
+// se repetem a cada 1_000_000 ms). Substituído por reserva atômica via
+// transação Firestore — mesmo padrão já usado e testado para Compras
+// (comprasProximoNumeroAtomico/erp_compras_counter): leitura+escrita em
+// UMA transação, então duas reservas concorrentes NUNCA recebem o mesmo
+// número (o Firestore reexecuta automaticamente o perdedor).
+//
+// Requer Rules: erp_vr/erp_orc_counter liberado para escrita por
+// isComercial() — ver diff proposto no relatório da Rodada E.1. Sem essa
+// liberação a transação falha com permission-denied, e
+// orcObterNumeroOficial() propaga o erro (NUNCA cai para um número local
+// inseguro) — a emissão de PDF/WhatsApp fica bloqueada com um aviso claro
+// em vez de mostrar um número não reservado.
+var _orcNumeroCounterLocal = 0;
+function orcProximoNumeroAtomico(){
+  if(typeof _db==='undefined' || !_db){
+    // Fallback só para harness de teste local sem Firestore — não é
+    // seguro contra concorrência real (documentado, igual ao precedente
+    // de Compras).
+    _orcNumeroCounterLocal = _orcNumeroCounterLocal + 1;
+    return Promise.resolve(_orcNumeroCounterLocal);
+  }
+  var ref = _db.collection(_COL).doc('erp_orc_counter');
+  return _db.runTransaction(function(txn){
+    return txn.get(ref).then(function(snap){
+      var atual = (snap.exists && snap.data() && typeof snap.data().n==='number') ? snap.data().n : 0;
+      var proximo = atual + 1;
+      txn.set(ref, { n: proximo });
+      return proximo;
+    });
+  });
+}
+
+// Número oficial reservado UMA única vez por rascunho de orçamento e
+// reaproveitado por ERP, PDF e WhatsApp enquanto ele não for salvo — nunca
+// recalculado a cada renderização, independente da marca selecionada.
+window._orcNumeroOficial = null;
+window._orcNumeroOficialPromise = null;
+function orcObterNumeroOficial(){
+  if(window._orcNumeroOficial) return Promise.resolve(window._orcNumeroOficial);
+  if(!window._orcNumeroOficialPromise){
+    window._orcNumeroOficialPromise = orcProximoNumeroAtomico().then(function(n){
+      var numStr = String(n).padStart(6,'0');
+      window._orcNumeroOficial = numStr;
+      return numStr;
+    }).catch(function(e){
+      window._orcNumeroOficialPromise = null; // permite nova tentativa
+      throw e;
+    });
+  }
+  return window._orcNumeroOficialPromise;
+}
+// Libera a reserva — chamado só depois de um salvamento bem-sucedido, para
+// o PRÓXIMO orçamento (novo rascunho) gerar a sua própria reserva; nunca
+// reaproveitar o número de um orçamento que já foi persistido.
+function orcLimparNumeroOficial(){ window._orcNumeroOficial = null; window._orcNumeroOficialPromise = null; }
+
+// Achado real da auditoria de isolamento de rascunho (Rodada E.1): o DOM do
+// wizard de Novo Orçamento nunca era limpo — só coberto pelo overlay de
+// bloqueio (decisão deliberada da Fase 1, documentada no commit bc65887,
+// para não gravar dado de cliente em localStorage). Isso é seguro enquanto
+// a MESMA conta desbloqueia depois. Mas "Sair e trocar usuário" (ou
+// "↗ Sair") troca de identidade na mesma aba sem recarregar a página —
+// então o próximo usuário herdava, sem perceber, nome/telefone/e-mail/
+// itens do orçamento abandonado pelo usuário anterior. Chamado a partir de
+// authLogout() — nunca do fluxo de bloqueio/desbloqueio (authUnlock),
+// que precisa continuar preservando o rascunho da MESMA conta.
+function orcLimparRascunhoAoTrocarConta(){
+  ['orcClientNome','orcClientDoc','orcClientEmail','orcClientTel','orcClientCidade'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '';
+  });
+  var vend = document.getElementById('orcClientVendedor'); if(vend) vend.value = '';
+  var itensBody = document.getElementById('orcItemBody'); if(itensBody) itensBody.innerHTML = '';
+  window._orcCalc = null;
+  orcLimparNumeroOficial();
 }
 
 // Achado real: o <select> de Validade (passo 1) nunca teve id — PDF e
@@ -16672,11 +16780,13 @@ function orcGetValidadeDias(){
   return isNaN(n) || n<=0 ? 10 : n;
 }
 
-function orcSalvarOrcamento() {
+async function orcSalvarOrcamento() {
   var c = window._orcCalc||{};
   if(!c.finalPrice){ showToast('Calcule o orçamento (Passo 3) antes de salvar','warn'); return; }
+  var num;
+  try { num = await orcObterNumeroOficial(); }
+  catch(e){ showToast('Não foi possível reservar o número do orçamento — tente novamente.','err'); return; }
   var lista = orcGetEnviados();
-  var num   = orcGetNumeroPreview();
   var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
   var dcPct = dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
   var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
@@ -16797,9 +16907,9 @@ function orcSalvarOrcamento() {
   })();
   if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
   showToast('Orçamento #'+num+' salvo! Veja em "Orçamentos Enviados".','ok');
-  // Libera o número de preview — o PRÓXIMO orçamento (Novo Orçamento) deve
-  // gerar o seu próprio, nunca reaproveitar o deste que acabou de salvar.
-  window._orcNumeroPreview = null;
+  // Libera a reserva — o PRÓXIMO orçamento (Novo Orçamento) deve gerar a
+  // sua própria, nunca reaproveitar o número deste que acabou de salvar.
+  orcLimparNumeroOficial();
 }
 
 // ── Autocomplete de cliente no orçamento ──────────────────────────────────
@@ -20552,6 +20662,12 @@ function authLogout(){
   secAuditLog('logout','Logout — '+(_currentSession?_currentSession.user:'?'));
   secClearSession();
   _currentSession=null;
+  // Achado da Rodada E.1: troca de conta na mesma aba não recarrega a
+  // página, então um rascunho de Novo Orçamento não salvo (nome/telefone/
+  // e-mail/itens do cliente anterior) ficava visível para a PRÓXIMA conta
+  // que fizesse login nesta aba. authUnlock() (mesma conta) nunca passa por
+  // aqui — só authLogout() de fato troca de identidade.
+  if(typeof orcLimparRascunhoAoTrocarConta==='function') orcLimparRascunhoAoTrocarConta();
   // Sem isso, um segundo login (perfil diferente) na MESMA aba herdaria os
   // listeners v2 do perfil anterior — comprasV2Init() é guardado por
   // _comprasV2Unsubs!=null e nunca reavaliaria o novo perfil.
