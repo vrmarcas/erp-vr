@@ -16002,52 +16002,98 @@ function orcCalcCondicoesPagamento(baseEfetiva) {
   return { dcOn: dcOn, dcPct: dcPct, pxOn: pxOn, pxPct: pxPct, parcela: parcela };
 }
 
+// Saudação por horário comercial em America/Sao_Paulo — nunca o horário
+// local do navegador de quem está operando o ERP, que pode estar em
+// qualquer fuso.
+// Mapeamento puro hora→saudação, separado da leitura do relógio real para
+// dar para testar sem precisar viajar no tempo do processo Node.
+function orcSaudacaoPorHora(horaSP){
+  if(horaSP>=5 && horaSP<12) return 'Bom dia';
+  if(horaSP>=12 && horaSP<18) return 'Boa tarde';
+  return 'Boa noite';
+}
+function orcSaudacaoHorario(){
+  var horaSP = parseInt(new Intl.DateTimeFormat('pt-BR',{hour:'2-digit',hour12:false,timeZone:'America/Sao_Paulo'}).format(new Date()),10);
+  return orcSaudacaoPorHora(horaSP);
+}
+
+// Normaliza telefone BR para o formato que o wa.me exige (só dígitos, com
+// DDI 55 — sem duplicar se já vier com ele, sem abrir o wa.me com número
+// vazio/inválido).
+function orcNormalizarTelefoneBR(tel){
+  var d = (tel||'').replace(/\D/g,'');
+  if(!d) return null;
+  if(d.length===12 || d.length===13){
+    if(d.slice(0,2)==='55') return d; // já tem DDI, não duplica
+  }
+  if(d.length===10 || d.length===11) return '55'+d; // DDD + número, sem DDI
+  return null; // não bate com nenhum formato BR plausível — não arrisca abrir errado
+}
+
 function orcEnviarOrcamentoWA() {
   var c = window._orcCalc || {};
-  var nome = (document.getElementById('orcClientNome')||document.getElementById('orcClienteNome')||{}).value || 'cliente';
+  var nomeCompleto = (document.getElementById('orcClientNome')||document.getElementById('orcClienteNome')||{}).value || '';
+  var primeiroNome = nomeCompleto.trim().split(/\s+/)[0] || '';
   var tel  = (document.getElementById('orcClientTel')||{}).value || '';
   var marca = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
-  var total = c.finalPrice ? 'R$ '+c.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
-  // Descontos e parcelamento — fonte única compartilhada com o PDF A4
+  var numero = orcGetNumeroPreview();
+  var responsavel = orcGetResponsavel(marca);
+
+  // Descontos e parcelamento — mesma fonte usada pelo PDF A4
+  // (orcCalcCondicoesPagamento) — os dois nunca mostram valores diferentes.
   var baseEfetivaWA = (c.finalPrice||0);
   var _condWA = orcCalcCondicoesPagamento(baseEfetivaWA);
   var dcOnWA = _condWA.dcOn, dcPctWA = _condWA.dcPct, pxOnWA = _condWA.pxOn, pxPctWA = _condWA.pxPct;
   baseEfetivaWA = (c.finalPrice||0)*(1-dcPctWA/100)*(1-pxPctWA/100);
-  var totalExibido  = baseEfetivaWA>0 && baseEfetivaWA<(c.finalPrice||0)
-    ? 'R$ '+baseEfetivaWA.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
-    : total;
-  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento calculado sobre o valor já com desconto
-  var parcelaStr = '';
+  var fmtBRLWA = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var totalExibido = baseEfetivaWA>0 ? fmtBRLWA(baseEfetivaWA) : (c.finalPrice?fmtBRLWA(c.finalPrice):'—');
+  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento sobre o valor já com desconto
+
+  // Itens numerados — mesma fonte usada pelo PDF (orcColetarItensDistribuidos).
+  var itensLista = orcColetarItensDistribuidos(baseEfetivaWA>0 ? baseEfetivaWA : (c.finalPrice||0));
+  var itensStr = itensLista.map(function(item, i){
+    var n = String(i+1).padStart(2,'0');
+    return n+'. '+item.desc+'\nQuantidade: '+item.qty+'\nValor unitário: '+fmtBRLWA(item.unit)+'\nSubtotal: '+fmtBRLWA(item.total);
+  }).join('\n\n');
+
+  var pgtoSelWA = document.getElementById('orcFormaPgto');
+  var pgtoLabelWA = pgtoSelWA ? pgtoSelWA.options[pgtoSelWA.selectedIndex].text : 'A combinar';
+
+  // Ofertas condicionais (desconto por fechamento até uma data, desconto
+  // Pix, parcelamento) são funcionalidade real e configurável do orçamento
+  // — preservadas aqui, só sem emoji (o modelo padrão não usa emoji).
+  var extrasStr = '';
   if(_condWA2.parcela){
-    parcelaStr = '\n📆 *Parcelável em até '+_condWA2.parcela.nParc+'x de R$ '+_condWA2.parcela.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+(_condWA2.parcela.semJuros?' sem juros':'')+'*';
+    extrasStr += '\n\n*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+(_condWA2.parcela.semJuros?' sem juros':' (parcelas com acréscimo)');
   }
-  // Captura itens
-  var itensArr = [];
-  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
-    var idx = row.dataset.idx; if(!idx) return;
-    var prod = (document.getElementById('oi_prod_'+idx)||{}).value||'';
-    var qty  = (document.getElementById('oi_qty_'+idx)||{}).value||'1';
-    var tot  = (document.getElementById('oi_tot_'+idx)||{}).textContent||'';
-    if(prod) itensArr.push('• '+qty+'× '+prod+' — '+tot.trim());
-  });
-  var itensStr  = itensArr.length ? '\n\n*Itens:*\n'+itensArr.join('\n') : '';
-  var condStr   = '';
   if(dcOnWA && dcPctWA>0){
     var condData = document.getElementById('orcDescCondData')?.value||'';
     var dataFmt  = condData ? condData.split('-').reverse().join('/') : '';
-    condStr = '\n\n⚡ *Oferta especial:* '+dcPctWA+'% de desconto → *'+totalExibido+'*'
-      +(dataFmt?'\nVálido para fechamento até *'+dataFmt+'*. Após essa data, valor retorna ao normal.':'!');
+    extrasStr += '\n\n*Oferta especial:* '+dcPctWA+'% de desconto já aplicado no valor acima'+(dataFmt?' — válido para fechamento até '+dataFmt+'. Após essa data, o valor retorna ao normal.':'.');
   }
-  var pixStr = '';
   if(pxOnWA && pxPctWA>0 && !dcOnWA){
-    pixStr = '\n\n⚡ *Desconto PIX:* Pague via PIX e ganhe *'+pxPctWA+'% de desconto* → *'+totalExibido+'*';
+    extrasStr += '\n\n*Desconto PIX:* '+pxPctWA+'% de desconto pagando à vista via PIX (já aplicado no valor acima).';
   }
-  var msg = 'Olá, *'+nome+'*! 👋\n\n'
-    +'Segue o orçamento da *'+marca+'*:'+itensStr+'\n\n'
-    +'💰 *Valor Total: '+totalExibido+'*'+parcelaStr+condStr+pixStr+'\n\n'
-    +'Para aprovar ou tirar dúvidas, é só responder! 😊';
-  var telClean = tel.replace(/\D/g,'');
-  window.open('https://wa.me/'+(telClean?'55'+telClean:'')+'?text='+encodeURIComponent(msg),'_blank');
+
+  var saudacaoNome = primeiroNome ? (orcSaudacaoHorario()+', *'+primeiroNome+'*!') : 'Olá!';
+  var msg = saudacaoNome+'\n\n'
+    +'Conforme solicitado, segue o orçamento da *'+marca+'*:\n\n'
+    +'*ORÇAMENTO Nº '+numero+'*\n\n'
+    +(itensStr ? '*Itens do orçamento*\n\n'+itensStr+'\n\n' : '')
+    +'*VALOR TOTAL: '+totalExibido+'*'
+    +extrasStr+'\n\n'
+    +'*Prazo de produção:* '+orcGetPrazoTexto()+'\n\n'
+    +'*Validade do orçamento:* '+orcGetValidadeDias()+' dias\n\n'
+    +'*Forma de pagamento:* '+pgtoLabelWA+'\n\n'
+    +'Caso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\n'
+    +'Atenciosamente,\n\n'
+    +'*'+responsavel+'*\n'
+    +'*'+marca+'*';
+
+  var telNorm = orcNormalizarTelefoneBR(tel);
+  if(!telNorm){ showToast('Telefone do cliente inválido ou não informado — corrija antes de enviar.','warn'); return; }
+  var url = 'https://wa.me/'+telNorm+'?text='+encodeURIComponent(msg);
+  window.open(url,'_blank');
   showToast('Orçamento enviado via WhatsApp!','ok');
 }
 
