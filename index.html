@@ -10379,7 +10379,7 @@ function _kbOpenProdOverlay(os) {
   document.getElementById('kbProdOverlay').classList.add('open');
 }
 
-function kbCloseProd() { document.getElementById('kbProdOverlay').classList.remove('open'); }
+function kbCloseProd() { document.getElementById('kbProdOverlay').classList.remove('open'); _kbProdSubmitting = false; }
 
 function kbProdSetTipo(tipo) {
   _kbProdTipo = tipo;
@@ -10441,21 +10441,27 @@ function kbProdCheckStock() {
   si.style.display = '';
 }
 
+var _kbProdSubmitting = false; // trava contra clique duplo/reentrância no submit
 function kbConfirmarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
+  if (_kbProdSubmitting) return; // já em andamento — ignora reclique
   var obs = (document.getElementById('kbProdObs')||{}).value||'';
   var _editMode = _kbProdEditMode; // captura antes de qualquer mutação
 
   // [S2] Helper: UI + auditLog + toast — chamado após sucesso (retalho: síncrono; matKey: dentro do .then())
   function _finalizar() {
+    _kbProdSubmitting = false;
+    var _submitBtn = document.querySelector('#kbProdOverlay .gen-submit'); if(_submitBtn) _submitBtn.disabled = false;
     if (!_editMode) {
       os.status = 'producao';
+      if(!os.inicioProducaoTs) os.inicioProducaoTs = Date.now(); // medição real de tempo de produção
       var stag = document.getElementById('kstag-' + _kbOsId);
       if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
       document.getElementById('kbOsStag').className = 'stag sp';
       document.getElementById('kbOsStag').textContent = 'Em Produção';
       var ib = document.getElementById('kbIniciarProdBox'); if (ib) ib.style.display = 'none';
     }
+    kbSaveKbos(); // estava faltando — mudança de status/matProd nunca era persistida no Firestore aqui
     var mb = document.getElementById('kbMatProdBox');
     var ml = document.getElementById('kbMatProdLabel');
     var mq = document.getElementById('kbMatProdQtyLabel');
@@ -10487,6 +10493,8 @@ function kbConfirmarProd() {
     var rList  = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
     if (isNaN(retIdx) || !rList[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
     var retalho = rList[retIdx];
+    _kbProdSubmitting = true;
+    (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
     if (_editMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
       var rOld = rList[os.matProd.retalhoIdx];
       if (rOld) { rOld.qty++; if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
@@ -10505,7 +10513,29 @@ function kbConfirmarProd() {
     if (!matKey) { showToast('Selecione o material', 'warn'); return; }
     if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
     // Pré-check rápido via memória (falha imediata para UX; a transação confirma no servidor)
-    if (STOCK[matKey].qty < chapasRetirar) { showToast('Estoque insuficiente (' + STOCK[matKey].qty + ' chapas disponíveis)', 'warn'); return; }
+    var _prodAutorizado = false;
+    if (STOCK[matKey].qty < chapasRetirar) {
+      var _falta = +(chapasRetirar - STOCK[matKey].qty).toFixed(2);
+      var _matLabel = STOCK[matKey].label || matKey;
+      var _souMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master';
+      if (!_souMaster) {
+        if (confirm('⚠️ Estoque insuficiente de '+_matLabel+' — faltam '+_falta+' chapa(s).\n\nRegistrar uma solicitação de compra agora?')) {
+          if (typeof comprasSolicitarDeOS === 'function') comprasSolicitarDeOS(os, matKey, _falta);
+        }
+        return;
+      }
+      var _autoriza = confirm('⚠️ Estoque insuficiente de '+_matLabel+' — faltam '+_falta+' chapa(s).\n\nOK = Iniciar mesmo assim, com autorização (fica registrado em auditoria)\nCancelar = não iniciar agora');
+      if (!_autoriza) {
+        if (confirm('Registrar solicitação de compra deste material agora?')) {
+          if (typeof comprasSolicitarDeOS === 'function') comprasSolicitarDeOS(os, matKey, _falta);
+        }
+        return;
+      }
+      _prodAutorizado = true;
+      if (typeof secAuditLog === 'function') secAuditLog('producao_autorizada', 'OS #'+os.num+' iniciada com estoque insuficiente de '+_matLabel+' (faltam '+_falta+') — autorizado por '+((_currentSession&&(_currentSession.user||_currentSession.email))||'master'));
+    }
+    _kbProdSubmitting = true;
+    (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
     var _prevKey    = (_editMode && os.matProd && !os.matProd.isRetalho) ? os.matProd.matKey : null;
     var _prevChapas = _prevKey ? (os.matProd.chapasRetiradas || os.matProd.qty || 1) : 0;
     var stockRef = _db.collection(_COL).doc('stock');
@@ -10516,7 +10546,7 @@ function kbConfirmarProd() {
         // Restaurar baixa anterior atomicamente (edição de material)
         if (_prevKey && sd[_prevKey]) sd[_prevKey].qty = (sd[_prevKey].qty||0) + _prevChapas;
         if (!sd[matKey]) throw new Error('Material não encontrado no estoque');
-        if ((sd[matKey].qty||0) < chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[matKey].qty||0) + ' chapas disponíveis)');
+        if (!_prodAutorizado && (sd[matKey].qty||0) < chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[matKey].qty||0) + ' chapas disponíveis)');
         sd[matKey].qty = (sd[matKey].qty||0) - chapasRetirar;
         txn.update(stockRef, { data: JSON.stringify(sd) });
         return sd;
@@ -10537,6 +10567,8 @@ function kbConfirmarProd() {
       os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' ' + STOCK[matKey].cor : '') + (STOCK[matKey].esp ? ' — ' + STOCK[matKey].esp + 'mm' : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
       _finalizar();
     }).catch(function(e) {
+      _kbProdSubmitting = false;
+      (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=false; })();
       showToast(e.message || 'Erro ao dar baixa no estoque', 'err');
     });
     return; // branch async — _finalizar() será chamado no .then()
