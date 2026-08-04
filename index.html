@@ -734,6 +734,14 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .lock-avatar{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#5B21B6,#9D174D);color:#fff;font-size:26px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
 .lock-name{font-size:18px;font-weight:800;color:#111827}
 .lock-sub{font-size:12px;color:#6B7280;margin-top:4px;margin-bottom:22px}
+/* boot-gate: visível por padrão (sem precisar de JS) — cobre a tela inteira
+   com z-index acima de auth-overlay/lock-overlay até authInit() decidir o
+   que mostrar. Sem isso, o HTML de #pg-dashboard (display:block por padrão)
+   pinta na tela antes do JS decidir se a sessão está bloqueada/expirada. */
+.boot-gate{position:fixed;inset:0;z-index:10000;background:linear-gradient(135deg,#0F0A2A 0%,#1E1B4B 50%,#2D1B69 100%);display:flex;align-items:center;justify-content:center}
+.boot-gate.hide{display:none}
+.boot-gate-spin{width:36px;height:36px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:bootSpin .8s linear infinite}
+@keyframes bootSpin{to{transform:rotate(360deg)}}
 .audit-grid{display:grid;grid-template-columns:130px 90px 1fr 110px;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11px;align-items:start}
 .audit-grid:last-child{border-bottom:none}
 .audit-grid.head{font-weight:700;color:var(--muted);font-size:10px;background:var(--bg2);border-radius:6px;margin-bottom:4px}
@@ -1576,7 +1584,7 @@ function _cloudLoadAll() {
   _cloudLoad("erp_sb_state", function(d){ if(d&&typeof d==='object') _sbState=d; done(); });
   _cloudLoad("erp_master_pwd", function(d){ if(d) _SEC_MASTER=d; done(); });
   _cloudLoad("erp_audit_log", function(d){ if(d&&Array.isArray(d)) _SEC_AUDIT=d; done(); });
-  _cloudLoad("erp_inact_mins", function(d){ if(d) _SEC_INACT_MINS=parseInt(d)||20; done(); });
+  _cloudLoad("erp_inact_mins", function(d){ if(d!==undefined&&d!==null&&d!==''){ var n=parseInt(d,10); if(!isNaN(n)) _SEC_INACT_MINS=n; } done(); });
   _cloudLoad("chatvolt_agent_id", function(d){ if(d) _chatvoltAgentId=d; done(); });
   _cloudLoad("chatvolt_marca", function(d){ if(d) _chatvoltMarca=d; done(); });
   _cloudLoad("chatvolt_fase", function(d){ if(d) _chatvoltFase=d; done(); });
@@ -1704,10 +1712,21 @@ function _normalizeRole(v) {
       // Não autenticado (ou anônimo rejeitado) — aguarda authLogin()
       // _cloudIniciar() NÃO é chamado aqui
       if(_cloudIniciou && _currentSession) {
-        // Sessão Firebase expirou durante uso → forçar logout do ERP
-        // Guard _currentSession evita double-call quando o próprio authLogout faz signOut
-        console.warn('[Cloud] Sessão Firebase encerrada externamente — deslogando ERP');
-        if(typeof authLogout === 'function') authLogout();
+        // Sessão Firebase encerrada externamente. Pode ser: (a) esta própria
+        // aba acabou de bloquear/deslogar (secEngageLock/authLogout já
+        // zeraram _currentSession antes de chamar signOut, então este guard
+        // já não entraria aqui); ou (b) outra aba bloqueou e o signOut se
+        // propagou via persistência compartilhada do Firebase Auth ANTES do
+        // evento "storage" chegar nesta aba. Nesse caso preferimos
+        // authInit() (que respeita erp_lock_state e mostra a tela de
+        // desbloqueio) a um authLogout() que mostraria login completo
+        // desnecessariamente — se não houver bloqueio persistido, authInit()
+        // cai no mesmo resultado de logout de qualquer forma.
+        console.warn('[Cloud] Sessão Firebase encerrada externamente — reavaliando estado do ERP');
+        secStopInactivityTimer();
+        if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+        if(secGetLockState()){ authInit(); }
+        else if(typeof authLogout === 'function') authLogout();
       }
     }
   });
@@ -1753,6 +1772,13 @@ function _authFirebaseError(code){
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
+
+<!-- ================================================
+     BOOT GATE — cobre a tela até authInit() decidir o que mostrar
+     (login, bloqueio ou app). Visível por padrão (sem depender de JS
+     rodar primeiro) para nunca deixar o Dashboard piscar por trás.
+     ================================================ -->
+<div id="bootGate" class="boot-gate"><div class="boot-gate-spin"></div></div>
 
 <!-- ================================================
      SIDEBAR
@@ -1826,7 +1852,7 @@ function _authFirebaseError(code){
         onkeydown="if(event.key==='Enter')authUnlock()">
     </div>
     <div class="auth-err" id="lockErr"></div>
-    <button class="auth-btn" onclick="authUnlock()" style="margin-top:8px">🔓 Desbloquear</button>
+    <button class="auth-btn" id="lockBtn" onclick="authUnlock()" style="margin-top:8px">🔓 Desbloquear</button>
     <div style="margin-top:14px">
       <button onclick="authLogout()"
         style="background:none;border:none;color:#9CA3AF;font-size:11px;cursor:pointer;text-decoration:underline">
@@ -3432,8 +3458,8 @@ function _authFirebaseError(code){
             <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:5px">Bloqueio automático por inatividade</div>
             <select id="secInactTime" onchange="secSaveInactTime()"
               style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
-              <option value="10">10 minutos</option>
-              <option value="20" selected>20 minutos</option>
+              <option value="10" selected>10 minutos</option>
+              <option value="20">20 minutos</option>
               <option value="30">30 minutos</option>
               <option value="60">1 hora</option>
               <option value="0">Desativado</option>
@@ -16522,7 +16548,7 @@ var _METAS_VENDEDOR = {};
 var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
-var _SEC_INACT_MINS = 5;
+var _SEC_INACT_MINS = 10; // padrão de bloqueio automático (era 5 — não é mais o padrão)
 var _SEC_LOCKOUT = {count:0,until:0}; // in-memory — não resetável via sessionStorage.clear()
 var _chatvoltAgentId = '';
 var _chatvoltMarca   = 'vr';
@@ -19964,8 +19990,22 @@ var SEC_MASTER_KEY   = 'erp_master_pwd';
 var SEC_AUDIT_KEY    = 'erp_audit_log';
 var SEC_LOCKOUT_KEY  = 'erp_lockout';
 var SEC_INACT_KEY    = 'erp_inact_mins';
+// erp_lock_state: marcador PERSISTENTE de bloqueio (sobrevive a F5, fechar/
+// reabrir aba, nova aba). Nunca contém senha — só o suficiente pra saber
+// QUEM está bloqueado e reautenticar a MESMA conta (uid/email/nome/funcao).
+// Sozinho ele não é a barreira de segurança — a barreira real é que
+// secEngageLock() encerra a sessão Firebase (signOut) no momento do
+// bloqueio, então mesmo removendo esta chave manualmente do localStorage
+// não sobra nenhum token válido: o app no máximo volta pra tela de login
+// normal (ver authInit()), nunca restaura acesso.
+var SEC_LOCK_STATE_KEY = 'erp_lock_state';
 var _secTimer        = null;
 var _currentSession  = null;
+var _unlockInFlight  = false;
+
+function secGetLockState(){ try{ return JSON.parse(localStorage.getItem(SEC_LOCK_STATE_KEY)); }catch(e){ return null; } }
+function secSetLockState(s){ try{ localStorage.setItem(SEC_LOCK_STATE_KEY, JSON.stringify(s)); }catch(e){} }
+function secClearLockState(){ try{ localStorage.removeItem(SEC_LOCK_STATE_KEY); }catch(e){} }
 
 // ── Hashing simples (djb2 + abs + base36) ────────────────────────────────────
 function secHash(s) {
@@ -19975,9 +20015,14 @@ function secHash(s) {
 }
 
 // ── Inatividade configurável ──────────────────────────────────────────────────
-function secGetInactMins(){ return _SEC_INACT_MINS||20; }
+// Achado real: "||10"/"||20" tratam 0 (opção "Desativado") como valor
+// ausente e caem no default — a opção "Desativado" nunca funcionava de
+// verdade. 0 agora é um valor explícito válido, só ausência real (undefined/
+// NaN) cai no default de 10 min.
+function secGetInactMins(){ return (typeof _SEC_INACT_MINS==='number' && !isNaN(_SEC_INACT_MINS)) ? _SEC_INACT_MINS : 10; }
 function secSaveInactTime(){
-  var v=parseInt((document.getElementById('secInactTime')||{}).value||'20');
+  var v=parseInt((document.getElementById('secInactTime')||{}).value,10);
+  if(isNaN(v)) v=10;
   _SEC_INACT_MINS=v;
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_inact_mins', v);
   // Restart timer
@@ -20027,12 +20072,34 @@ function secCheckLockout(){
 }
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
+// Esconde o boot-gate (só depois que authInit() já decidiu o que mostrar —
+// login, bloqueio ou app). Sem isso o Dashboard (display:block por padrão)
+// pintaria na tela antes dessa decisão terminar.
+function secHideBootGate(){
+  var bg=document.getElementById('bootGate'); if(bg) bg.classList.add('hide');
+}
+
 function authInit(){
+  // ── 1. Bloqueio persistido tem prioridade sobre TUDO ────────────────────
+  // Se há um erp_lock_state salvo, a sessão Firebase já foi encerrada no
+  // momento do bloqueio (ver secEngageLock) — nunca restauramos acesso
+  // aqui, só mostramos a tela de desbloqueio pedindo a senha da MESMA
+  // conta. F5, fechar/reabrir aba ou abrir em outra aba caem todos neste
+  // ramo enquanto o marcador existir.
+  var lockState=secGetLockState();
+  if(lockState && lockState.uid){
+    _currentSession=null;
+    secPopulateUserSelect();
+    var ovL=document.getElementById('authOverlay'); if(ovL) ovL.classList.remove('show');
+    secApplyLockUI(lockState);
+    secHideBootGate();
+    return;
+  }
   var stored=secGetSession();
-  var inactMins=_SEC_INACT_MINS||5;
+  var inactMins=secGetInactMins();
   if(stored&&stored.user&&stored.lastActivity){
     var elapsed=(Date.now()-stored.lastActivity)/60000;
-    if(elapsed<inactMins){
+    if(inactMins>0 && elapsed<inactMins){
       // Sessão recente — restaurar silenciosamente sem pedir senha
       _currentSession=stored;
       _currentSession.lastActivity=Date.now();
@@ -20041,13 +20108,26 @@ function authInit(){
       var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
       authApplySession();
       secStartInactivityTimer();
+      secHideBootGate();
       return;
-    } else {
+    } else if(inactMins>0) {
       // Sessão expirada — forçar login completo (F5 não deve bypass o lock)
       secClearSession();
       _currentSession=null;
       secPopulateUserSelect();
       var ov2=document.getElementById('authOverlay'); if(ov2) ov2.classList.add('show');
+      secHideBootGate();
+      return;
+    } else {
+      // Bloqueio automático desativado (0min) — mantém a sessão viva
+      // indefinidamente enquanto o token Firebase continuar válido.
+      _currentSession=stored;
+      _currentSession.lastActivity=Date.now();
+      secSetSession(_currentSession);
+      secPopulateUserSelect();
+      var ov3=document.getElementById('authOverlay'); if(ov3) ov3.classList.remove('show');
+      authApplySession();
+      secHideBootGate();
       return;
     }
   }
@@ -20057,6 +20137,7 @@ function authInit(){
   var ov=document.getElementById('authOverlay');
   if(ov) ov.classList.add('show');
   secCheckLockout();
+  secHideBootGate();
 }
 
 function secPopulateUserSelect(){
@@ -20199,7 +20280,7 @@ function authLogin(){
       var nome = (uRec && uRec.nome) || email.split('@')[0];
       secSetLockout({count:0,until:0});
       _currentSession = {
-        user: nome, email: email, funcao: role,
+        user: nome, email: email, funcao: role, uid: ctx.fbUser.uid,
         loginTime: Date.now(), lastActivity: Date.now()
       };
       secSetSession(_currentSession);
@@ -20377,79 +20458,139 @@ function authLogout(){
 }
 
 // ── Lock screen ───────────────────────────────────────────────────────────────
-function authLock(){
+// secEngageLock() é a ÚNICA porta de entrada real do bloqueio (manual via
+// authLock() ou automático via o timer de inatividade abaixo). Fronteira de
+// segurança: encerra a sessão Firebase (signOut) e apaga erp_session — a
+// partir daqui não sobra token válido em lugar nenhum. O único jeito de
+// voltar é reautenticar com a senha da MESMA conta (ver authUnlock()).
+// O DOM da aplicação NÃO é resetado (só coberto pelo overlay) — é assim que
+// um formulário em edição (ex.: Novo Orçamento) sobrevive ao bloqueio sem
+// precisarmos gravar dado de cliente em nenhum armazenamento local.
+function secEngageLock(motivo){
   if(!_currentSession) return;
-  // NÃO limpa sessão — reload restaura automaticamente se recente
+  var fbUser = firebase.auth().currentUser;
+  var lockState = {
+    uid: (fbUser && fbUser.uid) || _currentSession.uid || null,
+    email: _currentSession.email || null,
+    nome: _currentSession.user || 'Usuário',
+    funcao: _currentSession.funcao || null,
+    lockedAt: Date.now(),
+    motivo: motivo || 'manual'
+  };
+  if(!lockState.uid || !lockState.email){
+    // Sem uid/email não há como reautenticar essa conta depois — um
+    // bloqueio que ninguém consegue desbloquear é pior que logout completo.
+    authLogout();
+    return;
+  }
+  secSetLockState(lockState);
   secStopInactivityTimer();
-  var nome=_currentSession.user||'Usuário';
-  var avEl=document.getElementById('lockAvatar'); if(avEl) avEl.textContent=nome[0].toUpperCase();
-  var nmEl=document.getElementById('lockName');   if(nmEl) nmEl.textContent=nome;
-  var sbEl=document.getElementById('lockSub');
-  if(sbEl){ var i=Math.round((Date.now()-(_currentSession.lastActivity||Date.now()))/60000); sbEl.textContent='Sessão bloqueada'+(i>0?' · Inativo há '+i+' min':''); }
-  var pwEl=document.getElementById('lockPwd'); if(pwEl){ pwEl.value=''; }
-  var errEl=document.getElementById('lockErr'); if(errEl) errEl.textContent='';
-  var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.add('show');
-  setTimeout(function(){ var p=document.getElementById('lockPwd'); if(p) p.focus(); },100);
-  secAuditLog('lock','Tela bloqueada');
+  if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  try{ firebase.auth().signOut(); }catch(e){}
+  _currentSession = null;
+  secClearSession();
+  secApplyLockUI(lockState);
+  secAuditLog('lock', (motivo==='auto'?'Sessão bloqueada por inatividade — ':'Tela bloqueada — ')+lockState.nome);
 }
 
+function secApplyLockUI(lockState){
+  var avEl=document.getElementById('lockAvatar'); if(avEl) avEl.textContent=(lockState.nome||'?')[0].toUpperCase();
+  var nmEl=document.getElementById('lockName');   if(nmEl) nmEl.textContent=lockState.nome||'Usuário';
+  var sbEl=document.getElementById('lockSub');
+  if(sbEl){
+    var i=Math.round((Date.now()-(lockState.lockedAt||Date.now()))/60000);
+    sbEl.textContent=(lockState.motivo==='auto'?'Sessão bloqueada por inatividade':'Sessão bloqueada')+(i>0?' · há '+i+' min':'');
+  }
+  var pwEl=document.getElementById('lockPwd'); if(pwEl) pwEl.value='';
+  var errEl=document.getElementById('lockErr'); if(errEl) errEl.textContent='';
+  var ov=document.getElementById('authOverlay'); if(ov) ov.classList.remove('show');
+  var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.add('show');
+  setTimeout(function(){ var p=document.getElementById('lockPwd'); if(p) p.focus(); },100);
+}
+
+function authLock(){
+  if(!_currentSession) return;
+  secEngageLock('manual');
+}
+
+// Reautenticação real via Firebase Auth (nunca comparação local de senha —
+// achado do round anterior mostrou fallback offline comparando contra
+// u.senha em texto/hash no cliente; removido). Se o Firebase estiver
+// inacessível, o desbloqueio falha explicitamente em vez de cair para uma
+// verificação mais fraca — não há caminho alternativo de menor segurança.
 function authUnlock(){
+  if(_unlockInFlight) return;
+  var lockState=secGetLockState();
   var pwdEl=document.getElementById('lockPwd');
   var errEl=document.getElementById('lockErr');
+  var btnEl=document.getElementById('lockBtn');
+  if(!lockState || !lockState.uid || !lockState.email){
+    // Não há bloqueio persistido válido — no máximo volta pra tela normal
+    // de login; nunca autentica sozinho a partir daqui.
+    var lo0=document.getElementById('lockOverlay'); if(lo0) lo0.classList.remove('show');
+    secClearLockState();
+    _currentSession=null;
+    var ov0=document.getElementById('authOverlay'); if(ov0) ov0.classList.add('show');
+    secPopulateUserSelect();
+    return;
+  }
   var pwd=(pwdEl&&pwdEl.value)||'';
   if(!pwd){ if(errEl) errEl.textContent='Informe a senha'; return; }
-  var ok=false;
-  if(_currentSession&&_currentSession.funcao==='master'){
-    ok=(secHash(pwd)===secGetMasterHash());
-  } else if(_currentSession){
-    var users=usrLoadUsuarios();
-    var u=users.find(function(u){ return u.nome===_currentSession.user; });
-    if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
-  }
-  // FASE 5: na lock screen, a senha deve ser revalidada via Firebase Auth
-  // para garantir que o token Firebase está ativo.
-  // Validação local é mantida como fallback offline (ex: sem internet).
-  var fbUser = firebase.auth().currentUser;
-  if(fbUser && _currentSession && _currentSession.email){
-    // Tentativa via Firebase Auth (online)
-    var emailForUnlock = _currentSession.email;
-    firebase.auth().signInWithEmailAndPassword(emailForUnlock, pwd)
-      .then(function(cred){ return cred.user.getIdToken(true); })
-      .then(function(){
-        var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
-        _currentSession.lastActivity=Date.now();
-        secSetSession(_currentSession);
-        secStartInactivityTimer();
-        _cloudStartTokenRenewal();
-        secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
-        if(pwdEl) pwdEl.value='';
-      })
-      .catch(function(e){
-        if(errEl) errEl.textContent = _authFirebaseError(e.code) || '❌ Senha incorreta';
-        if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
+  _unlockInFlight=true;
+  if(btnEl) btnEl.disabled=true;
+  if(pwdEl) pwdEl.disabled=true;
+  if(errEl) errEl.textContent='';
+  return firebase.auth().signInWithEmailAndPassword(lockState.email, pwd)
+    .then(function(cred){
+      if(cred.user.uid!==lockState.uid){
+        // Credenciais válidas, mas de OUTRA conta — nunca libera o ERP da
+        // conta que estava bloqueada com a sessão de outra pessoa.
+        return firebase.auth().signOut().then(function(){
+          var e=new Error('account-mismatch'); e.code='account-mismatch'; throw e;
+        });
+      }
+      return cred.user.getIdTokenResult(true).then(function(){
+        return _db.collection('erp_vr_usuarios').doc(lockState.uid).get();
       });
-  } else {
-    // Fallback offline: validação local (erp_usuarios)
-    var ok=false;
-    if(_currentSession&&_currentSession.funcao==='master'){
-      ok=(secHash(pwd)===secGetMasterHash());
-    } else if(_currentSession){
-      var users=usrLoadUsuarios();
-      var u=users.find(function(u){ return u.nome===_currentSession.user; });
-      if(u) ok=(u.senha===pwd)||(secHash(pwd)===u.senha);
-    }
-    if(ok){
-      var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
-      _currentSession.lastActivity=Date.now();
+    })
+    .then(function(doc){
+      // Reidentifica o perfil como um login normal faria — não confia
+      // cegamente no "funcao" salvo no marcador de bloqueio, que pode estar
+      // desatualizado se o perfil mudou enquanto a tela estava bloqueada.
+      var role = (doc && doc.exists && doc.data()) ? _normalizeRole(doc.data().funcao) : null;
+      if(!role){
+        return firebase.auth().signOut().then(function(){
+          var e=new Error('no-profile'); e.code='no-profile'; throw e;
+        });
+      }
+      _currentSession = {
+        user: (doc.data().nome||lockState.nome), email: lockState.email, funcao: role,
+        uid: lockState.uid, loginTime: Date.now(), lastActivity: Date.now()
+      };
       secSetSession(_currentSession);
+      secClearLockState();
+      var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
+      authApplySession();
       secStartInactivityTimer();
-      secAuditLog('unlock','Tela desbloqueada (offline) — '+_currentSession.user);
+      _cloudStartTokenRenewal();
+      if(!_cloudIniciou) _cloudIniciar();
+      secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
       if(pwdEl) pwdEl.value='';
-    } else {
-      if(errEl) errEl.textContent='❌ Senha incorreta';
-      if(pwdEl){ pwdEl.value=''; pwdEl.focus(); }
-    }
-  }
+    })
+    .catch(function(e){
+      var msg;
+      if(e && e.code==='account-mismatch') msg='❌ Esta senha pertence a outra conta';
+      else if(e && e.code==='no-profile') msg='❌ Conta sem perfil atribuído — contate o administrador';
+      else msg = _authFirebaseError(e && e.code) || '❌ Senha incorreta';
+      if(errEl) errEl.textContent = msg;
+      if(pwdEl) pwdEl.value='';
+      secAuditLog('unlock_failed','Tentativa de desbloqueio falhou — '+(lockState.nome||'?'));
+    })
+    .finally(function(){
+      _unlockInFlight=false;
+      if(btnEl) btnEl.disabled=false;
+      if(pwdEl){ pwdEl.disabled=false; pwdEl.focus(); }
+    });
 }
 
 // ── Inactividade ──────────────────────────────────────────────────────────────
@@ -20460,10 +20601,23 @@ function secStartInactivityTimer(){
   _secTimer=setInterval(function(){
     if(!_currentSession) return;
     var elapsed=(Date.now()-(_currentSession.lastActivity||Date.now()))/60000;
-    if(elapsed>=mins){ secStopInactivityTimer(); secAuditLog('lock','Sessão expirada por inatividade — logout automático'); authLogout(); }
+    if(elapsed>=mins){ secStopInactivityTimer(); secEngageLock('auto'); }
   },30000);
 }
 function secStopInactivityTimer(){ if(_secTimer){ clearInterval(_secTimer); _secTimer=null; } }
+
+// ── Sincronização entre abas ──────────────────────────────────────────────────
+// O evento "storage" só dispara em OUTRAS abas da mesma origem (nunca na
+// aba que fez a mudança) — exatamente o sinal que precisamos: se uma aba
+// bloqueia/desbloqueia/desloga, as demais reagem automaticamente. Reusar
+// authInit() garante a mesma decisão (bloqueado/logado/deslogado) que uma
+// aba nova tomaria ao abrir, sem duplicar a lógica.
+window.addEventListener('storage', function(e){
+  if(e.key!==SEC_LOCK_STATE_KEY && e.key!==SEC_SESSION_KEY) return;
+  secStopInactivityTimer();
+  if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  authInit();
+});
 
 // Reset activity on user interaction
 var _secLastSave=0;
