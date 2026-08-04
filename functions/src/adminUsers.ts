@@ -186,12 +186,36 @@ async function readUsersDoc(): Promise<UserProfile[]> {
   }
 }
 
+// Coleção normalizada — um documento por UID (achado de homologação: o
+// array único em erp_vr/erp_usuarios obriga qualquer perfil autenticado a
+// ler os dados de TODOS os usuários só para resolver o próprio, e Rules não
+// conseguem restringir "ler só o próprio perfil" dentro de um array
+// compartilhado). Dual-write mantido durante a migração: o array antigo
+// segue existindo (Master-only, usado pela tela administrativa e por telas
+// legadas que ainda não foram adaptadas), mas a resolução de perfil no
+// login e qualquer leitura por um usuário sobre si mesmo devem usar
+// erp_vr_usuarios/{uid} — Rules permitem cada UID ler só o próprio doc.
+const COL_USUARIOS_NORMALIZADO = "erp_vr_usuarios";
+
+async function writeUsuariosNormalizado(users: UserProfile[]): Promise<void> {
+  const db = admin.firestore();
+  const batch = db.batch();
+  users.forEach((u) => {
+    if (!u.uid) return;
+    batch.set(db.collection(COL_USUARIOS_NORMALIZADO).doc(u.uid), {
+      uid: u.uid, nome: u.nome, email: u.email, funcao: u.funcao, ativo: u.ativo,
+    });
+  });
+  await batch.commit();
+}
+
 async function writeUsersDoc(users: UserProfile[]): Promise<void> {
   const db = admin.firestore();
   await db.collection(COL_ERP).doc(DOC_USERS).set({
     data: JSON.stringify(users),
     ts: Date.now(),
   });
+  await writeUsuariosNormalizado(users);
 }
 
 // ── Idempotência ──────────────────────────────────────────────────────────────

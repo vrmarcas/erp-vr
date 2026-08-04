@@ -1167,6 +1167,7 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 <script>
 // ═══════════════════════════════════════════════════
 // FIREBASE — SYNC EM NUVEM (erp-vrmarcas)
@@ -1233,6 +1234,9 @@ if (_HOMOLOG_MODE) {
   try {
     _db.useEmulator('localhost', 8080);
     firebase.auth().useEmulator('http://localhost:9099', {disableWarnings:true});
+    if (typeof firebase.functions === 'function') {
+      firebase.functions().useEmulator('127.0.0.1', 5001);
+    }
     _HOMOLOG_EMULATORS_CONNECTED = true;
     console.warn('[HOMOLOG] Firebase Emulator Suite ativo — projectId=' + firebaseConfig.projectId + '. NÃO é o backend de produção.');
   } catch (e) {
@@ -11982,6 +11986,54 @@ function comprasCancelar(id){
   comprasRender();
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// COMPRAS v2 — arquitetura documento-por-registro, mediada por Cloud
+// Functions (functions/src/compras.ts). Achado de homologação: o modelo
+// acima (COMPRAS = array único em erp_vr/compras) não permite que Rules
+// diferenciem "Produção cria uma solicitação" de "Produção aprova/
+// precifica uma compra existente" — ambas são a mesma operação do ponto
+// de vista do Firestore. Aqui não existe escrita direta do cliente: cada
+// função chama uma Cloud Function que verifica o perfil no servidor,
+// valida a transição de status e é transacional/idempotente.
+//
+// Escopo desta rodada: implementado e testado contra o Firebase Emulator
+// Suite (Functions+Firestore+Auth). Só ativo/chamável quando _HOMOLOG_MODE
+// está ligado — em produção estas funções não são invocadas por nenhum
+// botão existente (a UI de Compras em produção continua no fluxo antigo,
+// acima, intocado). Ativar isso em produção exige plano de integração
+// próprio (ver relatório de homologação) — não é este commit que decide
+// isso, só prova que o mecanismo funciona.
+function comprasV2RequerHomolog(){
+  if(!_HOMOLOG_MODE) throw new Error('[Compras v2] disponível somente em modo homologação (?emulator=1) nesta branch.');
+}
+function comprasV2CriarSolicitacao(label, qtyNecessaria, material, marca){
+  comprasV2RequerHomolog();
+  var requestId = 'req_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+  return firebase.functions().httpsCallable('comprasCriarSolicitacao')({ requestId:requestId, label:label, qtyNecessaria:qtyNecessaria, material:material||null, marca:marca||'vr' }).then(function(res){ return res.data; });
+}
+function comprasV2Aprovar(compraId, fornecedorEscolhido, precoUnit){
+  comprasV2RequerHomolog();
+  return firebase.functions().httpsCallable('comprasAprovar')({ compraId:compraId, fornecedorEscolhido:fornecedorEscolhido, precoUnit:precoUnit }).then(function(res){ return res.data; });
+}
+function comprasV2RegistrarRecebimento(compraId, qtyRecebida){
+  comprasV2RequerHomolog();
+  var requestId = 'rec_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+  return firebase.functions().httpsCallable('comprasRegistrarRecebimento')({ compraId:compraId, qtyRecebida:qtyRecebida, requestId:requestId }).then(function(res){ return res.data; });
+}
+function comprasV2AdicionarDocumento(compraId, numero, valorTotal, nParcelas){
+  comprasV2RequerHomolog();
+  return firebase.functions().httpsCallable('comprasAdicionarDocumento')({ compraId:compraId, numero:numero, valorTotal:valorTotal, nParcelas:nParcelas }).then(function(res){ return res.data; });
+}
+function comprasV2RegistrarPagamento(cpId, valor){
+  comprasV2RequerHomolog();
+  var requestId = 'pag_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+  return firebase.functions().httpsCallable('comprasRegistrarPagamento')({ cpId:cpId, valor:valor, requestId:requestId }).then(function(res){ return res.data; });
+}
+function comprasV2Cancelar(compraId, motivo){
+  comprasV2RequerHomolog();
+  return firebase.functions().httpsCallable('comprasCancelar')({ compraId:compraId, motivo:motivo }).then(function(res){ return res.data; });
+}
+
 // Recebimento FÍSICO puro: atualiza estoque só pelo delta recebido AGORA
 // (nunca duplica — reentrância travada por _comprasRecebendoIds). NÃO cria
 // Conta a Pagar diretamente — só sincroniza a ÚNICA obrigação provisória da
@@ -16315,6 +16367,23 @@ function orcSalvarOrcamento() {
   };
   lista.unshift(orc);
   orcSetEnviados(lista);
+  // Dual-write: além do array legado (erp_vr/orcamentos, ainda a fonte de
+  // verdade lida pela UI existente), grava também o núcleo comercial deste
+  // orçamento em erp_vr_orcamentos/{id} — só campos voltados ao cliente,
+  // nada de custo/margem/markup interno (ver Rules: subcoleção /interno é
+  // Financeiro/Master-only e não é escrita por este caminho porque este
+  // objeto nunca carregou esses campos). Preparação para migrar a leitura
+  // definitivamente para a coleção normalizada numa rodada futura.
+  if(typeof _db!=='undefined' && _db && _HOMOLOG_MODE){
+    try{
+      _db.collection('erp_vr_orcamentos').doc(orc.id).set({
+        id: orc.id, num: orc.num, cliente: orc.cliente, tel: orc.tel, email: orc.email,
+        produto: orc.produto, marca: orc.marca, valorBase: orc.valorBase, valorFinal: orc.valorFinal,
+        status: orc.status, dataSalvo: orc.dataSalvo, itens: orc.itens,
+        criadoPorEmail: (_currentSession&&_currentSession.email)||null
+      });
+    }catch(e){ console.warn('[orcamentos] dual-write erp_vr_orcamentos falhou:', e); }
+  }
   orcAtualizarBadgeEnviados();
   orcLinkClienteOrcamento(orc);
   // Auto-cadastra cliente se ainda não existir
@@ -19807,27 +19876,32 @@ function authLogin(){
   // ── 1. Autenticar com Firebase Auth ─────────────────────────────────────────
   firebase.auth().signInWithEmailAndPassword(email, pwd)
     .then(function(cred){
-      // ── 2. Buscar role em erp_usuarios no Firestore (fonte de verdade) ─────
-      // Custom claims não são usadas — a role vem do cadastro no ERP.
+      // ── 2. Resolver o PRÓPRIO perfil — mínimo necessário para logar ────────
+      // Achado de homologação: ler o array inteiro de erp_usuarios (todo
+      // funcionário) só para descobrir o próprio cargo expõe nome/e-mail de
+      // todos os usuários a qualquer perfil que loga (Financeiro devia ler
+      // só o próprio perfil). erp_vr_usuarios/{uid} é um documento por
+      // usuário — Rules permitem cada UID ler só o próprio. Fallback para o
+      // array legado (erp_vr/erp_usuarios, Master-only nas Rules novas)
+      // continua existindo só como caminho de leitura ADMINISTRATIVA (tela
+      // de Criação de Usuários), nunca mais como base do login.
       // getIdTokenResult() força a sincronização do token recém-emitido antes
       // da leitura no Firestore — sem isso, a leitura pode disparar numa
       // janela em que o SDK do Firestore ainda não recebeu o novo estado de
       // autenticação, causando permission-denied intermitente logo após o
       // login (achado real: reproduzido contra o Firebase Emulator Suite).
       return cred.user.getIdTokenResult().then(function(){
-        return _db.collection(_COL).doc('erp_usuarios').get();
+        return _db.collection('erp_vr_usuarios').doc(cred.user.uid).get();
       })
         .then(function(doc){
           var users = [];
-          if(doc.exists && doc.data() && doc.data().data){
-            try { users = JSON.parse(doc.data().data); } catch(e){}
+          if(doc.exists && doc.data()){
+            users = [doc.data()];
           }
-          // Fallback para cache em memória se o Firestore falhar
-          if(!users.length) users = _USR_DATA.slice();
           return { fbUser: cred.user, users: users };
         })
         .catch(function(){
-          return { fbUser: cred.user, users: _USR_DATA.slice() };
+          return { fbUser: cred.user, users: [] };
         });
     })
     .then(function(ctx){

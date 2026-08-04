@@ -29,6 +29,16 @@ export {
   adminListUsers,
 } from "./adminUsers";
 
+// ── Compras (documento-por-registro, transições críticas mediadas) ───────────
+export {
+  comprasCriarSolicitacao,
+  comprasAprovar,
+  comprasRegistrarRecebimento,
+  comprasAdicionarDocumento,
+  comprasRegistrarPagamento,
+  comprasCancelar,
+} from "./compras";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,

@@ -165,6 +165,83 @@ service cloud.firestore {
       // Nega tudo o mais por padrão — nenhum catch-all amplo.
     }
 
+    // ── erp_vr_usuarios: documento por UID (normalizado, substitui o array
+    // erp_vr/erp_usuarios para fins de login/identificação de perfil) ───────
+    // Cada usuário lê SÓ o próprio documento; só Master lista todos. Nenhum
+    // perfil escreve aqui — toda alteração passa por adminCreateUser/
+    // adminUpdateUserRole/adminToggleStatus (Cloud Functions, Admin SDK),
+    // que verificam master no servidor antes de gravar. Isso, sozinho, já
+    // impede autoelevação: nenhum client-side write é aceito.
+    match /erp_vr_usuarios/{uid} {
+      allow read:  if isAuthenticated() && (request.auth.uid == uid || isMaster());
+      allow write: if false;
+    }
+
+    // ── Compras — documento-por-registro. Toda escrita passa por Cloud
+    // Function (comprasCriarSolicitacao/Aprovar/RegistrarRecebimento/
+    // AdicionarDocumento/RegistrarPagamento/Cancelar em functions/src/
+    // compras.ts), que verifica o perfil do chamador no servidor, valida a
+    // transição de status e é transacional/idempotente. O client NUNCA
+    // escreve direto nessas coleções — só lê. Isso resolve o achado da
+    // rodada anterior: Rules por documento não conseguem diferenciar
+    // "Produção cria uma solicitação" de "Produção aprova uma compra
+    // existente" quando ambas seriam a mesma operação (sobrescrever o
+    // documento); aqui não existe operação de escrita direta alguma —
+    // só a Cloud Function certa para cada transição.
+    match /erp_vr_compras/{compraId} {
+      allow read:  if isAnyStaff();
+      allow write: if false;
+    }
+    match /erp_vr_compras_counter/{docId} {
+      allow read:  if isAnyStaff();
+      allow write: if false; // incrementado só dentro da transação da Cloud Function
+    }
+    match /erp_vr_compras_recebimentos/{recId} {
+      allow read:  if isAnyStaff();
+      allow write: if false;
+    }
+    match /erp_vr_compras_documentos/{docId} {
+      allow read:  if isFinanceiro() || isProducao(); // produção vê que o documento chegou; valores ficam em fin_cp
+      allow write: if false;
+    }
+    match /erp_vr_compras_parcelas/{parcelaId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_fin_cp/{cpId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_fin_pagamentos/{pagId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_stock_movimentos/{movId} {
+      allow read:  if isProducao();
+      allow write: if false;
+    }
+    match /compras_idem_keys/{key} {
+      allow read, write: if false; // uso interno exclusivo das Cloud Functions
+    }
+    match /compras_audit_log/{entryId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+
+    // ── erp_vr_orcamentos: núcleo comercial do orçamento (sem custo/markup) ──
+    // Ver subcoleção /interno abaixo para os dados sensíveis.
+    match /erp_vr_orcamentos/{orcId} {
+      allow read:  if isComercial() || isFinanceiro();
+      allow write: if isComercial();
+
+      // Dados internos (custo, margem, markup, overhead, imposto) — nunca
+      // lidos pelo Comercial. Só Master/Financeiro (conciliação de DRE).
+      match /interno/{doc} {
+        allow read:  if isFinanceiro();
+        allow write: if isMaster();
+      }
+    }
+
     // ── valeria_simulations: somente Cloud Functions (service account) ──────
     match /valeria_simulations/{docId} {
       allow read:  if isAdmin(); // admin pode auditar
@@ -207,14 +284,27 @@ service cloud.firestore {
       allow write: if false; // somente Cloud Functions
     }
 
-    // ── Demais coleções (comportamento inalterado) ──────────────────────────
+    // ── Nega por padrão qualquer coleção não listada explicitamente acima ────
+    // ACHADO CRÍTICO desta rodada (autodescoberto e autocorrigido): a versão
+    // anterior deste catch-all fazia `allow read,write: if isAuthenticated()
+    // && !(col in [lista fixa])` — como a lista fixa nunca foi atualizada ao
+    // criar as novas coleções (erp_vr_compras, erp_vr_fin_cp, erp_vr_usuarios
+    // etc.), QUALQUER usuário autenticado conseguia ler/escrever direto
+    // nelas, ignorando por completo as regras específicas escritas acima e
+    // as Cloud Functions que deveriam ser o único caminho de escrita. Prova
+    // real: PATCH direto em erp_vr_compras (que tem `allow write: if false`
+    // no match block específico) retornava HTTP 200 antes desta correção —
+    // porque o catch-all, avaliado em paralelo, também "match"ava o mesmo
+    // caminho e concedia com uma condição mais permissiva (Firestore Rules
+    // combina múltiplos match blocks que casam o mesmo caminho com OR: se
+    // QUALQUER um permite, a operação é permitida). Corrigido trocando a
+    // lista de exclusão por negação total — nenhuma coleção legítima do
+    // app depende deste catch-all (todo acesso do cliente já passa pelos
+    // match blocks explícitos acima); um catch-all "permissivo com lista de
+    // exclusão" é exatamente o anti-padrão que a homologação pediu para
+    // evitar, e a lista de exclusão comprovadamente fica desatualizada.
     match /{col}/{docId=**} {
-      allow read, write: if isAuthenticated() && !(col in [
-        'erp_vr', 'valeria_simulations', 'valeria_idem_keys',
-        'valeria_rate_limits', 'valeria_alertas', 'interacoes_valeria',
-        'valeria_conversations', 'valeria_msgs',
-        'marketing_connections', 'marketing_daily_metrics', 'marketing_sync_logs'
-      ]);
+      allow read, write: if false;
     }
 
   }
