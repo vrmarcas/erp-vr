@@ -22025,8 +22025,15 @@ function planProdEspSvgChange(idx, input) {
   if(!files || !files.length) return;
   var arr = Array.prototype.slice.call(files);
   var pending = arr.length;
-  var lastData = null;
+  var parsedAny = [];
   var rejeitados = [];
+  function finish() {
+    planProdRenderEspList();
+    if(parsedAny.length) setTimeout(function(){
+      parsedAny.forEach(function(p){ planSvgParsePecas(p.svgData, p.src); });
+    }, 200);
+    if(rejeitados.length) showToast('Arquivo(s) rejeitado(s) — não é um SVG válido/seguro: '+rejeitados.join(', '),'err');
+  }
   arr.forEach(function(file) {
     var reader = new FileReader();
     reader.onload = function(ev) {
@@ -22034,38 +22041,41 @@ function planProdEspSvgChange(idx, input) {
       if(!limpo) {
         rejeitados.push(file.name);
         pending--;
-        if(pending===0){ planProdRenderEspList(); if(lastData) setTimeout(function(){ planSvgParsePecas(lastData); }, 200); if(rejeitados.length) showToast('Arquivo(s) rejeitado(s) — não é um SVG válido/seguro: '+rejeitados.join(', '),'err'); }
+        if(pending===0) finish();
         return;
       }
       if(!_planPlanificacoes[idx]) return;
       if(!_planPlanificacoes[idx].svgs) _planPlanificacoes[idx].svgs = [];
+      var svgIdx = _planPlanificacoes[idx].svgs.length;
       _planPlanificacoes[idx].svgs.push({svgData: limpo, svgNome: file.name});
-      lastData = limpo;
+      parsedAny.push({svgData: limpo, src: idx+'_'+svgIdx});
       pending--;
-      if(pending === 0) {
-        planProdRenderEspList();
-        if(lastData) setTimeout(function(){ planSvgParsePecas(lastData); }, 200);
-        if(rejeitados.length) showToast('Arquivo(s) rejeitado(s) — não é um SVG válido/seguro: '+rejeitados.join(', '),'err');
-      }
+      if(pending === 0) finish();
     };
     reader.readAsText(file);
   });
 }
 
 function planProdEspSvgClear(idx, svgIdx) {
-  if(_planPlanificacoes[idx] && _planPlanificacoes[idx].svgs) _planPlanificacoes[idx].svgs.splice(svgIdx, 1);
+  if(_planPlanificacoes[idx] && _planPlanificacoes[idx].svgs) {
+    _planPlanificacoes[idx].svgs.splice(svgIdx, 1);
+    var srcKey = idx+'_'+svgIdx;
+    _planProdPecas = _planProdPecas.filter(function(p){ return p.__src !== srcKey; });
+    planProdRenderPecas();
+    planProdPrevCalc();
+  }
   planProdRenderEspList();
 }
 
 function planProdEspParseNow(idx, svgIdx) {
   var e = _planPlanificacoes[idx];
-  if(e && e.svgs && e.svgs[svgIdx]) planSvgParsePecas(e.svgs[svgIdx].svgData);
+  if(e && e.svgs && e.svgs[svgIdx]) planSvgParsePecas(e.svgs[svgIdx].svgData, idx+'_'+svgIdx);
 }
 
 // Retrocompatibilidade: mantém planSvgParseNow apontando para primeiro SVG da primeira espessura
 function planSvgParseNow() {
   var first = _planPlanificacoes.length && _planPlanificacoes[0].svgs && _planPlanificacoes[0].svgs[0];
-  if(first) planSvgParsePecas(first.svgData);
+  if(first) planSvgParsePecas(first.svgData, '0_0');
 }
 
 // Carrega planificacoes no estado interno (ao abrir modal de edição)
@@ -22165,7 +22175,7 @@ function _planGuessTipo(wCm, hCm, nomePeca, esp) {
   return 'prateleira';
 }
 
-function planSvgParsePecas(svgText) {
+function planSvgParsePecas(svgText, sourceKey) {
   if(!svgText) return;
   // Sanitiza SEMPRE aqui também — esta função é o ponto real de risco (insere
   // via innerHTML num <div>, mesmo fora da tela isso ainda executa <script>/
@@ -22268,7 +22278,8 @@ function planSvgParsePecas(svgText) {
         alt: String(hCm),
         esp: grp.esp ? String(grp.esp) : '',
         tipo: _planGuessTipo(wCm, hCm, shapeName, grp.esp),
-        usinagem: isInternal ? 'rasgo' : ''
+        usinagem: isInternal ? 'rasgo' : '',
+        __src: sourceKey || null
       });
     });
   });
@@ -22295,7 +22306,14 @@ function planSvgParsePecas(svgText) {
     return (parseFloat(b.larg)*parseFloat(b.alt)) - (parseFloat(a.larg)*parseFloat(a.alt));
   });
 
-  _planProdPecas = deduped;
+  // Mescla com as peças já existentes de OUTRAS origens (outras espessuras/SVGs)
+  // em vez de substituir a lista inteira — cada upload/extração só afeta as
+  // peças que ele mesmo gerou anteriormente (mesma sourceKey).
+  if(sourceKey) {
+    _planProdPecas = _planProdPecas.filter(function(p){ return p.__src !== sourceKey; }).concat(deduped);
+  } else {
+    _planProdPecas = deduped;
+  }
   planProdRenderPecas();
   planProdPrevCalc();
   showToast('✅ '+deduped.length+' peças extraídas do SVG ('+espGroups.filter(function(g){return g.esp;}).length+' espessura(s) detectada(s))','ok');
@@ -22367,7 +22385,8 @@ function planProdReadPecas() {
       larg: larg ? larg.value : 'L',
       alt:  alt  ? alt.value  : 'A',
       esp:  esp  ? esp.value  : '',
-      tipo: tipo ? tipo.value : ''
+      tipo: tipo ? tipo.value : '',
+      __src: row.dataset.src || null
     });
   });
 }
@@ -22389,7 +22408,7 @@ function planProdRenderPecas() {
   var TIPOS = ['painel','prateleira','divisoria','gaveta'];
   tbody.innerHTML = _planProdPecas.map(function(peca, i) {
     var tipoSel = TIPOS.map(function(t){ return '<option value="'+t+'"'+(peca.tipo===t?' selected':'')+'>'+t+'</option>'; }).join('');
-    return '<tr style="border-bottom:1px solid var(--border)">'
+    return '<tr style="border-bottom:1px solid var(--border)" data-src="'+cfgEsc(peca.__src||'')+'">'
       +'<td style="padding:6px 8px"><input type="number" data-field="qty" value="'+cfgEsc(peca.qty)+'" min="1" style="width:45px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
       +'<td style="padding:6px 8px"><input type="text" data-field="nome" value="'+cfgEsc(peca.nome)+'" placeholder="Ex: Lateral" style="width:100%;min-width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"></td>'
       +'<td style="padding:6px 8px"><input type="text" data-field="larg" value="'+cfgEsc(peca.larg)+'" placeholder="Ex: L - 2*e" style="width:100%;min-width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)" oninput="planProdPrevCalc()"></td>'
@@ -22475,7 +22494,7 @@ function planProdSalvar() {
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
-    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||''}; }),
+    pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',__src:p.__src||null}; }),
     planificacoes: _planifs,
     svg: _firstSvg || undefined
   };

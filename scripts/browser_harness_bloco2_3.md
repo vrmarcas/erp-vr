@@ -289,6 +289,79 @@ neste ambiente), permitindo screenshot real do resultado renderizado.
   (incluindo Chrome), mas o resultado exato não foi confirmado via um
   PDF real gerado por `window.print()`/impressora virtual.
 
+## Rodada de fechamento v5 — múltiplos SVGs/peças com clique real de DOM
+
+Objetivo: sair de "chamada de função via console" para interação real —
+`.click()` em botões reais, `dispatchEvent(new Event('input'))` em campos
+reais, upload real via `File`+`DataTransfer` — na tela "📐 Produtos &
+Receitas de Planificação" (`pg-config-plan`), usando o mesmo harness
+(sessão fake `funcao:'master'`, `_cloudSave`/`_cloudLoad`/`_cloudWatch`
+stubados, zero gravação real).
+
+Fluxo exercitado com cliques/eventos reais, nesta ordem: `nav('config-
+plan')` → clique real em "+ Novo Produto" → digitação real do nome →
+2× clique real em "+ Adicionar Espessura" → preenchimento real dos
+campos espessura/descrição → **upload real** (`File`+`DataTransfer`) de
+um SVG com 2 peças na 1ª espessura e outro SVG com 1 peça na 2ª
+espessura → clique real no "✕" para remover um SVG → reupload real →
+clique real em "+ Adicionar Peça" → edição real dos campos da peça
+manual (fórmulas `L - 2*e` / `A - e`) → clique real em "✕" para remover
+uma peça → conferência da pré-visualização de área ao editar `L` real →
+clique real em "💾 Salvar Produto" → clique real em "✏️ Editar" para
+reabrir → produto legado (1 SVG único, sem `planificacoes[]`) inserido
+diretamente no array e reaberto via clique real em "Editar" → clique
+real em "🔍 Extrair Peças" para re-extrair.
+
+**Achado real #1 (crítico, não teórico)**: `planSvgParsePecas()` fazia
+`_planProdPecas = deduped` — substituição total da lista de peças a
+cada parse. Efeito real observado: subir o SVG da 2ª espessura apagava
+silenciosamente as peças já extraídas da 1ª (toast de sucesso "✅ 1
+peças extraídas" escondia que as 2 peças anteriores tinham sumido da
+tabela). Isso quebra diretamente o cenário pedido pelo usuário — "produto
+com 2+ SVGs, diferentes materiais/espessuras". **Corrigido**: cada peça
+extraída agora carrega uma `__src` (`idx` da espessura + índice do SVG);
+o merge deixou de ser substituição total e passou a ser "substitui
+apenas as peças da MESMA origem, preserva as demais" — replicado com
+`data-src` no `<tr>` para sobreviver a edições manuais no DOM, e
+`planProdEspSvgClear()` agora remove só as peças daquela origem ao
+excluir um SVG. Reverificado com clique real: upload SVG A (2 peças) →
+upload SVG B (1 peça) → tabela com as 3 peças coexistindo.
+
+**Achado real #2 (found durante a verificação do achado #1)**: com o
+merge por origem implementado, reabrir um produto salvo e clicar
+"🔍 Extrair Peças" de novo duplicava a peça, porque a peça carregada do
+`pecas[]` salvo não tinha `__src` (o `planProdSalvar()` não persistia
+esse campo) — então nunca batia com a origem da nova extração e ambas
+ficavam na tabela. **Corrigido**: `__src` agora é persistido em
+`pecas[]`. Reverificado com clique real (produto salvo → reaberto →
+"Extrair Peças" de novo): 1 peça antes, 1 peça depois — sem duplicação.
+**Limitação residual documentada, não escondida**: produtos legados que
+já existiam no Firestore *antes* desta correção (peças sem `__src`
+registrado) ainda podem duplicar se o usuário reabrir e clicar
+"Extrair Peças" de novo sem antes remover a peça antiga manualmente —
+o sistema não tem como inferir retroativamente qual peça veio de qual
+SVG num produto salvo antes desta mudança. Não é perda de dado (a peça
+duplicada pode ser removida com um clique), mas fica registrado aqui em
+vez de reportado como "resolvido" sem ressalva.
+
+**Demais pontos confirmados com clique/evento real**: produto legado
+(campo `svg` único, sem `svgs[]`) migra automaticamente ao reabrir via
+clique em "Editar" — preview do SVG e peça antiga aparecem corretos;
+peça manual via "+ Adicionar Peça" convive com peças extraídas de SVG
+sem se misturar; remoção de peça via "✕" real não deixa buraco nem
+duplica linha; pré-visualização de área (`planPrevResult`) recalcula ao
+vivo tanto ao editar peças quanto ao editar L/A globais; salvar → reabrir
+via clique real preserva nome, espessuras, SVGs (miniaturas renderizam) e
+peças (incluindo fórmulas de largura/altura). Nenhum handler de
+`keydown`/Enter ou `dblclick` existe nesta tela (grep confirmou) — não
+há, portanto, interação de teclado/duplo-clique a testar aqui além do
+clique simples já coberto.
+
+Todos os 197 testes mirror (`scripts/test_*.js`) foram reexecutados após
+as duas correções acima e continuam passando (nenhum mirror cobre esta
+lógica específica de merge de peças — ela só existe na função real,
+por isso só foi pega pelo teste de clique real, não pelos mirrors).
+
 ## O que este harness NÃO prova
 
 - Login real via Firebase Auth (não testado — precisaria de credenciais).
@@ -297,8 +370,13 @@ neste ambiente), permitindo screenshot real do resultado renderizado.
 - Paginação pixel-a-pixel do PDF A4 real gerado por `window.print()` —
   ver "Rodada de fechamento v4" acima para o que foi e não foi provado
   sobre quebras de página.
-- Interação humana real com os botões (cliques/toques) — as funções foram
-  chamadas diretamente via console, não via `click()` simulado no DOM.
-  Os elementos-alvo (`kbEntregarBtn`, etc.) foram confirmados presentes e
-  com `onclick` correto num teste anterior desta sessão, mas o disparo
-  real de evento de clique não foi reexercitado aqui.
+- Duplicação de peça ao re-extrair SVG em produtos **legados salvos
+  antes desta correção** (sem `__src` persistido) — ver "Achado real #2"
+  acima. Produtos criados/salvos a partir de agora não sofrem disso.
+- Interação humana real com os botões (cliques/toques) fora da tela de
+  Produtos & Planificação e do PDF A4 — as funções de outras telas
+  (Compras, financeiro, etc.) continuam validadas via chamada direta de
+  função, não via `click()` simulado no DOM. Os elementos-alvo
+  (`kbEntregarBtn`, etc.) foram confirmados presentes e com `onclick`
+  correto num teste anterior desta sessão, mas o disparo real de evento
+  de clique não foi reexercitado para eles nesta rodada.
