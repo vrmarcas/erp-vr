@@ -7352,7 +7352,15 @@ function orcAddItem() {
     ? _cfgMats.map(function(m,i){
         var _esp = m.esp || (function(){ var mm=String(m.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
         var _rsm2 = m.rsm2||(m.comp&&m.larg&&m.custo?(m.custo/(m.comp*m.larg/10000)):0);
-        return '<option value="cfg_'+i+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'">'+m.nome+'</option>';
+        // Texto visível inclui espessura e preço/m² — antes só mostrava o nome
+        // cadastrado (cor/acabamento ficam embutidos em m.nome quando o usuário
+        // já os descreve lá; não há campo estruturado separado para eles hoje).
+        var _label = m.nome
+          + (String(m.nome||'').match(/\d+(?:\.\d+)?\s*mm/i) ? '' : (_esp ? ' — '+_esp+'mm' : ''))
+          + (_rsm2>0 ? ' — R$'+_rsm2.toFixed(2)+'/m²' : '');
+        // data-nome preserva o nome "limpo" (sem preço) para uso em documentos
+        // voltados ao cliente — o preço/m² é custo interno, não deve vazar ali.
+        return '<option value="cfg_'+i+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'" data-nome="'+cfgEsc(m.nome)+'">'+_label+'</option>';
       }).join('')
     : '<option value="pending">⏳ Carregando materiais...</option>';
   tr.innerHTML = `
@@ -8163,6 +8171,10 @@ var ORC_ITEM_EXTRAS = {};
 function orcItemExtras(ri) {
   window._extrasRiAtual = ri; // usado por orcExtrasAutoLaser
   var ex   = ORC_ITEM_EXTRAS[ri] || {};
+  // Snapshot para permitir descartar alterações não salvas ao clicar Cancelar/×
+  window._extrasSnapshotRi = ri;
+  window._extrasSnapshot = JSON.parse(JSON.stringify(ex));
+  window._extrasSalvo = false;
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
   var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
@@ -8507,6 +8519,13 @@ function orcExtrasAutoLaser(){
 function orcItemExtrasFechar() {
   var ov = document.getElementById('orcItemExtrasOverlay');
   if(ov) ov.style.display='none';
+  // Se fechou sem clicar Salvar (X ou clique fora), descarta o que foi alterado
+  // ao vivo por orcItemExtraPreview() e restaura o valor salvo anteriormente.
+  if(!window._extrasSalvo && window._extrasSnapshotRi!=null){
+    ORC_ITEM_EXTRAS[window._extrasSnapshotRi] = window._extrasSnapshot;
+    if(typeof orcRecalc==='function') orcRecalc();
+  }
+  window._extrasSnapshotRi = null;
 }
 function orcItemExtraPreview(ri){
   var row  = document.getElementById('oir_'+ri);
@@ -8527,6 +8546,20 @@ function orcItemExtraPreview(ri){
   var total   = adhVal + acabVal + instVal + outVal;
   var el=document.getElementById('exPreview');
   if(el) el.textContent=total>0?'Total extras: R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+
+  // Recálculo em tempo real: consumíveis (Sim/Não) e demais custos extras
+  // atualizam o subtotal do orçamento imediatamente, sem esperar "Salvar".
+  // "Salvar" continua sendo quem grava definitivamente e espelha nos campos
+  // do Step 3; "Cancelar"/× descarta isso via orcItemExtrasFechar().
+  ORC_ITEM_EXTRAS[ri] = Object.assign({}, ORC_ITEM_EXTRAS[ri], {
+    adesivoSim: adhSim,
+    adesivo: adhVal,
+    acabamento: acabVal,
+    instalacao: instVal,
+    outros: outVal,
+    descricao: (document.getElementById('exDesc')||{}).value||''
+  });
+  if(typeof orcRecalc==='function') orcRecalc();
 }
 
 function orcItemExtrasSalvar(ri){
@@ -8569,6 +8602,7 @@ function orcItemExtrasSalvar(ri){
   wc('orcSoCorte', !!(document.getElementById('m_soCorte')||{}).checked);
   ws('orcSoCorteMin',(document.getElementById('m_soCorteMin')||{}).value||30);
 
+  window._extrasSalvo = true; // não desfazer o que acabamos de gravar
   orcItemExtrasFechar();
   var btn=document.querySelector('#oir_'+ri+' .plan-icon-btn[onclick*="orcItemExtras"]');
   var ex=ORC_ITEM_EXTRAS[ri];
@@ -15837,7 +15871,7 @@ function orcSalvarOrcamento() {
       qty:   (document.getElementById('oi_qty_'+ri)||{}).value||'1',
       larg:  (document.getElementById('oi_larg_'+ri)||{}).value||'',
       alt:   (document.getElementById('oi_alt_'+ri)||{}).value||'',
-      mat:   (function(){ var e=document.getElementById('oi_mat_'+ri); return e?e.options[e.selectedIndex].text:''; })(),
+      mat:   (function(){ var e=document.getElementById('oi_mat_'+ri); if(!e) return ''; var o=e.options[e.selectedIndex]; return (o&&o.dataset&&o.dataset.nome) ? o.dataset.nome : (o?o.text:''); })(),
       det:   (document.getElementById('oi_det_'+ri)||{}).value||'',
       unit:  (document.getElementById('oi_unit_'+ri)||{}).textContent||'',
       total: (document.getElementById('oi_total_'+ri)||{}).textContent||''
