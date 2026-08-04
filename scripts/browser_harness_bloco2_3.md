@@ -577,3 +577,147 @@ independente do que a lógica de negócio faça) tornou baixa prioridade
 re-testar exaustivamente fluxos que, no backend real, retornariam
 403 de qualquer forma para esses perfis. A lógica de negócio em si já
 tinha sido validada via mock fiel nas rodadas anteriores.
+
+## Rodada de homologação isolada v8 — correção das Rules + fail-closed + achado de deploy
+
+### Correções ao relatório anterior (autoauditoria solicitada pelo usuário)
+
+- "5 commits novos desde e940fc1" estava **errado** — eram só 2 (`c7defa9`,
+  `b862027`). O número 5 veio de confundir com o total acumulado desde o
+  início desta série de rodadas (`0be228b`, `fd675b2`, `922b04a`, `23065e3`,
+  `e940fc1` — da rodada ANTERIOR — mais os 2 novos).
+- "226 testes" nunca foi reconciliado com sucesso: reconstruindo a soma real
+  dos 6 arquivos de teste em cada commit histórico da branch (`675d9c8`→160,
+  `0cc4f5a`→184), nenhum ponto bate com 226 nem com 208. Não existe artefato
+  no repo que registre como esses números foram calculados — foram citados
+  verbalmente numa fase anterior desta mesma sessão, sem reexecução. O único
+  número reproduzível é o atual: **219** (197 mirror + 22 do novo
+  `test_homolog_guard.js`, que extrai e testa as funções reais do guard de
+  homologação, não uma reimplementação).
+- Doravante, "Firebase Emulator Suite" nunca é chamado de "backend real" —
+  ele prova comportamento contra as Rules **locais carregadas no emulador**,
+  não contra produção.
+
+### Comparação Rules do repo × Rules publicadas (leitura pura, sem tokens expostos)
+
+Usado `gcloud auth print-access-token` (conta já autenticada como
+`vrmarcasgithub@gmail.com`) + GET em `firebaserules.googleapis.com`
+(`projects.releases.get` e `projects.rulesets.get`) — operação 100% leitura,
+nenhuma Rule foi publicada. Resultado: **as Rules publicadas em produção
+NÃO correspondem ao `firestore.rules` do repositório.** A versão publicada
+(release `17b762d1-...`, atualizada em 2026-07-31T11:44:09Z) é uma versão
+mais antiga e mais simples — sem `isComercial()`/`isProducao()`/
+`isAnyStaff()`, sem proteção das coleções Valéria — e é, na prática, **mais
+permissiva** (`allow read/write: if isAuthenticated()` para quase tudo em
+`erp_vr`, exceto 4 documentos). O `firestore.rules` do repositório (última
+alteração antes desta rodada: commit `0c8c69a`, 2026-08-03) nunca foi
+publicado. Ou seja: o bloqueador de Rules relatado na rodada anterior
+descreve o que aconteceria **se o arquivo do repositório fosse publicado
+como estava** — não o comportamento atual de produção (que é mais aberto,
+porém sem a granularidade por perfil que o restante do app já assume).
+
+### Achado de deploy (fora do escopo de Rules, mas real e relevante)
+
+`index.html` publicado em `https://erp-vrmarcas.web.app/index.html`
+(verificado via GET puro, `x-cache: MISS`, `Last-Modified: Sun, 02 Aug 2026
+02:42:54 GMT`) é **byte-idêntico** a um estado do repositório de
+2026-07-15 (commits `5b7c90b`/`1152c37`/etc., que não alteram o arquivo
+entre si) — **163 commits atrás do HEAD desta branch, e ainda atrás da
+própria `main`** (que está em `5176af5`, 2026-07-27 — 35 commits atrás do
+HEAD desta branch). Ou seja: o hosting de produção foi publicado em
+2026-08-02 a partir de uma cópia desatualizada, sem nenhuma das mudanças
+de Auth/Financeiro/Compras/Orçamento feitas desde meados de julho —
+Hosting e Firestore Rules de produção estão dessincronizados entre si e
+ambos atrás do repositório. Isso não foi corrigido nem é desta rodada
+(nenhum deploy foi feito) — só registrado como fato observável.
+
+### Nova matriz de Rules (fail-closed, sem catch-all amplo)
+
+`firestore.rules` reescrito (bloco `erp_vr`): `isFinanceiro()` adicionada;
+cada coleção real (auditada via grep de todo `_cloudSave`/`_cloudLoad`/
+`_cloudWatch` em index.html — não suposição) recebeu regra própria por
+perfil, negando por padrão o que não foi explicitamente listado. Achado
+extra: a Rules antiga (nunca publicada) usava o docId `erp_stock`, mas o
+app grava em `stock` — mesmo a versão mais permissiva pretendida nunca
+teria funcionado para Produção.
+
+Testado via REST puro (Bearer token real por perfil, sem SDK, sem cache)
+contra o emulador com as Rules novas: **104/104 conforme o esperado** —
+96 combinações da matriz perfil×coleção×operação (negações contam como
+sucesso), mais 8 casos de borda: não-autenticado (negado em tudo), conta
+autenticada sem role (lê só `erp_usuarios`, nega o resto), role inventada
+("hacker_role_invalida") negada em toda tentativa de escrita e de
+autoelevação (não consegue virar master nem editar permissões), DELETE
+negado para quem não tem permissão de escrita. Reverificado ao vivo:
+Comercial salvou um orçamento real e Produção criou uma compra real via
+clique real na UI, ambos persistidos no Firestore Emulator e confirmados
+via REST cru — os dois bloqueadores centrais da rodada anterior.
+
+**Achado de exposição de dado sensível** (pedido explícito do usuário):
+o campo `pricingVersion` gravado em cada orçamento (lido por Comercial)
+continha os percentuais reais de overhead/VRML/imposto em texto puro —
+Firestore Rules não conseguem redigir campos individuais de um documento
+(só bloquear o documento inteiro), então a única correção possível sem
+separar o dado em outro documento era parar de gravar o valor legível.
+Corrigido com hash não-reversível (`cfgHashNaoReversivel`, djb2) — mesma
+utilidade (detectar mudança de config), sem vazar o percentual.
+
+**Bloqueador arquitetural registrado, não corrigido** (indicado
+explicitamente pelo usuário como aceitável se não for possível corrigir
+nesta rodada): cada "tabela" do sistema é UM documento Firestore com um
+array inteiro serializado em JSON no campo `data`. Firestore Rules operam
+no nível do documento — conseguem dizer QUEM mexe em `compras`, mas não
+conseguem diferenciar, dentro do mesmo documento, "Produção cria uma
+solicitação" de "Produção aprova/precifica uma compra existente" (ambas
+são, do ponto de vista do Firestore, a mesma operação: sobrescrever o
+campo `data` inteiro). A separação real hoje só existe para a etapa de
+pagamento/quitação (`fin_cp`/`fin_cr`, exclusivo de Financeiro). Correção
+completa exigiria migrar para um documento por registro (`erp_vr_compras/
+{id}`) ou mediar as transições de status por uma Cloud Function — ambos
+fora do escopo desta rodada ("não redesenhe módulos já implementados").
+
+### Modo de homologação — fail-closed
+
+`_HOMOLOG_MODE` agora exige, além de localhost/127.0.0.1 + `?emulator=1`:
+projectId obrigatoriamente `demo-*` (`_homologValidateProjectId`,
+verificado ANTES de `initializeApp`, aborta com tela de erro visível e
+`throw` se falhar) e confirmação de que Auth+Firestore realmente
+conectaram ao emulador (`_HOMOLOG_EMULATORS_CONNECTED`, checado por
+`_homologGuardOrThrow()` no topo de `authLogin`, `_cloudSave`, `_cloudLoad`
+e `_cloudWatch` — os 4 pontos por onde toda auth/leitura/gravação passa).
+Testado com as funções REAIS extraídas de index.html via regex (não
+mirror) em `scripts/test_homolog_guard.js` — 22 casos, incluindo hostname
+de produção real + `?emulator=1` (deve permanecer em modo produção),
+projectId real forçado em modo homolog (deve bloquear), role/projectId
+maliciosos. Também verificado ao vivo no navegador: `_homologGuardOrThrow()`
+lança exceção de verdade quando `_HOMOLOG_EMULATORS_CONNECTED` é forçado
+para `false`.
+
+### PDF via window.print() real
+
+Tentativa feita: `orcImprimirOrcamentoPDF()` abre uma janela via
+`window.open()` + `document.write()` com um botão que chama
+`window.print()` dentro DAQUELA janela. Confirmado (nesta rodada e na
+anterior) que este ambiente de automação não consegue renderizar essa
+janela separada como um navegador real faria nem disparar/inspecionar um
+diálogo de impressão nativo do SO. A evidência válida sobre o HTML/CSS
+que seria enviado ao motor de impressão (incluindo o achado real e a
+correção do corte de página entre páginas A4) continua sendo a da rodada
+anterior (captura de `window.open`, screenshot do HTML renderizado).
+Registrado como limitação de ambiente, não como sucesso simulado.
+
+### Achado de processo
+
+O primeiro script de seed de fixtures gravava `data` como array/objeto
+cru do Firestore; o app real sempre grava `data` como uma STRING
+`JSON.stringify(...)` (`_cloudSave`, index.html:1298). Isso fez o login
+real falhar com "Conta sem perfil atribuído" para TODOS os perfis
+(inclusive os que as Rules permitiam), mascarando temporariamente qual
+parte da falha era Rules genuínas vs. bug do próprio harness de teste.
+Corrigido no script de seed; reconfirmado depois que Comercial e Produção
+logam e operam normalmente. Um segundo susto de processo: o script inicial
+da matriz de Rules fazia PATCH sem `updateMask`, sobrescrevendo (e
+apagando) o documento inteiro — incluindo o seed real — como efeito
+colateral de testar permissão de escrita. Corrigido usando
+`updateMask.fieldPaths=probe` (merge de um campo só, nunca substitui o
+documento).
