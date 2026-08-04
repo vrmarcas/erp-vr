@@ -458,3 +458,122 @@ branch.
   (`kbEntregarBtn`, etc.) foram confirmados presentes e com `onclick`
   correto num teste anterior desta sessão, mas o disparo real de evento
   de clique não foi reexercitado para eles nesta rodada.
+
+## Rodada de homologação isolada v7 — Firebase Emulator Suite real (bloqueador de produção encontrado)
+
+Resposta a uma segunda rodada de crítica do usuário: as rodadas anteriores
+provaram lógica de negócio (mock fiel) e handlers client-side, mas nunca
+integração real de transações contra o Firestore, nem autorização efetiva
+via Firestore Rules reais. Esta rodada resolve isso.
+
+**Setup**: OpenJDK 21 via Homebrew (autorizado explicitamente pelo
+usuário), Firebase Emulator Suite real (`firebase emulators:start
+--project demo-erp-homolog --only auth,firestore,hosting`), `firestore.rules`
+exatas do repositório carregadas automaticamente pelo emulador (nunca
+alteradas), 4 usuários reais no Auth Emulator com custom claim `role`
+(master/financeiro/comercial/producao) e fixtures `erp_vr/*` mínimas via
+Admin SDK. `index.html` ganhou um hook opt-in (`_HOMOLOG_MODE`) que só
+ativa com `(localhost|127.0.0.1)` + `?emulator=1` explícito na URL —
+sem isso o app se comporta exatamente como hoje, apontando pro projeto
+real. Confirmado por config (`firebase.app().options.projectId`) e por
+log (`[HOMOLOG] ... NÃO é o backend de produção`).
+
+**Achado crítico #1 (bloqueador de produção)**: `firestore.rules` nunca
+foi atualizada para o perfil `financeiro`, que existe e é validado em
+todo o resto do sistema (Cloud Function `adminUsers.ts` aceita
+`financeiro` em `VALID_ROLES`; client-side `PERM_DEFAULT`/
+`PERFIL_HARD_DENY` tratam `financeiro` como perfil de primeira classe).
+`isAnyStaff()` só inclui `['master','admin','comercial','producao']`.
+Resultado medido via REST puro (Bearer token real, sem SDK, sem cache —
+tabela completa abaixo): **um usuário financeiro autenticado não
+consegue nem logar** (a leitura de `erp_vr/erp_usuarios`, "fonte da
+verdade" do perfil no login, retorna 403 para financeiro) — comprovado
+com um login real na UI mostrando "⛔ Conta sem perfil atribuído".
+
+**Achado crítico #2 (bloqueador de produção)**: o catch-all de
+`erp_vr/{docId}` (`allow write: if isAdmin();`) significa que **apenas
+Master pode gravar a maioria das coleções do sistema**. Medido via REST
+com token real de cada perfil:
+
+| Documento (erp_vr/) | master | financeiro | comercial | producao |
+|---|---|---|---|---|
+| erp_usuarios (READ) | 200 | **403** | 200 | 200 |
+| erp_config (WRITE) | 200 | 403 | 403 | 403 |
+| fin_tx (WRITE) | 200 | 403 | 403 | 403 |
+| crm_leads (WRITE) | 200 | 403 | 200 | 403 |
+| kb_os (WRITE) | 200 | 403 | 403 | 200 |
+| **orcamentos (WRITE)** | 200 | 403 | **403** | 403 |
+| **compras (WRITE)** | 200 | 403 | 403 | **403** |
+| fin_cp (WRITE) | 200 | 403 | 403 | 403 |
+| erp_plan_produtos (WRITE) | 200 | 403 | 403 | 403 |
+| erp_fornecedores (WRITE) | 200 | 403 | 403 | 403 |
+
+Ou seja: **Comercial não consegue salvar um orçamento enviado** (sua
+função central) e **Produção não consegue gravar uma solicitação de
+compra** (fluxo "solicitar compra a partir da OS", construído e testado
+nesta mesma branch) — contra o backend real. Hoje, na prática, só
+Master/admin fazem qualquer coisa além de Kanban/Estoque (produção) e
+CRM (comercial).
+
+**Proposta de correção (NÃO aplicada — Rules de produção fora do
+escopo desta tarefa)**: adicionar `isFinanceiro()` e trocar o catch-all
+por regras por-documento equivalentes ao que já existe no client-side
+(`PERM_DEFAULT`/`PERFIL_HARD_DENY`), por exemplo:
+```
+function isFinanceiro() { return isAuthenticated() && (userRole()=='financeiro' || userRole()=='master' || userRole()=='admin'); }
+function isAnyStaff() { return isAuthenticated() && userRole() in ['master','admin','comercial','producao','financeiro']; }
+...
+allow write: if isComercial() && docId in ['crm_leads','crm_prospects','crm_reativacao','orcamentos'];
+allow write: if isProducao() && docId in ['kb_os','erp_stock','compras'];
+allow write: if isFinanceiro() && docId in ['fin_cp','fin_cr','fin_tx'];
+```
+Esta é uma proposta textual para revisão humana — não foi commitada em
+`firestore.rules` nem publicada, conforme instrução explícita do usuário.
+
+**Achados reais corrigidos nesta rodada** (ver commit `c7defa9`): (a)
+corrida entre `signInWithEmailAndPassword` e a leitura de
+`erp_usuarios` causava "Conta sem perfil atribuído" intermitente mesmo
+para perfis com leitura permitida — corrigido aguardando
+`getIdTokenResult()`; (b) `secApplyPerms()` nunca escondia os 4 itens
+de sidebar do Financeiro (usam `onclick="navFin(...)"`, que não batia
+no regex `/nav\('.../`) — qualquer perfil não-master via os links
+"Dashboard Financeiro/Contas a Receber/Contas a Pagar/DRE" sempre
+visíveis na sidebar, mesmo sem acesso real (o handler já bloqueava a
+navegação, só a visibilidade estava furada) — corrigido.
+
+**Incidente de processo, registrado sem maquiagem**: a primeira
+tentativa de login desta rodada usou `location.hostname==='localhost'`
+como gate do modo emulador; a navegação de teste usou `127.0.0.1`
+(hostname diferente), então o gate não ativou e ESSA tentativa de login
+(e-mail fictício `e2e.financeiro@local.test` + senha de teste) foi
+enviada ao Firebase Auth de PRODUÇÃO real antes de eu perceber o erro —
+retornou "credencial inválida" (e-mail não existe em produção).
+Nenhuma leitura ou gravação de dado ocorreu (é uma chamada de
+autenticação, não uma escrita), nenhuma credencial real foi exposta.
+Corrigido imediatamente (gate agora aceita `localhost` OU `127.0.0.1`)
+e todas as tentativas seguintes foram confirmadas, por config e log,
+contra o emulador.
+
+**Prova real de integração transacional com o Firestore Emulator**:
+`comprasProximoNumeroAtomico()` (função real, não mock) chamada 15 vezes
+concorrentemente contra o emulador real — 15 números únicos
+(`[1,2,3,4,5]` depois `[6..15]`), sem colisão; logs do emulador
+mostraram `failed-precondition` seguido de retry automático em algumas
+tentativas — prova de contenção real resolvida corretamente pela
+otimistic concurrency do `runTransaction`, não apenas ausência de erro.
+Compra criada, avançada por 3 status reais (solicitada→cotação→pedida)
+e recebida parcialmente (5/10) via clique real na UI (prompts
+nativos do browser controlados por stub), tudo persistido no Firestore
+Emulator e confirmado depois via REST cru. Produto com SVG salvo,
+persistido (confirmado via REST) e recarregado com sucesso após reload
+completo de página + novo login.
+
+**O que esta rodada NÃO cobriu com a mesma profundidade** (registrado,
+não escondido): os 16 subcenários de Compras, os cenários de OS/Estoque
+e o ciclo fiscal/DRE completo não foram todos re-executados via clique
+real contra o emulador nesta rodada — a descoberta do bloqueador de
+Rules (que invalida a maioria das gravações de Comercial/Produção
+independente do que a lógica de negócio faça) tornou baixa prioridade
+re-testar exaustivamente fluxos que, no backend real, retornariam
+403 de qualquer forma para esses perfis. A lógica de negócio em si já
+tinha sido validada via mock fiel nas rodadas anteriores.
