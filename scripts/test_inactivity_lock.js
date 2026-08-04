@@ -67,6 +67,7 @@ var _mockNow = Date.parse('2026-08-05T10:00:00-03:00');
 var _origDateNow = Date.now;
 Date.now = function () { return _mockNow; };
 function advanceMinutes(m) { _mockNow += m * 60000; }
+function advanceMs(ms) { _mockNow += ms; }
 
 // localStorage in-memory
 var _lsStore = {};
@@ -191,6 +192,24 @@ async function main() {
     fireIntervalTick();
     assertTrue(global._currentSession !== null, 'sessão deveria continuar ativa');
     assertEq(secGetLockState(), null, 'não deveria haver lock state');
+  });
+
+  console.log('\n-- Fronteira exata de 600.000 ms (Rodada E.1) --');
+  await test('1b. NÃO bloqueia em 599.999 ms de inatividade', function () {
+    resetAll(); loginSessionFixture();
+    secStartInactivityTimer();
+    advanceMs(599999);
+    fireIntervalTick();
+    assertTrue(global._currentSession !== null, 'sessão não deveria ter sido bloqueada em 599999ms');
+    assertEq(secGetLockState(), null, 'não deveria haver lock state em 599999ms');
+  });
+  await test('1c. bloqueia em exatamente 600.000 ms de inatividade (limite inclusivo, elapsed>=mins)', function () {
+    resetAll(); loginSessionFixture();
+    secStartInactivityTimer();
+    advanceMs(600000);
+    fireIntervalTick();
+    assertEq(global._currentSession, null, 'sessão deveria ter sido bloqueada em exatamente 600000ms');
+    assertTrue(!!secGetLockState(), 'deveria existir lock state em 600000ms');
   });
 
   console.log('\n-- Bloqueio após o tempo configurado --');
@@ -327,6 +346,18 @@ async function main() {
     authUnlock();
     assertEq(global._currentSession, null);
     assertTrue(secGetLockState() !== null, 'lock state não deveria ter sido removido sem senha');
+  });
+
+  console.log('\n-- Remoção manual do marcador de bloqueio --');
+  await test('13b. apagar o marcador de localStorage NUNCA restaura a sessão — no máximo leva ao login normal', function () {
+    resetAll(); loginSessionFixture('uid-tamper');
+    secEngageLock('manual');
+    assertTrue(secGetLockState() !== null, 'pré-condição: deveria estar bloqueado');
+    localStorage.removeItem(SEC_LOCK_STATE_KEY); // ataque simulado: apagar só o marcador
+    authInit();
+    assertEq(global._currentSession, null, 'sessão NUNCA deveria ser restaurada só por apagar o marcador');
+    assertEq(secGetLockState(), null, 'marcador continua ausente (não foi recriado)');
+    assertEq(firebase.auth().currentUser, null, 'firebase continua signed-out — não há atalho de volta');
   });
 
   console.log('\n-- Leitura/ação enquanto bloqueado --');
