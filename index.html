@@ -7079,13 +7079,24 @@ function sbRestoreState() {
 }
 document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreState, 100); });
 
+// Única fonte de verdade para bloqueio de página por perfil — usada tanto pelo
+// handler de navegação (nav) quanto pela aplicação de sessão (authApplySession)
+// e pela ocultação de sidebar (secApplyPerms). Antes desta correção existiam
+// três listas hardcoded independentes e divergentes entre si: nav() não tinha
+// NENHUMA entrada para 'financeiro' (um usuário financeiro podia abrir
+// Segurança/Criação de Usuários chamando nav() diretamente, mesmo com o botão
+// escondido da sidebar) e não bloqueava 'dashboard' para comercial/producao
+// como as outras duas listas já faziam.
+var PERFIL_HARD_DENY = {
+  comercial:{'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
+  producao: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
+  financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
+};
+
 function nav(page, el) {
   // ── Verificação de permissão ──────────────────────────────────────────────
   if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao){
-    var _navDeny={
-      comercial:{'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-      producao: {'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
-    };
+    var _navDeny=PERFIL_HARD_DENY;
     var _fn=(_currentSession.funcao||'').toLowerCase();
     if(_navDeny[_fn]&&_navDeny[_fn][page]){
       if(typeof showToast==='function') showToast('Acesso restrito para seu perfil.','err');
@@ -19822,11 +19833,8 @@ function authApplySession(){
   var mspA=document.getElementById('mspAvatar'); if(mspA) mspA.textContent=nome[0].toUpperCase();
   secApplyPerms(funcao);
   // Redirecionar para dashboard se a página atual for restrita para este perfil
-  var _authDeny={
-    comercial:{'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1}
-  };
-  var _authDefault={ comercial:'orcamento', producao:'kanban' };
+  var _authDeny=PERFIL_HARD_DENY;
+  var _authDefault={ comercial:'orcamento', producao:'kanban', financeiro:'dashboard' };
   var _fn=(funcao||'').toLowerCase();
   if(_authDeny[_fn]){
     var currentPg=document.querySelector('.pg.on');
@@ -19844,12 +19852,8 @@ function secApplyPerms(funcao){
   if(funcao==='master') return;
   var perms=usrLoadPerms();
   // Hard deny per role — cannot be overridden by saved permissions
-  var HARD_DENY = {
-    comercial: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-    producao:  {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
-    financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
-  };
-  var denied = HARD_DENY[funcao]||{};
+  // (fonte única compartilhada com nav() e authApplySession() — ver PERFIL_HARD_DENY)
+  var denied = PERFIL_HARD_DENY[funcao]||{};
   function getPermForMod(mod, page){
     // Hard deny takes priority
     if(denied[page]||denied[mod]) return false;

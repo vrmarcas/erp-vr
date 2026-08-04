@@ -362,6 +362,81 @@ as duas correções acima e continuam passando (nenhum mirror cobre esta
 lógica específica de merge de peças — ela só existe na função real,
 por isso só foi pega pelo teste de clique real, não pelos mirrors).
 
+## Rodada de fechamento v6 — permissões por perfil (Master/Financeiro/Comercial/Produção)
+
+Objetivo: verificar, para os 4 perfis, tanto a **visibilidade** (itens
+de menu escondidos) quanto o **bloqueio dentro dos próprios handlers**
+(o que acontece se a página for aberta por um caminho que não passa pelo
+clique no menu — nomeadamente, chamando `nav(pagina, null)` diretamente,
+que é exatamente o que qualquer botão, atalho ou futuro código faria).
+
+Método: sessão fake (`window._currentSession = {funcao: <role>}`) sem
+tocar Firebase Auth real, `secApplyPerms(funcao)` chamado (função real,
+não mirror) para aplicar a visibilidade da sidebar, depois `nav(pagina,
+null)` chamado (função real) para cada página sensível, lendo
+`getComputedStyle(...).display` e `pg-<pagina>.style.display` — nenhuma
+gravação no Firestore em nenhum passo.
+
+**Achado real (antes da correção)**: o app tinha **três listas de
+bloqueio por perfil hardcoded, independentes e divergentes** —
+`nav()` (`_navDeny`), `authApplySession()` (`_authDeny`) e
+`secApplyPerms()` (`HARD_DENY`). Rodando o teste acima antes de tocar no
+código:
+- **Perfil Financeiro**: a sidebar escondia corretamente os botões de
+  "Criação de Usuários" e "Segurança", mas `nav('config-usr', null)` e
+  `nav('seguranca', null)` **retornavam sucesso** (a página abria) —
+  porque `nav()` não tinha NENHUMA entrada para o perfil `financeiro`
+  em sua lista. Ou seja: a interface escondia o botão, mas o handler por
+  trás dele não bloqueava nada se acionado por qualquer outro caminho
+  (console, um link direto, um botão futuro mal configurado).
+- **Perfis Comercial e Produção**: `nav('dashboard', null)` também
+  abria a página, mesmo com o item de menu escondido — as outras duas
+  listas já bloqueavam `dashboard` para esses perfis, só `nav()` não.
+
+**Corrigido**: as três listas foram unificadas numa única constante
+(`PERFIL_HARD_DENY`), usada por `nav()`, `authApplySession()` e
+`secApplyPerms()`. Reverificado com o mesmo teste real após a correção:
+Financeiro agora tem `config-orc`/`config-plan`/`config-usr`/`seguranca`
+bloqueados em `nav()` (antes: liberado); Comercial e Produção têm
+`dashboard` bloqueado em `nav()` (antes: liberado). Master continua
+irrestrito em todas as páginas testadas. Os 197 testes mirror
+(`scripts/test_*.js`) foram reexecutados após a correção e continuam
+passando.
+
+**Limitação honesta, registrada e não escondida (autorização efetiva
+depende de Rules)**: a correção acima fecha uma inconsistência real
+entre "o que a UI esconde" e "o que o handler de navegação bloqueia" —
+mas isso ainda é 100% lógica client-side. Duas ressalvas concretas,
+verificadas nesta sessão, não presumidas:
+1. Funções que gravam dados sensíveis (ex.: `usrSalvarPerms()`, que
+   reescreve a matriz de permissões inteira) **não têm nenhuma
+   verificação de perfil dentro de si mesmas** — hoje elas só ficam
+   inacessíveis por estarem numa página que `nav()` agora bloqueia
+   corretamente. Uma chamada direta a `usrSalvarPerms()` via console,
+   por um usuário autenticado com qualquer perfil, ainda executaria a
+   função no cliente.
+2. A matriz de permissões configurável (checkboxes da tela 🔐
+   Segurança, `_PERM_DATA`) hoje só é lida por `secApplyPerms()` para
+   decidir visibilidade da sidebar — `nav()` só consulta a lista rígida
+   `PERFIL_HARD_DENY`, não a matriz configurável. Ou seja: se o Master
+   desmarcar, por exemplo, "Fornecedores" para o perfil Comercial na
+   tela de Permissões, o item some do menu, mas `nav('fornecedores',
+   null)` continua funcionando se chamado diretamente (verificado).
+   Isso não é uma regressão desta sessão — é como o sistema já se
+   comportava — mas fica registrado por não ter sido corrigido aqui
+   (mudar isso significaria decidir, para cada um dos ~25 módulos, se
+   ele deveria virar bloqueio rígido, o que é uma decisão de produto
+   fora do escopo desta rodada de testes).
+
+Em ambos os casos, a única barreira que realmente impede um usuário
+autenticado de ler/gravar dados fora do seu perfil, contornando toda a
+lógica de tela e de `nav()` descrita acima, são as **Firestore Security
+Rules** — que não foram e não podem ser alteradas nesta tarefa.
+**Registro objetivo, na forma pedida**: a interface está protegida (e
+mais consistente agora do que antes desta rodada); a autorização
+efetiva do backend depende de Rules e permanece fora do alcance desta
+branch.
+
 ## O que este harness NÃO prova
 
 - Login real via Firebase Auth (não testado — precisaria de credenciais).
@@ -373,6 +448,9 @@ por isso só foi pega pelo teste de clique real, não pelos mirrors).
 - Duplicação de peça ao re-extrair SVG em produtos **legados salvos
   antes desta correção** (sem `__src` persistido) — ver "Achado real #2"
   acima. Produtos criados/salvos a partir de agora não sofrem disso.
+- Autorização de backend real por perfil (Firestore Rules) — ver
+  "Rodada de fechamento v6" acima. O que foi testado e corrigido é
+  exclusivamente a camada de UI/handler client-side.
 - Interação humana real com os botões (cliques/toques) fora da tela de
   Produtos & Planificação e do PDF A4 — as funções de outras telas
   (Compras, financeiro, etc.) continuam validadas via chamada direta de
