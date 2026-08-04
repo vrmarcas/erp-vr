@@ -1348,8 +1348,8 @@ function _cloudLoadAll() {
     // Backup automático diário (salva no Firebase em erp_backups/YYYY-MM-DD)
     setTimeout(function(){ try{ erpBackupAutomatico(); }catch(e){} }, 3000);
     // Listeners em tempo real
-    _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} } });
-    _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} } });
+    _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+    _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
@@ -1362,7 +1362,7 @@ function _cloudLoadAll() {
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
-    _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; try{finRenderTx();finDashKPIs();dashRender();}catch(e){} } });
+    _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; try{finRenderTx();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
       if(d&&d.length){
         var local=usrLoadUsuarios();
@@ -4496,7 +4496,7 @@ function _authFirebaseError(code){
                 <option value="0">Acumulado Anual</option>
                 <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
                 <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
-                <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+                <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
                 <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
               </select>
               <button class="topbar-btn ghost" style="font-size:11px" onclick="finDREBuild()">🔄 Atualizar</button>
@@ -4637,7 +4637,7 @@ function _authFirebaseError(code){
             <select id="relMensalMes" onchange="relMensal()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
               <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
               <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
-              <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+              <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
               <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
             </select>
           </div>
@@ -4658,7 +4658,7 @@ function _authFirebaseError(code){
             <option value="0">Acumulado Anual</option>
             <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
             <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
-            <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+            <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
             <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
           </select>
         </div>
@@ -4673,7 +4673,7 @@ function _authFirebaseError(code){
             <select id="relContasMes" onchange="relContasPagas()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
               <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
               <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
-              <option value="7" selected>Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+              <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
               <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
             </select>
           </div>
@@ -7103,8 +7103,8 @@ function nav(page, el) {
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
   if (page === 'kanban')       { setTimeout(function(){ if(typeof kbRender==='function') kbRender(); try{renderOsTable();syncSidebarBadges();}catch(e){} }, 0); }
   if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
-  if (page === 'financeiro') { setTimeout(function(){ finRefreshAll(); }, 0); }
-  if (page === 'relatorios') { setTimeout(function(){ relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
+  if (page === 'financeiro') { setTimeout(function(){ relSetMesAtualUmaVez(); finRefreshAll(); }, 0); }
+  if (page === 'relatorios') { setTimeout(function(){ relSetMesAtualUmaVez(); relTab('caixa', document.getElementById('relTabBtnCaixa')); }, 60); }
   // Ao entrar em Criação de Usuários, renderizar lista e permissões
   if (page === 'config-plan') { setTimeout(function(){ planProdRender(); }, 0); }
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); try{vendedoresRender();}catch(e){} try{iaCfgLoad();}catch(e){} }, 0); }
@@ -10569,12 +10569,15 @@ function kbReceberSaldo() {
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
-  if (os.status === 'aguardando_saldo') { showToast('💰 Aguardando recebimento do saldo antes de marcar como Pronta!','warn'); return; }
+  // Saldo pendente (normalmente pago na retirada) NÃO bloqueia mais "Pronta" — apenas
+  // alerta. O saldo continua rastreado normalmente em Contas a Receber (os.restante,
+  // FIN_CR) até ser recebido via kbReceberSaldo(); só a entrega final é bloqueada
+  // (ver osLiberar), pois cobrar na retirada é o fluxo normal, não uma exceção.
+  var _saldoPendente = (os.restante||0) > 0;
   var _pCard=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
   if(_pCard&&_pCard.parentElement) os.kbDay=_pCard.parentElement.id;
   var _pDest=document.getElementById('kbProntas');
   if(_pCard&&_pDest){_pDest.appendChild(_pCard);var _pH=document.getElementById('kbProntasHint');if(_pH)_pH.style.display='none';}
-  os.status = 'pronta'; os.pronto = true; os.prog = 100;
   os.status = 'pronta'; os.pronto = true; os.prog = 100;
   os._ck = os.checks.map(function(){ return true; });
 
@@ -10607,8 +10610,11 @@ function kbMarcarPronto() {
   }
 
   renderOsTable(); syncSidebarBadges();
-  if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta');
-  setTimeout(function(){ showToast('OS #'+os.num+' marcada como Pronta! 🎉', 'ok'); }, 150);
+  if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+  setTimeout(function(){
+    if(_saldoPendente) showToast('⚠️ OS #'+os.num+' Pronta — saldo de '+finFmt(os.restante)+' ainda pendente (cobrar na retirada)','warn');
+    else showToast('OS #'+os.num+' marcada como Pronta! 🎉', 'ok');
+  }, 150);
 }
 
 function kbReverterProducao(){
@@ -11435,10 +11441,21 @@ function renderOsTable() {
 }
 function osLiberar(id) {
   var os=KB_OS[id]; if(!os) return;
+  // Entrega/conclusão definitiva é bloqueada se ainda houver saldo, salvo exceção
+  // explícita e justificada — que registra usuário/data/motivo e mantém a dívida aberta
+  // (não mexe em os.restante nem no lançamento pendente em FIN_CR).
+  var saldoPendente = (os.restante||0) > 0;
+  if(saldoPendente){
+    var justificativa = prompt('⚠️ OS #'+os.num+' ainda tem saldo pendente de '+finFmt(os.restante)+'.\n\nEntregar mesmo assim é uma exceção e precisa de justificativa (ex.: acordo com o cliente, cobrança à parte). Descreva o motivo para confirmar, ou cancele para não entregar agora:');
+    if(justificativa===null || !justificativa.trim()){ showToast('Entrega cancelada — saldo pendente não autorizado','warn'); return; }
+    var _quem=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.user||_currentSession.email))||'desconhecido';
+    if(typeof secAuditLog==='function') secAuditLog('os_entrega_excecao','OS #'+os.num+' entregue com saldo pendente de '+finFmt(os.restante)+' — responsável: '+_quem+' — justificativa: '+justificativa.trim());
+  }
   os.status='entregue';
+  kbSaveKbos();
   document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){stag.className='stag sm ok';stag.textContent='✅ Entregue';}});
   renderOsTable(); syncSidebarBadges();
-  showToast('OS #'+os.num+' liberada para o cliente!','ok');
+  showToast(saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!','ok');
 }
 
 // ============================================================
@@ -11610,13 +11627,15 @@ function finFilterArr(arr, campoMarca) {
 
 // ── KPI Cards ─────────────────────────────────────────────────────────────────
 function finDashKPIs() {
-  var mes = finMesAtual();
-  var tx  = FIN_TX.filter(function(t){return t.mes===mes&&t.status==='recebido';});
+  // Saldo disponível é um saldo acumulado (estilo extrato bancário) — precisa somar
+  // TODO o histórico recebido/pago, não só o mês atual. Antes, a receita era filtrada
+  // pelo mês corrente e a despesa somava todos os tempos, gerando saldos incoerentes.
+  var txTudo=FIN_TX.filter(function(t){return t.status==='recebido';});
   var cpPago=FIN_CP.filter(function(c){return c.status==='pago';});
 
-  // ── Card 1: Saldo Disponível Imediato (somente PIX + Dinheiro) ─────────
+  // ── Card 1: Saldo Disponível Imediato (somente PIX + Dinheiro, acumulado) ──
   var metImediato = ['PIX','Dinheiro','pix','dinheiro'];
-  var saldoImediato = tx.filter(function(t){
+  var saldoImediato = txTudo.filter(function(t){
     return metImediato.some(function(m){ return (t.metodo||'').toLowerCase().indexOf(m.toLowerCase())>=0; });
   }).reduce(function(s,t){return s+t.valor;},0)
   - cpPago.reduce(function(s,c){return s+c.valor;},0);
@@ -11670,33 +11689,46 @@ function finDashKPIs() {
 }
 
 // ── Bar Chart (Entradas vs Saídas por semana) ─────────────────────────────────
+// Agrupa uma data 'DD/MM' ou 'DD/MM/AAAA' em uma das 4 semanas do mês pelo dia real
+// (o dia é sempre o primeiro componente em ambos os formatos usados em FIN_TX/FIN_CP).
+function finSemanaDoDia(dataStr) {
+  var d=parseInt((dataStr||'').split('/')[0],10);
+  if(!d||d<1) return 3; // sem dia legível → cai na última semana em vez de sumir do gráfico
+  if(d<=7) return 0; if(d<=14) return 1; if(d<=21) return 2; return 3;
+}
+
 function finBarChartRender() {
   var el=document.getElementById('finBarChart'); if(!el) return;
-  var semanas=['Semana 1','Semana 2','Semana 3','Semana 4'];
+  var semanas=['Semana 1 (1–7)','Semana 2 (8–14)','Semana 3 (15–21)','Semana 4 (22+)'];
   var mes=finMesAtual();
+  // Entradas/saídas reais do mês, agrupadas pela DATA real de cada lançamento —
+  // não mais uma distribuição percentual fixa aplicada sobre o total do mês.
   var txMes=FIN_TX.filter(function(t){return t.mes===mes;});
-  var totalEnt=txMes.reduce(function(s,t){return s+t.valor;},0)||1;
-  var totalSai=FIN_CP.filter(function(c){return c.status==='pago';}).reduce(function(s,c){return s+c.valor;},0)||1;
-  var distE=[0.35,0.25,0.22,0.18], distS=[0.20,0.40,0.25,0.15];
-  var maxVal=Math.max(totalEnt*0.35,totalSai*0.40)||1;
-  // Ponto de Equilíbrio: saídas totais / 4 semanas → %  do maxVal
-  var metaSemanal = (totalSai/4);
-  var metaPct = Math.min(Math.round(metaSemanal/maxVal*100),100);
+  var cpMes=FIN_CP.filter(function(c){return c.status==='pago'&&c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mes;});
+  var entPorSemana=[0,0,0,0], saiPorSemana=[0,0,0,0];
+  txMes.forEach(function(t){ entPorSemana[finSemanaDoDia(t.data)]+=t.valor; });
+  cpMes.forEach(function(c){ saiPorSemana[finSemanaDoDia(c.dataPagamento)]+=c.valor; });
+  var maxVal=Math.max.apply(null, entPorSemana.concat(saiPorSemana))||1;
+
+  // Ponto de Equilíbrio real do mês: receita mínima para cobrir as despesas operacionais,
+  // dada a margem de contribuição observada (Lucro Bruto ÷ Receita Bruta). CMV (matéria-prima
+  // + mão de obra direta) é tratado como variável; despesas operacionais como fixas do período.
+  // Sem receita no mês ou margem ≤ 0, não há como calcular um ponto de equilíbrio real.
+  var _dreMes=finCalcularDRE(txMes,cpMes);
+  var margemContrib = _dreMes.receitaBruta>0 ? (_dreMes.lucroBruto/_dreMes.receitaBruta) : 0;
+  var peValido = _dreMes.receitaBruta>0 && margemContrib>0;
+  var peReceita = peValido ? (_dreMes.desp/margemContrib) : null;
+
   var html='';
   semanas.forEach(function(sem,i){
-    var ent=totalEnt*distE[i], sai=totalSai*distS[i];
+    var ent=entPorSemana[i], sai=saiPorSemana[i];
     var pctE=Math.round(ent/maxVal*100), pctS=Math.round(sai/maxVal*100);
-    var acimaMeta = ent >= metaSemanal;
-    html+='<div class="fin-bar-group" style="position:relative">'
+    html+='<div class="fin-bar-group">'
       +'<div class="fin-bar-week">'+sem+'</div>'
-      +'<div class="fin-bar-line" style="position:relative">'
+      +'<div class="fin-bar-line">'
         +'<span class="fin-bar-type">Entradas</span>'
-        +'<div class="fin-bar-outer" style="position:relative">'
-          +'<div class="fin-bar-inner" style="width:'+pctE+'%;background:linear-gradient(90deg,'+(acimaMeta?'#059669,#34D399':'#D97706,#FCD34D')+')"></div>'
-          // Linha pontilhada de equilíbrio
-          +'<div style="position:absolute;top:0;bottom:0;left:'+metaPct+'%;width:2px;background:repeating-linear-gradient(180deg,#6366F1 0,#6366F1 3px,transparent 3px,transparent 6px);opacity:.7;pointer-events:none" title="Ponto de Equilíbrio"></div>'
-        +'</div>'
-        +'<span class="fin-bar-val" style="color:'+(acimaMeta?'#059669':'#D97706')+'">'+finFmt(ent)+'</span>'
+        +'<div class="fin-bar-outer"><div class="fin-bar-inner" style="width:'+pctE+'%;background:linear-gradient(90deg,#059669,#34D399)"></div></div>'
+        +'<span class="fin-bar-val" style="color:#059669">'+finFmt(ent)+'</span>'
       +'</div>'
       +'<div class="fin-bar-line">'
         +'<span class="fin-bar-type">Saídas</span>'
@@ -11705,10 +11737,10 @@ function finBarChartRender() {
       +'</div>'
     +'</div>';
   });
-  // Legenda do Ponto de Equilíbrio
-  html+='<div style="display:flex;align-items:center;gap:5px;margin-top:8px;font-size:10px;color:#6366F1">'
-    +'<div style="width:18px;height:2px;background:repeating-linear-gradient(90deg,#6366F1 0,#6366F1 4px,transparent 4px,transparent 8px)"></div>'
-    +'<span>Ponto de Equilíbrio (Meta semanal: '+finFmt(metaSemanal)+')</span>'
+  html+='<div style="margin-top:10px;font-size:10px;color:var(--muted);line-height:1.5">'
+    + (peValido
+        ? 'Ponto de Equilíbrio do mês: receita mínima de <strong style="color:var(--text)">'+finFmt(peReceita)+'</strong> para cobrir as despesas operacionais (margem de contribuição: '+(margemContrib*100).toFixed(1)+'%, despesas operacionais: '+finFmt(_dreMes.desp)+')'
+        : 'Ponto de Equilíbrio: dados insuficientes para calcular (sem receita registrada no mês ou margem de contribuição negativa)')
   +'</div>';
   el.innerHTML=html;
 }
@@ -11718,16 +11750,22 @@ function finDonutRender() {
   var svg=document.getElementById('finDonut');
   var leg=document.getElementById('finDonutLegend');
   if(!svg||!leg) return;
+  // Chaves canônicas (iguais às usadas no DRE via finNormCat) + Mão de Obra Direta,
+  // que antes não tinha bucket próprio e caía silenciosamente em "Outros".
   var cats={
-    'Pessoal':   {color:'#7C3AED',total:0},
-    'Operacional':{color:'#3B82F6',total:0},
-    'Matéria-prima':{color:'#F59E0B',total:0},
-    'Impostos':  {color:'#EF4444',total:0},
-    'Empréstimos':{color:'#6B7280',total:0},
-    'Outros':    {color:'#10B981',total:0}
+    'Pessoal Admin':      {color:'#7C3AED',total:0},
+    'Operacional':        {color:'#3B82F6',total:0},
+    'Matéria-Prima':      {color:'#F59E0B',total:0},
+    'Mão de Obra Direta': {color:'#F97316',total:0},
+    'Impostos':           {color:'#EF4444',total:0},
+    'Empréstimos':        {color:'#6B7280',total:0},
+    'Sem categoria':      {color:'#94A3B8',total:0},
+    'Outros':             {color:'#10B981',total:0}
   };
   FIN_CP.filter(function(c){return c.status==='pago';}).forEach(function(c){
-    if(cats[c.categoria]) cats[c.categoria].total+=c.valor;
+    if(!c.categoria) { cats['Sem categoria'].total+=c.valor; return; }
+    var cat=finNormCat(c.categoria);
+    if(cats[cat]) cats[cat].total+=c.valor;
     else cats['Outros'].total+=c.valor;
   });
   var total=Object.values(cats).reduce(function(s,c){return s+c.total;},0)||1;
@@ -11928,6 +11966,9 @@ function finCRBaixa(id) {
 }
 function _finCRBaixaConfirmar(id, dtISO) {
   var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
+  // Idempotência: sem esta guarda, clique duplo/reexecução lançava um segundo
+  // registro em FIN_TX para o mesmo recebimento (duplicidade real de caixa).
+  if(r.status==='recebido'){ showToast('Este recebimento já foi confirmado.','info'); return; }
   var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
   r.status='recebido'; r.dataRecebimento=dtBR;
   var d=new Date(dtISO+'T12:00:00');
@@ -12047,6 +12088,31 @@ var FIN_CAT_ALIAS = {
   'Matéria-prima':'Matéria-Prima', 'Pessoal':'Pessoal Admin'
 };
 function finNormCat(c){ return FIN_CAT_ALIAS[c]||c; }
+
+// ── DRE: alíquota gerencial única (fonte de verdade compartilhada) ────────────
+// Regra vigente desde 2026-08: 8,5% sobre 100% das vendas, como se todas tivessem
+// nota fiscal emitida — a situação fiscal real da venda não afeta o DRE gerencial.
+var FIN_TAXA_IMPOSTO_DRE = 0.085;
+function finCalcularDRE(txFiltro, cpFiltro) {
+  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
+  var impostos=receitaBruta*FIN_TAXA_IMPOSTO_DRE;
+  var receitaLiq=receitaBruta-impostos;
+  // CUSTO = diretamente ligado à produção (CMV)
+  var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
+  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmv=cmvMat+cmvMod;
+  var lucroBruto=receitaLiq-cmv;
+  // DESPESA = operacional/administrativo (independente do imposto automático sobre vendas)
+  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
+  var desp=cpPessoal+cpOp+cpEmp+cpImp;
+  var lucroLiq=lucroBruto-desp;
+  return {receitaBruta:receitaBruta,impostos:impostos,receitaLiq:receitaLiq,cmvMat:cmvMat,cmvMod:cmvMod,cmv:cmv,
+    lucroBruto:lucroBruto,cpPessoal:cpPessoal,cpOp:cpOp,cpEmp:cpEmp,cpImp:cpImp,desp:desp,lucroLiq:lucroLiq};
+}
 // ============================================================
 // AGENDA DE PAGAMENTOS — Calendário mensal
 // ============================================================
@@ -12308,6 +12374,7 @@ function finCPPagar(id) {
 }
 function _finCPPagarConfirmar(id, dtISO) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  if(r.status==='pago'){ showToast('Este pagamento já foi confirmado.','info'); return; }
   var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
   r.status='pago'; r.dataPagamento=dtBR;
   _finSaveCP();
@@ -12403,22 +12470,10 @@ function finDREBuild() {
     txFiltro=FIN_TX.filter(function(t){return t.status==='recebido'&&(mesFlt===0||(t.mes&&t.mes===mesFlt));});
     cpFiltro=FIN_CP.filter(function(c){return c.status==='pago'&&(mesFlt===0||(c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mesFlt));});
   }
-  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
-  var impostos=receitaBruta*0.07;
-  var receitaLiq=receitaBruta-impostos;
-  // CUSTO = diretamente ligado à produção (CMV)
-  var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
-  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
-  var cmv=cmvMat+cmvMod;
-  var lucroBruto=receitaLiq-cmv;
-  // DESPESA = operacional/administrativo
-  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
-  var desp=cpPessoal+cpOp+cpEmp+cpImp;
-  var lucroLiq=lucroBruto-desp;
+  var _dre=finCalcularDRE(txFiltro,cpFiltro);
+  var receitaBruta=_dre.receitaBruta, impostos=_dre.impostos, receitaLiq=_dre.receitaLiq;
+  var cmvMat=_dre.cmvMat, cmvMod=_dre.cmvMod, cmv=_dre.cmv, lucroBruto=_dre.lucroBruto;
+  var cpPessoal=_dre.cpPessoal, cpOp=_dre.cpOp, cpEmp=_dre.cpEmp, cpImp=_dre.cpImp, desp=_dre.desp, lucroLiq=_dre.lucroLiq;
   var pct=function(v){return receitaBruta>0?' <span class="dre-pct">'+(v/receitaBruta*100).toFixed(1)+'%</span>':'';};
   var secHd=function(t,sub){return '<div class="dre-section-hd">'+t+(sub?'<span style="font-size:9px;font-weight:400;margin-left:6px;opacity:.7">'+sub+'</span>':'')+'</div>';};
   var row=function(lbl,val,extra,indent){
@@ -12452,7 +12507,7 @@ function finDREBuild() {
     +secHd('RECEITAS')
     +_recMarcaRows
     +row('(+) Receita Bruta de Vendas',receitaBruta,'dre-row-total')
-    +row('(−) Impostos e Deduções (7%)',impostos,'',true)
+    +row('(−) Impostos e Deduções (8,5%)',impostos,'',true)
     +row('(=) Receita Líquida',receitaLiq,'dre-row-total '+(receitaLiq>=0?'dre-row-result-pos':'dre-row-result-neg'))
     +secHd('CUSTOS DE PRODUÇÃO','(CMV — vinculados à produção)')
     +row('(−) Matéria-Prima consumida',cmvMat,'',true)
@@ -12584,7 +12639,9 @@ function finBaixaManual(marca) {
 // ============================================================
 
 // ── Navegação entre abas de relatório ─────────────────────────────────────────
+var _relActiveTab = 'caixa';
 function relTab(t, el) {
+  _relActiveTab = t;
   ['Caixa','Mensal','DRE','Contas','NF'].forEach(function(k){
     var btn=document.getElementById('relTabBtn'+k);
     var pg =document.getElementById('relPg'+k);
@@ -12602,17 +12659,51 @@ function relTab(t, el) {
   }, 30);
 }
 
+// Reexecuta a aba de relatório atualmente aberta — chamado pelos listeners do
+// Firestore (_cloudWatch) quando fin_tx/fin_cr/fin_cp chegam/mudam DEPOIS que a
+// tela de Relatórios já foi renderizada. Sem isso, dados carregados tardiamente
+// da nuvem nunca apareciam nos relatórios (ficavam presos nos arrays vazios iniciais).
+function relRefreshCurrent() {
+  try {
+    if(_relActiveTab==='caixa')  relCaixaDiario();
+    if(_relActiveTab==='mensal') relMensal();
+    if(_relActiveTab==='dre')    relatoriosRender();
+    if(_relActiveTab==='contas') relContasPagas();
+    if(_relActiveTab==='nf')     relFiscalRender();
+  } catch(e) { /* tela de relatórios pode não estar montada ainda */ }
+}
+
+// Define o mês corrente como padrão nos filtros de relatório, uma única vez por
+// sessão — evita o bug de relatórios "vazios" por estarem travados em Julho
+// enquanto preserva a escolha manual do usuário em navegações seguintes.
+var _relMesAutoSet = false;
+function relSetMesAtualUmaVez() {
+  if(_relMesAutoSet) return;
+  _relMesAutoSet = true;
+  var mesAtual = String(finMesAtual());
+  ['relMensalMes','relMes','relContasMes','finDREMes'].forEach(function(id){
+    var elSel=document.getElementById(id);
+    if(elSel) elSel.value=mesAtual;
+  });
+}
+
 // ── Relatório Fiscal (NF) ──────────────────────────────────────────────────────
-function relFiscalRender() {
-  var el = document.getElementById('relNFBody'); if(!el) return;
+// Filtro único do Relatório Fiscal — usado tanto pela tela quanto pela exportação,
+// para que os dois nunca mais divirjam (a exportação ignorava mês/marca antes).
+function relFiscalGetFiltrados() {
   var mesFiltro  = (document.getElementById('relNFMes')||{}).value||'';
   var mrcFiltro  = (document.getElementById('relNFMarca')||{}).value||'';
-  var orcs = orcGetEnviados().filter(function(o) {
+  return orcGetEnviados().filter(function(o) {
     if(!o.nfSolicitada) return false;
     if(mrcFiltro && (o.marca||'vr') !== mrcFiltro) return false;
     if(mesFiltro && o.dataSalvo && o.dataSalvo.indexOf(mesFiltro) < 0) return false;
     return true;
   });
+}
+
+function relFiscalRender() {
+  var el = document.getElementById('relNFBody'); if(!el) return;
+  var orcs = relFiscalGetFiltrados();
   var totalNF = orcs.reduce(function(s,o){ return s+(o.valorFinal||o.valorBase||0); }, 0);
   if(!orcs.length){
     el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhum or\u00e7amento com nota fiscal solicitada no per\u00edodo.</div>';
@@ -12645,8 +12736,8 @@ function relFiscalRender() {
 }
 
 function relFiscalExportar() {
-  var orcs = orcGetEnviados().filter(function(o){ return !!o.nfSolicitada; });
-  if(!orcs.length){ showToast('Nenhum item com NF solicitada','warn'); return; }
+  var orcs = relFiscalGetFiltrados();
+  if(!orcs.length){ showToast('Nenhum item com NF solicitada no período/filtro atual','warn'); return; }
   var linhas = ['Or\u00e7amento\tData\tCliente\tCNPJ/CPF\tEmpresa\tValor'];
   orcs.forEach(function(o){
     linhas.push([
@@ -12925,20 +13016,10 @@ function relatoriosRender() {
   var crPend=FIN_CR.filter(function(r){return r.status==='pendente';});
   var cpPend=FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';});
 
-  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
-  var impostos=receitaBruta*0.07;
-  var receitaLiq=receitaBruta-impostos;
-  var cpNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMat=cpNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
-  var cmvMod=cpNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
-  var cmv=cmvMat+cmvMod;
-  var lucroBruto=receitaLiq-cmv;
-  var cpPessoal=cpNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpOp=cpNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpEmp=cpNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpImp=cpNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
-  var desp=cpPessoal+cpOp+cpEmp+cpImp;
-  var lucroLiq=lucroBruto-desp;
+  var _dre2=finCalcularDRE(txFiltro,cpFiltro);
+  var receitaBruta=_dre2.receitaBruta, impostos=_dre2.impostos, receitaLiq=_dre2.receitaLiq;
+  var cmvMat=_dre2.cmvMat, cmvMod=_dre2.cmvMod, cmv=_dre2.cmv, lucroBruto=_dre2.lucroBruto;
+  var cpPessoal=_dre2.cpPessoal, cpOp=_dre2.cpOp, cpEmp=_dre2.cpEmp, cpImp=_dre2.cpImp, desp=_dre2.desp, lucroLiq=_dre2.lucroLiq;
   var totalReceber=crPend.reduce(function(s,r){return s+r.valor;},0);
   var totalPagar=cpPend.reduce(function(s,r){return s+r.valor;},0);
 
@@ -12947,7 +13028,7 @@ function relatoriosRender() {
 
   var dreRows=[
     {lbl:'Receita Bruta de Vendas',      val:receitaBruta,bold:true,tipo:'receita'},
-    {lbl:'(−) Impostos e Deduções (7%)', val:-impostos,   bold:false,tipo:'dedução'},
+    {lbl:'(−) Impostos e Deduções (8,5%)', val:-impostos,   bold:false,tipo:'dedução'},
     {lbl:'Receita Líquida',              val:receitaLiq,  bold:true,tipo:'subtotal'},
     {lbl:'─── CUSTOS DE PRODUÇÃO (CMV)───',val:null,      bold:false,tipo:'section'},
     {lbl:'(−) Matéria-Prima',            val:-cmvMat,     bold:false,tipo:'custo'},
