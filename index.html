@@ -13072,6 +13072,29 @@ function relFiscalGetFiltrados() {
   });
 }
 
+var FISCAL_STATUS_LABEL = {pendente:'⏳ Pendente',emitida:'✅ Emitida',dispensada:'🚫 Dispensada',cancelada:'❌ Cancelada'};
+
+function relFiscalSetStatus(id, status){
+  var lista = orcGetEnviados();
+  var orc = lista.find(function(o){ return o.id===id; });
+  if(!orc) return;
+  if(status==='emitida'){
+    var numero = prompt('Numero da nota fiscal emitida:', orc.numeroNF||'');
+    if(!numero || !numero.trim()){ showToast('Numero da NF e obrigatorio para marcar como emitida.','warn'); return; }
+    orc.numeroNF = numero.trim();
+    orc.dataEmissaoNF = new Date().toLocaleDateString('pt-BR');
+  } else if(status==='dispensada'){
+    var motivo = prompt('Justificativa da dispensa de nota fiscal (obrigatoria):', orc.justificativaDispensa||'');
+    if(!motivo || !motivo.trim()){ showToast('Dispensa de NF exige justificativa.','warn'); return; }
+    orc.justificativaDispensa = motivo.trim();
+  }
+  orc.statusFiscal = status;
+  orcSetEnviados(lista);
+  if(typeof secAuditLog==='function') secAuditLog('fiscal_status','Orcamento '+orc.id+' - NF: '+status);
+  showToast('Situacao fiscal atualizada.','ok');
+  relFiscalRender();
+}
+
 function relFiscalRender() {
   var el = document.getElementById('relNFBody'); if(!el) return;
   var orcs = relFiscalGetFiltrados();
@@ -13080,21 +13103,32 @@ function relFiscalRender() {
     el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhum or\u00e7amento com nota fiscal solicitada no per\u00edodo.</div>';
     return;
   }
+  var porSituacao = {pendente:0, emitida:0, dispensada:0, cancelada:0};
+  orcs.forEach(function(o){ var s=o.statusFiscal||'pendente'; porSituacao[s]=(porSituacao[s]||0)+(o.valorFinal||o.valorBase||0); });
+  var resumoHtml = Object.keys(FISCAL_STATUS_LABEL).map(function(s){
+    return '<span style="margin-right:14px">'+FISCAL_STATUS_LABEL[s]+': <strong>R$ '+(porSituacao[s]||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></span>';
+  }).join('');
   var rows = orcs.map(function(o){
     var marca = o.marca==='vitre' ? '🌸 Vitre' : '🟣 VR Marcas';
+    var statusAtual = o.statusFiscal||'pendente';
+    var statusSel = '<select onchange="relFiscalSetStatus(\''+o.id+'\',this.value)" style="font-size:10px;padding:2px 4px;border-radius:5px;border:1px solid var(--border);background:var(--surface)">'
+      + Object.keys(FISCAL_STATUS_LABEL).map(function(s){ return '<option value="'+s+'"'+(statusAtual===s?' selected':'')+'>'+FISCAL_STATUS_LABEL[s]+'</option>'; }).join('')
+      + '</select>';
     return '<tr style="border-bottom:1px solid var(--border)">'
-      +'<td style="padding:6px 8px">'+o.id+'</td>'
+      +'<td style="padding:6px 8px">'+o.id+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+o.numeroNF+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+o.dataSalvo+'</td>'
       +'<td style="padding:6px 8px"><strong>'+o.cliente+'</strong>'
-        +(o.nf&&o.nf.cnpjCpf?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+o.nf.cnpjCpf+'</div>':'')+'</td>'
+        +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+o.nf.doc+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+marca+'</td>'
       +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+(o.valorFinal||o.valorBase||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
-      +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+((o.nf&&o.nf.email)||'—')+'</td>'
+      +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+(o.email||'—')+'</td>'
+      +'<td style="padding:6px 8px">'+statusSel+'</td>'
       +'</tr>';
   }).join('');
-  el.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">'
+  el.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">'
     +orcs.length+' NF(s) solicitada(s) &mdash; Total: <strong style="color:#059669">R$ '
     +totalNF.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></div>'
+    +'<div style="font-size:11px;margin-bottom:10px">'+resumoHtml+'</div>'
     +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="color:var(--muted);border-bottom:2px solid var(--border)">'
     +'<th style="text-align:left;padding:6px 8px">Or\u00e7amento</th>'
@@ -13103,19 +13137,22 @@ function relFiscalRender() {
     +'<th style="text-align:left;padding:6px 8px">Empresa</th>'
     +'<th style="text-align:left;padding:6px 8px">Valor NF</th>'
     +'<th style="text-align:left;padding:6px 8px">E-mail</th>'
+    +'<th style="text-align:left;padding:6px 8px">Situacao</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table>';
 }
 
 function relFiscalExportar() {
   var orcs = relFiscalGetFiltrados();
   if(!orcs.length){ showToast('Nenhum item com NF solicitada no período/filtro atual','warn'); return; }
-  var linhas = ['Or\u00e7amento\tData\tCliente\tCNPJ/CPF\tEmpresa\tValor'];
+  var linhas = ['Or\u00e7amento\tData\tCliente\tCNPJ/CPF\tEmpresa\tValor\tSitua\u00e7\u00e3o\tN\u00famero NF'];
   orcs.forEach(function(o){
     linhas.push([
       o.id, o.dataSalvo, o.cliente,
-      (o.nf&&o.nf.cnpjCpf)||'—',
+      (o.nf&&o.nf.doc)||'—',
       o.marca==='vitre'?'Vitre':'VR Marcas',
-      (o.valorFinal||o.valorBase||0).toFixed(2).replace('.',',')
+      (o.valorFinal||o.valorBase||0).toFixed(2).replace('.',','),
+      FISCAL_STATUS_LABEL[o.statusFiscal||'pendente']||'—',
+      o.numeroNF||'—'
     ].join('\t'));
   });
   var blob = new Blob([linhas.join('\n')], {type:'text/plain;charset=utf-8'});
@@ -15954,7 +15991,15 @@ function orcSalvarOrcamento() {
     prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
     prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||'',
     dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10),
-    pricingVersion: (function(){ var _f=(_cfgData&&_cfgData.financeiro)||{}; return [_f.overhead,_f.vrml,_f.impostos].join('_')||new Date().toISOString().slice(0,10); })()
+    pricingVersion: (function(){ var _f=(_cfgData&&_cfgData.financeiro)||{}; return [_f.overhead,_f.vrml,_f.impostos].join('_')||new Date().toISOString().slice(0,10); })(),
+    // Controle fiscal por venda (seção 11) — antes nfSolicitada nunca era
+    // gravado em lugar nenhum, então o Relatório Fiscal ficava sempre vazio.
+    nfSolicitada: !!(document.getElementById('orcNFToggle')||{}).checked,
+    statusFiscal: (document.getElementById('orcNFToggle')||{}).checked ? 'pendente' : null,
+    nf: (function(){
+      var t=document.getElementById('orcNFToggle'); if(!t||!t.checked) return null;
+      return {precisa:true,nome:(document.getElementById('nfNome')||{}).value||'',doc:(document.getElementById('nfDoc')||{}).value||'',ie:(document.getElementById('nfIE')||{}).value||'',cep:(document.getElementById('nfCEP')||{}).value||'',endereco:(document.getElementById('nfEndereco')||{}).value||''};
+    })()
   };
   lista.unshift(orc);
   orcSetEnviados(lista);

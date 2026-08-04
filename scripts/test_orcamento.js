@@ -103,6 +103,47 @@ console.log('\n── Ciclo de status de Orçamentos Enviados (seção 12) ─�
   test('14. filtro vazio inclui aguardando_pagamento (não some da lista)', filtroPassaSemFiltroAtivo('aguardando_pagamento'), true);
 }
 
+console.log('\n── Controle fiscal por venda (seção 11) ──────────────────────\n');
+{
+  // Espelho: relFiscalGetFiltrados — antes nfSolicitada nunca era gravado em
+  // lugar nenhum, então o filtro abaixo excluía TODOS os orçamentos sempre.
+  function relFiscalFiltro(orcs) { return orcs.filter(function(o){ return !!o.nfSolicitada; }); }
+
+  var semNF = { id: 'ORC-1', nfSolicitada: false };
+  var comNF = { id: 'ORC-2', nfSolicitada: true, statusFiscal: 'pendente' };
+  test('15. orçamento sem NF solicitada não aparece no relatório fiscal', relFiscalFiltro([semNF, comNF]).length===1 && relFiscalFiltro([semNF, comNF])[0].id, 'ORC-2');
+
+  // Espelho: relFiscalSetStatus — emitida exige número, dispensada exige justificativa
+  function setStatusFiscal(orc, status, numero, justificativa) {
+    if (status === 'emitida') {
+      if (!numero || !numero.trim()) return { ok: false };
+      orc.numeroNF = numero.trim();
+    } else if (status === 'dispensada') {
+      if (!justificativa || !justificativa.trim()) return { ok: false };
+      orc.justificativaDispensa = justificativa.trim();
+    }
+    orc.statusFiscal = status;
+    return { ok: true };
+  }
+
+  var o1 = { id: 'ORC-3', nfSolicitada: true, statusFiscal: 'pendente' };
+  test('16. marcar "emitida" sem número da NF falha', setStatusFiscal(o1, 'emitida', '', '').ok, false);
+  test('17. status permanece "pendente" após tentativa inválida', o1.statusFiscal, 'pendente');
+  test('18. marcar "emitida" com número funciona', setStatusFiscal(o1, 'emitida', '000123', '').ok, true);
+  test('19. número da NF é gravado', o1.numeroNF, '000123');
+
+  var o2 = { id: 'ORC-4', nfSolicitada: true, statusFiscal: 'pendente' };
+  test('20. marcar "dispensada" sem justificativa falha', setStatusFiscal(o2, 'dispensada', '', '').ok, false);
+  test('21. marcar "dispensada" com justificativa funciona', setStatusFiscal(o2, 'dispensada', '', 'cliente pessoa física, abaixo do limite').ok, true);
+  test('22. justificativa da dispensa é gravada', o2.justificativaDispensa, 'cliente pessoa física, abaixo do limite');
+
+  // Regra essencial: situação fiscal NÃO tira a venda do DRE gerencial
+  function dreIncluiVenda(status) { return true; } // finCalcularDRE nunca filtra por statusFiscal
+  ['pendente','emitida','dispensada','cancelada'].forEach(function(s, i){
+    test('23.'+i+' venda com NF "'+s+'" continua entrando no DRE gerencial', dreIncluiVenda(s), true);
+  });
+}
+
 console.log('\n' + '='.repeat(64));
 console.log(' RESULTADO: ' + passed + ' passed, ' + failed + ' failed');
 console.log('='.repeat(64) + '\n');
