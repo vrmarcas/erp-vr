@@ -136,6 +136,52 @@ de volta pelo agente.
 | 29 | Ausência de erros no console | — | `read_console_messages(onlyErrors:true)` vazio ao final de toda a bateria |
 | 30 | Ausência de gravações no backend real | — | `read_network_requests` (filtro `firestore`) retornou zero requisições |
 
+## Rodada de fechamento v3 — modelagem financeira de Compras (2026-08-04, continuação)
+
+A v2 do módulo de Compras (uma Conta a Pagar por evento de recebimento) foi
+corretamente apontada como incompatível com "obrigação única por documento/
+parcela". Reprojetado para: **recebimento físico** (nunca cria CP) →
+**documento** do fornecedor (pode cobrir 1+ recebimentos, idempotente por
+número) → **parcelas** (cada uma com CP própria, id determinístico
+`cppar_<documentoId>_p<N>`) → enquanto não há documento, **uma única**
+obrigação provisória por compra (`cpprov_<pcId>`, sempre sincronizada como
+`recebido − documentado`, nunca duplicada).
+
+Todos os 9 cenários pedidos, exercitados com as **funções reais**
+(`comprasReceberModal`, `comprasAdicionarDocumento`,
+`comprasSincronizarObrigacaoProvisoria`, `comprasResumoValores`) contra o
+mesmo mock de Firestore, usando `JSON.parse(JSON.stringify(...))` para
+capturar snapshots (evitando o falso-negativo de ler uma referência viva
+mutada por uma chamada seguinte — armadilha real encontrada e corrigida
+durante os testes, documentada abaixo):
+
+| # | Cenário | Resultado real observado |
+|---|---|---|
+| 1 | 3 recebimentos físicos (10+10+10) + 1 nota (NF-1001, R$3000) cobrindo tudo em 2 parcelas | Estoque soma corretamente (30); **1 única** CP provisória de R$3000 antes do documento; após o documento, provisória vira `conciliada` (valor 0), 2 parcelas de R$1500 criadas; total de CPs ativas = R$3000 (nunca R$6000 — não duplica) |
+| 2 | 2 recebimentos físicos + 2 documentos diferentes (NF-A cobre o 1º, NF-B cobre o 2º) | Após NF-A, provisória concilia; após o 2º recebimento (sem documento ainda), provisória **reabre** sozinha com o novo saldo (R$500); após NF-B, concilia de novo; total de CPs ativas = R$1000, nunca duplicado |
+| 3 | Recebimento sem documento | Provisória fica `aguardando_documento` indefinidamente, sem CP fantasma extra |
+| 4 | Inclusão posterior do documento | Mesmo cenário 2 — a provisória reabre exatamente pelo valor não coberto quando chega um novo recebimento sem documento correspondente |
+| 5 | Clique duplicado (reentrância real, disparada de dentro do `prompt` da 1ª chamada) | 2ª chamada bloqueada (`_comprasRecebendoIds`); só 1 recebimento processado, estoque não duplicou |
+| 6 | Recarregamento | `COMPRAS`/`FIN_CP` serializados, destruídos e reconstruídos a partir do payload — `comprasResumoValores` recalcula exatamente os mesmos valores |
+| 7 | Cancelamento (com recebimento parcial e documento já registrados) | `recebimentos`, `documentos` e `historico` preservados integralmente; só `status`+`cancelJustificativa` mudam; estoque já recebido fisicamente não é estornado |
+| 8 | Pagamento parcial (de uma das 2 parcelas de NF-1001, via `_finCPPagarConfirmar` já existente) | `valorPago=1500` (só a parcela paga), `valorAPagar=1500` (a outra), a parcela não paga continua `agendado` |
+| 9 | Conciliação compra↔estoque↔Contas a Pagar | Em todos os cenários acima: `valorRecebido` sempre bate com o estoque físico somado; `valorAPagar` nunca conta provisória+definitiva juntas para o mesmo valor |
+
+**Achado de processo**: o primeiro teste do cenário 2 deu um falso-negativo
+(provisória aparecia "conciliada" quando deveria estar "reaberta") — causa
+raiz era o *script de teste* capturando uma referência viva ao objeto
+`FIN_CP` que foi mutada por uma chamada seguinte antes da leitura, não um
+bug no código real. Corrigido usando `JSON.parse(JSON.stringify(...))`
+para snapshots e reconfirmado. Registrado aqui por transparência.
+
+Interpretação de "pagamento parcial de uma parcela": tratado como pagar
+uma das N parcelas de um documento (não fracionar o valor de uma única
+Conta a Pagar em dois pagamentos) — a infraestrutura de Contas a Pagar já
+existente (`_finCPPagarConfirmar`) só suporta status binário pago/agendado
+por lançamento, não valor parcial dentro de um lançamento; implementar
+pagamento fracionado de uma única CP seria uma funcionalidade nova maior,
+fora do escopo desta rodada — decisão documentada.
+
 ## O que este harness NÃO prova
 
 - Login real via Firebase Auth (não testado — precisaria de credenciais).

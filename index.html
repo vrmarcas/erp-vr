@@ -11670,14 +11670,17 @@ function _finSaveCP(){ _cloudSave('fin_cp', FIN_CP); }
 //    em vez de escolher a primeira sozinha. Registros antigos sem ID
 //    continuam funcionando apenas com o texto do item (retrocompatibilidade
 //    — matKeyConfianca:'nenhuma' sinaliza esse caso).
-//  - Recebimento/Contas a Pagar: cada evento de recebimento (pc.recebimentos[])
-//    gera sua PRÓPRIA Conta a Pagar, pelo valor daquela entrega — não mais
-//    uma única obrigação pelo total no primeiro toque. valorPedido
-//    (contratado) nunca muda com recebimentos parciais; valorRecebido
-//    acumula por evento. Sem documento do fornecedor informado na hora do
-//    recebimento, a Conta a Pagar ainda é criada (para não perder o
-//    passivo), mas com status 'aguardando_documento' em vez de 'agendado' —
-//    decisão provisória documentada, revisável.
+//  - Modelagem financeira (revisão v3): separação explícita entre
+//    RECEBIMENTO FÍSICO (pc.recebimentos[], nunca cria Conta a Pagar
+//    sozinho), DOCUMENTO do fornecedor (pc.documentos[], pode cobrir 1+
+//    recebimentos, pode haver vários documentos para a mesma compra) e
+//    PARCELA (cada documento tem 1+ parcelas, cada parcela = 1 Conta a
+//    Pagar com id determinístico 'cppar_<documentoId>_p<N>' — idempotente).
+//    Enquanto não há documento, existe NO MÁXIMO UMA obrigação provisória
+//    por compra ('cpprov_<pcId>', status 'aguardando_documento'), cujo
+//    valor é sempre recalculado como recebido−documentado — nunca uma nova
+//    provisória por entrega, e nunca provisória+definitiva contando o
+//    mesmo valor ao mesmo tempo (ver comprasSincronizarObrigacaoProvisoria).
 var COMPRAS = [];
 var PC_STATUS = ['solicitada','cotacao','aprovada','pedida','recebida_parcial','recebida','cancelada'];
 var PC_STATUS_LABEL = {solicitada:'📝 Solicitada',cotacao:'💬 Em cotação',aprovada:'✅ Aprovada',pedida:'📦 Pedida',recebida_parcial:'🚚 Recebida parcialmente',recebida:'✅ Recebida',cancelada:'🚫 Cancelada'};
@@ -11751,7 +11754,7 @@ function comprasSolicitarDeOS(os, matKey, qtdFalta){
         unidade: 'chapa', precoUnit: 0,
         matKeyConfianca: matKey ? 'exata' : 'nenhuma'
       }],
-      cotacoes: [], recebimentos: [],
+      cotacoes: [], recebimentos: [], documentos: [], obrigacaoProvisoriaId: null,
       fornecedorEscolhido: '', marca: os.mk||'vr',
       responsavel: comprasQuem(), criadoEm: new Date().toISOString(),
       historico: [], finCpId: null // legado — mantido só para telas antigas; ver pc.recebimentos[].finCpId
@@ -11836,7 +11839,7 @@ function comprasNovaSolicitacaoModal(){
         qtyReservada: 0, unidade: 'un', precoUnit: 0,
         matKeyConfianca: matKey ? 'exata' : 'nenhuma'
       }],
-      cotacoes: [], recebimentos: [],
+      cotacoes: [], recebimentos: [], documentos: [], obrigacaoProvisoriaId: null,
       fornecedorEscolhido: fornecedor, marca: marca,
       responsavel: comprasQuem(), criadoEm: new Date().toISOString(),
       historico: [], finCpId: null
@@ -11894,13 +11897,11 @@ function comprasCancelar(id){
   comprasRender();
 }
 
-// Recebimento total ou parcial: atualiza estoque só pelo delta recebido
-// AGORA (nunca duplica — reentrância travada por _comprasRecebendoIds), e
-// cada evento de recebimento gera sua PRÓPRIA Conta a Pagar (idempotente a
-// esse evento — uma nova chamada gera uma NOVA entrega, nunca reprocessa a
-// anterior). Documento do fornecedor é opcional nesta entrega: sem ele, a
-// Conta a Pagar ainda é criada (para não perder o passivo), com status
-// 'aguardando_documento' em vez de 'agendado'.
+// Recebimento FÍSICO puro: atualiza estoque só pelo delta recebido AGORA
+// (nunca duplica — reentrância travada por _comprasRecebendoIds). NÃO cria
+// Conta a Pagar diretamente — só sincroniza a ÚNICA obrigação provisória da
+// compra (ver comprasSincronizarObrigacaoProvisoria). O documento do
+// fornecedor é registrado depois, separadamente, via comprasAdicionarDocumento().
 function comprasReceberModal(id){
   if(_comprasRecebendoIds[id]){ showToast('Recebimento já em andamento para este pedido.','info'); return; }
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
@@ -11908,6 +11909,7 @@ function comprasReceberModal(id){
   _comprasRecebendoIds[id] = true;
   try {
     if(!pc.recebimentos) pc.recebimentos=[];
+    if(!pc.documentos) pc.documentos=[];
     var itensRecebidos = [];
     pc.itens.forEach(function(item, idx){
       var restante = (item.qtyNecessaria||0) - (item.qtyRecebida||0);
@@ -11919,8 +11921,6 @@ function comprasReceberModal(id){
     });
     if(!itensRecebidos.length){ showToast('Nenhuma quantidade registrada.','info'); return; }
 
-    var documentoFornecedor = (prompt('Número da nota/documento do fornecedor para ESTA entrega (deixe em branco se ainda não tiver):')||'').trim();
-
     var valorEntrega = 0;
     itensRecebidos.forEach(function(r){
       var item = pc.itens[r.itemIdx];
@@ -11930,7 +11930,7 @@ function comprasReceberModal(id){
         STOCK[item.material].qty = (STOCK[item.material].qty||0) + r.qty;
         if(typeof stockSaveData==='function') stockSaveData();
         if(typeof stockUpdateDisplay==='function') try{ stockUpdateDisplay(item.material); }catch(e){}
-        if(typeof _stockLog==='function') try{ _stockLog('entrada', item.material, r.qty, pc.numero, 'Recebimento compra #'+pc.numero+(documentoFornecedor?' — NF '+documentoFornecedor:'')); }catch(e){}
+        if(typeof _stockLog==='function') try{ _stockLog('entrada', item.material, r.qty, pc.numero, 'Recebimento compra #'+pc.numero); }catch(e){}
       }
     });
 
@@ -11939,52 +11939,122 @@ function comprasReceberModal(id){
 
     var seq = pc.recebimentos.length + 1;
     var recebimentoId = 'rcb_'+pc.id+'_'+seq;
-    var cpId = null;
-    if(valorEntrega>0){
-      cpId = 'cp_'+recebimentoId;
-      var hoje = new Date();
-      var dd=hoje.getDate().toString().padStart(2,'0'), mm=(hoje.getMonth()+1).toString().padStart(2,'0'), yyyy=hoje.getFullYear();
-      var venc = new Date(hoje); venc.setDate(venc.getDate()+30);
-      var vdd=venc.getDate().toString().padStart(2,'0'), vmm=(venc.getMonth()+1).toString().padStart(2,'0');
-      FIN_CP.unshift({
-        id: cpId,
-        descricao: 'Compra #'+pc.numero+' — entrega '+seq+(documentoFornecedor?' — NF '+documentoFornecedor:' — sem NF'),
-        categoria: 'Matéria-Prima', valor: valorEntrega, vencimento: vdd+'/'+vmm+'/'+venc.getFullYear(),
-        status: documentoFornecedor ? 'agendado' : 'aguardando_documento',
-        marca: pc.marca||'vr', fornecedor: pc.fornecedorEscolhido||'',
-        formaPgto: 'Banco', dataCriacao: dd+'/'+mm+'/'+yyyy, dataPagamento: null,
-        origemCompraId: pc.id, origemRecebimentoId: recebimentoId
-      });
-      _finSaveCP();
-      pc.finCpId = pc.finCpId || cpId; // primeiro id — retrocompat de leitura
-    }
     pc.recebimentos.push({
-      id: recebimentoId, data: new Date().toLocaleString('pt-BR'), usuario: comprasQuem(),
-      itens: itensRecebidos, documentoFornecedor: documentoFornecedor||null,
-      valorRecebido: valorEntrega, finCpId: cpId
+      id: recebimentoId, seq: seq, data: new Date().toLocaleString('pt-BR'), usuario: comprasQuem(),
+      itens: itensRecebidos, valorRecebido: valorEntrega, documentoId: null
     });
-    comprasLog(pc, 'recebimento', (tudoRecebido?'Recebimento total':'Recebimento parcial')+(documentoFornecedor?' — NF '+documentoFornecedor:' — sem documento do fornecedor'));
+    comprasLog(pc, 'recebimento', (tudoRecebido?'Recebimento total':'Recebimento parcial')+' (físico) — '+finFmt(valorEntrega));
+    comprasSincronizarObrigacaoProvisoria(pc);
     comprasSave();
-    if(typeof secAuditLog==='function') secAuditLog('compra_recebimento','Compra #'+pc.numero+' — entrega '+seq+' — '+finFmt(valorEntrega)+(documentoFornecedor?' NF '+documentoFornecedor:' sem NF'));
-    showToast('Recebimento registrado para a Compra #'+pc.numero+(cpId?' — conta a pagar criada':''),'ok');
+    if(typeof secAuditLog==='function') secAuditLog('compra_recebimento','Compra #'+pc.numero+' — recebimento físico '+seq+' — '+finFmt(valorEntrega));
+    showToast('Recebimento físico registrado para a Compra #'+pc.numero+'. Adicione o documento do fornecedor quando disponível.','ok');
     comprasRender();
   } finally {
     delete _comprasRecebendoIds[id];
   }
 }
 
-// Resumo financeiro do pedido: pedido (contratado, imutável) x recebido
-// (acumulado físico) x faturado (só entregas com documento) x a pagar/pago
-// (a partir das Contas a Pagar geradas por cada recebimento).
+// Mantém NO MÁXIMO UMA Conta a Pagar provisória por compra (id fixo
+// 'cpprov_<pcId>' — nunca duplica, sempre sincroniza), com valor sempre
+// recalculado como (recebido físico − documentado). Quando um documento
+// cobre tudo que estava provisório, o valor cai para 0 e a provisória é
+// marcada 'conciliada' (nunca some do histórico, só para de contar como
+// "a pagar"). Isso garante que provisória e definitiva nunca contam o
+// mesmo valor ao mesmo tempo.
+function comprasSincronizarObrigacaoProvisoria(pc){
+  var totalRecebidoFisico = (pc.recebimentos||[]).reduce(function(s,r){ return s+(r.valorRecebido||0); }, 0);
+  var totalDocumentado = (pc.documentos||[]).reduce(function(s,d){ return s+(d.valorTotal||0); }, 0);
+  var saldoNaoDocumentado = +Math.max(0, totalRecebidoFisico - totalDocumentado).toFixed(2);
+  var provId = 'cpprov_'+pc.id;
+  var existente = FIN_CP.find(function(c){ return c.id===provId; });
+  if(saldoNaoDocumentado<=0){
+    if(existente && existente.status==='aguardando_documento'){ existente.status='conciliada'; existente.valor=0; existente.dataConciliacao=new Date().toLocaleDateString('pt-BR'); }
+    pc.obrigacaoProvisoriaId = null;
+    _finSaveCP();
+    return;
+  }
+  if(existente){
+    existente.valor = saldoNaoDocumentado; // sincroniza — NUNCA cria uma segunda provisória
+    if(existente.status==='conciliada') existente.status='aguardando_documento'; // reabre se voltou a ter saldo não documentado
+  } else {
+    var hoje = new Date();
+    FIN_CP.unshift({
+      id: provId, descricao: 'Compra #'+pc.numero+' — aguardando documento do fornecedor',
+      categoria: 'Matéria-Prima', valor: saldoNaoDocumentado, vencimento: hoje.toLocaleDateString('pt-BR'),
+      status: 'aguardando_documento', marca: pc.marca||'vr', fornecedor: pc.fornecedorEscolhido||'',
+      formaPgto: 'Banco', dataCriacao: hoje.toLocaleDateString('pt-BR'), dataPagamento: null,
+      origemCompraId: pc.id
+    });
+  }
+  pc.obrigacaoProvisoriaId = provId;
+  _finSaveCP();
+}
+
+// Registra um documento (nota fiscal) do fornecedor para a compra — pode
+// cobrir o valor de um ou vários recebimentos físicos já feitos. Cria 1+
+// parcelas, cada uma com sua PRÓPRIA Conta a Pagar (id determinístico
+// 'cppar_<documentoId>_p<N>' — idempotente: reexecutar com o mesmo número
+// de documento não duplica nada, é bloqueado explicitamente). Concilia a
+// obrigação provisória em seguida (nunca fica provisória+definitiva juntas
+// para o mesmo valor).
+function comprasAdicionarDocumento(id){
+  var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
+  if(!pc.documentos) pc.documentos=[];
+  if(!(pc.recebimentos||[]).length){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
+  var numero = (prompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
+  if(!numero){ showToast('Número do documento é obrigatório.','warn'); return; }
+  if(pc.documentos.some(function(d){ return d.numero===numero; })){ showToast('Este documento já foi registrado para esta compra.','warn'); return; }
+  var valorTotal = parseFloat(prompt('Valor total do documento (R$):'));
+  if(isNaN(valorTotal) || valorTotal<=0){ showToast('Valor inválido.','warn'); return; }
+  var nParc = parseInt(prompt('Quantas parcelas?','1'))||1;
+  if(nParc<1) nParc=1;
+  var documentoId = 'doc_'+pc.id+'_'+numero.replace(/[^a-zA-Z0-9]/g,'');
+  var parcelas = [];
+  var acumulado = 0;
+  for(var i=1;i<=nParc;i++){
+    var valorParcela = i===nParc ? +(valorTotal-acumulado).toFixed(2) : +(valorTotal/nParc).toFixed(2);
+    acumulado += valorParcela;
+    var diasVenc = parseInt(prompt('Parcela '+i+'/'+nParc+' — dias até o vencimento:', '30'))||30;
+    var venc = new Date(); venc.setDate(venc.getDate()+diasVenc);
+    var parcelaId = documentoId+'_p'+i;
+    var cpId = 'cppar_'+parcelaId;
+    parcelas.push({ id: parcelaId, numero: i, valor: valorParcela, vencimento: venc.toLocaleDateString('pt-BR'), finCpId: cpId });
+    if(!FIN_CP.some(function(c){ return c.id===cpId; })){ // idempotência: nunca duplica a parcela
+      FIN_CP.unshift({
+        id: cpId, descricao: 'Compra #'+pc.numero+' — NF '+numero+' — parcela '+i+'/'+nParc,
+        categoria: 'Matéria-Prima', valor: valorParcela, vencimento: venc.toLocaleDateString('pt-BR'),
+        status: 'agendado', marca: pc.marca||'vr', fornecedor: pc.fornecedorEscolhido||'',
+        formaPgto: 'Banco', dataCriacao: new Date().toLocaleDateString('pt-BR'), dataPagamento: null,
+        origemCompraId: pc.id, origemDocumentoId: documentoId
+      });
+    }
+  }
+  pc.documentos.push({ id: documentoId, numero: numero, dataEmissao: new Date().toLocaleDateString('pt-BR'), valorTotal: valorTotal, parcelas: parcelas, criadoEm: new Date().toISOString(), usuario: comprasQuem() });
+  comprasLog(pc, 'documento', 'Documento '+numero+' registrado — '+finFmt(valorTotal)+' em '+nParc+' parcela(s)');
+  comprasSincronizarObrigacaoProvisoria(pc);
+  comprasSave();
+  if(typeof secAuditLog==='function') secAuditLog('compra_documento','Compra #'+pc.numero+' — documento '+numero+' — '+finFmt(valorTotal)+' em '+nParc+' parcela(s)');
+  showToast('Documento '+numero+' registrado — '+nParc+' parcela(s) criada(s) em Contas a Pagar.','ok');
+  comprasRender();
+}
+
+// Resumo financeiro: pedido (contratado, imutável) × recebido (físico
+// acumulado) × documentado/faturado × a pagar/pago (parcelas definitivas +
+// provisória ainda em aberto) × saldo contratual (físico a receber) ×
+// saldo financeiro (a pagar).
 function comprasResumoValores(pc){
   var valorPedido = (pc.itens||[]).reduce(function(s,i){ return s+(i.qtyNecessaria||0)*(i.precoUnit||0); }, 0);
-  var recs = pc.recebimentos||[];
-  var valorRecebido = recs.reduce(function(s,r){ return s+(r.valorRecebido||0); }, 0);
-  var valorFaturado = recs.filter(function(r){ return !!r.documentoFornecedor; }).reduce(function(s,r){ return s+(r.valorRecebido||0); }, 0);
-  var cps = recs.map(function(r){ return r.finCpId; }).filter(Boolean).map(function(cpid){ return FIN_CP.find(function(c){ return c.id===cpid; }); }).filter(Boolean);
-  var valorAPagar = cps.filter(function(c){ return c.status!=='pago'; }).reduce(function(s,c){ return s+(c.valor||0); }, 0);
-  var valorPago = cps.filter(function(c){ return c.status==='pago'; }).reduce(function(s,c){ return s+(c.valor||0); }, 0);
-  return {valorPedido:valorPedido, valorRecebido:valorRecebido, valorFaturado:valorFaturado, valorAPagar:valorAPagar, valorPago:valorPago};
+  var valorRecebido = (pc.recebimentos||[]).reduce(function(s,r){ return s+(r.valorRecebido||0); }, 0);
+  var valorDocumentado = (pc.documentos||[]).reduce(function(s,d){ return s+(d.valorTotal||0); }, 0);
+  var todasParcelasCp = [];
+  (pc.documentos||[]).forEach(function(d){ (d.parcelas||[]).forEach(function(p){ var cp=FIN_CP.find(function(c){return c.id===p.finCpId;}); if(cp) todasParcelasCp.push(cp); }); });
+  var provisoria = pc.obrigacaoProvisoriaId ? FIN_CP.find(function(c){ return c.id===pc.obrigacaoProvisoriaId && c.status==='aguardando_documento'; }) : null;
+  var todasCps = provisoria ? todasParcelasCp.concat([provisoria]) : todasParcelasCp;
+  var valorAPagar = todasCps.filter(function(c){ return c.status!=='pago'; }).reduce(function(s,c){ return s+(c.valor||0); }, 0);
+  var valorPago = todasCps.filter(function(c){ return c.status==='pago'; }).reduce(function(s,c){ return s+(c.valor||0); }, 0);
+  var saldoContratual = Math.max(0, valorPedido-valorRecebido);
+  var saldoFinanceiro = valorAPagar;
+  return {valorPedido:valorPedido, valorRecebido:valorRecebido, valorDocumentado:valorDocumentado, valorAPagar:valorAPagar, valorPago:valorPago, saldoContratual:saldoContratual, saldoFinanceiro:saldoFinanceiro};
 }
 
 function comprasRender(){
@@ -12004,18 +12074,26 @@ function comprasRender(){
     }).join('');
     var origemHtml = pc.origem ? '<span style="font-size:10px;color:var(--muted)">OS #'+pc.origem.osNum+'</span>' : '';
     var rv = comprasResumoValores(pc);
-    var resumoHtml = (rv.valorPedido>0) ? ('<div style="font-size:10px;color:var(--muted);margin-top:6px">'
+    var resumoHtml = (rv.valorPedido>0) ? ('<div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6">'
       +'Pedido: <strong>'+finFmt(rv.valorPedido)+'</strong>'
       +' · Recebido: '+finFmt(rv.valorRecebido)
-      +' · Faturado: '+finFmt(rv.valorFaturado)
+      +' · Documentado: '+finFmt(rv.valorDocumentado)
       +' · A pagar: '+finFmt(rv.valorAPagar)
       +' · Pago: '+finFmt(rv.valorPago)
+      +'<br>Saldo contratual (a receber): '+finFmt(rv.saldoContratual)
+      +' · Saldo financeiro (a pagar): '+finFmt(rv.saldoFinanceiro)
+      +'</div>') : '';
+    var documentosHtml = (pc.documentos&&pc.documentos.length) ? ('<div style="font-size:10px;color:var(--muted);margin-top:4px">'
+      +pc.documentos.map(function(d){ return 'NF '+cfgEsc(d.numero)+' ('+finFmt(d.valorTotal)+', '+d.parcelas.length+'x)'; }).join(' · ')
       +'</div>') : '';
     var acoes = '';
     if(pc.status!=='cancelada' && pc.status!=='recebida'){
       var proxLabel = pc.status==='pedida' ? '🚚 Registrar Recebimento' : '➡️ Avançar';
       acoes += '<button onclick="comprasAvancarStatus(\''+pc.id+'\')" class="topbar-btn" style="font-size:11px;padding:5px 10px">'+proxLabel+'</button>';
       acoes += '<button onclick="comprasCancelar(\''+pc.id+'\')" style="font-size:11px;padding:5px 10px;border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:6px">Cancelar</button>';
+    }
+    if((pc.recebimentos||[]).length && rv.valorRecebido>rv.valorDocumentado){
+      acoes += '<button onclick="comprasAdicionarDocumento(\''+pc.id+'\')" style="font-size:11px;padding:5px 10px;border:1px solid #3B82F6;background:transparent;color:#3B82F6;border-radius:6px;cursor:pointer;margin-left:6px">📄 Adicionar Documento</button>';
     }
     return '<div class="card" style="padding:14px 16px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
@@ -12024,6 +12102,7 @@ function comprasRender(){
       +'</div>'
       +'<div style="margin-top:8px">'+itensHtml+'</div>'
       +resumoHtml
+      +documentosHtml
       +(pc.fornecedorEscolhido?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Fornecedor: '+cfgEsc(pc.fornecedorEscolhido)+'</div>':'')
       +(pc.cancelJustificativa?'<div style="font-size:11px;color:#DC2626;margin-top:4px">Cancelada: '+cfgEsc(pc.cancelJustificativa)+'</div>':'')
       +'<div style="margin-top:10px">'+acoes+'</div>'
