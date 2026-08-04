@@ -1171,15 +1171,38 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 // ═══════════════════════════════════════════════════
 // FIREBASE — SYNC EM NUVEM (erp-vrmarcas)
 // ═══════════════════════════════════════════════════
-// ── MODO HOMOLOGAÇÃO ISOLADA (Firebase Emulator Suite) ──────────────────────
-// Ativa-se SOMENTE com localhost + ?emulator=1 explícito na URL — nunca em
-// produção (hosting real não serve de localhost) e nunca por acidente (exige
-// o parâmetro). Quando ativo, o app INTEIRO (default app, usado por todo o
-// arquivo) troca de projectId para um projeto fictício (demo-erp-homolog) que
-// não existe de verdade, redirecionado ao emulador local — mesmo que a
-// chamada useEmulator() abaixo falhasse por algum motivo, o SDK tentaria
-// alcançar um projeto inexistente, nunca o erp-vrmarcas real.
-var _HOMOLOG_MODE = ((location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).get('emulator') === '1');
+// ── MODO HOMOLOGAÇÃO ISOLADA (Firebase Emulator Suite) — fail-closed ────────
+// Ativa-se SOMENTE com localhost/127.0.0.1 + ?emulator=1 explícito na URL —
+// nunca em produção (hosting real não serve desses hosts) e nunca por
+// acidente (exige o parâmetro). Estas funções são puras e replicadas em
+// scripts/test_homolog_guard.js (mirror test) — qualquer mudança aqui deve
+// ser espelhada lá.
+//
+// Fail-closed real (não apenas "confiar no valor calculado"): se o modo
+// homologação for detectado mas o projectId resultante não começar com
+// "demo-", a inicialização é interrompida com erro visível (documento
+// substituído por um aviso, exceção lançada, execução do restante do script
+// abortada) — nunca cai silenciosamente para a config de produção. Além
+// disso, nenhuma operação de auth/Firestore prossegue (_homologGuardOrThrow,
+// chamado em authLogin/_cloudSave/_cloudLoad/_cloudWatch) sem confirmação
+// explícita de que os emuladores foram conectados com sucesso.
+function _homologComputeMode(hostname, emulatorParam) {
+  return ((hostname === 'localhost' || hostname === '127.0.0.1') && emulatorParam === '1');
+}
+function _homologValidateProjectId(homologMode, projectId) {
+  if (!homologMode) return { ok: true, mode: 'production' };
+  if (!/^demo-/.test(projectId || '')) {
+    return { ok: false, reason: 'HOMOLOG_MODE ativo, mas projectId "' + projectId + '" não começa com "demo-"' };
+  }
+  return { ok: true, mode: 'homolog' };
+}
+function _homologFatal(reason) {
+  var msg = '⛔ Inicialização interrompida por segurança — modo de homologação mal configurado.\n' + reason;
+  try { document.documentElement.innerHTML = '<pre style="padding:40px;font:14px monospace;color:#B91C1C;white-space:pre-wrap">' + msg.replace(/</g,'&lt;') + '</pre>'; } catch(e){}
+  throw new Error('[HOMOLOG] ' + reason);
+}
+
+var _HOMOLOG_MODE = _homologComputeMode(location.hostname, new URLSearchParams(location.search).get('emulator'));
 var firebaseConfig = _HOMOLOG_MODE ? {
   apiKey: "demo-homolog-key",
   authDomain: "demo-erp-homolog.firebaseapp.com",
@@ -1195,12 +1218,36 @@ var firebaseConfig = _HOMOLOG_MODE ? {
   messagingSenderId: "273506088255",
   appId: "1:273506088255:web:a9d06d52253161d2cf8f8a"
 };
+
+var _homologCheck = _homologValidateProjectId(_HOMOLOG_MODE, firebaseConfig.projectId);
+if (!_homologCheck.ok) { _homologFatal(_homologCheck.reason); }
+
 if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
 var _db = firebase.firestore();
+
+// Só true depois que AMBOS os emuladores (Firestore e Auth) confirmarem
+// conexão — nenhuma leitura/gravação/login é permitida antes disso quando
+// _HOMOLOG_MODE está ativo (ver _homologGuardOrThrow).
+var _HOMOLOG_EMULATORS_CONNECTED = false;
 if (_HOMOLOG_MODE) {
-  _db.useEmulator('localhost', 8080);
-  firebase.auth().useEmulator('http://localhost:9099', {disableWarnings:true});
-  console.warn('[HOMOLOG] Firebase Emulator Suite ativo — projectId=demo-erp-homolog. NÃO é o backend de produção.');
+  try {
+    _db.useEmulator('localhost', 8080);
+    firebase.auth().useEmulator('http://localhost:9099', {disableWarnings:true});
+    _HOMOLOG_EMULATORS_CONNECTED = true;
+    console.warn('[HOMOLOG] Firebase Emulator Suite ativo — projectId=' + firebaseConfig.projectId + '. NÃO é o backend de produção.');
+  } catch (e) {
+    _homologFatal('Falha ao conectar aos emuladores Auth/Firestore: ' + e.message);
+  }
+}
+// Chamado no topo de authLogin() e de _cloudSave/_cloudLoad/_cloudWatch —
+// trava fail-closed contra qualquer operação de auth/Firestore que rode em
+// modo homologação sem confirmação de que os emuladores estão conectados
+// (por exemplo, se o código acima for alterado no futuro e o try/catch for
+// removido por engano, esta função ainda bloqueia).
+function _homologGuardOrThrow() {
+  if (_HOMOLOG_MODE && !_HOMOLOG_EMULATORS_CONNECTED) {
+    _homologFatal('Operação de autenticação/Firestore bloqueada — modo homologação ativo sem confirmação de conexão aos emuladores.');
+  }
 }
 var _COL = "erp_vr"; // coleção Firestore
 var _cloudReady = false;
@@ -1297,6 +1344,7 @@ var _cloudLastPayload = {};
 // Salvar documento no Firestore
 function _cloudSave(key, data) {
   if(!_db) return;
+  _homologGuardOrThrow();
   try {
     var payload = JSON.stringify(data);
     if(_cloudLastPayload[key] === payload) return; // dado idêntico — nada a gravar
@@ -1318,6 +1366,7 @@ function _cloudSave(key, data) {
 // Carregar documento do Firestore
 function _cloudLoad(key, cb) {
   if(!_db) { cb(null); return; }
+  _homologGuardOrThrow();
   _db.collection(_COL).doc(key).get().then(function(doc) {
     if(doc.exists && doc.data() && doc.data().data) {
       try {
@@ -1333,6 +1382,7 @@ function _cloudLoad(key, cb) {
 // Listener em tempo real
 function _cloudWatch(key, callback) {
   if(!_db) return;
+  _homologGuardOrThrow();
   var unsub = _db.collection(_COL).doc(key).onSnapshot(function(doc) {
     if(doc.exists && doc.data() && doc.data().data) {
       try {
@@ -16251,7 +16301,9 @@ function orcSalvarOrcamento() {
     prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
     prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||'',
     dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10),
-    pricingVersion: (function(){ var _f=(_cfgData&&_cfgData.financeiro)||{}; return [_f.overhead,_f.vrml,_f.impostos].join('_')||new Date().toISOString().slice(0,10); })(),
+    // Hash não-reversível — nunca grava overhead/VRML/imposto em texto puro
+    // no orçamento (documento lido pelo perfil Comercial). Ver cfgHashNaoReversivel.
+    pricingVersion: (function(){ var _f=(_cfgData&&_cfgData.financeiro)||{}; var _raw=[_f.overhead,_f.vrml,_f.impostos].join('_'); return _raw==='__' ? new Date().toISOString().slice(0,10) : cfgHashNaoReversivel(_raw); })(),
     // Controle fiscal por venda (seção 11) — antes nfSolicitada nunca era
     // gravado em lugar nenhum, então o Relatório Fiscal ficava sempre vazio.
     nfSolicitada: !!(document.getElementById('orcNFToggle')||{}).checked,
@@ -17490,6 +17542,21 @@ function cfgRowMaq(i,r){ return '<tr id="maqR'+i+'"><td><input style="border:non
 function cfgRowMob(i,r){ return '<tr id="mobR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mob\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mob\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='hora'?' selected':'')+'>hora</option><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.valor+'" oninput="cfgCell(\'mob\','+i+',\'valor\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'mob\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'mob\','+i+')">✕</button></td></tr>'; }
 
 function cfgEsc(s){ return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+// Hash simples e não-reversível (djb2) — usado para "pricingVersion" no
+// orçamento: precisa detectar SE a config de markup mudou desde que o
+// orçamento foi calculado, sem gravar os percentuais de overhead/VRML/
+// imposto em texto puro dentro de um documento que o perfil Comercial
+// também lê (achado real da homologação: Firestore Rules não conseguem
+// redigir campos individuais de um documento, só bloquear o documento
+// inteiro — a única forma de não vazar markup para Comercial sem separar
+// a config em outro documento era parar de gravar o valor legível).
+function cfgHashNaoReversivel(str){
+  var h = 5381;
+  str = String(str);
+  for(var i=0;i<str.length;i++){ h = ((h*33) ^ str.charCodeAt(i)) >>> 0; }
+  return h.toString(36);
+}
 
 var _cfgData = null;
 var _cfgDataLoaded = false; // True somente após receber dados reais do Firestore
@@ -19722,6 +19789,7 @@ function fbVoltarLogin(){
 
 // ── Login — FASE 5: signInWithEmailAndPassword ────────────────────────────────
 function authLogin(){
+  _homologGuardOrThrow();
   if(secCheckLockout()) return;
   var emailEl=document.getElementById('authEmail');
   var pwdEl  =document.getElementById('authPwd');
