@@ -721,3 +721,108 @@ apagando) o documento inteiro — incluindo o seed real — como efeito
 colateral de testar permissão de escrita. Corrigido usando
 `updateMask.fieldPaths=probe` (merge de um campo só, nunca substitui o
 documento).
+
+## Rodada de fechamento arquitetural v9 — documento-por-registro + Cloud Functions
+
+Resolve o bloqueador arquitetural registrado na v8: Rules por documento
+não conseguem diferenciar "criar" de "aprovar" dentro do mesmo array.
+Detalhes completos no commit `955269f` e em `functions/src/compras.ts`.
+
+**ACHADO CRÍTICO autodescoberto e autocorrigido**: ao testar escrita
+direta (bypass da Cloud Function) como parte do checklist "tentativa
+direta, sem interface", descobri que o catch-all antigo
+(`match /{col}/{docId=**} { allow read,write: if isAuthenticated() &&
+!(col in [lista fixa]) }`) nunca foi atualizado com as coleções novas —
+qualquer usuário autenticado lia/escrevia direto em erp_vr_compras,
+erp_vr_fin_cp etc., ignorando as regras específicas (`if false`) escritas
+para elas, porque o Firestore combina múltiplos match blocks que casam o
+mesmo caminho com OR. Prova: PATCH direto em erp_vr_compras retornava
+HTTP 200 antes da correção, apesar do match block específico dizer
+`allow write: if false`. Corrigido trocando para `allow read,write: if
+false` incondicional — nenhuma coleção legítima dependia do catch-all.
+Reconfirmado com os mesmos testes: 403 em tudo que deveria ser negado,
+200 em tudo que deveria continuar permitido (leitura legítima do
+erp_vr_compras/{id}, erp_vr/erp_usuarios via master, valeria_*/
+marketing_* inalterados).
+
+**Matriz de Rules final**: estrutura antiga 96 (matriz) + 10 (bordas:
+não-autenticado, sem role, role inválida, delete) = 106. Estrutura nova
+76 (matriz, incluindo erp_vr_usuarios por UID, erp_vr_compras* sempre
+`write:false`, erp_vr_orcamentos/interno nunca lido por Comercial).
+Total: 182 casos de Rules, 182/182 conforme o esperado, tokens reais do
+Auth Emulator via REST (nunca Admin SDK para as operações testadas).
+
+**E2E real do novo pipeline de Compras** (Auth+Firestore+Functions
+Emulator, via `firebase.functions().httpsCallable`, não simulação):
+Produção cria solicitação (`comprasCriarSolicitacao`) → Produção tenta
+aprovar a própria solicitação → **negado no servidor**
+(`permission-denied`, mensagem explícita do perfil) → Master aprova
+(`comprasAprovar`, define fornecedor/preço) → reaprovar a mesma compra
+→ **negado** (`failed-precondition`, transição inválida de "aprovada"
+para "aprovada") → Produção registra recebimento físico com DOIS
+cliques simultâneos usando a MESMA requestId → processado uma única
+vez (confirmado via leitura direta: 1 documento em
+erp_vr_compras_recebimentos, não 2) → segundo recebimento completa a
+quantidade, status vira "recebida" → Produção tenta adicionar documento
+fiscal → **negado** (perfil errado) → Financeiro adiciona documento
+(gera 2 parcelas em erp_vr_fin_cp) → Financeiro paga uma parcela com
+DOIS cliques simultâneos (mesma requestId) → processado uma única vez
+(confirmado: 1 documento em erp_vr_fin_pagamentos). Produção confirmada
+sem leitura nem escrita em erp_vr_fin_cp em nenhum momento.
+
+**erp_usuarios normalizado**: `erp_vr_usuarios/{uid}`, dual-write a
+partir de `writeUsersDoc()` (adminUsers.ts) mantendo o array legado
+intocado. Login do client agora lê só `erp_vr_usuarios/{próprio uid}` —
+testado ao vivo: Financeiro loga e recebe só o próprio registro; tentar
+ler o UID de outro perfil via REST puro retorna 403.
+
+**Separação de dado sensível de orçamento**: `erp_vr_orcamentos/{id}`
+(núcleo comercial) + `erp_vr_orcamentos/{id}/interno/{doc}` (custo/
+margem, só Financeiro/Master — 76/76 confirma que Comercial nunca lê).
+Dual-write no client (`orcSalvarOrcamentoCompleto`, ativo só em
+`_HOMOLOG_MODE` — produção continua usando exclusivamente o array
+legado nesta branch). Testado: Comercial cria orçamento real via UI,
+persiste em `erp_vr_orcamentos/{id}`, confirmado via leitura direta.
+
+**Migração** (`scripts/migrate_compras_v2.js`): fail-closed (recusa
+sem `FIRESTORE_EMULATOR_HOST` e sem `--project demo-*`), idempotente
+via campo `migradoDe` — testada rodando 2x seguidas: 1ª execução migra
+2 registros legados, 2ª execução detecta os 2 como já migrados e não
+duplica (confirmado por leitura direta no Firestore, não só pelo log).
+Detecção de duplicata por número também testada. Aditiva — nunca altera
+o array legado.
+
+**PDF via motor real do Chromium**: `google-chrome --headless
+--print-to-pdf` (não mais captura de `window.open`) sobre o HTML
+real gerado por `orcImprimirOrcamentoPDF()`. Orçamento de 25 itens
+gerou PDF real de 2 páginas (confirmado via contagem de objetos
+`/Type /Page` no PDF), renderizado em imagem via `pdftoppm`
+(poppler instalado — utilitário padrão, não relacionado ao app):
+página 1 termina no item 16 sem cortar nenhuma linha, página 2 repete
+o cabeçalho da tabela (`thead{display:table-header-group}`) e mostra
+os itens 17–25 + Total Geral R$ 23.750,00 + parcelamento 6x R$ 4.195,44
+com acréscimo + desconto Pix 5% + rodapé com CNPJ/endereço — nenhum
+custo interno visível em nenhuma página. Orçamento curto (1 item,
+R$999,99 com 5% Pix = R$949,99) gerou PDF real de 1 página, mesma
+estrutura. Arquivos gerados ficam fora do repositório (scratchpad),
+não commitados.
+
+**Bugs corrigidos nesta rodada**: (1) catch-all de Rules vazando todas
+as coleções novas — crítico, acima; (2) `admin.firestore.FieldValue.
+serverTimestamp()` retornava `undefined` dentro do Functions Emulator
+(funciona em Node puro, mas não no runtime do emulador nesta versão) —
+substituído por `Date.now()`, mesmo padrão já usado no restante do
+arquivo para idempotência.
+
+## O que NÃO foi reexecutado nesta rodada (registrado, não escondido)
+
+Os ~40 cenários de E2E listados para OS/Estoque, Orçamento/Fiscal/DRE e
+SVG/Peças (início normal, falta de material, OS Pronta, bloqueio de
+entrega, DRE caixa/competência, produto legado, SVG malicioso etc.) NÃO
+foram re-executados nesta rodada especificamente — o código desses
+fluxos não foi alterado por este round (só Compras/usuários/orçamento
+mudaram de arquitetura) e a evidência da rodada v8/v7 anterior (cliques
+reais contra mock fiel de Firestore) continua válida para o comportamento
+funcional, mas não foi revalidada contra o Firebase Emulator Suite real
+nem contra as Rules normalizadas desta rodada. Isso é uma lacuna real de
+cobertura, não uma alegação de conclusão.
