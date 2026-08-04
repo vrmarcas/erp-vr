@@ -1171,7 +1171,23 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 // ═══════════════════════════════════════════════════
 // FIREBASE — SYNC EM NUVEM (erp-vrmarcas)
 // ═══════════════════════════════════════════════════
-var firebaseConfig = {
+// ── MODO HOMOLOGAÇÃO ISOLADA (Firebase Emulator Suite) ──────────────────────
+// Ativa-se SOMENTE com localhost + ?emulator=1 explícito na URL — nunca em
+// produção (hosting real não serve de localhost) e nunca por acidente (exige
+// o parâmetro). Quando ativo, o app INTEIRO (default app, usado por todo o
+// arquivo) troca de projectId para um projeto fictício (demo-erp-homolog) que
+// não existe de verdade, redirecionado ao emulador local — mesmo que a
+// chamada useEmulator() abaixo falhasse por algum motivo, o SDK tentaria
+// alcançar um projeto inexistente, nunca o erp-vrmarcas real.
+var _HOMOLOG_MODE = ((location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).get('emulator') === '1');
+var firebaseConfig = _HOMOLOG_MODE ? {
+  apiKey: "demo-homolog-key",
+  authDomain: "demo-erp-homolog.firebaseapp.com",
+  projectId: "demo-erp-homolog",
+  storageBucket: "demo-erp-homolog.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:0000000000000000000000"
+} : {
   apiKey: "AIzaSyASz1dnDw39NpIpU07cbcyR4kl2dOXCsVA",
   authDomain: "erp-vrmarcas.firebaseapp.com",
   projectId: "erp-vrmarcas",
@@ -1181,6 +1197,11 @@ var firebaseConfig = {
 };
 if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
 var _db = firebase.firestore();
+if (_HOMOLOG_MODE) {
+  _db.useEmulator('localhost', 8080);
+  firebase.auth().useEmulator('http://localhost:9099', {disableWarnings:true});
+  console.warn('[HOMOLOG] Firebase Emulator Suite ativo — projectId=demo-erp-homolog. NÃO é o backend de produção.');
+}
 var _COL = "erp_vr"; // coleção Firestore
 var _cloudReady = false;
 // [S4] Array de funções unsubscribe — cancelar todos os onSnapshot ao sair da página
@@ -19720,7 +19741,14 @@ function authLogin(){
     .then(function(cred){
       // ── 2. Buscar role em erp_usuarios no Firestore (fonte de verdade) ─────
       // Custom claims não são usadas — a role vem do cadastro no ERP.
-      return _db.collection(_COL).doc('erp_usuarios').get()
+      // getIdTokenResult() força a sincronização do token recém-emitido antes
+      // da leitura no Firestore — sem isso, a leitura pode disparar numa
+      // janela em que o SDK do Firestore ainda não recebeu o novo estado de
+      // autenticação, causando permission-denied intermitente logo após o
+      // login (achado real: reproduzido contra o Firebase Emulator Suite).
+      return cred.user.getIdTokenResult().then(function(){
+        return _db.collection(_COL).doc('erp_usuarios').get();
+      })
         .then(function(doc){
           var users = [];
           if(doc.exists && doc.data() && doc.data().data){
@@ -19865,7 +19893,21 @@ function secApplyPerms(funcao){
     return !!(perms[mod]&&perms[mod][funcao]);
   }
   function applyToItem(item, pageExtractor){
-    var m=(item.getAttribute('onclick')||'').match(pageExtractor);
+    var onclick=item.getAttribute('onclick')||'';
+    // navFin('dash'|'cr'|'cp'|'dre', ...) — sub-abas do Financeiro. Checado
+    // ANTES do pageExtractor genérico porque "navFin(" não casa com o regex
+    // /nav\('.../ (não há "nav(" literal dentro de "navFin(") — achado real:
+    // isso fazia os 4 itens de sidebar do Financeiro (Dashboard Financeiro,
+    // Contas a Receber, Contas a Pagar, DRE) nunca serem escondidos pelo
+    // secApplyPerms() para NENHUM perfil não-master, permanecendo sempre
+    // visíveis mesmo com o módulo "financeiro" negado.
+    var mFin=onclick.match(/navFin\('([^']+)'/);
+    if(mFin){
+      var hasPermFin=getPermForMod('financeiro', 'financeiro');
+      item.style.display=hasPermFin?'':'none';
+      return;
+    }
+    var m=onclick.match(pageExtractor);
     if(!m) return;
     var page=m[1];
     var mod=page;
