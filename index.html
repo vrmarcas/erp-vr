@@ -4822,6 +4822,7 @@ function _authFirebaseError(code){
                 <span id="cfgMargemPlanTotal" style="font-size:15px;font-weight:900;color:#7C3AED;margin-left:6px">—</span>
                 <span style="color:#6B7280;font-size:11px;margin-left:4px">(Overhead + VRML) — edite os campos acima para alterar</span>
               </div>
+              <div id="cfgMarkupRevisaoBox" style="grid-column:1/-1;border-radius:8px;padding:10px 14px;font-size:12px"></div>
               <div class="fg"><label>% Despesas Operacionais (ref.)</label><input type="number" id="cfgDespPct" step="0.1" min="0" max="100" placeholder="Ex: 20" title="Usado para alertar quando despesas ultrapassarem esse % do faturamento"></div>
               <div class="fg"><label>Taxa Cartão de Crédito (%)</label><input type="number" id="cfgCartao" step="0.01" min="0" max="10" placeholder="Ex: 3.49"></div>
               <div class="fg"><label>Taxa PIX / Mercado Pago (%)</label><input type="number" id="cfgPix" step="0.01" min="0" max="5" placeholder="Ex: 0.99"></div>
@@ -4830,7 +4831,9 @@ function _authFirebaseError(code){
               <div class="fg"><label>Impostos sobre Venda (%)</label><input type="number" id="cfgImpostos" step="0.1" min="0" max="50" placeholder="Ex: 7" oninput="cfgSalvar()"></div>
               <div class="fg"><label>Comissão de Vendedores (%)</label><input type="number" id="cfgComissao" step="0.1" min="0" max="30" placeholder="Ex: 5" oninput="cfgSalvar()"></div>
             </div>
-            <div style="text-align:right;margin-top:14px">
+            <div style="text-align:right;margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+              <button class="topbar-btn ghost" onclick="cfgMarkupAdiar()" title="Adia a próxima revisão sem alterar os valores atuais">⏰ Adiar Revisão</button>
+              <button class="topbar-btn ghost" onclick="cfgMarkupRevisarAgora()">🔄 Revisar Agora</button>
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
           </div>
@@ -11049,6 +11052,12 @@ function dashRender() {
     return p.length>=2 && new Date() > new Date(2026, parseInt(p[1])-1, parseInt(p[0]));
   });
   if(late.length) alertas.push({tipo:'warn', msg:late.length+' OS com prazo ultrapassado', acao:'Ver Kanban'});
+  if(typeof cfgMarkupRevisaoStatus==='function'){
+    var _mkSt = cfgMarkupRevisaoStatus();
+    if(!_mkSt.nunca && _mkSt.diasRestantes<=30){
+      alertas.push({tipo:'warn', msg:(_mkSt.diasRestantes<0?'Revisão de markup atrasada há '+Math.abs(_mkSt.diasRestantes)+' dia(s)':'Revisão de markup em '+_mkSt.diasRestantes+' dia(s)'), acao:'Ver Config'});
+    }
+  }
 
   var dAlerts  = document.getElementById('dAlerts');
   var dAlertN  = document.getElementById('dAlertN');
@@ -17098,6 +17107,7 @@ function cfgTab(n) {
     if(t) t.classList.toggle('on', i===n);
     if(p) p.style.display = i===n ? 'block' : 'none';
   }
+  if(n===3) { try{ cfgAtualizarMargemPlan(); cfgRenderMarkupRevisaoBanner(); }catch(e){} }
   if(n===6) cfgRenderParc();
   if(n===7) cfgCarregarBanco();
   if(n===9) cfgIntegLoad();
@@ -17451,6 +17461,69 @@ function calcTempoCorte(params) {
   };
 }
 
+// ============================================================
+// REVISÃO SEMESTRAL DE MARKUP (seção 18) — controle de quando os
+// parâmetros de precificação (overhead/VRML/impostos) foram revisados
+// pela última vez, com alerta antes do prazo. NUNCA altera preços
+// automaticamente: só registra data/responsável/histórico da revisão
+// que o usuário já faz ao editar e salvar os campos financeiros.
+// ============================================================
+var MARKUP_REVISAO_INTERVALO_DIAS = 182; // ~6 meses
+
+function cfgMarkupQuem(){ return (typeof _currentSession!=='undefined' && _currentSession && (_currentSession.user||_currentSession.email)) || 'desconhecido'; }
+
+function cfgMarkupRevisaoStatus() {
+  var d = cfgLoad();
+  var mr = (d && d.markupRevisao) || {};
+  if(!mr.ultimaRevisao) return { nunca: true, diasRestantes: null, mr: mr };
+  var proxima = mr.proximaRevisao || (mr.ultimaRevisao + MARKUP_REVISAO_INTERVALO_DIAS*86400000);
+  var diasRestantes = Math.ceil((proxima - Date.now())/86400000);
+  return { nunca:false, ultimaRevisao:mr.ultimaRevisao, proximaRevisao:proxima, diasRestantes:diasRestantes, responsavel:mr.responsavel, historico:mr.historico||[], mr:mr };
+}
+
+function cfgRenderMarkupRevisaoBanner() {
+  var box = document.getElementById('cfgMarkupRevisaoBox'); if(!box) return;
+  var st = cfgMarkupRevisaoStatus();
+  var cor, bg, msg;
+  if(st.nunca){
+    cor='#92400E'; bg='#FEF3C7';
+    msg='⚠️ Este parâmetro de precificação ainda não tem uma revisão registrada. Ajuste os valores acima e clique em "Salvar Alterações" para registrar a primeira revisão.';
+  } else {
+    var d = new Date(st.proximaRevisao).toLocaleDateString('pt-BR');
+    var dUlt = new Date(st.ultimaRevisao).toLocaleDateString('pt-BR');
+    if(st.diasRestantes < 0){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Revisão de markup ATRASADA há '+Math.abs(st.diasRestantes)+' dia(s) (prevista para '+d+'). Última revisão: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
+    else if(st.diasRestantes<=7){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
+    else if(st.diasRestantes<=30){ cor='#D97706'; bg='#FFFBEB'; msg='🟡 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
+    else { cor='#059669'; bg='#F0FDF4'; msg='🟢 Próxima revisão de markup: '+d+' ('+st.diasRestantes+' dias). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
+  }
+  box.style.background=bg; box.style.border='1.5px solid '+cor; box.style.color=cor;
+  box.innerHTML = msg;
+}
+
+// Não altera nada sozinho — apenas foca os campos e explica que salvar
+// registra a revisão. A decisão/simulação continua manual e deliberada.
+function cfgMarkupRevisarAgora() {
+  var el = document.getElementById('cfgOverhead');
+  if(el){ el.focus(); el.scrollIntoView({behavior:'smooth', block:'center'}); }
+  showToast('Compare custos (material, mão de obra, energia, aluguel, impostos) e ajuste Overhead/VRML/Impostos acima. Salvar registra esta revisão.', 'info');
+}
+
+function cfgMarkupAdiar() {
+  var motivo = prompt('Justificativa para adiar a revisão do markup (obrigatória):');
+  if(!motivo || !motivo.trim()){ showToast('Adiamento requer justificativa.','warn'); return; }
+  if(!_cfgData) _cfgData = cfgLoad();
+  if(!_cfgData.markupRevisao) _cfgData.markupRevisao = {};
+  var mr = _cfgData.markupRevisao;
+  var baseProxima = mr.proximaRevisao || Date.now();
+  mr.proximaRevisao = baseProxima + 30*86400000;
+  if(!mr.historico) mr.historico=[];
+  mr.historico.push({data:Date.now(), tipo:'adiamento', responsavel:cfgMarkupQuem(), justificativa:motivo.trim()});
+  cfgSave(_cfgData);
+  if(typeof secAuditLog==='function') secAuditLog('markup_revisao','Revisão de markup adiada 30 dias — motivo: '+motivo.trim());
+  showToast('Revisão adiada em 30 dias.','ok');
+  cfgRenderMarkupRevisaoBanner();
+}
+
 function cfgAtualizarMargemPlan() {
   var oh = parseFloat((document.getElementById('cfgOverhead')||{}).value)||0;
   var vr = parseFloat((document.getElementById('cfgVrml')||{}).value)||0;
@@ -17464,12 +17537,31 @@ function cfgSalvar() {
   // Financeiro
   var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
   if(!_cfgData.financeiro) _cfgData.financeiro={};
+  // Snapshot ANTES de sobrescrever — usado para detectar se overhead/VRML/
+  // impostos (os parâmetros de markup) realmente mudaram nesta gravação.
+  var _fAntes = Object.assign({}, _cfgData.financeiro);
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el) _cfgData.financeiro[k]=parseFloat(el.value)||0; });
+  var _mudouMarkup = ['overhead','vrml','impostos'].some(function(k){ return (_fAntes[k]||0) !== (_cfgData.financeiro[k]||0); });
+  if(_mudouMarkup){
+    if(!_cfgData.markupRevisao) _cfgData.markupRevisao = {};
+    var mr = _cfgData.markupRevisao;
+    if(!mr.historico) mr.historico=[];
+    mr.historico.push({
+      data: Date.now(), tipo:'revisao', responsavel: cfgMarkupQuem(),
+      antes: {overhead:_fAntes.overhead||0, vrml:_fAntes.vrml||0, impostos:_fAntes.impostos||0},
+      depois:{overhead:_cfgData.financeiro.overhead||0, vrml:_cfgData.financeiro.vrml||0, impostos:_cfgData.financeiro.impostos||0}
+    });
+    mr.ultimaRevisao = Date.now();
+    mr.proximaRevisao = Date.now() + MARKUP_REVISAO_INTERVALO_DIAS*86400000;
+    mr.responsavel = cfgMarkupQuem();
+    if(typeof secAuditLog==='function') secAuditLog('markup_revisao','Parâmetros de markup revisados por '+mr.responsavel);
+  }
   // Markup
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
   if(!_cfgData.markup) _cfgData.markup={};
   Object.keys(mkIds).forEach(function(k){ var el=document.getElementById(mkIds[k]); if(el) _cfgData.markup[k]=parseFloat(el.value)||0; });
   cfgSave(_cfgData);
+  if(typeof cfgRenderMarkupRevisaoBanner==='function') cfgRenderMarkupRevisaoBanner();
   // Recalcular R$/m² de todas as linhas antes de re-renderizar
   (_cfgData.materiais||[]).forEach(function(row,i){
     var area=(row.comp||0)*(row.larg||0)/10000;
