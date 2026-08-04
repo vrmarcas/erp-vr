@@ -10657,6 +10657,16 @@ function kbReceberSaldo() {
   // Atualiza OS
   os.status='iniciada'; os.restante=0;
   kbSaveKbos();
+  // Se a OS veio de um orçamento em "aguardando_pagamento", conclui o ciclo -> pago
+  if(os.orcRef && typeof orcGetEnviados==='function'){
+    var _listaOrc = orcGetEnviados();
+    var _orcOrigem = _listaOrc.find(function(o){ return o.id===os.orcRef; });
+    if(_orcOrigem && _orcOrigem.status==='aguardando_pagamento'){
+      _orcOrigem.status = 'pago';
+      orcSetEnviados(_listaOrc);
+      try{ orcEnviadosRender(); }catch(e){}
+    }
+  }
   // Atualiza badge no card
   var stg = document.getElementById('kstag-'+_kbOsId);
   if(stg){stg.className='stag si';stg.textContent='Iniciada';}
@@ -15293,31 +15303,46 @@ window.crmReceiveChatvoltLead = function(data) {
 // ============================================================
 // ORÇAMENTO — ENVIO E CONFIRMAÇÃO DO CLIENTE
 // ============================================================
+// Fonte única de condições de pagamento (desconto condicional, desconto Pix,
+// parcelamento) — usada tanto pelo WhatsApp quanto pelo PDF A4, para os dois
+// nunca mais divergirem no que mostram ao cliente (achado da auditoria:
+// antes só o WhatsApp exibia parcelamento/Pix, o PDF nem lia esses campos).
+function orcCalcCondicoesPagamento(baseEfetiva) {
+  var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
+  var dcPct = dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
+  var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
+  var pxPct = pxOn ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
+  var parcAtivo = !!(document.getElementById('orcParcToggle')?.checked);
+  var parcSel   = document.getElementById('orcParcSel');
+  var nParc = parcAtivo && parcSel ? parseInt(parcSel.value)||1 : 1;
+  var parcela = null;
+  if (parcAtivo && nParc > 1) {
+    var dpd = cfgLoad();
+    var pFound = (dpd.parcelamento||CFG_DEFAULT.parcelamento).find(function(r){return r.parcelas===nParc;}) || {taxa:0};
+    var totalComTaxa = baseEfetiva * (1 + (pFound.taxa||0)/100);
+    parcela = { nParc: nParc, valorParcela: totalComTaxa/nParc, taxa: pFound.taxa||0, semJuros: !(pFound.taxa>0) };
+  }
+  return { dcOn: dcOn, dcPct: dcPct, pxOn: pxOn, pxPct: pxPct, parcela: parcela };
+}
+
 function orcEnviarOrcamentoWA() {
   var c = window._orcCalc || {};
   var nome = (document.getElementById('orcClientNome')||document.getElementById('orcClienteNome')||{}).value || 'cliente';
   var tel  = (document.getElementById('orcClientTel')||{}).value || '';
   var marca = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
   var total = c.finalPrice ? 'R$ '+c.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
-  // Descontos e parcelamento
-  var dcOnWA  = !!(document.getElementById('orcDescCondToggle')?.checked);
-  var dcPctWA = dcOnWA  ? (parseFloat(document.getElementById('orcDescCond')?.value)||0)  : 0;
-  var pxOnWA  = !!(document.getElementById('orcPixDiscToggle')?.checked);
-  var pxPctWA = pxOnWA  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var baseEfetivaWA = (c.finalPrice||0)*(1-dcPctWA/100)*(1-pxPctWA/100);
+  // Descontos e parcelamento — fonte única compartilhada com o PDF A4
+  var baseEfetivaWA = (c.finalPrice||0);
+  var _condWA = orcCalcCondicoesPagamento(baseEfetivaWA);
+  var dcOnWA = _condWA.dcOn, dcPctWA = _condWA.dcPct, pxOnWA = _condWA.pxOn, pxPctWA = _condWA.pxPct;
+  baseEfetivaWA = (c.finalPrice||0)*(1-dcPctWA/100)*(1-pxPctWA/100);
   var totalExibido  = baseEfetivaWA>0 && baseEfetivaWA<(c.finalPrice||0)
     ? 'R$ '+baseEfetivaWA.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : total;
-  var parcAtivo = !!(document.getElementById('orcParcToggle')?.checked);
-  var parcSel   = document.getElementById('orcParcSel');
-  var nParc = parcAtivo && parcSel ? parseInt(parcSel.value)||1 : 1;
+  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento calculado sobre o valor já com desconto
   var parcelaStr = '';
-  if(parcAtivo && nParc>1){
-    var dpd = cfgLoad();
-    var pFound = (dpd.parcelamento||CFG_DEFAULT.parcelamento).find(function(r){return r.parcelas===nParc;})||{taxa:0};
-    var totalComTaxa = baseEfetivaWA*(1+(pFound.taxa||0)/100);
-    var parcelValWA  = totalComTaxa/nParc;
-    parcelaStr = '\n📆 *Parcelável em até '+nParc+'x de R$ '+parcelValWA.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'*';
+  if(_condWA2.parcela){
+    parcelaStr = '\n📆 *Parcelável em até '+_condWA2.parcela.nParc+'x de R$ '+_condWA2.parcela.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+(_condWA2.parcela.semJuros?' sem juros':'')+'*';
   }
   // Captura itens
   var itensArr = [];
@@ -15529,6 +15554,22 @@ function orcImprimirOrcamentoPDF() {
     ? 'R$ '+baseEfetiva.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (c2.finalPrice ? 'R$ '+c2.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
 
+  // Condições de pagamento (parcelamento, desconto Pix) — mesma fonte usada no
+  // WhatsApp (orcCalcCondicoesPagamento), para PDF e WhatsApp nunca divergirem.
+  var _condPDF = orcCalcCondicoesPagamento(baseEfetiva>0 ? baseEfetiva : (c2.finalPrice||0));
+  var condPagamentoHtml = '';
+  if(_condPDF.parcela || (_condPDF.pxOn && _condPDF.pxPct>0 && !_condPDF.dcOn)){
+    var _linhas = '';
+    if(_condPDF.parcela){
+      var _p = _condPDF.parcela;
+      _linhas += '<div>💳 Parcelável em até <strong>'+_p.nParc+'x de R$ '+_p.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+(_p.semJuros?' sem juros':' (parcelas com acréscimo)')+'</strong></div>';
+    }
+    if(_condPDF.pxOn && _condPDF.pxPct>0 && !_condPDF.dcOn){
+      _linhas += '<div>⚡ '+_condPDF.pxPct+'% de desconto pagando via PIX</div>';
+    }
+    condPagamentoHtml = '<div style="margin-top:8px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;color:#334155;line-height:1.6">'+_linhas+'</div>';
+  }
+
   var dataHoje = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
 
   // ── VITRE TEMPLATE ──────────────────────────────────────────────
@@ -15589,6 +15630,7 @@ function orcImprimirOrcamentoPDF() {
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
+    +condPagamentoHtml
     +'<div class="footer-bar"><div class="footer-contacts"><span>📞 (62) 3941-6787</span><span>📸 @vitre</span><span>🌐 vitre.com.br</span><span>✉️ vitre@email.com</span></div>'
     +'<div style="font-weight:700;font-size:10px;color:#666">CNPJ 37.855.285/0001-52</div>'
     +'<div style="font-size:9px;color:#aaa;margin-top:4px">Rua Francisca da Costa Cunha, nº 39, Qd. 69A Lt. 17, Setor Aeroporto — Goiânia – GO, CEP 74.075-300</div>'
@@ -15649,6 +15691,7 @@ function orcImprimirOrcamentoPDF() {
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
+    +condPagamentoHtml
     +'<div class="footer-bar"><span>📞 (62) 3941-6787</span><span>📸 @vrmarcas</span><span>🌐 vrmarcas.com</span><span>✉️ vrmarcas@hotmail.com</span></div>'
     +'<div style="text-align:center;font-size:10px;color:#888;font-weight:700;margin-top:8px">CNPJ 37.855.285/0001-52</div>'
     +'<div style="text-align:center;font-size:9px;color:#bbb;margin-top:4px">Rua Francisca da Costa Cunha, nº 39, Qd. 69A Lt. 17, Setor Aeroporto — Goiânia – GO, CEP 74.075-300</div>'
@@ -16090,8 +16133,10 @@ function orcEnviadosRender() {
     tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Nenhum orçamento encontrado.</td></tr>';
     return;
   }
-  var statusLabel = {aguardando:'⏳ Aguardando',aprovado:'✅ Aprovado',recusado:'❌ Recusado',expirado:'🕐 Expirado'};
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
+  // aguardando_pagamento/pago são estados aditivos (setados automaticamente ao
+  // gerar OS / receber saldo) — nunca substituem os 4 estados manuais originais.
+  var statusLabel = {aguardando:'⏳ Aguardando',aprovado:'✅ Aprovado',aguardando_pagamento:'💰 Aguard. Pagamento',pago:'✅ Pago',recusado:'❌ Recusado',expirado:'🕐 Expirado'};
+  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   tbody.innerHTML = filtered.map(function(o,idx){
     var isVR = o.marca==='vr';
     var marcaHtml = '<span style="background:'+(isVR?'#EDE9FE':'#FCE7F3')+';color:'+(isVR?'#5B21B6':'#9D174D')+';padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">'+(isVR?'VR Marcas':'Vitre')+'</span>';
@@ -16105,7 +16150,7 @@ function orcEnviadosRender() {
     if(o.parcelas>1) extras.push('💳 '+o.parcelas+'x');
     var extraHtml = extras.length ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">'+extras.join(' · ')+'</div>' : '';
     var statusSel = '<select onchange="orcEnvSetStatus(\''+o.id+'\',this.value)" style="font-size:10px;padding:3px 5px;border-radius:5px;border:1px solid var(--border);background:var(--surface)">'
-      + ['aguardando','aprovado','recusado','expirado'].map(function(s){
+      + ['aguardando','aprovado','aguardando_pagamento','pago','recusado','expirado'].map(function(s){
           return '<option value="'+s+'"'+(o.status===s?' selected':'')+'>'+statusLabel[s]+'</option>';
         }).join('')
       + '</select>';
@@ -16316,7 +16361,7 @@ function orcEnvConfirmarPgto(id) {
   }
   var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var valorTotal = o.valorFinal||0;
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
+  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(520px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
     +'<div><div style="font-size:16px;font-weight:900">💳 Confirmar Pagamento</div>'
@@ -16442,8 +16487,10 @@ function orcEnvGerarOS(){
   if(typeof _cloudSave==='function') _cloudSave('kb_os',KB_OS);
   // Renderiza Kanban
   try{kbRender();}catch(e){}
-  // Atualiza status do orçamento para aprovado
-  o.status='aprovado'; o.osRef=newId; orcSetEnviados(lista);
+  // Atualiza status do orçamento: aguardando_pagamento se sobrou saldo a
+  // receber (fluxo normal de 50%+50%), ou pago se a OS já nasceu quitada.
+  o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
+  o.osRef=newId; orcSetEnviados(lista);
   // Se tem entrada, lança no CR/Caixa
   if(valorEntrada>0){
     var crId='cr'+Date.now();
