@@ -826,3 +826,218 @@ reais contra mock fiel de Firestore) continua válida para o comportamento
 funcional, mas não foi revalidada contra o Firebase Emulator Suite real
 nem contra as Rules normalizadas desta rodada. Isso é uma lacuna real de
 cobertura, não uma alegação de conclusão.
+
+## Rodada D — Verificação Valéria (Task 3, somente leitura)
+
+**Commit `9e04c33`** — `fix(valeria): preserve lead id when reusing existing lead`,
+autor 2026-08-02 14:17:34 -03:00 (=17:17:34 UTC), altera só
+`functions-valeria/src/valeria.ts` (+1 linha, `git show --stat`).
+
+- Em qual branch(es): `git branch --all --contains 9e04c33` → presente em
+  4 branches locais/remotos, todas com push feito para origin.
+- Contido na branch atual (`feat/os-compras-fiscal-orcamento`):
+  `git merge-base --is-ancestor 9e04c33 HEAD` → **SIM** (exit 0).
+- Contido em `main`: `git merge-base --is-ancestor 9e04c33 main` → **NÃO**
+  (exit 1) — commit não chegou a `main`.
+- Evidência objetiva de deploy: consulta somente-leitura via
+  `gcloud auth print-access-token` + REST
+  `GET https://cloudfunctions.googleapis.com/v2/projects/erp-vrmarcas/locations/-/functions`
+  (HTTP 200, salvo em `/tmp/_functions_list.json`, não commitado) — 17
+  funções `valeria*` ativas (`state:"ACTIVE"`). Metadado completo de uma
+  delas (`valeriaCriarOportunidade`) inspecionado via filtro local
+  (nenhuma escrita realizada):
+  `labels:{"firebase-functions-codebase":"valeria", ...}` — **prova
+  direta e não-inferencial** de que as Functions Valéria publicadas em
+  produção vêm da codebase separada `functions-valeria/` (deploy via
+  `firebase-valeria.json`, `firebase deploy --config firebase-valeria.json`),
+  e não da codebase `default` (`functions/`, `firebase.json`) onde este
+  round adicionou as Functions de Compras. Confirmado cruzando
+  `firebase.json` (só declara `"default"`, sem qualquer referência a
+  `functions-valeria`) e `firebase-valeria.json` (declara `"valeria"` →
+  `source:"functions-valeria"`) — são dois alvos de deploy distintos e
+  independentes.
+- Quais Functions Valéria estão publicadas (17, todas `ACTIVE`):
+  `valeriaGetContexto, valeriaUpsertCliente, valeriaCatalogo,
+  valeriaCalcularOrcamento, valeriaCriarOrcamento, valeriaCriarOportunidade,
+  valeriaRegistrarMensagem, valeriaTransferirHumano, valeriaProximaAcao,
+  valeriaConsultarStatus, valeriaStatus, valeriaWebhookChatvolt,
+  valeriaAtualizarBriefing` + mais 4 (`valeriaMudarEtapa`, `valeriaFechamento`
+  e variantes B3) — todas batem exatamente com os exports de
+  `functions-valeria/src/index.ts`. **Divergência de nomes**: 7 dos 17
+  nomes publicados NÃO aparecem no bloco de export Valéria de
+  `functions/src/index.ts` (que expõe só 10 nomes, dos quais 8 se
+  sobrepõem por nome aos publicados — `valeriaGetCliente` e
+  `valeriaConsultarOS` são exclusivos de `functions/src/valeria.ts` e
+  nunca foram publicados sob esses nomes). Isso significa que um deploy
+  futuro de `functions/` (codebase `default`, que agora inclui as novas
+  Functions de Compras) usando por engano `firebase deploy --only functions`
+  sem `--config firebase-valeria.json` NÃO afeta as Functions já
+  publicadas da codebase `valeria` (codebases são isoladas por deploy-alvo
+  no Firebase, confirmado pela própria label `firebase-functions-codebase`),
+  mas se algum dia `functions/src/valeria.ts` for exportado com os MESMOS
+  nomes de `functions-valeria` e alguém rodar deploy apontando para a
+  codebase errada, haveria conflito. Risco documentado para a Task 4.
+- Versão/commit efetivamente em produção (o conteúdo do commit
+  `9e04c33` especificamente): **NÃO COMPROVADO por diff de conteúdo**.
+  Evidência disponível é só temporal e indireta: todas as 17 Functions
+  Valéria têm `updateTime` entre 2026-07-30T00:01Z e 2026-08-02T01:42Z
+  (a grande maioria em 2026-08-02T01:41–01:42Z); o commit `9e04c33` foi
+  autorado em 2026-08-02T20:17:34Z (17:17:34 -03:00) — **~18h40min DEPOIS**
+  do último `updateTime` observado nas Functions publicadas. Isso sugere
+  fortemente que o commit NÃO está refletido no deploy atual, mas é uma
+  inferência por timestamp, não uma comparação de bytes do código-fonte.
+  Tentativa de obter prova definitiva por diff real: `curl` autenticado
+  (mesmo token OAuth de leitura, sem nenhuma escrita) contra a
+  `storageSource` do pacote publicado
+  (`gs://uploads-535833047417.us-central1.cloudfunctions.appspot.com/
+  35b10771-345a-4256-b043-4eddcda6f919.zip`) → **HTTP 403 AccessDenied**:
+  `"vrmarcasgithub@gmail.com does not have storage.objects.get access to
+  the Google Cloud Storage object"` — bloqueio externo real e objetivo
+  (permissão IAM insuficiente na conta autenticada), não contornável sem
+  alterar IAM (proibido neste round). Classificação final: **NÃO
+  COMPROVADO** se o conteúdo exato do commit `9e04c33` está em produção
+  — evidência disponível (timestamps) aponta para que NÃO esteja, mas
+  isso é inferência, não prova.
+- Divergência código/Rules/Functions/Hosting (consolidado com achados de
+  rounds anteriores, já registrados acima neste arquivo): Rules
+  publicadas (2026-07-31) ≠ `firestore.rules` do repo (2026-08-03,
+  nunca publicado, inclui a correção do catch-all desta rodada);
+  Hosting publicado corresponde a um commit de 2026-07-15 (163 commits
+  atrás da branch atual), publicado em 2026-08-02; Functions `default`
+  publicadas não foram verificadas byte-a-byte nesta rodada (fora do
+  escopo do Task 3, que é especificamente sobre Valéria) mas o mesmo
+  padrão de defasagem é esperado dado o histórico. Nenhuma dessas
+  divergências foi corrigida nesta rodada — só documentadas
+  (correção/publicação exige autorização futura separada).
+
+## Rodada D — Task 4: Análise read-only das três linhas + estratégia de integração
+
+**Reconfirmação dos três marcos (podem ter mudado desde o relatório anterior — reconfirmados agora):**
+- Produção (Hosting, conteúdo publicado): `5b7c90b` — "Add files via upload", 2026-07-15 16:53:10 -03:00.
+- `main` (remoto, `origin/main`): **mudou** desde o relatório anterior — antes `5176af5`, agora
+  `320ec4c` — "Merge pull request #4 from vrmarcas/feature/fase5-auth", 2026-07-31 13:47:38 -03:00.
+- Feature (`feat/os-compras-fiscal-orcamento`, HEAD atual): `daf9d54` (branch local, idêntico ao
+  reportado — nada mudou aqui além do trabalho desta própria rodada).
+
+**Ancestralidade (git merge-base --is-ancestor, comandos reais, sem suposição):**
+- `5b7c90b` (produção) É ancestral de `origin/main` — confirmado.
+- `5b7c90b` (produção) É ancestral de `HEAD` (feature) — confirmado.
+- `origin/main` É ancestral de `HEAD` (feature) — confirmado. **Achado importante**: isso significa
+  que `main` NÃO tem nenhum commit que a feature não tenha — a feature está estritamente à frente de
+  `main` (32 commits), sem nenhuma divergência lateral. `git log --oneline HEAD..origin/main` retorna
+  vazio (zero commits exclusivos de `main`).
+- `HEAD` NÃO é ancestral de `main` (óbvio — a feature tem 32 commits que main não tem).
+
+**Commits exclusivos de cada linha:**
+- Exclusivos de `main` (não estão na feature): **0**.
+- Exclusivos da feature (não estão em `main`): **32**, do mais antigo ("sync: estado atual do
+  projeto") ao mais recente (este relatório). Inclui: unificação Admin→Master, autenticação real
+  (Fase 5 — já mesclada em main via PR #4), múltiplas espessuras/SVGs em Produtos & Planificação,
+  criação de conta Auth ao criar usuário no ERP, fix da Valéria (`9e04c33`), e todo o bloco desta
+  homologação (Rules normalizadas, Compras v2, script de migração).
+- Entre produção (`5b7c90b`) e `main`: **136 commits** — `main` já está bem à frente de produção
+  mesmo sem contar a feature.
+
+**Arquivos que mudam em `main` E na feature desde o ancestral comum (risco de conflito em merge):**
+`comm -12` entre os dois diffs → **conjunto vazio**. Não há nenhum arquivo alterado por `main` desde
+que a feature foi criada que TAMBÉM tenha sido alterado pela feature — ou seja, do ponto de vista
+puramente textual do Git, um merge de `main` para dentro da feature (ou vice-versa) não produziria
+NENHUM conflito de merge automático. Isso é uma propriedade favorável, mas **não** significa que a
+integração seja segura — os riscos reais não são de texto/Git, são de **infraestrutura publicada**
+(Rules, Functions, Hosting, dados) divergindo do que o código local presume, como detalhado abaixo.
+
+**O que separa produção de tudo que existe em `main`/feature (diff real, não suposição):**
+- `firestore.rules`: produção tinha **0 bytes deste arquivo no formato atual** — 311 linhas inseridas
+  desde então (Rules normalizadas por coleção, catch-all `if false`, tudo que este round auditou não
+  existia em produção).
+- `functions/src/*.ts`: **8 arquivos inteiros**, 2417 linhas, não existem em produção — todo o
+  backend de Cloud Functions (`compras.ts`, `adminUsers.ts`, `valeria.ts`, `encryption.ts`,
+  `googleAds.ts`, `metaAds.ts`, `syncMetrics.ts`, `index.ts`) foi criado depois de `5b7c90b`.
+- `firebase.json` / `firebase-valeria.json`: não existiam em `5b7c90b` — todo o mecanismo de
+  multi-codebase (`default` vs `valeria`) é posterior à produção atual.
+- Combinado com o achado já registrado nesta rodada (Task 3): as Functions Valéria realmente
+  publicadas em produção vêm de um `firebase-valeria.json`/codebase `valeria` que, mesmo não
+  existindo em `5b7c90b`, FOI publicado em produção em algum deploy manual posterior — ou seja,
+  **produção (Hosting) e produção (Functions) não estão no mesmo commit entre si**: o Hosting serve
+  HTML de `5b7c90b` (15/jul), mas as Cloud Functions Valéria ativas foram implantadas depois (deploy
+  observado em ~02/ago), a partir de um código-fonte que não corresponde a nenhum commit do Hosting
+  publicado. Isso só é possível porque Hosting e Functions são publicados por comandos `firebase
+  deploy` INDEPENDENTES, cada um podendo rodar a partir de um checkout/estado de arquivo diferente —
+  não há garantia de commit único "em produção".
+
+### Estratégia de integração recomendada (proposta, NÃO executada nesta rodada)
+
+Esta NÃO é "merge de tudo" — é uma sequência condicionada às dependências reais encontradas acima.
+
+**(1) Branch base recomendada**: `main` (`320ec4c`). Justificativa: `main` já contém 100% do que
+produção tem mais a Fase 5 (Auth real), sem nenhum commit exclusivo que a feature não tenha — logo
+`main` é estritamente um subconjunto da feature. Não há razão para basear em produção diretamente
+(perderia 136 commits de correções já validadas em `main`) nem em qualquer outra branch.
+
+**(2) Ordem de merges/cherry-picks**: dado que não há conflito textual e a feature é um superset
+linear de `main`, um único `git merge` (fast-forward ou merge commit) de `feat/os-compras-fiscal-
+orcamento` para `main` é suficiente do ponto de vista de código — MAS deve ser precedido de:
+  a. Revisão humana explícita dos 32 commits (não só o diff agregado) — em especial os 3 commits
+     desta própria rodada de homologação, que nunca passaram por revisão de terceiros.
+  b. Squash ou manutenção do histórico linear — decisão de time, não técnica.
+  c. NÃO fazer cherry-pick seletivo de "só a parte de Compras" — a arquitetura v2 depende de
+     `firestore.rules` (achado do catch-all corrigido) E de `functions/src/compras.ts` E do fix de
+     `adminUsers.ts` (dual-write `erp_vr_usuarios`) simultaneamente; publicar qualquer um desses três
+     sem os outros dois reabre o buraco de segurança já documentado (Rules antigas + Functions novas
+     = Functions rejeitam mas Rules antigas permitem bypass direto, OU Rules novas + Functions
+     antigas = usuário não consegue logar porque `erp_vr_usuarios` nunca foi populado).
+
+**(3) Ordem futura coordenada de migração, Rules, Functions e Hosting (a mais crítica desta rodada)**:
+  1. Publicar `functions/src/index.ts` (codebase `default`) via `firebase deploy --only functions`
+     — isto sozinho é seguro isoladamente porque as nova Functions de Compras não são chamadas por
+     nenhum botão em produção ainda (Hosting antigo não tem os `onclick` novos).
+  2. Rodar `scripts/migrate_compras_v2.js` contra o projeto REAL (não `demo-*`) — script já tem trava
+     fail-closed que hoje IMPEDE isso (`--project` precisa começar com `demo-`); essa trava precisa
+     ser deliberadamente adaptada (não simplesmente removida) quando a migração real for autorizada.
+  3. Publicar `firestore.rules` — só depois do passo 1, nunca antes (Rules novas negam a leitura de
+     `erp_vr_usuarios` que só existe depois do dual-write do passo 1 ter rodado pelo menos uma vez
+     por usuário ativo — Rules-antes-de-Functions quebraria login).
+  4. Publicar o `index.html` atualizado (Hosting) — só depois dos passos 1–3, já que a nova UI de
+     Compras assume que as Functions e as Rules normalizadas já existem.
+  5. Nunca publicar a codebase `default` de Functions usando `firebase deploy` sem `--only functions:
+     <lista>` explícita ou sem `--config` correto — existe risco documentado (Task 3) de nomes de
+     função colidirem entre `functions/src/valeria.ts` (8 nomes sobrepostos) e a codebase `valeria`
+     já publicada; **nunca fazer deploy de Functions sem antes conferir explicitamente que a lista de
+     nomes publicados não colide com a codebase `valeria`**.
+
+**(4) Precondições**: acesso e autorização explícita para publicar em produção (fora do escopo desta
+rodada); backup de `erp_vr/compras` e `erp_vr/erp_usuarios` reais antes de qualquer migração;
+confirmação de quem são os usuários reais ativos (para não quebrar login durante a virada dual-write).
+
+**(5) Backups necessários**: export do Firestore de produção (`gcloud firestore export`) antes do
+passo 2 acima; cópia do `firestore.rules` publicado atual (via API, já lido nesta rodada) guardada
+fora do repo, para rollback textual imediato.
+
+**(6) Smoke tests pós-cada-passo** (mínimo): login de 1 usuário de cada perfil real; 1 criação de
+solicitação de compra real; 1 leitura de orçamento; conferir Emulator UI / logs de Functions por
+erros nos primeiros minutos após deploy.
+
+**(7) Plano de rollback**: Hosting — `firebase hosting:clone` do release anterior (Firebase mantém
+histórico de releases, rollback é um comando único); Rules — reaplicar o texto salvo no passo (5) via
+`firebase deploy --only firestore:rules`; Functions — `firebase functions:delete <nome>` para as
+novas funções de Compras caso causem erro, o que NÃO afeta Rules nem Hosting (as três camadas são
+independentes); migração de dados — o script é aditivo (nunca apaga `erp_vr/compras`), então
+"desfazer" é apagar só os documentos novos criados em `erp_vr_compras` com `migradoDe` preenchido.
+
+**(8) Critérios de parada/interrupção**: qualquer erro 5xx sustentado nas Cloud Functions nos
+primeiros 10 minutos; qualquer usuário real reportando "Conta sem perfil atribuído" após o deploy de
+Rules (sinal de que o dual-write do passo 1 não tinha rodado para aquele usuário); qualquer diff
+inesperado entre o `firestore.rules` publicado e o texto local logo após o deploy (verificável via
+`firebaserules.googleapis.com`, mesma chamada read-only já usada nesta rodada).
+
+**(9) Validações após cada etapa**: repetir a mesma verificação read-only via
+`cloudfunctions.googleapis.com`/`firebaserules.googleapis.com` usada nesta rodada para confirmar que
+o que foi publicado é exatamente o commit esperado (comparar `firebase-functions-hash`/timestamps);
+rodar a mesma matriz de Rules (`rules_matrix_v2.py`) contra o projeto real com um usuário de teste
+dedicado (nunca com credenciais de usuário real).
+
+**(10) Tratamento da diferença entre produção, main e a feature**: produção está 136 commits atrás de
+`main` e nunca recebeu Functions/Rules — ou seja, produção não é "uma versão mais velha do mesmo
+sistema", é efetivamente **um sistema sem a camada de segurança server-side que este round inteiro
+validou**. Isso eleva o risco de qualquer deploy parcial (publicar só Hosting, ou só Rules, sem as
+Functions) — motivo pelo qual a ordem do item (3) é rígida e não intercambiável.
