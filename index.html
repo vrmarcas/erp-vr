@@ -2310,6 +2310,7 @@ function _authFirebaseError(code){
           <div style="position:sticky;bottom:0;z-index:5;background:var(--surface);border-top:1.5px solid var(--border);padding:10px 0 4px;margin-top:10px;display:flex;flex-direction:column;gap:6px">
             <button id="kbReverterBtn" onclick="kbReverterProducao()" style="display:none;width:100%;padding:10px;border:1.5px solid #D97706;background:transparent;color:#D97706;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">↩ Reverter para Produção</button>
             <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
+            <button id="kbEntregarBtn" onclick="osLiberar(_kbOsId)" style="display:none;width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📦 Entregar ao Cliente</button>
             <button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button>
             <button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button>
           </div>
@@ -9575,6 +9576,12 @@ function kbOpen(id) {
     btn.className = 'kb-pronto-btn';
     btn.textContent = '✓ Marcar como Pronta';
   }
+  // Entregar ao Cliente — só aparece quando a OS está Pronta; some quando já Entregue
+  var entBtn = document.getElementById('kbEntregarBtn');
+  if(entBtn){
+    entBtn.style.display = (os.status==='pronta') ? '' : 'none';
+    entBtn.textContent = (os.restante||0)>0 ? '📦 Entregar ao Cliente (saldo pendente)' : '📦 Entregar ao Cliente';
+  }
   // Iniciar Produção / Material em Produção
   var _iniciarBox = document.getElementById('kbIniciarProdBox');
   var _matProdBox = document.getElementById('kbMatProdBox');
@@ -10609,6 +10616,10 @@ function kbMarcarPronto() {
     }
   }
 
+  var entBtn0 = document.getElementById('kbEntregarBtn');
+  if(entBtn0){ entBtn0.style.display=''; entBtn0.textContent = _saldoPendente ? '📦 Entregar ao Cliente (saldo pendente)' : '📦 Entregar ao Cliente'; }
+
+  kbSaveKbos(); // estava faltando — status "Pronta" nunca era persistido no Firestore
   renderOsTable(); syncSidebarBadges();
   if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
   setTimeout(function(){
@@ -10633,6 +10644,7 @@ function kbReverterProducao(){
   var btn=document.getElementById('kbProntoBtn');
   if(btn){btn.className='kb-pronto-btn';btn.textContent='✓ Marcar como Pronta';}
   var rb=document.getElementById('kbReverterBtn'); if(rb) rb.style.display='none';
+  var entBtnRev=document.getElementById('kbEntregarBtn'); if(entBtnRev) entBtnRev.style.display='none';
   var avisarBox=document.getElementById('kbAvisarClienteBox');
   if(avisarBox) avisarBox.style.display='none';
   var prontas=document.getElementById('kbProntas'),pHint=document.getElementById('kbProntasHint');
@@ -11454,6 +11466,13 @@ function osLiberar(id) {
   os.status='entregue';
   kbSaveKbos();
   document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){stag.className='stag sm ok';stag.textContent='✅ Entregue';}});
+  // Atualiza o modal se estiver aberto nesta mesma OS
+  if(typeof _kbOsId!=='undefined' && String(_kbOsId)===String(id)){
+    var entBtn=document.getElementById('kbEntregarBtn'); if(entBtn) entBtn.style.display='none';
+    var pBtn=document.getElementById('kbProntoBtn'); if(pBtn){ pBtn.className='kb-pronto-btn done'; pBtn.textContent='✓ OS Entregue'; }
+    var stagEl=document.getElementById('kbOsStag'); if(stagEl){ stagEl.className='stag sm ok'; stagEl.textContent='✅ Entregue'; }
+    var avisarBox2=document.getElementById('kbAvisarClienteBox'); if(avisarBox2) avisarBox2.style.display='none';
+  }
   renderOsTable(); syncSidebarBadges();
   showToast(saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!','ok');
 }
