@@ -2565,7 +2565,7 @@ function _authFirebaseError(code){
             <div class="fg-row">
               <!-- orcFormaPgto hidden — seleção movida para o Step 5 -->
               <select id="orcFormaPgto" style="display:none"><option value="pix">PIX (100%)</option><option value="50_50">50% entrada + 50% retirada</option><option value="cartao">Cartão de Crédito</option><option value="link">Link de Pagamento</option><option value="dinheiro">Dinheiro</option></select>
-              <div class="fg"><label>Validade</label><select><option>10 dias</option><option>7 dias</option><option>15 dias</option><option>30 dias</option></select></div>
+              <div class="fg"><label>Validade</label><select id="orcValidadeDias"><option value="10" selected>10 dias</option><option value="7">7 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select></div>
             </div>
             <div class="fg-row" id="orcParcelasRow" style="display:none;visibility:hidden;height:0;overflow:hidden">
               <div class="fg">
@@ -16151,46 +16151,43 @@ function orcCalcPrazo() {
   if(pt) pt.textContent = prazoDate;
 }
 
-function orcImprimirOrcamentoPDF() {
-  var c2 = window._orcCalc || {};
-  var isVitre = document.body.classList.contains('vitre');
-  var marca   = isVitre ? 'Vitre' : 'VR Marcas';
-  var nome    = (document.getElementById('orcClientNome')||{}).value || '—';
-  var tel     = (document.getElementById('orcClientTel')||{}).value  || '—';
-  var email   = (document.getElementById('orcClientEmail')||{}).value|| '—';
-  var doc     = (document.getElementById('orcClientDoc')||{}).value  || '';
-  var cidade  = (document.getElementById('orcClientCidade')||{}).value|| '';
-  var vendedor= (document.getElementById('orcClientVendedor')||{}).value|| '—';
-  var pgtoSel = document.getElementById('orcFormaPgto');
-  var pgtoLabel = pgtoSel ? pgtoSel.options[pgtoSel.selectedIndex].text : 'A combinar';
-  var prazoDiasPDF    = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
-  var prazoDiasMaxPDF = parseInt((document.getElementById('orcPrazoDiasMax')||{}).value||'0');
-  var prazoEntregaPDF = (document.getElementById('orcPrazoEntrega')||{}).value||'';
-  var prazoTxtPDF = (function(){
-    if(prazoDiasPDF > 0) {
-      var faixaTxt = prazoDiasMaxPDF > prazoDiasPDF
-        ? 'De '+prazoDiasPDF+' a '+prazoDiasMaxPDF+' dias úteis'
-        : prazoDiasPDF+' dia'+(prazoDiasPDF!==1?'s úteis':' útil');
-      if(prazoEntregaPDF) {
-        function _addUtil(n){ var d=new Date();var u=0;while(u<n){d.setDate(d.getDate()+1);var dw=d.getDay();if(dw!==0&&dw!==6)u++;}return d.toLocaleDateString('pt-BR');}
-        var dtMinStr = _addUtil(prazoDiasPDF);
-        var dtMaxStr = prazoDiasMaxPDF > prazoDiasPDF ? ' à '+_addUtil(prazoDiasMaxPDF) : '';
-        return faixaTxt+' — entrega prevista: '+dtMinStr+dtMaxStr;
-      }
-      return faixaTxt+' após aprovação e comprovante de pagamento';
-    } else { return 'a combinar após aprovação e comprovante de pagamento'; }
-  })();
+// Prazo de produção em texto — fonte única (antes só existia dentro do PDF;
+// o WhatsApp nunca mostrava prazo nenhum). Fallback ("a combinar...") é o
+// mesmo já usado no restante do app — não inventamos um prazo padrão novo
+// tipo "3 a 4 dias" sem lastro em nenhuma configuração real do sistema.
+function orcGetPrazoTexto(){
+  var dias    = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
+  var diasMax = parseInt((document.getElementById('orcPrazoDiasMax')||{}).value||'0');
+  var entrega = (document.getElementById('orcPrazoEntrega')||{}).value||'';
+  if(dias > 0){
+    var faixaTxt = diasMax > dias
+      ? 'De '+dias+' a '+diasMax+' dias úteis'
+      : dias+' dia'+(dias!==1?'s úteis':' útil');
+    if(entrega){
+      function _addUtil(n){ var d=new Date();var u=0;while(u<n){d.setDate(d.getDate()+1);var dw=d.getDay();if(dw!==0&&dw!==6)u++;}return d.toLocaleDateString('pt-BR');}
+      var dtMinStr = _addUtil(dias);
+      var dtMaxStr = diasMax > dias ? ' à '+_addUtil(diasMax) : '';
+      return faixaTxt+' — entrega prevista: '+dtMinStr+dtMaxStr;
+    }
+    return faixaTxt+' após aprovação e comprovante de pagamento';
+  }
+  return 'a combinar após aprovação e comprovante de pagamento';
+}
 
-  // itens
-  // descontos (calculados antes dos itens para redistribuir o valor final)
-  var condAtivo = !!(document.getElementById('orcDescCondToggle')?.checked);
-  var condPct   = condAtivo ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
-  var condData  = condAtivo ? (document.getElementById('orcDescCondData')?.value||'') : '';
-  var pixAtivo  = !!(document.getElementById('orcPixDiscToggle')?.checked);
-  var pixPct    = pixAtivo  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100)*(1-pixPct/100) : 0;
+// Responsável pelo orçamento: vendedor cadastrado no passo 1 → "Equipe
+// {{marca}}" como último recurso (nunca um nome fixo no código).
+function orcGetResponsavel(marca){
+  var vendedor = (document.getElementById('orcClientVendedor')||{}).value||'';
+  return vendedor && vendedor!=='—' ? vendedor : 'Equipe '+marca;
+}
 
-  // Coleta raw de itens para redistribuição proporcional
+// Fonte única de itens (descrição completa + qty + valor unitário + total),
+// já com o valor final redistribuído proporcionalmente entre os itens —
+// usada pelo PDF E pelo WhatsApp, para os dois nunca mostrarem números
+// diferentes para o mesmo orçamento (achado da auditoria: cada um tinha sua
+// própria cópia dessa lógica antes desta rodada).
+function orcColetarItensDistribuidos(baseEfetiva){
+  var c = window._orcCalc || {};
   var _itensDados = [];
   var _matTotalRaw = 0;
   document.querySelectorAll('#orcItemBody tr').forEach(function(row){
@@ -16202,29 +16199,56 @@ function orcImprimirOrcamentoPDF() {
     var matEl = document.getElementById('oi_mat_'+idx);
     var matLbl= matEl ? matEl.options[matEl.selectedIndex].text : '';
     var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
-    // Parse raw material total for this item
     var totRawTxt = (document.getElementById('oi_tot_'+idx)||{}).textContent||'0';
     var totRaw = parseFloat(totRawTxt.replace(/[^\d,]/g,'').replace(',','.').replace(/\./g,function(m,o,s){return o<s.lastIndexOf('.')?'':'.'})) || 0;
     _matTotalRaw += totRaw;
     _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, matLbl:matLbl, det:det, totRaw:totRaw});
   });
-
-  // Redistribui o valor final proporcionalmente entre os itens
-  var _totalParaDistribuir = baseEfetiva || c2.finalPrice || 0;
-  var fmtBRL = function(v){ return 'R$'+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var itensRows = '';
-  _itensDados.forEach(function(item){
-    var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (1/_itensDados.length);
+  var _totalParaDistribuir = baseEfetiva || c.finalPrice || 0;
+  return _itensDados.map(function(item){
+    var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);
     var itemTotal = _totalParaDistribuir * share;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
     var desc = item.prod;
     if(item.larg && item.alt) desc += ' ' + item.larg + '×' + item.alt + 'cm';
     if(item.matLbl) desc += ' em ' + item.matLbl;
     if(item.det) desc += ' — ' + item.det;
-    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+desc+'</td>'
-      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(itemUnit)+'</td>'
+    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal };
+  });
+}
+
+function orcImprimirOrcamentoPDF() {
+  var c2 = window._orcCalc || {};
+  var isVitre = document.body.classList.contains('vitre');
+  var marca   = isVitre ? 'Vitre' : 'VR Marcas';
+  var nome    = (document.getElementById('orcClientNome')||{}).value || '—';
+  var tel     = (document.getElementById('orcClientTel')||{}).value  || '—';
+  var email   = (document.getElementById('orcClientEmail')||{}).value|| '—';
+  var doc     = (document.getElementById('orcClientDoc')||{}).value  || '';
+  var cidade  = (document.getElementById('orcClientCidade')||{}).value|| '';
+  var pgtoSel = document.getElementById('orcFormaPgto');
+  var pgtoLabel = pgtoSel ? pgtoSel.options[pgtoSel.selectedIndex].text : 'A combinar';
+  var prazoTxtPDF = orcGetPrazoTexto();
+
+  // itens
+  // descontos (calculados antes dos itens para redistribuir o valor final)
+  var condAtivo = !!(document.getElementById('orcDescCondToggle')?.checked);
+  var condPct   = condAtivo ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
+  var condData  = condAtivo ? (document.getElementById('orcDescCondData')?.value||'') : '';
+  var pixAtivo  = !!(document.getElementById('orcPixDiscToggle')?.checked);
+  var pixPct    = pixAtivo  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
+  var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100)*(1-pixPct/100) : 0;
+
+  // Itens já redistribuídos — mesma fonte usada pelo WhatsApp
+  // (orcColetarItensDistribuidos), PDF e WhatsApp nunca mais divergem aqui.
+  var _totalParaDistribuir = baseEfetiva || c2.finalPrice || 0;
+  var fmtBRL = function(v){ return 'R$'+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var itensRows = '';
+  orcColetarItensDistribuidos(baseEfetiva).forEach(function(item){
+    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+item.desc+'</td>'
+      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(item.unit)+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+item.qty+'</td>'
-      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(itemTotal)+'</td>'
+      +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(item.total)+'</td>'
       +'</tr>';
   });
   var totalFmt = baseEfetiva>0
@@ -16248,13 +16272,25 @@ function orcImprimirOrcamentoPDF() {
   }
 
   var dataHoje = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
+  // Ativos oficiais (assets/brand/) — URL absoluta porque o PDF abre numa
+  // janela about:blank própria (window.open + document.write), então uma
+  // URL relativa dependeria de comportamento de base-URL do navegador.
+  var _brandBase = location.origin + '/assets/brand/';
+  var responsavelPDF = orcGetResponsavel(marca);
+  var numeroPDF = orcGetNumeroPreview();
+  var validadeDiasPDF = orcGetValidadeDias();
 
   // ── VITRE TEMPLATE ──────────────────────────────────────────────
   var html;
   if(isVitre) {
-    var vtPrim  = '#B85C28';  // terracotta
-    var vtTeal  = '#1D6B6B';  // teal
-    var vtCream = '#F5EDE0';  // cream
+    // Cores reais extraídas de "Id visual - VR e Vitre/logo VITRE.png" —
+    // Vitre só tem UMA cor oficial (verde-petróleo); vtTeal é um tom mais
+    // claro derivado dela para uso em elementos interativos/acentos, vtCream
+    // é um tom bem claro da mesma cor para fundos suaves. Nada de terracota
+    // — essa paleta anterior não vinha de nenhum ativo real da marca.
+    var vtPrim  = '#134F57';  // verde-petróleo oficial
+    var vtTeal  = '#1E7A86';  // tom mais claro, derivado
+    var vtCream = '#EAF3F3';  // tom bem claro, derivado
     html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento — Vitre</title>'
     +'<style>*{margin:0;padding:0;box-sizing:border-box}'
     +'body{font-family:Georgia,"Times New Roman",serif;background:#fff;color:#2D2D2D}'
@@ -16297,8 +16333,8 @@ function orcImprimirOrcamentoPDF() {
     +'</svg>'
     +'<div class="content">'
     +'<div class="hdr">'
-    +'<div class="brand"><div class="brand-name">vitre</div><div class="brand-tag">acrílicos personalizados</div><div class="brand-phone">(62) 3941-6787</div></div>'
-    +'<div class="orc-right"><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Data: '+dataHoje+'<br>Validade: 10 dias<br>Vendedor: '+vendedor+'</div></div>'
+    +'<div class="brand"><img src="'+_brandBase+'vitre-logo.png" alt="Vitre" style="height:34px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
+    +'<div class="orc-right"><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Nº '+numeroPDF+'<br>Data: '+dataHoje+'<br>Validade: '+validadeDiasPDF+' dias<br>Responsável: '+responsavelPDF+'</div></div>'
     +'</div>'
     +'<div class="div1"></div>'
     +'<div class="client-grid">'
@@ -16312,13 +16348,16 @@ function orcImprimirOrcamentoPDF() {
     +'<div style="font-weight:700;font-size:10px;color:#666">CNPJ 37.855.285/0001-52</div>'
     +'<div style="font-size:9px;color:#aaa;margin-top:4px">Rua Francisca da Costa Cunha, nº 39, Qd. 69A Lt. 17, Setor Aeroporto — Goiânia – GO, CEP 74.075-300</div>'
     +'</div>'
-    +'<div class="disc">ESTE ORÇAMENTO NÃO TEM VALOR FISCAL · Válido por 10 dias a partir da emissão</div>'
+    +'<div class="disc">ESTE ORÇAMENTO NÃO TEM VALOR FISCAL · Válido por '+validadeDiasPDF+' dias a partir da emissão</div>'
     +'<div class="no-print" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:12px 28px;background:'+vtPrim+';color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">🖨️ Imprimir / Salvar PDF</button></div>'
     +'</div></div></body></html>';
 
   } else {
     // ── VR MARCAS TEMPLATE ───────────────────────────────────────
-    var vrCyan = '#00C1DE'; var vrMag = '#B11CAB'; var vrGold = '#FFB71B'; var vrDark = '#3F3F3E';
+    // Cores reais extraídas de "Id visual - VR e Vitre/LOGO VR MARCAS.png"
+    // (a paleta anterior — #00C1DE/#B11CAB/#FFB71B — era próxima mas não
+    // batia com nenhum pixel real do arquivo oficial).
+    var vrCyan = '#1EB8D8'; var vrMag = '#983C8F'; var vrGold = '#FAB427'; var vrDark = '#54565A';
     html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento — VR Marcas</title>'
     +'<style>*{margin:0;padding:0;box-sizing:border-box}'
     +'body{font-family:Arial,"Helvetica Neue",sans-serif;background:#fff;color:'+vrDark+'}'
@@ -16358,8 +16397,8 @@ function orcImprimirOrcamentoPDF() {
     +'</svg>'
     +'<div class="content">'
     +'<div class="hdr">'
-    +'<div><div class="brand-name">VR Marcas</div><div class="brand-tag">acrílicos personalizados</div><div class="brand-phone">(62) 3941-6787</div></div>'
-    +'<div><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Data: '+dataHoje+'<br>Validade: 10 dias<br>Vendedor: '+vendedor+'</div></div>'
+    +'<div><img src="'+_brandBase+'vr-marcas-logo.png" alt="VR Marcas" style="height:52px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
+    +'<div><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Nº '+numeroPDF+'<br>Data: '+dataHoje+'<br>Validade: '+validadeDiasPDF+' dias<br>Responsável: '+responsavelPDF+'</div></div>'
     +'</div>'
     +'<div class="rainbow-bar"></div>'
     +'<div class="client-grid">'
@@ -16372,7 +16411,7 @@ function orcImprimirOrcamentoPDF() {
     +'<div class="footer-bar"><span>📞 (62) 3941-6787</span><span>📸 @vrmarcas</span><span>🌐 vrmarcas.com</span><span>✉️ vrmarcas@hotmail.com</span></div>'
     +'<div style="text-align:center;font-size:10px;color:#888;font-weight:700;margin-top:8px">CNPJ 37.855.285/0001-52</div>'
     +'<div style="text-align:center;font-size:9px;color:#bbb;margin-top:4px">Rua Francisca da Costa Cunha, nº 39, Qd. 69A Lt. 17, Setor Aeroporto — Goiânia – GO, CEP 74.075-300</div>'
-    +'<div class="disc">ESTE ORÇAMENTO NÃO TEM VALOR FISCAL · Válido por 10 dias a partir da emissão</div>'
+    +'<div class="disc">ESTE ORÇAMENTO NÃO TEM VALOR FISCAL · Válido por '+validadeDiasPDF+' dias a partir da emissão</div>'
     +'<div class="no-print" style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:12px 28px;background:'+vrDark+';color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">🖨️ Imprimir / Salvar PDF</button></div>'
     +'</div></div></body></html>';
   }
@@ -16569,11 +16608,29 @@ var _ORC_ENVIADOS_DATA = [];
 function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }
 function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
 
+// Número do orçamento — gerado na PRIMEIRA vez que é preciso mostrá-lo ao
+// cliente (PDF ou WhatsApp, no passo "Envio ao Cliente", ANTES do
+// orçamento existir salvo) e reaproveitado no salvamento final, para o
+// cliente nunca receber um número diferente do que fica registrado.
+function orcGetNumeroPreview(){
+  if(!window._orcNumeroPreview) window._orcNumeroPreview = String(Date.now()).slice(-6);
+  return window._orcNumeroPreview;
+}
+
+// Achado real: o <select> de Validade (passo 1) nunca teve id — PDF e
+// WhatsApp sempre mostravam "10 dias" fixo, não importa o que o usuário
+// selecionasse ali. Fonte única agora usada pelos dois.
+function orcGetValidadeDias(){
+  var sel = document.getElementById('orcValidadeDias');
+  var n = sel ? parseInt(sel.value,10) : 10;
+  return isNaN(n) || n<=0 ? 10 : n;
+}
+
 function orcSalvarOrcamento() {
   var c = window._orcCalc||{};
   if(!c.finalPrice){ showToast('Calcule o orçamento (Passo 3) antes de salvar','warn'); return; }
   var lista = orcGetEnviados();
-  var num   = String(Date.now()).slice(-6);
+  var num   = orcGetNumeroPreview();
   var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
   var dcPct = dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
   var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
@@ -16694,6 +16751,9 @@ function orcSalvarOrcamento() {
   })();
   if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
   showToast('Orçamento #'+num+' salvo! Veja em "Orçamentos Enviados".','ok');
+  // Libera o número de preview — o PRÓXIMO orçamento (Novo Orçamento) deve
+  // gerar o seu próprio, nunca reaproveitar o deste que acabou de salvar.
+  window._orcNumeroPreview = null;
 }
 
 // ── Autocomplete de cliente no orçamento ──────────────────────────────────
