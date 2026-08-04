@@ -233,14 +233,70 @@ o resto da suíte):
   sem nenhum vetor); sistema continuou funcional (extraiu peças, toast de
   sucesso) — a sanitização não quebrou o uso legítimo.
 
+## Rodada de fechamento v4 — PDF A4 real (curto e longo)
+
+Objetivo: sair do "testado por leitura de código" e gerar o HTML real
+que o botão "Imprimir/Salvar PDF" produz, a partir da função real
+`orcImprimirOrcamentoPDF()`, sem tocar o Firestore.
+
+Técnica: `window.open` foi interceptado (retorna um objeto fake cujo
+`document.write(html)` acumula o HTML em `window.__pdfCapturado` em vez
+de abrir uma popup real — popup real não se comporta como esperado neste
+ambiente de automação). O HTML capturado foi salvo em arquivo e servido
+pelo mesmo servidor HTTP local do preview (`file://` trava navegação
+neste ambiente), permitindo screenshot real do resultado renderizado.
+
+- **Orçamento curto** (2 itens, parcelamento 6x com acréscimo ativo,
+  desconto Pix 5% ativo, sem condição comercial): HTML capturado
+  (6.168 caracteres), renderizado e fotografado. Confirmado visualmente:
+  layout A4, marca VR Marcas, dados do cliente, tabela de itens com
+  matemática correta, "Total Geral R$ 950,00" (1000 × 0,95), texto
+  "Parcelável em até 6x de R$ 167,82 (parcelas com acréscimo)" (não
+  afirma "sem juros" pois a taxa real de 6x é > 0 — paridade com a regra
+  usada no WhatsApp via `orcCalcCondicoesPagamento()`), "5% de desconto
+  pagando via PIX", rodapé com CNPJ/endereço, nenhum dado de custo
+  interno visível.
+- **Orçamento longo** (25 itens, parcelamento 6x + Pix 5% ativos):
+  HTML capturado (19.515 caracteres), 25 linhas presentes, "Total Geral
+  R$ 23.750,00" e "6x de R$ 4.195,44 (parcelas com acréscimo)" corretos.
+  Auditoria de posição de cada `<tr>` via `getBoundingClientRect()`
+  confirmou as 25 linhas com altura uniforme (61px), sem sobreposição e
+  sem lacuna — nenhum item foi perdido ou duplicado ao reabrir/rolar.
+  **Achado real (não teórico) antes da correção**: o CSS de impressão
+  não tinha nenhuma regra `page-break-inside`/`break-inside`. Medindo a
+  posição de cada linha contra os limites de página A4 (1123px @96dpi),
+  4 das 25 linhas caíam exatamente sobre uma quebra de página — ou seja,
+  ao imprimir de verdade, aquelas linhas seriam cortadas ao meio entre
+  duas páginas. **Corrigido** em `index.html` (ambos os templates, VR
+  Marcas e Vitre, dentro do bloco `@media print` de
+  `orcImprimirOrcamentoPDF()`): adicionado
+  `tr{page-break-inside:avoid;break-inside:avoid}`,
+  `.total-row,.client-grid,.hdr{page-break-inside:avoid;break-inside:avoid}`
+  e `thead{display:table-header-group}` (repete o cabeçalho da tabela em
+  cada página). Recapturado após a correção: `hasBreakCSS:true`
+  confirmado no HTML gerado pela função real.
+  **Limitação honesta**: a verificação acima prova (a) que o conteúdo
+  transborda uma página A4 única com 25 itens (~2.287px de conteúdo vs
+  ~1.123px por página, portanto paginação múltipla é real) e (b) que a
+  regra CSS padrão para evitar corte de linha agora está presente no
+  HTML gerado. Ela **não** prova pixel-a-pixel como o motor de impressão
+  do Chrome vai paginar o conteúdo real, pois as ferramentas de
+  automação deste ambiente renderizam em fluxo de tela contínuo, não no
+  modo de paginação de impressão real (`window.print()` não pôde ser
+  disparado/inspecionado headless aqui). `page-break-inside`/
+  `break-inside:avoid` em `<tr>` é comportamento padrão e amplamente
+  suportado pelos motores de impressão de todos os browsers evergreen
+  (incluindo Chrome), mas o resultado exato não foi confirmado via um
+  PDF real gerado por `window.print()`/impressora virtual.
+
 ## O que este harness NÃO prova
 
 - Login real via Firebase Auth (não testado — precisaria de credenciais).
 - Round-trip real de gravação/leitura no Firestore de produção (o mock
   prova a *lógica* de transação, não a infraestrutura real do Firebase).
-- Renderização visual do PDF A4 (testado por leitura de código + presença
-  das novas seções HTML, não por screenshot de um PDF gerado com dados
-  reais — precisaria de um orçamento real calculado via `_orcCalc`).
+- Paginação pixel-a-pixel do PDF A4 real gerado por `window.print()` —
+  ver "Rodada de fechamento v4" acima para o que foi e não foi provado
+  sobre quebras de página.
 - Interação humana real com os botões (cliques/toques) — as funções foram
   chamadas diretamente via console, não via `click()` simulado no DOM.
   Os elementos-alvo (`kbEntregarBtn`, etc.) foram confirmados presentes e
