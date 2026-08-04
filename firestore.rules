@@ -178,6 +178,39 @@ service cloud.firestore {
       // Nega tudo o mais por padrão — nenhum catch-all amplo.
     }
 
+    // ── erp_vr/erp_orc_counter: contador atômico do número oficial de
+    // orçamento (Rodada E.2) — caminho exato, FORA do match genérico
+    // erp_vr/{docId} acima, para que nenhuma regra ampla de outro documento
+    // (ex.: o precedente já existente 'allow read, write: if isProducao()'
+    // usado por erp_compras_counter) se aplique aqui por acidente. Ao
+    // contrário desse precedente — que autoriza escrita irrestrita de
+    // qualquer forma no documento —, este bloco valida o CONTEÚDO da
+    // escrita, não só o papel de quem escreve:
+    //  - create: só aceita o valor inicial canônico (n=1), só o campo 'n';
+    //  - update: só aceita incremento atômico de exatamente +1 sobre o
+    //    valor já gravado (resource.data.n, lido pela própria regra — não
+    //    pelo cliente), nunca reduz/reseta/pula, nunca outro campo;
+    //  - delete: sempre negado (excluir e recriar seria um reset disfarçado).
+    // A atomicidade entre reservas concorrentes continua garantida pela
+    // transação do Firestore (mesma técnica já usada e testada em
+    // comprasProximoNumeroAtomico) — esta regra só impede que uma escrita
+    // (transacional ou não) grave um valor fora do incremento válido.
+    match /erp_vr/erp_orc_counter {
+      allow read: if isComercial();
+
+      allow create: if isComercial()
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n == 1;
+
+      allow update: if isComercial()
+        && resource != null
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n is int
+        && request.resource.data.n == resource.data.n + 1;
+
+      allow delete: if false;
+    }
+
     // ── erp_vr_usuarios: documento por UID (normalizado, substitui o array
     // erp_vr/erp_usuarios para fins de login/identificação de perfil) ───────
     // Cada usuário lê SÓ o próprio documento; só Master lista todos. Nenhum

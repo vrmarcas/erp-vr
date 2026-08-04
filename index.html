@@ -16717,14 +16717,35 @@ function orcProximoNumeroAtomico(){
     return Promise.resolve(_orcNumeroCounterLocal);
   }
   var ref = _db.collection(_COL).doc('erp_orc_counter');
-  return _db.runTransaction(function(txn){
-    return txn.get(ref).then(function(snap){
-      var atual = (snap.exists && snap.data() && typeof snap.data().n==='number') ? snap.data().n : 0;
-      var proximo = atual + 1;
-      txn.set(ref, { n: proximo });
-      return proximo;
+  function espera(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
+  function tentar(restam){
+    return _db.runTransaction(function(txn){
+      return txn.get(ref).then(function(snap){
+        var atual = (snap.exists && snap.data() && typeof snap.data().n==='number') ? snap.data().n : 0;
+        var proximo = atual + 1;
+        txn.set(ref, { n: proximo });
+        return proximo;
+      });
+    }).catch(function(e){
+      // Achado da Rodada E.2: o Firestore Emulator (não a Rules em si —
+      // comprovado isolando cada cláusula: nem "resource.data.n" sozinho,
+      // nem "request.resource.data.n" sozinho falham, só a combinação dos
+      // dois em alta concorrência real no MESMO documento) tem uma falha
+      // conhecida de avaliação transitória ("evaluation error") ao ler
+      // resource.data dentro de uma regra sob concorrência — sempre
+      // permission-denied, nunca escreve valor inválido (a invariante de
+      // segurança nunca é violada; só a disponibilidade cai sob
+      // concorrência real no emulador local). Retry com jitter pequeno —
+      // cada tentativa relê o valor mais recente, então nunca reaproveita
+      // nem pula um número, só espalha as tentativas para reduzir a
+      // chance de reincidir na mesma corrida.
+      if(restam>0 && e && e.code==='permission-denied'){
+        return espera(15 + Math.floor(Math.random()*40)).then(function(){ return tentar(restam-1); });
+      }
+      throw e;
     });
-  });
+  }
+  return tentar(20);
 }
 
 // Número oficial reservado UMA única vez por rascunho de orçamento e
