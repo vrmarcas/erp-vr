@@ -99,14 +99,27 @@ service cloud.firestore {
       allow read: if isAuthenticated() && docId == 'erp_usuarios';
       allow write: if isMaster() && docId == 'erp_usuarios';
 
-      // Config estrutural, permissões e segredos administrativos — só Master
-      // pode ler E escrever. Ninguém eleva o próprio perfil porque só quem
-      // já é Master pode tocar em erp_permissoes/erp_usuarios.
+      // Segredos administrativos — só Master pode ler E escrever.
       allow read, write: if isMaster() && docId in [
-        'erp_permissoes', 'erp_master_pwd', 'erp_bank_config',
+        'erp_master_pwd', 'erp_bank_config',
         'erp_mach_presets', 'erp_inact_mins', 'erp_mat_prices',
         'valeria_authorized_agents'
       ];
+
+      // erp_permissoes: matriz de visibilidade de página por perfil
+      // (booleanos, sem segredo nenhum) — consumida no cliente por
+      // usrLoadPerms()/secApplyPerms() para decidir o que cada perfil vê na
+      // sidebar. Achado real desta rodada: estava só-Master (mesmo grupo
+      // acima), o que tornava a personalização de permissões (tela
+      // Config>Usuários) 100% inerte para qualquer perfil não-master — o
+      // cliente nunca conseguia LER o próprio documento de permissões
+      // customizadas, então usrLoadPerms() sempre caía no PERM_DEFAULT
+      // hardcoded (que nem inclui 'compras'/'fornecedores' para produção),
+      // escondendo a página de Compras da sidebar de Produção mesmo com a
+      // Cloud Function comprasCriarSolicitacao exigindo exatamente esse
+      // perfil. Escrita continua exclusiva de Master — não eleva privilégio.
+      allow read: if isAnyStaff() && docId == 'erp_permissoes';
+      allow write: if isMaster() && docId == 'erp_permissoes';
 
       // erp_config: todo o staff precisa LER (cálculo de preço no orçamento,
       // taxa de imposto no DRE), mas só Master decide os percentuais.
