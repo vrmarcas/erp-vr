@@ -214,6 +214,32 @@ console.log('\n── 2.3 Recebimento por evento + Conta a Pagar idempotente ─
   test('34. receber depois de completo retorna ok:false', e4.ok, false);
 }
 
+console.log('\n── Regressão de segurança (achados da revisão do diff) ──────\n');
+{
+  // Espelho: cfgEsc() — usado para escapar campos de texto livre (label,
+  // fornecedor, justificativa) antes de irem para innerHTML em comprasRender().
+  function cfgEsc(s) { return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  test('35. cfgEsc neutraliza tag <img> maliciosa', cfgEsc('<img src=x onerror=alert(1)>').indexOf('<img') === -1, true);
+  test('36. cfgEsc neutraliza tag <script> maliciosa', cfgEsc('<script>alert(2)</script>').indexOf('<script>') === -1, true);
+  test('37. cfgEsc preserva o texto legítimo (sem tags)', cfgEsc('Fornecedor ACME Ltda'), 'Fornecedor ACME Ltda');
+
+  // Espelho: trava _comprasSolicitandoOS — evita 2 solicitações para a
+  // mesma OS se comprasSolicitarDeOS for chamada 2x antes da 1ª terminar
+  // (achado real: confirmado no harness do navegador, aqui é o mirror).
+  function simulaSolicitarDeOS(osId, travas, comprasExistentes) {
+    if (travas[osId]) return { criada: false, motivo: 'em andamento' };
+    var jaExiste = comprasExistentes.some(function (pc) { return pc.origem === osId && pc.status !== 'cancelada'; });
+    if (jaExiste) return { criada: false, motivo: 'já existe' };
+    travas[osId] = true;
+    return { criada: true };
+  }
+  var travas = {}, existentes = [];
+  var r1 = simulaSolicitarDeOS('osDup', travas, existentes);
+  var r2 = simulaSolicitarDeOS('osDup', travas, existentes); // "concorrente" — trava ainda não foi liberada
+  test('38. primeira chamada para a OS cria a solicitação', r1.criada, true);
+  test('39. segunda chamada concorrente para a MESMA OS é bloqueada', r2.criada, false);
+}
+
 console.log('\n' + '='.repeat(64));
 console.log(' RESULTADO: ' + passed + ' passed, ' + failed + ' failed');
 console.log('='.repeat(64) + '\n');

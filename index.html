@@ -11720,7 +11720,19 @@ function comprasProximoNumeroAtomico(){
 // Cria uma solicitação de compra a partir de uma falta de material detectada
 // na produção (kbConfirmarProd) — matKey já é um ID real de STOCK (o usuário
 // escolheu no seletor de material da produção), não um texto solto.
+var _comprasSolicitandoOS = {}; // trava síncrona: evita 2 solicitações para a mesma OS se disparada 2x antes da 1ª promise resolver
 function comprasSolicitarDeOS(os, matKey, qtdFalta){
+  var chaveTrava = os.id||os.num;
+  if(_comprasSolicitandoOS[chaveTrava]){
+    showToast('Já existe uma solicitação de compra em andamento para esta OS.','info');
+    return Promise.resolve(null);
+  }
+  var jaExiste = COMPRAS.some(function(pc){ return pc.origem && (pc.origem.osId===os.id || pc.origem.osNum===os.num) && pc.status!=='cancelada'; });
+  if(jaExiste){
+    showToast('Já existe uma solicitação de compra em aberto para esta OS.','info');
+    return Promise.resolve(null);
+  }
+  _comprasSolicitandoOS[chaveTrava] = true;
   return comprasProximoNumeroAtomico().then(function(numero){
     var s = matKey && STOCK[matKey];
     var pc = {
@@ -11751,6 +11763,12 @@ function comprasSolicitarDeOS(os, matKey, qtdFalta){
     if(typeof secAuditLog==='function') secAuditLog('compra_criada','Solicitação #'+pc.numero+' criada a partir da OS #'+os.num+' — '+pc.itens[0].label);
     if(typeof comprasRender==='function') comprasRender();
     return pc;
+  }).catch(function(e){
+    console.warn('[Compras] Falha ao criar solicitação:', e);
+    showToast('Erro ao registrar solicitação de compra: '+(e&&e.message||e),'err');
+    throw e;
+  }).finally(function(){
+    delete _comprasSolicitandoOS[chaveTrava];
   });
 }
 
@@ -11980,9 +11998,9 @@ function comprasRender(){
   wrap.innerHTML = lista.map(function(pc){
     var itensHtml = pc.itens.map(function(i){
       var espTxt = i.esp ? ' — '+i.esp+'mm' : '';
-      var corTxt = i.cor ? ' '+i.cor : '';
+      var corTxt = i.cor ? ' '+cfgEsc(i.cor) : '';
       var idTxt = i.matKeyConfianca==='exata' ? ' 🔗' : (i.matKeyConfianca==='nenhuma' ? ' (sem vínculo de ID)' : '');
-      return '<div style="font-size:11px;color:var(--muted)">• '+i.label+corTxt+espTxt+idTxt+' — '+(i.qtyRecebida||0)+'/'+i.qtyNecessaria+' '+(i.unidade||'un')+(i.precoUnit?' · R$'+i.precoUnit.toFixed(2)+'/un':'')+'</div>';
+      return '<div style="font-size:11px;color:var(--muted)">• '+cfgEsc(i.label)+corTxt+espTxt+idTxt+' — '+(i.qtyRecebida||0)+'/'+i.qtyNecessaria+' '+(i.unidade||'un')+(i.precoUnit?' · R$'+i.precoUnit.toFixed(2)+'/un':'')+'</div>';
     }).join('');
     var origemHtml = pc.origem ? '<span style="font-size:10px;color:var(--muted)">OS #'+pc.origem.osNum+'</span>' : '';
     var rv = comprasResumoValores(pc);
@@ -12006,8 +12024,8 @@ function comprasRender(){
       +'</div>'
       +'<div style="margin-top:8px">'+itensHtml+'</div>'
       +resumoHtml
-      +(pc.fornecedorEscolhido?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Fornecedor: '+pc.fornecedorEscolhido+'</div>':'')
-      +(pc.cancelJustificativa?'<div style="font-size:11px;color:#DC2626;margin-top:4px">Cancelada: '+pc.cancelJustificativa+'</div>':'')
+      +(pc.fornecedorEscolhido?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Fornecedor: '+cfgEsc(pc.fornecedorEscolhido)+'</div>':'')
+      +(pc.cancelJustificativa?'<div style="font-size:11px;color:#DC2626;margin-top:4px">Cancelada: '+cfgEsc(pc.cancelJustificativa)+'</div>':'')
       +'<div style="margin-top:10px">'+acoes+'</div>'
       +'</div>';
   }).join('');
@@ -13243,13 +13261,13 @@ function relFiscalRender() {
       + Object.keys(FISCAL_STATUS_LABEL).map(function(s){ return '<option value="'+s+'"'+(statusAtual===s?' selected':'')+'>'+FISCAL_STATUS_LABEL[s]+'</option>'; }).join('')
       + '</select>';
     return '<tr style="border-bottom:1px solid var(--border)">'
-      +'<td style="padding:6px 8px">'+o.id+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+o.numeroNF+'</div>':'')+'</td>'
-      +'<td style="padding:6px 8px">'+o.dataSalvo+'</td>'
-      +'<td style="padding:6px 8px"><strong>'+o.cliente+'</strong>'
-        +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+o.nf.doc+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px">'+cfgEsc(o.id)+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+cfgEsc(o.numeroNF)+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px">'+cfgEsc(o.dataSalvo)+'</td>'
+      +'<td style="padding:6px 8px"><strong>'+cfgEsc(o.cliente)+'</strong>'
+        +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+cfgEsc(o.nf.doc)+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+marca+'</td>'
       +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+(o.valorFinal||o.valorBase||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
-      +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+(o.email||'—')+'</td>'
+      +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+cfgEsc(o.email||'—')+'</td>'
       +'<td style="padding:6px 8px">'+statusSel+'</td>'
       +'</tr>';
   }).join('');
@@ -17610,10 +17628,10 @@ function cfgRenderMarkupRevisaoBanner() {
   } else {
     var d = new Date(st.proximaRevisao).toLocaleDateString('pt-BR');
     var dUlt = new Date(st.ultimaRevisao).toLocaleDateString('pt-BR');
-    if(st.diasRestantes < 0){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Revisão de markup ATRASADA há '+Math.abs(st.diasRestantes)+' dia(s) (prevista para '+d+'). Última revisão: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
-    else if(st.diasRestantes<=7){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
-    else if(st.diasRestantes<=30){ cor='#D97706'; bg='#FFFBEB'; msg='🟡 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
-    else { cor='#059669'; bg='#F0FDF4'; msg='🟢 Próxima revisão de markup: '+d+' ('+st.diasRestantes+' dias). Última: '+dUlt+' por '+(st.responsavel||'—')+'.'; }
+    if(st.diasRestantes < 0){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Revisão de markup ATRASADA há '+Math.abs(st.diasRestantes)+' dia(s) (prevista para '+d+'). Última revisão: '+dUlt+' por '+cfgEsc(st.responsavel||'—')+'.'; }
+    else if(st.diasRestantes<=7){ cor='#DC2626'; bg='#FEF2F2'; msg='🔴 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+cfgEsc(st.responsavel||'—')+'.'; }
+    else if(st.diasRestantes<=30){ cor='#D97706'; bg='#FFFBEB'; msg='🟡 Faltam '+st.diasRestantes+' dia(s) para a próxima revisão de markup ('+d+'). Última: '+dUlt+' por '+cfgEsc(st.responsavel||'—')+'.'; }
+    else { cor='#059669'; bg='#F0FDF4'; msg='🟢 Próxima revisão de markup: '+d+' ('+st.diasRestantes+' dias). Última: '+dUlt+' por '+cfgEsc(st.responsavel||'—')+'.'; }
   }
   box.style.background=bg; box.style.border='1.5px solid '+cor; box.style.color=cor;
   box.innerHTML = msg;
