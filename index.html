@@ -1329,7 +1329,7 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 9;
+  var loaded = 0, total = 10; // +1 (compras) — manter sincronizado com o número de _cloudLoad(...) abaixo
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1350,6 +1350,7 @@ function _cloudLoadAll() {
     // Listeners em tempo real
     _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
     _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+    _cloudWatch("compras", function(d){ if(d&&Array.isArray(d)){ COMPRAS=d; try{comprasRender();syncSidebarBadges();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'site');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
@@ -1447,6 +1448,7 @@ function _cloudLoadAll() {
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
+  _cloudLoad("compras", function(d){ if(d&&d.length){ COMPRAS=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
@@ -1772,6 +1774,7 @@ function _authFirebaseError(code){
       <div class="sb-item" onclick="nav('os-list',this)"><span class="ico">📄</span> Todas as OS</div>
       <div class="sb-item" onclick="nav('estoque',this)"><span class="ico">📦</span> Estoque <span class="sb-badge red" id="sbBadgeEstoque" style="display:none"></span></div>
       <div class="sb-item" onclick="nav('fornecedores',this)"><span class="ico">🏭</span> Fornecedores</div>
+      <div class="sb-item" onclick="nav('compras',this)"><span class="ico">🛒</span> Compras <span class="sb-badge red" id="sbBadgeCompras" style="display:none"></span></div>
     </div>
 
     <div class="sb-section" onclick="sbToggle('comercial')"><span>Comercial</span><span class="sb-arrow">▼</span></div>
@@ -5374,6 +5377,34 @@ function _authFirebaseError(code){
       </div>
     </div>
 
+    <!-- ==============================
+         COMPRAS — Necessidade → Cotação → Pedido → Recebimento
+         ============================== -->
+    <div id="pg-compras" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <select id="comprasFiltroStatus" onchange="comprasRender()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <option value="">Todos os status</option>
+          <option value="solicitada">Solicitada</option>
+          <option value="cotacao">Em cotação</option>
+          <option value="aprovada">Aprovada</option>
+          <option value="pedida">Pedida</option>
+          <option value="recebida_parcial">Recebida parcialmente</option>
+          <option value="recebida">Recebida</option>
+          <option value="cancelada">Cancelada</option>
+        </select>
+        <span id="comprasTotal" style="font-size:11px;color:var(--muted)"></span>
+        <div style="flex:1"></div>
+        <button class="topbar-btn ghost" onclick="comprasGerarNecessidades()" style="font-size:12px">🔎 Gerar necessidades a partir das OS</button>
+        <button class="topbar-btn" onclick="comprasNovaSolicitacaoModal()" style="font-size:12px">＋ Nova Solicitação</button>
+      </div>
+      <div id="comprasEmpty" style="display:none;text-align:center;padding:60px 20px">
+        <div style="font-size:64px;margin-bottom:16px;opacity:.5">🛒</div>
+        <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhuma solicitação de compra</div>
+        <div style="font-size:13px;color:var(--muted)">Use "Gerar necessidades a partir das OS" ou crie uma solicitação manual.</div>
+      </div>
+      <div id="comprasList" style="display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 
@@ -7093,6 +7124,7 @@ function nav(page, el) {
     seguranca: '🔐 Segurança',
     painel: '📺 Painel Executivo',
     fornecedores: '🏭 Fornecedores',
+    compras: '🛒 Compras',
     marketing: '📣 Marketing & Ads'
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
@@ -7113,6 +7145,7 @@ function nav(page, el) {
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
+  if (page === 'compras')   { setTimeout(function(){ comprasRender(); }, 0); }
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
   if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'pipeline'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
@@ -11253,6 +11286,9 @@ function syncSidebarBadges() {
   var estqCount=Object.values(STOCK).filter(function(s){return s.qty<s.min;}).length;
   var stBadge=document.getElementById('sbBadgeEstoque');
   if(stBadge){stBadge.textContent=estqCount||'';stBadge.style.display=estqCount?'':'none';}
+  var comprasCount=(typeof COMPRAS!=='undefined'?COMPRAS:[]).filter(function(p){return p.status!=='recebida'&&p.status!=='cancelada';}).length;
+  var pcBadge=document.getElementById('sbBadgeCompras');
+  if(pcBadge){pcBadge.textContent=comprasCount||'';pcBadge.style.display=comprasCount?'':'none';}
 }
 
 // ============================================================
@@ -11564,6 +11600,246 @@ var FIN_CP = [];
 
 function _finSaveCR(){ _cloudSave('fin_cr', FIN_CR); }
 function _finSaveCP(){ _cloudSave('fin_cp', FIN_CP); }
+
+// ============================================================
+// COMPRAS — Necessidade → Solicitação → Cotação → Aprovação → Pedido →
+//           Recebimento (parcial/total) → Estoque → Conta a Pagar
+// ============================================================
+// v1: escopo mínimo funcional. Simplificações assumidas (decisões provisórias,
+// documentadas para revisão futura):
+//  - Numeração sequencial simples baseada em contador local (não transacional
+//    como _OS_COUNTER) — risco de colisão em criação concorrente, aceitável
+//    para o volume inicial de uso.
+//  - "Gerar necessidades a partir das OS" é heurístico: sinaliza OS ativas cujo
+//    material principal (os.material) não bate com nenhuma chave em STOCK com
+//    saldo positivo — não faz explosão completa de lista de materiais (BOM).
+//  - Obrigação em Contas a Pagar é criada uma única vez, no primeiro
+//    recebimento (parcial ou total), pelo VALOR TOTAL do pedido — não por
+//    valor recebido parcialmente. Modelo alternativo (lançar só o valor
+//    recebido a cada parcial) pode ser adotado depois se preferido.
+var COMPRAS = [];
+var PC_STATUS = ['solicitada','cotacao','aprovada','pedida','recebida_parcial','recebida','cancelada'];
+var PC_STATUS_LABEL = {solicitada:'📝 Solicitada',cotacao:'💬 Em cotação',aprovada:'✅ Aprovada',pedida:'📦 Pedida',recebida_parcial:'🚚 Recebida parcialmente',recebida:'✅ Recebida',cancelada:'🚫 Cancelada'};
+var PC_STATUS_COLOR = {solicitada:'#6B7280',cotacao:'#D97706',aprovada:'#3B82F6',pedida:'#7C3AED',recebida_parcial:'#F59E0B',recebida:'#059669',cancelada:'#DC2626'};
+var _pcCounter = 0;
+
+function comprasSave(){ _cloudSave('compras', COMPRAS); }
+
+function comprasQuem(){ return (typeof _currentSession!=='undefined' && _currentSession && (_currentSession.user||_currentSession.email)) || 'desconhecido'; }
+
+function comprasLog(pc, acao, obs){
+  if(!pc.historico) pc.historico=[];
+  pc.historico.push({data:new Date().toLocaleString('pt-BR'), usuario:comprasQuem(), acao:acao, obs:obs||''});
+}
+
+function comprasProximoNumero(){
+  _pcCounter = Math.max(_pcCounter, COMPRAS.reduce(function(m,p){return Math.max(m,p.numero||0);},0)) + 1;
+  return _pcCounter;
+}
+
+// Cria uma solicitação de compra a partir de uma falta de material detectada
+// na produção (kbConfirmarProd) — usada quando o usuário confirma que quer
+// registrar a necessidade após um bloqueio de estoque insuficiente.
+function comprasSolicitarDeOS(os, matKey, qtdFalta){
+  var pc = {
+    id: 'pc'+Date.now(),
+    numero: comprasProximoNumero(),
+    status: 'solicitada',
+    origem: { osNum: os.num, osId: os.id },
+    itens: [{ material: matKey||null, label: (STOCK[matKey]&&STOCK[matKey].label)||matKey||'(material a definir)', qtyNecessaria: qtdFalta||1, qtyRecebida: 0, unidade: 'chapa', precoUnit: 0 }],
+    cotacoes: [],
+    fornecedorEscolhido: '',
+    marca: os.mk||'vr',
+    responsavel: comprasQuem(),
+    criadoEm: new Date().toISOString(),
+    historico: [],
+    finCpId: null
+  };
+  comprasLog(pc, 'criada', 'Gerada automaticamente por falta de material na OS #'+os.num);
+  COMPRAS.unshift(pc);
+  comprasSave();
+  showToast('🛒 Solicitação de compra #'+pc.numero+' registrada para '+pc.itens[0].label,'ok');
+  if(typeof secAuditLog==='function') secAuditLog('compra_criada','Solicitação #'+pc.numero+' criada a partir da OS #'+os.num+' — '+pc.itens[0].label);
+  return pc;
+}
+
+// Heurística: aponta OS ativas cujo material principal não tem saldo em STOCK.
+// Não substitui uma explosão de lista de materiais real — é um alerta de partida.
+function comprasGerarNecessidades(){
+  var ativos = ['iniciada','producao','aguardando_saldo'];
+  var candidatas = Object.values(KB_OS).filter(function(o){ return ativos.indexOf(o.status)>=0 && !o.matProd; });
+  var geradas = 0;
+  candidatas.forEach(function(os){
+    var matNome = (os.material||'').trim();
+    if(!matNome) return;
+    var matKey = Object.keys(STOCK).find(function(k){ return STOCK[k].label && STOCK[k].label.toLowerCase().indexOf(matNome.toLowerCase())>=0; });
+    var semEstoque = !matKey || (STOCK[matKey].qty||0) <= 0;
+    if(!semEstoque) return;
+    var jaExiste = COMPRAS.some(function(pc){ return pc.origem && pc.origem.osNum===os.num && pc.status!=='cancelada'; });
+    if(jaExiste) return;
+    comprasSolicitarDeOS(os, matKey||null, os.qty||1);
+    geradas++;
+  });
+  if(geradas===0) showToast('Nenhuma necessidade nova encontrada — OS ativas estão com material disponível ou já têm solicitação em aberto.','info');
+  else showToast(geradas+' solicitação(ões) de compra gerada(s) a partir das OS.','ok');
+  comprasRender();
+}
+
+function comprasNovaSolicitacaoModal(){
+  var nomeItem = prompt('Descrição do item/material a comprar:');
+  if(!nomeItem || !nomeItem.trim()) return;
+  var qtd = parseFloat(prompt('Quantidade necessária:', '1'))||1;
+  var fornecedor = prompt('Fornecedor (opcional — pode deixar em branco e escolher depois na cotação):')||'';
+  var marca = (typeof _finBrand!=='undefined' && _finBrand!=='todas') ? _finBrand : 'vr';
+  var matKey = Object.keys(STOCK).find(function(k){ return STOCK[k].label && STOCK[k].label.toLowerCase()===nomeItem.trim().toLowerCase(); });
+  var pc = {
+    id: 'pc'+Date.now(),
+    numero: comprasProximoNumero(),
+    status: 'solicitada',
+    origem: null,
+    itens: [{ material: matKey||null, label: nomeItem.trim(), qtyNecessaria: qtd, qtyRecebida: 0, unidade: 'un', precoUnit: 0 }],
+    cotacoes: [],
+    fornecedorEscolhido: fornecedor,
+    marca: marca,
+    responsavel: comprasQuem(),
+    criadoEm: new Date().toISOString(),
+    historico: [],
+    finCpId: null
+  };
+  comprasLog(pc, 'criada', 'Solicitação manual');
+  COMPRAS.unshift(pc);
+  comprasSave();
+  showToast('🛒 Solicitação de compra #'+pc.numero+' criada!','ok');
+  if(typeof secAuditLog==='function') secAuditLog('compra_criada','Solicitação #'+pc.numero+' criada manualmente — '+nomeItem.trim());
+  comprasRender();
+}
+
+// Ordem linear do fluxo — usada para permitir avanço direto ou cancelamento a
+// qualquer momento, mas nunca "pular para trás" exceto via cancelamento.
+var PC_FLUXO = ['solicitada','cotacao','aprovada','pedida','recebida_parcial','recebida'];
+
+function comprasAvancarStatus(id){
+  var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
+  if(pc.status==='cancelada' || pc.status==='recebida'){ showToast('Este pedido já está em estado final.','info'); return; }
+  if(pc.status==='pedida'){ comprasReceberModal(id); return; } // "avançar" de pedida = registrar recebimento
+  var idx = PC_FLUXO.indexOf(pc.status);
+  var proximo = PC_FLUXO[idx+1];
+  if(!proximo) return;
+  if(proximo==='pedida'){
+    if(!pc.fornecedorEscolhido || !pc.fornecedorEscolhido.trim()){
+      var f = prompt('Informe o fornecedor escolhido para emitir o pedido:');
+      if(!f || !f.trim()){ showToast('Fornecedor é obrigatório para emitir o pedido.','warn'); return; }
+      pc.fornecedorEscolhido = f.trim();
+    }
+  }
+  var statusAnterior = pc.status;
+  pc.status = proximo;
+  comprasLog(pc, 'status', statusAnterior+' → '+proximo);
+  comprasSave();
+  if(typeof secAuditLog==='function') secAuditLog('compra_status','Compra #'+pc.numero+' '+statusAnterior+' → '+proximo);
+  showToast('Compra #'+pc.numero+' agora está: '+PC_STATUS_LABEL[proximo],'ok');
+  comprasRender();
+}
+
+function comprasCancelar(id){
+  var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
+  if(pc.status==='cancelada'){ return; }
+  if(pc.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
+  var motivo = prompt('Motivo do cancelamento (obrigatório):');
+  if(!motivo || !motivo.trim()){ showToast('Cancelamento requer justificativa.','warn'); return; }
+  var statusAnterior = pc.status;
+  pc.status = 'cancelada';
+  pc.cancelJustificativa = motivo.trim();
+  comprasLog(pc, 'cancelada', motivo.trim());
+  comprasSave();
+  if(typeof secAuditLog==='function') secAuditLog('compra_cancelada','Compra #'+pc.numero+' cancelada (estava '+statusAnterior+') — motivo: '+motivo.trim());
+  showToast('Compra #'+pc.numero+' cancelada.','warn');
+  comprasRender();
+}
+
+// Recebimento total ou parcial: atualiza estoque somente pelo delta recebido
+// agora, e cria a obrigação em Contas a Pagar uma única vez (pc.finCpId).
+function comprasReceberModal(id){
+  var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
+  if(pc.status!=='pedida' && pc.status!=='recebida_parcial'){ showToast('Só é possível receber pedidos com status "Pedida" ou "Recebida parcialmente".','warn'); return; }
+  var algumaMudanca = false;
+  pc.itens.forEach(function(item){
+    var restante = (item.qtyNecessaria||0) - (item.qtyRecebida||0);
+    if(restante<=0) return;
+    var recebidoAgora = parseFloat(prompt('Recebendo agora — "'+item.label+'"\nFalta: '+restante+'\nQuantidade recebida agora (0 para pular):', String(restante)));
+    if(isNaN(recebidoAgora) || recebidoAgora<=0) return;
+    recebidoAgora = Math.min(recebidoAgora, restante);
+    item.qtyRecebida = (item.qtyRecebida||0) + recebidoAgora;
+    algumaMudanca = true;
+    if(item.material && STOCK[item.material]){
+      STOCK[item.material].qty = (STOCK[item.material].qty||0) + recebidoAgora;
+      if(typeof stockSaveData==='function') stockSaveData();
+      if(typeof stockUpdateDisplay==='function') try{ stockUpdateDisplay(item.material); }catch(e){}
+      if(typeof _stockLog==='function') try{ _stockLog('entrada', item.material, recebidoAgora, pc.numero, 'Recebimento compra #'+pc.numero); }catch(e){}
+    }
+  });
+  if(!algumaMudanca){ showToast('Nenhuma quantidade registrada.','info'); return; }
+  var tudoRecebido = pc.itens.every(function(item){ return (item.qtyRecebida||0) >= (item.qtyNecessaria||0); });
+  pc.status = tudoRecebido ? 'recebida' : 'recebida_parcial';
+  comprasLog(pc, 'recebimento', tudoRecebido?'Recebimento total':'Recebimento parcial');
+
+  // Cria a obrigação em Contas a Pagar uma única vez (idempotente via pc.finCpId)
+  if(!pc.finCpId){
+    var valorTotal = pc.itens.reduce(function(s,i){ return s+((i.qtyNecessaria||0)*(i.precoUnit||0)); }, 0);
+    if(valorTotal>0){
+      var cpId = 'cp_compra_'+pc.id;
+      var hoje = new Date();
+      var dd=hoje.getDate().toString().padStart(2,'0'), mm=(hoje.getMonth()+1).toString().padStart(2,'0'), yyyy=hoje.getFullYear();
+      var venc = new Date(hoje); venc.setDate(venc.getDate()+30);
+      var vdd=venc.getDate().toString().padStart(2,'0'), vmm=(venc.getMonth()+1).toString().padStart(2,'0');
+      FIN_CP.unshift({
+        id: cpId, descricao: 'Compra #'+pc.numero+' — '+pc.itens.map(function(i){return i.label;}).join(', '),
+        categoria: 'Matéria-Prima', valor: valorTotal, vencimento: vdd+'/'+vmm+'/'+venc.getFullYear(),
+        status: 'agendado', marca: pc.marca||'vr', fornecedor: pc.fornecedorEscolhido||'',
+        formaPgto: 'Banco', dataCriacao: dd+'/'+mm+'/'+yyyy, dataPagamento: null
+      });
+      _finSaveCP();
+      pc.finCpId = cpId;
+      comprasLog(pc, 'financeiro', 'Conta a pagar criada: '+finFmt(valorTotal));
+    }
+  }
+  comprasSave();
+  if(typeof secAuditLog==='function') secAuditLog('compra_recebimento','Compra #'+pc.numero+' — '+(tudoRecebido?'recebimento total':'recebimento parcial'));
+  showToast('Recebimento registrado para a Compra #'+pc.numero+(pc.finCpId?' — conta a pagar criada':''),'ok');
+  comprasRender();
+}
+
+function comprasRender(){
+  var wrap = document.getElementById('comprasList'); if(!wrap) return;
+  var filtro = (document.getElementById('comprasFiltroStatus')||{}).value||'';
+  var lista = COMPRAS.filter(function(pc){ return !filtro || pc.status===filtro; });
+  var totEl = document.getElementById('comprasTotal');
+  if(totEl) totEl.textContent = lista.length+' pedido(s)';
+  var empty = document.getElementById('comprasEmpty');
+  if(empty) empty.style.display = lista.length ? 'none' : '';
+  wrap.innerHTML = lista.map(function(pc){
+    var itensHtml = pc.itens.map(function(i){
+      return '<div style="font-size:11px;color:var(--muted)">• '+i.label+' — '+(i.qtyRecebida||0)+'/'+i.qtyNecessaria+' '+(i.unidade||'un')+(i.precoUnit?' · R$'+i.precoUnit.toFixed(2)+'/un':'')+'</div>';
+    }).join('');
+    var origemHtml = pc.origem ? '<span style="font-size:10px;color:var(--muted)">OS #'+pc.origem.osNum+'</span>' : '';
+    var acoes = '';
+    if(pc.status!=='cancelada' && pc.status!=='recebida'){
+      var proxLabel = pc.status==='pedida' ? '🚚 Registrar Recebimento' : '➡️ Avançar';
+      acoes += '<button onclick="comprasAvancarStatus(\''+pc.id+'\')" class="topbar-btn" style="font-size:11px;padding:5px 10px">'+proxLabel+'</button>';
+      acoes += '<button onclick="comprasCancelar(\''+pc.id+'\')" style="font-size:11px;padding:5px 10px;border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:6px">Cancelar</button>';
+    }
+    return '<div class="card" style="padding:14px 16px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      +'<div><strong>Compra #'+pc.numero+'</strong> '+origemHtml+'</div>'
+      +'<span style="background:'+PC_STATUS_COLOR[pc.status]+'22;color:'+PC_STATUS_COLOR[pc.status]+';padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">'+PC_STATUS_LABEL[pc.status]+'</span>'
+      +'</div>'
+      +'<div style="margin-top:8px">'+itensHtml+'</div>'
+      +(pc.fornecedorEscolhido?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Fornecedor: '+pc.fornecedorEscolhido+'</div>':'')
+      +(pc.cancelJustificativa?'<div style="font-size:11px;color:#DC2626;margin-top:4px">Cancelada: '+pc.cancelJustificativa+'</div>':'')
+      +'<div style="margin-top:10px">'+acoes+'</div>'
+      +'</div>';
+  }).join('');
+}
 
 // ============================================================
 // FINANCEIRO — Funções Globais
