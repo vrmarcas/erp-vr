@@ -1425,6 +1425,12 @@ function _cloudLoadAll() {
     // Listeners em tempo real
     _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
     _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+    // Leitura legada isolada — só popula COMPRAS (array antigo) para o fluxo
+    // pré-v2 continuar funcionando fora de homologação; NUNCA escreve.
+    // Critério objetivo de remoção: quando as Cloud Functions de Compras
+    // estiverem publicadas em produção e a migração de erp_vr/compras tiver
+    // sido executada (ver Task 4 do relatório de homologação), este watch e
+    // o array COMPRAS inteiro podem ser removidos sem perda de dado real.
     _cloudWatch("compras", function(d){ if(d&&Array.isArray(d)){ COMPRAS=d; try{comprasRender();syncSidebarBadges();}catch(e){} } });
     _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
@@ -5481,6 +5487,10 @@ function _authFirebaseError(code){
         <div style="font-size:13px;color:var(--muted)">Use "Gerar necessidades a partir das OS" ou crie uma solicitação manual.</div>
       </div>
       <div id="comprasList" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div id="comprasV2FinCpBlock" style="margin-top:22px">
+        <div style="font-size:12px;font-weight:800;color:var(--muted);margin-bottom:8px">💰 CONTAS A PAGAR — COMPRAS v2 (documentos/parcelas desta arquitetura; o módulo geral de Contas a Pagar não muda aqui)</div>
+        <div id="comprasV2FinCpList" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
     </div>
 
   </div><!-- /content -->
@@ -7180,7 +7190,13 @@ function nav(page, el) {
   }
   // ── Navegação ─────────────────────────────────────────────────────────────
   // Hide all pages with direct inline style (most reliable cross-browser)
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
+  // Achado real desta rodada: 'compras' nunca esteve nesta lista — a página
+  // nunca era escondida ao navegar para outra (só não incomodava ninguém
+  // porque, antes desta rodada, 'compras' também nunca estava em MODULOS,
+  // então só Master alcançava a página pela sidebar, e raramente saía dela
+  // sem recarregar). Agora que Produção/Financeiro navegam para Compras
+  // rotineiramente, o conteúdo ficava vazando por baixo de outras páginas.
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -11428,7 +11444,8 @@ function syncSidebarBadges() {
   var estqCount=Object.values(STOCK).filter(function(s){return s.qty<s.min;}).length;
   var stBadge=document.getElementById('sbBadgeEstoque');
   if(stBadge){stBadge.textContent=estqCount||'';stBadge.style.display=estqCount?'':'none';}
-  var comprasCount=(typeof COMPRAS!=='undefined'?COMPRAS:[]).filter(function(p){return p.status!=='recebida'&&p.status!=='cancelada';}).length;
+  var _comprasFonteBadge=(typeof _HOMOLOG_MODE!=='undefined'&&_HOMOLOG_MODE)?(typeof COMPRAS_V2_CACHE!=='undefined'?COMPRAS_V2_CACHE:[]):(typeof COMPRAS!=='undefined'?COMPRAS:[]);
+  var comprasCount=_comprasFonteBadge.filter(function(p){return p.status!=='recebida'&&p.status!=='cancelada';}).length;
   var pcBadge=document.getElementById('sbBadgeCompras');
   if(pcBadge){pcBadge.textContent=comprasCount||'';pcBadge.style.display=comprasCount?'':'none';}
 }
@@ -11819,6 +11836,36 @@ function comprasSolicitarDeOS(os, matKey, qtdFalta){
     showToast('Já existe uma solicitação de compra em andamento para esta OS.','info');
     return Promise.resolve(null);
   }
+  // Arquitetura v2 (documento-por-registro, mediada por Cloud Function) —
+  // ver bloco "COMPRAS v2" abaixo. Em _HOMOLOG_MODE a UI NUNCA mais cria
+  // solicitação no array legado (COMPRAS/erp_vr/compras); o ramo legado
+  // logo abaixo só continua ativo fora de homologação (produção real ainda
+  // não tem as Cloud Functions de Compras publicadas — ver relatório de
+  // homologação, Task 4). Critério objetivo de remoção do ramo legado:
+  // Functions de compras publicadas + firestore.rules normalizadas
+  // publicadas + migração de erp_vr/compras executada contra produção.
+  if(_HOMOLOG_MODE){
+    var jaExisteV2 = COMPRAS_V2_CACHE.some(function(pc){ return pc.origem && (pc.origem.osId===os.id || pc.origem.osNum===os.num) && pc.status!=='cancelada'; });
+    if(jaExisteV2){
+      showToast('Já existe uma solicitação de compra em aberto para esta OS.','info');
+      return Promise.resolve(null);
+    }
+    _comprasSolicitandoOS[chaveTrava] = true;
+    var sV2 = matKey && STOCK[matKey];
+    var labelV2 = (sV2&&sV2.label)||matKey||'(material a definir)';
+    return comprasV2CriarSolicitacao(labelV2, qtdFalta||1, matKey||null, os.mk||'vr', {osNum:os.num, osId:os.id})
+      .then(function(res){
+        showToast('🛒 Solicitação de compra #'+res.numero+' registrada para '+labelV2+' (Compras v2).','ok');
+        if(typeof secAuditLog==='function') secAuditLog('compra_criada','Solicitação #'+res.numero+' criada (v2) a partir da OS #'+os.num+' — '+labelV2);
+        return res;
+      })
+      .catch(function(e){
+        console.warn('[Compras v2] Falha ao criar solicitação:', e);
+        showToast('Erro ao registrar solicitação de compra: '+(e&&e.message||e),'err');
+        throw e;
+      })
+      .finally(function(){ delete _comprasSolicitandoOS[chaveTrava]; });
+  }
   var jaExiste = COMPRAS.some(function(pc){ return pc.origem && (pc.origem.osId===os.id || pc.origem.osNum===os.num) && pc.status!=='cancelada'; });
   if(jaExiste){
     showToast('Já existe uma solicitação de compra em aberto para esta OS.','info');
@@ -11901,7 +11948,8 @@ function comprasGerarNecessidades(){
     var matKey = comprasResolverMaterialPorNome(matNome);
     var semEstoque = !matKey || (STOCK[matKey].qty||0) <= 0;
     if(!semEstoque) return proximo();
-    var jaExiste = COMPRAS.some(function(pc){ return pc.origem && pc.origem.osNum===os.num && pc.status!=='cancelada'; });
+    var fonteChecagem = _HOMOLOG_MODE ? COMPRAS_V2_CACHE : COMPRAS; // v2 nunca lê o array legado
+    var jaExiste = fonteChecagem.some(function(pc){ return pc.origem && pc.origem.osNum===os.num && pc.status!=='cancelada'; });
     if(jaExiste) return proximo();
     comprasSolicitarDeOS(os, matKey||null, os.qty||1).then(function(){ geradas++; proximo(); });
   }
@@ -11912,9 +11960,23 @@ function comprasNovaSolicitacaoModal(){
   var nomeItem = prompt('Descrição do item/material a comprar:');
   if(!nomeItem || !nomeItem.trim()) return;
   var qtd = parseFloat(prompt('Quantidade necessária:', '1'))||1;
-  var fornecedor = prompt('Fornecedor (opcional — pode deixar em branco e escolher depois na cotação):')||'';
   var marca = (typeof _finBrand!=='undefined' && _finBrand!=='todas') ? _finBrand : 'vr';
   var matKey = comprasResolverMaterialPorNome(nomeItem);
+  if(_HOMOLOG_MODE){
+    // v2: fornecedor/preço NÃO são definidos na criação — só na aprovação
+    // (comprasV2Aprovar, Master apenas). Essa separação é intencional
+    // (é exatamente o requisito "Produção não pode aprovar a própria
+    // solicitação"), não uma omissão de UI.
+    comprasV2CriarSolicitacao(nomeItem.trim(), qtd, matKey||null, marca, null).then(function(res){
+      showToast('🛒 Solicitação de compra #'+res.numero+' criada (Compras v2)!','ok');
+      if(typeof secAuditLog==='function') secAuditLog('compra_criada','Solicitação #'+res.numero+' criada manualmente (v2) — '+nomeItem.trim());
+    }).catch(function(e){
+      console.warn('[Compras v2] Falha ao criar solicitação:', e);
+      showToast('Erro ao criar solicitação: '+(e&&e.message||e),'err');
+    });
+    return;
+  }
+  var fornecedor = prompt('Fornecedor (opcional — pode deixar em branco e escolher depois na cotação):')||'';
   comprasProximoNumeroAtomico().then(function(numero){
     var s = matKey && STOCK[matKey];
     var pc = {
@@ -11947,6 +12009,7 @@ function comprasNovaSolicitacaoModal(){
 var PC_FLUXO = ['solicitada','cotacao','aprovada','pedida','recebida_parcial','recebida'];
 
 function comprasAvancarStatus(id){
+  if(_HOMOLOG_MODE) return comprasV2AvancarStatus(id);
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status==='cancelada' || pc.status==='recebida'){ showToast('Este pedido já está em estado final.','info'); return; }
   if(pc.status==='pedida'){ comprasReceberModal(id); return; } // "avançar" de pedida = registrar recebimento
@@ -11971,6 +12034,21 @@ function comprasAvancarStatus(id){
 
 // Cancelamento NUNCA apaga histórico/recebimentos — só marca o status.
 function comprasCancelar(id){
+  if(_HOMOLOG_MODE){
+    var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
+    if(pcV2.status==='cancelada'){ return; }
+    if(pcV2.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
+    var motivoV2 = prompt('Motivo do cancelamento (obrigatório):');
+    if(!motivoV2 || !motivoV2.trim()) { showToast('Cancelamento requer justificativa.','warn'); return; }
+    comprasV2Cancelar(id, motivoV2.trim()).then(function(){
+      if(typeof secAuditLog==='function') secAuditLog('compra_cancelada','Compra #'+pcV2.numero+' cancelada (v2) — motivo: '+motivoV2.trim());
+      showToast('Compra #'+pcV2.numero+' cancelada.','warn');
+    }).catch(function(e){
+      console.warn('[Compras v2] Falha ao cancelar:', e);
+      showToast('Erro ao cancelar: '+(e&&e.message||e),'err');
+    });
+    return;
+  }
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status==='cancelada'){ return; }
   if(pc.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
@@ -12006,10 +12084,10 @@ function comprasCancelar(id){
 function comprasV2RequerHomolog(){
   if(!_HOMOLOG_MODE) throw new Error('[Compras v2] disponível somente em modo homologação (?emulator=1) nesta branch.');
 }
-function comprasV2CriarSolicitacao(label, qtyNecessaria, material, marca){
+function comprasV2CriarSolicitacao(label, qtyNecessaria, material, marca, origem){
   comprasV2RequerHomolog();
   var requestId = 'req_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-  return firebase.functions().httpsCallable('comprasCriarSolicitacao')({ requestId:requestId, label:label, qtyNecessaria:qtyNecessaria, material:material||null, marca:marca||'vr' }).then(function(res){ return res.data; });
+  return firebase.functions().httpsCallable('comprasCriarSolicitacao')({ requestId:requestId, label:label, qtyNecessaria:qtyNecessaria, material:material||null, marca:marca||'vr', origem:origem||null }).then(function(res){ return res.data; });
 }
 function comprasV2Aprovar(compraId, fornecedorEscolhido, precoUnit){
   comprasV2RequerHomolog();
@@ -12034,12 +12112,104 @@ function comprasV2Cancelar(compraId, motivo){
   return firebase.functions().httpsCallable('comprasCancelar')({ compraId:compraId, motivo:motivo }).then(function(res){ return res.data; });
 }
 
+// ── Compras v2 — cache local + render + orquestração de UI ────────────────
+// O cache abaixo é alimentado por um listener REAL do Firestore
+// (erp_vr_compras / erp_vr_fin_cp) — leitura pura, nunca escrita direta do
+// cliente (Rules dessas coleções: allow write: if false; toda escrita passa
+// por Cloud Function, ver functions/src/compras.ts). Só é inicializado em
+// _HOMOLOG_MODE; fora de homologação essas variáveis ficam sempre vazias e
+// a tela de Compras usa exclusivamente o fluxo legado (COMPRAS).
+var COMPRAS_V2_CACHE = [];
+var COMPRAS_V2_FINCP_CACHE = [];
+var _comprasV2Unsubs = null;
+var _comprasV2RecebendoIds = {}; // mesma trava de reentrância do fluxo legado, aplicada aos ids v2
+function comprasV2Init(){
+  if(!_HOMOLOG_MODE || _comprasV2Unsubs || typeof _db==='undefined' || !_db) return;
+  _comprasV2Unsubs = [
+    _db.collection('erp_vr_compras').onSnapshot(function(snap){
+      COMPRAS_V2_CACHE = snap.docs.map(function(d){ return d.data(); }).sort(function(a,b){ return (b.numero||0)-(a.numero||0); });
+      if(typeof comprasRender==='function') comprasRender();
+    }, function(err){ console.warn('[Compras v2] listener erp_vr_compras falhou:', err); })
+  ];
+  // erp_vr_fin_cp só é legível por financeiro/master (Rules); abrir esse
+  // listener para produção/comercial só gera permission-denied em loop, sem
+  // nenhum uso — nunca escondemos o erro, simplesmente não fazemos a
+  // pergunta que sabemos que as Rules vão negar.
+  var minhaFuncaoInit = _normalizeRole((typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao)||'')||'';
+  if(minhaFuncaoInit==='master' || minhaFuncaoInit==='financeiro'){
+    _comprasV2Unsubs.push(_db.collection('erp_vr_fin_cp').onSnapshot(function(snap){
+      COMPRAS_V2_FINCP_CACHE = snap.docs.map(function(d){ return d.data(); });
+      if(typeof comprasRender==='function') comprasRender();
+    }, function(err){ console.warn('[Compras v2] listener erp_vr_fin_cp falhou:', err); }));
+  }
+}
+
+// "Avançar" no v2 tem semântica diferente por estado: solicitada/cotacao →
+// Aprovar (só Master, define fornecedor+preço); aprovada/pedida/
+// recebida_parcial → Registrar Recebimento. Não existe função de servidor
+// para uma etapa "pedida" isolada nesta rodada (comprasRegistrarRecebimento
+// aceita 'aprovada' diretamente) — registrado como simplificação conhecida,
+// não uma omissão silenciosa (ver functions/src/compras.ts, TRANSICOES).
+function comprasV2AvancarStatus(id){
+  var pc = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pc) return;
+  if(pc.status==='cancelada' || pc.status==='recebida'){ showToast('Este pedido já está em estado final.','info'); return; }
+  if(pc.status==='solicitada' || pc.status==='cotacao'){
+    var fornecedor = prompt('Fornecedor escolhido para aprovar esta compra:', pc.fornecedorEscolhido||'');
+    if(!fornecedor || !fornecedor.trim()){ showToast('Fornecedor é obrigatório para aprovar.','warn'); return; }
+    var item0 = (pc.itens||[])[0]||{};
+    var preco = parseFloat(prompt('Preço unitário ('+(item0.label||'item')+'):', String(item0.precoUnit||'0')));
+    if(isNaN(preco) || preco<0){ showToast('Preço unitário inválido.','warn'); return; }
+    comprasV2Aprovar(id, fornecedor.trim(), preco).then(function(res){
+      if(typeof secAuditLog==='function') secAuditLog('compra_status','Compra #'+res.numero+' aprovada (v2) — fornecedor '+fornecedor.trim());
+      showToast('Compra #'+res.numero+' aprovada.','ok');
+    }).catch(function(e){
+      console.warn('[Compras v2] Falha ao aprovar:', e);
+      showToast('Erro ao aprovar: '+(e&&e.message||e),'err');
+    });
+    return;
+  }
+  // aprovada / pedida / recebida_parcial → registrar recebimento
+  comprasReceberModal(id);
+}
+
+function comprasV2RegistrarPagamentoUI(cpId, valorSugerido){
+  var valor = parseFloat(prompt('Valor a pagar (R$):', String(valorSugerido||0)));
+  if(isNaN(valor) || valor<=0){ showToast('Valor inválido.','warn'); return; }
+  comprasV2RegistrarPagamento(cpId, valor).then(function(){
+    if(typeof secAuditLog==='function') secAuditLog('compra_pagamento','Pagamento registrado (v2) — CP '+cpId+' — '+finFmt(valor));
+    showToast('Pagamento registrado.','ok');
+  }).catch(function(e){
+    console.warn('[Compras v2] Falha ao registrar pagamento:', e);
+    showToast('Erro ao registrar pagamento: '+(e&&e.message||e),'err');
+  });
+}
+
 // Recebimento FÍSICO puro: atualiza estoque só pelo delta recebido AGORA
 // (nunca duplica — reentrância travada por _comprasRecebendoIds). NÃO cria
 // Conta a Pagar diretamente — só sincroniza a ÚNICA obrigação provisória da
 // compra (ver comprasSincronizarObrigacaoProvisoria). O documento do
 // fornecedor é registrado depois, separadamente, via comprasAdicionarDocumento().
 function comprasReceberModal(id){
+  if(_HOMOLOG_MODE){
+    if(_comprasV2RecebendoIds[id]){ showToast('Recebimento já em andamento para este pedido.','info'); return; }
+    var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
+    if(['aprovada','pedida','recebida_parcial'].indexOf(pcV2.status)<0){ showToast('Só é possível receber pedidos aprovados/pedidos/parciais.','warn'); return; }
+    var itemV2 = (pcV2.itens||[])[0]||{};
+    var restanteV2 = (itemV2.qtyNecessaria||0) - (pcV2.qtyRecebidaTotal||0);
+    var qtyV2 = parseFloat(prompt('Recebendo agora — "'+(itemV2.label||'')+'"\nFalta: '+restanteV2+'\nQuantidade recebida agora:', String(restanteV2)));
+    if(isNaN(qtyV2) || qtyV2<=0){ showToast('Nenhuma quantidade registrada.','info'); return; }
+    _comprasV2RecebendoIds[id] = true;
+    comprasV2RegistrarRecebimento(id, qtyV2).then(function(res){
+      if(typeof secAuditLog==='function') secAuditLog('compra_recebimento','Compra #'+pcV2.numero+' — recebimento (v2) '+qtyV2+' — status '+res.novoStatus);
+      showToast('Recebimento registrado (v2) para a Compra #'+pcV2.numero+'.','ok');
+    }).catch(function(e){
+      console.warn('[Compras v2] Falha ao registrar recebimento:', e);
+      showToast('Erro ao registrar recebimento: '+(e&&e.message||e),'err');
+    }).finally(function(){
+      delete _comprasV2RecebendoIds[id];
+    });
+    return;
+  }
   if(_comprasRecebendoIds[id]){ showToast('Recebimento já em andamento para este pedido.','info'); return; }
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status!=='pedida' && pc.status!=='recebida_parcial'){ showToast('Só é possível receber pedidos com status "Pedida" ou "Recebida parcialmente".','warn'); return; }
@@ -12135,6 +12305,24 @@ function comprasSincronizarObrigacaoProvisoria(pc){
 // obrigação provisória em seguida (nunca fica provisória+definitiva juntas
 // para o mesmo valor).
 function comprasAdicionarDocumento(id){
+  if(_HOMOLOG_MODE){
+    var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
+    if(!(pcV2.qtyRecebidaTotal>0)){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
+    var numeroV2 = (prompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
+    if(!numeroV2){ showToast('Número do documento é obrigatório.','warn'); return; }
+    var valorTotalV2 = parseFloat(prompt('Valor total do documento (R$):'));
+    if(isNaN(valorTotalV2) || valorTotalV2<=0){ showToast('Valor inválido.','warn'); return; }
+    var nParcV2 = parseInt(prompt('Quantas parcelas?','1'))||1;
+    if(nParcV2<1) nParcV2=1;
+    comprasV2AdicionarDocumento(id, numeroV2, valorTotalV2, nParcV2).then(function(){
+      if(typeof secAuditLog==='function') secAuditLog('compra_documento','Compra #'+pcV2.numero+' — documento '+numeroV2+' (v2) — '+finFmt(valorTotalV2)+' em '+nParcV2+' parcela(s)');
+      showToast('Documento '+numeroV2+' registrado (v2) — '+nParcV2+' parcela(s) criada(s).','ok');
+    }).catch(function(e){
+      console.warn('[Compras v2] Falha ao adicionar documento:', e);
+      showToast('Erro ao adicionar documento: '+(e&&e.message||e),'err');
+    });
+    return;
+  }
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(!pc.documentos) pc.documentos=[];
   if(!(pc.recebimentos||[]).length){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
@@ -12194,7 +12382,61 @@ function comprasResumoValores(pc){
   return {valorPedido:valorPedido, valorRecebido:valorRecebido, valorDocumentado:valorDocumentado, valorAPagar:valorAPagar, valorPago:valorPago, saldoContratual:saldoContratual, saldoFinanceiro:saldoFinanceiro};
 }
 
+function comprasV2Render(){
+  comprasV2Init();
+  var wrap = document.getElementById('comprasList'); if(!wrap) return;
+  var filtro = (document.getElementById('comprasFiltroStatus')||{}).value||'';
+  var lista = COMPRAS_V2_CACHE.filter(function(pc){ return !filtro || pc.status===filtro; });
+  var totEl = document.getElementById('comprasTotal');
+  if(totEl) totEl.textContent = lista.length+' pedido(s) — Compras v2 (Cloud Functions)';
+  var empty = document.getElementById('comprasEmpty');
+  if(empty) empty.style.display = lista.length ? 'none' : '';
+  var minhaFuncao = _normalizeRole((typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao)||'')||'';
+  var souMaster = minhaFuncao==='master';
+  wrap.innerHTML = lista.map(function(pc){
+    var item = (pc.itens||[])[0]||{};
+    var origemHtml = (pc.origem&&pc.origem.osNum) ? '<span style="font-size:10px;color:var(--muted)">OS #'+pc.origem.osNum+'</span>' : '';
+    var valorPedido = (item.qtyNecessaria||0)*(item.precoUnit||0);
+    var resumoHtml = valorPedido ? ('<div style="font-size:10px;color:var(--muted);margin-top:6px">Pedido: <strong>'+finFmt(valorPedido)+'</strong> · Recebido: '+(pc.qtyRecebidaTotal||0)+'/'+(item.qtyNecessaria||0)+' '+(item.unidade||'un')+'</div>') : '';
+    var acoes = '';
+    if(pc.status!=='cancelada' && pc.status!=='recebida'){
+      var podeAprovar = (pc.status==='solicitada'||pc.status==='cotacao') && souMaster;
+      var podeReceber = (pc.status==='aprovada'||pc.status==='pedida'||pc.status==='recebida_parcial') && (souMaster||minhaFuncao==='producao');
+      if(podeAprovar) acoes += '<button onclick="comprasV2AvancarStatus(\''+pc.id+'\')" class="topbar-btn" style="font-size:11px;padding:5px 10px">✅ Aprovar / Precificar</button>';
+      if(podeReceber) acoes += '<button onclick="comprasReceberModal(\''+pc.id+'\')" class="topbar-btn" style="font-size:11px;padding:5px 10px;margin-left:6px">🚚 Registrar Recebimento</button>';
+      if(souMaster) acoes += '<button onclick="comprasCancelar(\''+pc.id+'\')" style="font-size:11px;padding:5px 10px;border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:6px">Cancelar</button>';
+    }
+    if((pc.qtyRecebidaTotal||0)>0 && (souMaster||minhaFuncao==='financeiro')){
+      acoes += '<button onclick="comprasAdicionarDocumento(\''+pc.id+'\')" style="font-size:11px;padding:5px 10px;border:1px solid #3B82F6;background:transparent;color:#3B82F6;border-radius:6px;cursor:pointer;margin-left:6px">📄 Adicionar Documento</button>';
+    }
+    return '<div class="card" style="padding:14px 16px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      +'<div><strong>Compra #'+pc.numero+'</strong> '+origemHtml+'</div>'
+      +'<span style="background:'+(PC_STATUS_COLOR[pc.status]||'#6B7280')+'22;color:'+(PC_STATUS_COLOR[pc.status]||'#6B7280')+';padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">'+(PC_STATUS_LABEL[pc.status]||pc.status)+'</span>'
+      +'</div>'
+      +'<div style="margin-top:8px;font-size:11px;color:var(--muted)">• '+cfgEsc(item.label||'')+' — '+(pc.qtyRecebidaTotal||0)+'/'+(item.qtyNecessaria||0)+' '+(item.unidade||'un')+(item.precoUnit?' · R$'+item.precoUnit.toFixed(2)+'/un':'')+'</div>'
+      +resumoHtml
+      +(pc.fornecedorEscolhido?'<div style="font-size:11px;color:var(--muted);margin-top:4px">Fornecedor: '+cfgEsc(pc.fornecedorEscolhido)+'</div>':'')
+      +(pc.motivoCancelamento?'<div style="font-size:11px;color:#DC2626;margin-top:4px">Cancelada: '+cfgEsc(pc.motivoCancelamento)+'</div>':'')
+      +'<div style="margin-top:10px">'+acoes+'</div>'
+      +'</div>';
+  }).join('');
+
+  var cpWrap = document.getElementById('comprasV2FinCpList');
+  if(cpWrap){
+    var pendentes = COMPRAS_V2_FINCP_CACHE.filter(function(cp){ return cp.status!=='pago'; });
+    var podePagar = souMaster||minhaFuncao==='financeiro';
+    cpWrap.innerHTML = pendentes.length ? pendentes.map(function(cp){
+      return '<div class="card" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px">'
+        +'<div style="font-size:11px">Compra ref. '+cfgEsc((cp.compraId||'').slice(0,8))+'… — '+cfgEsc(cp.tipo||'')+' — <strong>'+finFmt(cp.valor||0)+'</strong></div>'
+        +(podePagar?('<button onclick="comprasV2RegistrarPagamentoUI(\''+cp.id+'\','+(cp.valor||0)+')" class="topbar-btn" style="font-size:11px;padding:5px 10px">💰 Registrar Pagamento</button>'):'')
+        +'</div>';
+    }).join('') : '<div style="font-size:11px;color:var(--muted)">Nenhuma conta a pagar pendente (Compras v2).</div>';
+  }
+}
+
 function comprasRender(){
+  if(_HOMOLOG_MODE) return comprasV2Render();
   var wrap = document.getElementById('comprasList'); if(!wrap) return;
   var filtro = (document.getElementById('comprasFiltroStatus')||{}).value||'';
   var lista = COMPRAS.filter(function(pc){ return !filtro || pc.status===filtro; });
@@ -18035,13 +18277,25 @@ var MODULOS = [
   { id:'estoque',      nome:'Estoque' },
   { id:'financeiro',   nome:'Financeiro' },
   { id:'fornecedores', nome:'Fornecedores' },
+  { id:'compras',      nome:'Compras' },
   { id:'config',       nome:'Configurações' }
 ];
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque'].includes(m.id), financeiro: ['dashboard','financeiro','os-list'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque','compras'].includes(m.id), financeiro: ['dashboard','financeiro','os-list','compras'].includes(m.id) };
 });
+// Achado real desta rodada: 'compras' nunca esteve em MODULOS — PERM_DEFAULT
+// nunca tinha uma entrada para o módulo, então getPermForMod() (secApplyPerms)
+// negava a página para TODO perfil não-master incondicionalmente, mesmo com
+// erp_permissoes customizado concedendo acesso — a sidebar de Compras nunca
+// foi alcançável por Produção/Financeiro, só por Master (que ignora
+// secApplyPerms). Isso bloqueava exatamente o fluxo que a arquitetura v2
+// (Cloud Functions comprasCriarSolicitacao/comprasRegistrarRecebimento/
+// comprasAdicionarDocumento) foi desenhada para servir. Default agora inclui
+// produção (cria solicitação/recebe) e financeiro (documenta/paga);
+// comercial fica fora do default (sem papel definido no fluxo de Compras) —
+// customizável via Config>Usuários como qualquer outro módulo.
 
 function usrLoadUsuarios(){ return _USR_DATA.slice(); }
 function usrLoadPerms(){
@@ -20025,13 +20279,23 @@ function secApplyPerms(funcao){
   // (fonte única compartilhada com nav() e authApplySession() — ver PERFIL_HARD_DENY)
   var denied = PERFIL_HARD_DENY[funcao]||{};
   function getPermForMod(mod, page){
-    // Hard deny takes priority
+    // Hard deny takes priority — este é o ÚNICO veto absoluto (não pode ser
+    // reconfigurado pela tela Config>Usuários).
     if(denied[page]||denied[mod]) return false;
-    // Then check PERM_DEFAULT as ceiling
+    // PERM_DEFAULT só decide se o módulo EXISTE no esquema de permissões —
+    // não é um segundo veto. Achado real desta rodada: a linha removida
+    // abaixo ("if(def && def[funcao]===false) return false") tratava o
+    // valor default (false) como proibição absoluta, retornando ANTES de
+    // consultar perms[mod][funcao] — isso tornava a personalização de
+    // permissões (tela Config>Usuários) permanentemente inoperante para
+    // qualquer combinação módulo/perfil cujo default fosse false, mesmo com
+    // o admin marcando explicitamente a caixa (ex.: Produção nunca
+    // conseguia ver "Compras" mesmo com a permissão salva como true — bloqueava
+    // exatamente o fluxo que Produção precisa para operar a Compras v2).
     var def = PERM_DEFAULT[mod];
-    if(def && def[funcao]===false) return false;
     if(!def || def[funcao]===undefined) return false;
-    // Finally stored perm
+    // Fonte real da verdade: perm armazenada (customizada), já mesclada
+    // sobre o default em usrLoadPerms().
     return !!(perms[mod]&&perms[mod][funcao]);
   }
   function applyToItem(item, pageExtractor){
@@ -20091,6 +20355,12 @@ function authLogout(){
   secAuditLog('logout','Logout — '+(_currentSession?_currentSession.user:'?'));
   secClearSession();
   _currentSession=null;
+  // Sem isso, um segundo login (perfil diferente) na MESMA aba herdaria os
+  // listeners v2 do perfil anterior — comprasV2Init() é guardado por
+  // _comprasV2Unsubs!=null e nunca reavaliaria o novo perfil.
+  if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
+  if(typeof COMPRAS_V2_CACHE!=='undefined') COMPRAS_V2_CACHE=[];
+  if(typeof COMPRAS_V2_FINCP_CACHE!=='undefined') COMPRAS_V2_FINCP_CACHE=[];
   // Encerrar sessão Firebase Auth (FASE 5)
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
   try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); }
