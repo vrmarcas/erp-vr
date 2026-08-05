@@ -17461,6 +17461,26 @@ function orcEnvConfirmarPgto(id) {
     pm.onclick=function(e){if(e.target===pm)pm.style.display='none';};
     document.body.appendChild(pm);
   }
+  // Camada de interface (achado de homologação Fase F, 2026-08-05): um
+  // orçamento que já tem OS nunca oferece o formulário de pagamento de
+  // novo — evita a rota mais comum de duplicidade (reabrir o modal e
+  // clicar Gerar OS outra vez). A barreira de verdade contra duplicidade
+  // é a transação no Firestore dentro de orcEnvGerarOS(); isto aqui é só
+  // a camada de interface, mais rápida de mostrar ao operador.
+  if(o.osRef){
+    var osExistente = (typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[o.osRef] : null;
+    pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(420px,96vw);box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center">'
+      +'<div style="font-size:32px;margin-bottom:8px">✅</div>'
+      +'<div style="font-size:16px;font-weight:900;margin-bottom:6px">OS já gerada para este orçamento</div>'
+      +'<div style="font-size:12px;color:var(--muted);margin-bottom:20px">Orçamento <strong>#'+o.num+'</strong> · '+o.cliente
+      +(osExistente?' · OS <strong>#'+osExistente.num+'</strong>':'')+'</div>'
+      +'<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'
+      +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcPagtoModal\').style.display=\'none\'">Fechar</button>'
+      +'<button onclick="document.getElementById(\'orcPagtoModal\').style.display=\'none\'; nav(\'kanban\');" style="background:linear-gradient(90deg,#059669,#047857);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer">Abrir Kanban</button>'
+      +'</div></div>';
+    pm.style.display='flex';
+    return;
+  }
   var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var valorTotal = o.valorFinal||0;
   var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
@@ -17508,7 +17528,7 @@ function orcEnvConfirmarPgto(id) {
     // Botões
     +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcPagtoModal\').style.display=\'none\'">Cancelar</button>'
-    +'<button onclick="orcEnvGerarOS()" style="background:linear-gradient(90deg,#059669,#047857);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer">🔧 Gerar OS no Kanban</button>'
+    +'<button id="orcGerarOSBtn" onclick="orcEnvGerarOS()" style="background:linear-gradient(90deg,#059669,#047857);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer">🔧 Gerar OS no Kanban</button>'
     +'</div>'
     +'</div>';
   pm.style.display='flex';
@@ -17551,10 +17571,42 @@ function orcPagtoTipoSel(btn){
   }
 }
 
+// Bug real (homologação Fase F, 2026-08-05): reabrir o modal de um
+// orçamento que JÁ tinha uma OS gerada e clicar "Gerar OS no Kanban" de
+// novo criava uma SEGUNDA OS e um SEGUNDO recebimento — a única barreira
+// era `o.osRef` já carregado em memória na tela, que não é uma fonte de
+// verdade confiável (retry, refresh, duas abas ou apenas reabrir o modal
+// contornam um campo em memória). Corrigido em duas camadas: (1)
+// interface — orcEnvConfirmarPgto() já barra o formulário quando
+// o.osRef existe (ver acima), e o botão fica desabilitado durante a
+// operação; (2) dados — a criação da OS + atualização do orçamento +
+// lançamento financeiro + contador agora rodam dentro de UMA transação
+// Firestore que RELÊ os documentos diretamente do banco e recusa
+// prosseguir se já existir osRef ou qualquer OS vinculada a este
+// orçamento — mesmo padrão de transação já usado e testado em
+// orcProximoNumeroAtomico()/comprasProximoNumeroAtomico().
 function orcEnvGerarOS(){
   var lista=orcGetEnviados();
   var o=lista.find(function(x){return x.id===_orcPagtoId;});
   if(!o){showToast('Orçamento não encontrado','warn');return;}
+
+  var btnGerar=document.getElementById('orcGerarOSBtn');
+  if(btnGerar && btnGerar.disabled) return; // operação já em andamento
+  if(btnGerar) btnGerar.disabled=true;
+
+  // Camada de interface — segunda checagem, imediatamente antes de
+  // prosseguir (o modal já deveria ter bloqueado isto em
+  // orcEnvConfirmarPgto(), mas o estado em memória pode estar
+  // desatualizado se outra aba gerou a OS enquanto este modal estava
+  // aberto). A checagem que realmente decide é a transação abaixo.
+  if(o.osRef){
+    if(btnGerar) btnGerar.disabled=false;
+    showToast('Este orçamento já tem uma OS gerada — abra a existente no Kanban.','warn');
+    var pmEarly=document.getElementById('orcPagtoModal'); if(pmEarly) pmEarly.style.display='none';
+    nav('kanban');
+    return;
+  }
+
   var tipo=_pgtoTipoAtual||'futuro';
   var forma=(document.getElementById('pgtoForma')||{}).value||'PIX';
   var obs=(document.getElementById('pgtoObs')||{}).value||'';
@@ -17567,74 +17619,142 @@ function orcEnvGerarOS(){
   if(tipo==='50-50'||tipo==='parcial'){
     if(!(entradaRaw!=='' && !isNaN(parseFloat(entradaRaw))) || entradaVal<=0 || entradaVal>valorTotal){
       showToast('Valor de entrada inválido — informe um valor maior que zero e até o total do orçamento.','warn');
+      if(btnGerar) btnGerar.disabled=false;
       return;
     }
   }
   var valorEntrada = tipo==='integral'?valorTotal:(tipo==='50-50'||tipo==='parcial')?entradaVal:0;
   var restante = Math.round((valorTotal-valorEntrada)*100)/100;
 
-  // Criar OS no Kanban
-  var n=(_OS_COUNTER+1);
-  _OS_COUNTER=n;
-  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_os_counter',n);
   var hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-  var newId='os'+Date.now();
   var prodNome=o.produto||'Produto';
   var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
   var itens=o.itens||[];
   var matLabel=itens.length&&itens[0].mat?itens[0].mat:'—';
   var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
   var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
-  KB_OS[newId]={
-    id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
-    cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
-    material:matLabel,medidas:medidasStr,qty:qtyTotal,
-    status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
-    valor:valorTotal,prog:0,pronto:false,
-    checks:['Corte','Gravação','Acabamento','Embalagem'],_ck:[false,false,false,false],
-    parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
-    clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
-    itens:itens,totalGeral:valorTotal,obs:obs,
-    orcRef:o.id, orcNum:o.num,
-    pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
-  };
-  // Salva KB_OS
-  if(typeof _cloudSave==='function') _cloudSave('kb_os',KB_OS);
-  // Renderiza Kanban
-  try{kbRender();}catch(e){}
-  // Atualiza status do orçamento: aguardando_pagamento se sobrou saldo a
-  // receber (fluxo normal de 50%+50%), ou pago se a OS já nasceu quitada.
-  o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
-  o.osRef=newId; orcSetEnviados(lista);
-  // Se tem entrada, lança no CR/Caixa
-  if(valorEntrada>0){
-    var crId='cr'+Date.now();
-    FIN_CR.unshift({
-      id:crId,cliente:o.cliente||'Cliente',
-      descricao:'Entrada ORC #'+o.num+' — '+prodNome,
-      valor:valorEntrada,vencimento:dia,status:'recebido',
-      marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,
-      dataCriacao:dia,dataRecebimento:dia
-    });
-    _finSaveCR();
-    // Se tem restante, cria CR pendente
-    if(restante>0){
-      FIN_CR.unshift({
-        id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',
-        descricao:'Restante ORC #'+o.num+' — '+prodNome,
-        valor:restante,vencimento:dia,status:'pendente',
-        marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,
-        dataCriacao:dia,dataRecebimento:null
-      });
-      _finSaveCR();
+
+  function finalizar(sucesso, dados){
+    if(btnGerar) btnGerar.disabled=false;
+    if(!sucesso){
+      if(dados==='OS_JA_EXISTE'){
+        showToast('Este orçamento já tem uma OS gerada — abra a existente no Kanban.','warn');
+        var pm2=document.getElementById('orcPagtoModal'); if(pm2) pm2.style.display='none';
+        nav('kanban');
+      } else {
+        console.warn('[orcEnvGerarOS] falhou:', dados);
+        showToast('Não foi possível gerar a OS — tente novamente.','err');
+      }
+      return;
     }
+    try{kbRender();}catch(e){}
+    var pm3=document.getElementById('orcPagtoModal'); if(pm3) pm3.style.display='none';
+    orcEnviadosRender();
+    showToast('OS #'+dados.num+' criada no Kanban! 🎉','ok');
+    setTimeout(function(){ nav('kanban'); },800);
   }
-  document.getElementById('orcPagtoModal').style.display='none';
-  orcEnviadosRender();
-  showToast('OS #'+n+' criada no Kanban! 🎉','ok');
-  // Navegar para kanban
-  setTimeout(function(){ nav('kanban'); },800);
+
+  if(!(typeof _db!=='undefined' && _db && typeof _db.runTransaction==='function')){
+    // Fallback só para harness de teste local sem Firestore — não é
+    // idempotente contra concorrência real (documentado, igual ao
+    // precedente de orcProximoNumeroAtomico()).
+    if(o.osRef){ finalizar(false,'OS_JA_EXISTE'); return; }
+    var nLocal=(_OS_COUNTER+1); _OS_COUNTER=nLocal;
+    var newIdLocal='os'+Date.now();
+    KB_OS[newIdLocal]={
+      id:newIdLocal,num:String(nLocal),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
+      cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
+      material:matLabel,medidas:medidasStr,qty:qtyTotal,
+      status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
+      valor:valorTotal,prog:0,pronto:false,
+      checks:['Corte','Gravação','Acabamento','Embalagem'],_ck:[false,false,false,false],
+      parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+      clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
+      itens:itens,totalGeral:valorTotal,obs:obs,
+      orcRef:o.id, orcNum:o.num,
+      pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
+    };
+    o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
+    o.osRef=newIdLocal; orcSetEnviados(lista);
+    if(valorEntrada>0){
+      FIN_CR.unshift({id:'cr'+Date.now(),cliente:o.cliente||'Cliente',descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:dia});
+      if(restante>0) FIN_CR.unshift({id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:null});
+    }
+    finalizar(true, {num:nLocal});
+    return;
+  }
+
+  var refOrc=_db.collection(_COL).doc('orcamentos');
+  var refOS =_db.collection(_COL).doc('kb_os');
+  var refCR =_db.collection(_COL).doc('fin_cr');
+  var refCnt=_db.collection(_COL).doc('erp_os_counter');
+
+  return _db.runTransaction(function(txn){
+    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refCR), txn.get(refCnt)])
+      .then(function(snaps){
+        var docOrc=snaps[0], docOS=snaps[1], docCR=snaps[2], docCnt=snaps[3];
+        var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
+        var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
+        var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
+        var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
+
+        var idxOrc = arrOrc.findIndex(function(x){ return x.id===o.id; });
+        if(idxOrc<0) throw new Error('ORC_NAO_ENCONTRADO');
+        // Barreira 1: campo osRef já gravado no Firestore (não no que
+        // estava na tela).
+        if(arrOrc[idxOrc].osRef) throw new Error('OS_JA_EXISTE');
+        // Barreira 2: nenhuma OS já vinculada a este orçamento, mesmo que
+        // osRef tenha ficado ausente por dado legado/gravação parcial.
+        var jaTemOS = Object.keys(objOS).some(function(k){ return objOS[k] && objOS[k].orcRef===o.id; });
+        if(jaTemOS) throw new Error('OS_JA_EXISTE');
+
+        var n = cnt+1;
+        var newId = 'os'+Date.now()+'_'+n;
+
+        objOS[newId] = {
+          id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
+          cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
+          material:matLabel,medidas:medidasStr,qty:qtyTotal,
+          status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
+          valor:valorTotal,prog:0,pronto:false,
+          checks:['Corte','Gravação','Acabamento','Embalagem'],_ck:[false,false,false,false],
+          parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+          clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
+          itens:itens,totalGeral:valorTotal,obs:obs,
+          orcRef:o.id, orcNum:o.num,
+          pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
+        };
+        arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
+        arrOrc[idxOrc].osRef = newId;
+
+        if(valorEntrada>0){
+          arrCR.unshift({id:'cr'+Date.now()+'_'+n,cliente:o.cliente||'Cliente',descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:dia});
+          if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1)+'_'+n,cliente:o.cliente||'Cliente',descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:null});
+        }
+
+        txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
+        txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
+        txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
+        txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
+
+        return {num:n, arrOrc:arrOrc, objOS:objOS, arrCR:arrCR};
+      });
+  }).then(function(resultado){
+    // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
+    // memória com exatamente o que a transação gravou.
+    _ORC_ENVIADOS_DATA = resultado.arrOrc;
+    KB_OS = resultado.objOS;
+    FIN_CR = resultado.arrCR;
+    _OS_COUNTER = resultado.num;
+    _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
+    _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
+    _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
+    _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
+    finalizar(true, resultado);
+  }).catch(function(e){
+    finalizar(false, (e && e.message==='OS_JA_EXISTE') ? 'OS_JA_EXISTE' : e);
+  });
 }
 
 // ============================================================
