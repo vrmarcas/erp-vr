@@ -4357,7 +4357,7 @@ function _authFirebaseError(code){
               <option value="retalho-entrada">✂️ Retalho — Criação</option>
               <option value="retalho-saida">✂️ Retalho — Consumo</option>
             </select>
-            <button onclick="STOCK_LOG=[];if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('erp_stock_log',STOCK_LOG);stockRenderHistorico();showToast('Histórico limpo','info')" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
+            <button onclick="stockLimparHistorico()" style="padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;font-size:10px;cursor:pointer">Limpar</button>
           </div>
         </div>
         <div id="stockHistBody" style="margin-top:8px">
@@ -14797,11 +14797,41 @@ function stockUpdateDisplay(key) {
   if(pEl){var pct=Math.min(100,Math.round(s.qty/s.max*100)); pEl.style.width=pct+'%'; pEl.style.background=col;}
 }
 
+function stockLimparHistorico() {
+  if (!confirm('Limpar todo o histórico de movimentações de estoque? Esta ação não pode ser desfeita.')) return;
+  var _anterior = STOCK_LOG;
+  STOCK_LOG = [];
+  stockRenderHistorico();
+  if (typeof _cloudSave !== 'function' || !_cloudReady) { showToast('Sem conexão — não foi possível limpar o histórico', 'err'); STOCK_LOG = _anterior; stockRenderHistorico(); return; }
+  _cloudSave('erp_stock_log', STOCK_LOG).then(function (res) {
+    if (res.ok) { showToast('Histórico limpo', 'info'); return; }
+    STOCK_LOG = _anterior;
+    stockRenderHistorico();
+    showToast('⚠️ Não foi possível limpar o histórico — tente novamente.', 'err');
+  });
+}
+function _stockLogSalvar(entry) {
+  STOCK_LOG.unshift(entry);
+  if (STOCK_LOG.length > 200) STOCK_LOG.length = 200;
+  stockRenderHistorico();
+  if (typeof _cloudSave !== 'function' || !_cloudReady) return Promise.resolve({ ok: false, reason: 'sem-conexao' });
+  return _cloudSave('erp_stock_log', STOCK_LOG).then(function (res) {
+    if (!res.ok) {
+      // Entrada de auditoria não confirmada pelo servidor — remove localmente
+      // para não deixar o histórico exibindo algo que não foi persistido.
+      var _ix = STOCK_LOG.indexOf(entry);
+      if (_ix >= 0) STOCK_LOG.splice(_ix, 1);
+      stockRenderHistorico();
+      console.warn('[Stock] Entrada de histórico não foi salva:', entry, res);
+    }
+    return res;
+  });
+}
 function _stockLog(tipo, matKey, qty, os, obs) {
   var s = STOCK[matKey];
   var now = new Date();
   var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-  STOCK_LOG.unshift({
+  return _stockLogSalvar({
     tipo: tipo,
     matKey: matKey,
     matLabel: s ? s.label : matKey,
@@ -14810,14 +14840,11 @@ function _stockLog(tipo, matKey, qty, os, obs) {
     obs: obs || '',
     dt: dtStr
   });
-  if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
-  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
-  stockRenderHistorico();
 }
 function _retalhoLog(tipo, mat, labelDims, cod, os) {
   var now = new Date();
   var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-  STOCK_LOG.unshift({
+  return _stockLogSalvar({
     tipo: tipo,
     matKey: mat || 'retalho',
     matLabel: labelDims || '',
@@ -14826,9 +14853,6 @@ function _retalhoLog(tipo, mat, labelDims, cod, os) {
     obs: cod ? 'Cód: ' + cod : '',
     dt: dtStr
   });
-  if(STOCK_LOG.length > 200) STOCK_LOG.length = 200;
-  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_stock_log', STOCK_LOG);
-  stockRenderHistorico();
 }
 
 
