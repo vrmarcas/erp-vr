@@ -53,7 +53,17 @@ function initializeAppComModoCorreto(admin, projectId, argv) {
 
 // ── Núcleo puro: recebe o estado JÁ CONSULTADO (authUsers, existingNormUids)
 // e valida contra as contagens esperadas. Testável sem Firebase. ──────────
-function validarEstadoEsperado(authUsers, existingNormUids) {
+//
+// exigirACriarAusente (default true): SÓ faz sentido para
+// create_missing_erp_users.js — o único script que roda ANTES das 3 contas
+// existirem. Os demais scripts (migrate_erp_usuarios_normalizado.js,
+// sync_role_claims.js, retire_erp_user.js) rodam DEPOIS da criação, quando
+// as 3 contas "a criar" já existem por design — passar false ali evita um
+// falso-positivo que abortaria uma sequência correta e já em andamento.
+// A checagem de "existentes devem estar presentes", ambiguidade e conta
+// técnica continuam valendo em TODOS os estágios, sem exceção.
+function validarEstadoEsperado(authUsers, existingNormUids, exigirACriarAusente) {
+  if (exigirACriarAusente === undefined) exigirACriarAusente = true;
   const authByEmail = new Map(authUsers.filter(u => u.email).map(u => [u.email.toLowerCase(), u]));
   const tecnicas = new Set(CONTAS_TECNICAS.map(e => e.toLowerCase()));
 
@@ -69,11 +79,19 @@ function validarEstadoEsperado(authUsers, existingNormUids) {
   if (existentes.length !== 4) erros.push('esperado 4 contas existentes na tabela, encontrado ' + existentes.length);
   if (aposentados.length !== 1) erros.push('esperado 1 aposentado na tabela, encontrado ' + aposentados.length);
 
-  // As 3 "a criar" DEVEM estar ausentes do Auth agora (senão o passo de
-  // criação seria redundante/perigoso — para nisso e exige nova conciliação).
-  aCriar.forEach(d => {
-    if (authByEmail.has(d.email.toLowerCase())) erros.push('conta "' + d.nome + '" já existe no Auth, mas a tabela espera criar — pare e reconcilie');
-  });
+  if (exigirACriarAusente) {
+    // As 3 "a criar" DEVEM estar ausentes do Auth agora (senão o passo de
+    // criação seria redundante/perigoso — para nisso e exige nova conciliação).
+    aCriar.forEach(d => {
+      if (authByEmail.has(d.email.toLowerCase())) erros.push('conta "' + d.nome + '" já existe no Auth, mas a tabela espera criar — pare e reconcilie');
+    });
+  } else {
+    // Estágio pós-criação: as 3 "a criar" DEVEM estar presentes agora
+    // (senão create_missing_erp_users.js ainda não rodou ou falhou).
+    aCriar.forEach(d => {
+      if (!authByEmail.has(d.email.toLowerCase())) erros.push('conta "' + d.nome + '" ainda não existe no Auth — rode create_missing_erp_users.js primeiro');
+    });
+  }
 
   // As 4 "existentes" DEVEM estar presentes no Auth agora.
   existentes.forEach(d => {

@@ -148,7 +148,7 @@ async function runReal() {
   const existingNormUids = new Set(existingNorm.docs.map(d => d.id));
 
   if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas') {
-    const check = validarEstadoEsperado(authUsers, existingNormUids);
+    const check = validarEstadoEsperado(authUsers, existingNormUids, false);
     console.log('=== validação de estado esperado (produção) ===');
     console.log(JSON.stringify(check.resumo));
     if (!check.ok) { console.error('❌ Estado real diverge do esperado — abortando ANTES de qualquer escrita:'); check.erros.forEach(e => console.error('  -', e)); process.exit(1); }

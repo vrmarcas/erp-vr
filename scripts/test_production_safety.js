@@ -32,10 +32,21 @@ assert('9. conta técnica presente no Auth mas fora da tabela -> ok (não é err
 const authComEmailDuplicado = authCorreto.concat([{uid:'dup', email:'isabellabsil@hotmail.com'}]);
 assert('10. e-mail da tabela com 2 contas no Auth -> nao ok (ambíguo)', validarEstadoEsperado(authComEmailDuplicado, new Set()).ok, false);
 
+console.log('\n-- validarEstadoEsperado (estágio pós-criação, exigirACriarAusente=false) --');
+// Bug real pego em produção: rodar migrate/sync/retire DEPOIS que as 3 contas
+// já foram criadas não pode abortar só porque elas agora existem — isso é o
+// estado ESPERADO nesse estágio, não uma divergência.
+const authTodos7Presentes = DECISOES_HUMANAS.filter(d=>d.acao!=='aposentar').map((d,i)=>({uid:'u'+i, email:d.email}))
+  .concat(DECISOES_HUMANAS.filter(d=>d.acao==='aposentar').map((d,i)=>({uid:'ap'+i, email:d.email})));
+assert('11. pós-criação: as 3 "a criar" JÁ presentes -> ok (esperado, não é erro)', validarEstadoEsperado(authTodos7Presentes, new Set(), false).ok, true);
+
+const authPosCriacaoFaltandoUma = authTodos7Presentes.filter(u => u.email !== 'cleiton_1310@hotmail.com');
+assert('12. pós-criação: uma das "a criar" AINDA ausente -> nao ok (create_missing ainda não rodou)', validarEstadoEsperado(authPosCriacaoFaltandoUma, new Set(), false).ok, false);
+
 console.log('\n-- usaCredencialADC --');
-assert('11. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
-assert('12. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
-assert('13. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
+assert('13. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
+assert('14. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
+assert('15. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
 
 console.log('\n================\n RESULTADO: '+passed+' passed, '+failed+' failed\n================');
 process.exit(failed?1:0);

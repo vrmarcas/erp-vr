@@ -84,7 +84,7 @@ async function runReal() {
     let allUsers = [], pt;
     do { const r = await auth.listUsers(1000, pt); allUsers = allUsers.concat(r.users.map(u=>({uid:u.uid,email:u.email}))); pt = r.pageToken; } while (pt);
     const norm = await db.collection('erp_vr_usuarios').get();
-    const check = validarEstadoEsperado(allUsers, new Set(norm.docs.map(d=>d.id)));
+    const check = validarEstadoEsperado(allUsers, new Set(norm.docs.map(d=>d.id)), false);
     console.log('=== validação de estado esperado (produção) ===');
     console.log(JSON.stringify(check.resumo));
     if (!check.ok) { console.error('❌ Estado real diverge do esperado — abortando ANTES de qualquer escrita:'); check.erros.forEach(e => console.error('  -', e)); process.exit(1); }
