@@ -7798,7 +7798,14 @@ function planAbrir(idx) {
   // clear pieces and restore saved manual pieces
   document.getElementById('planPiecesBody').innerHTML = '';
   document.getElementById('planPiecesFoot').innerHTML = '';
-  document.getElementById('planSumBox').style.display = 'none';
+  var _planSumBoxReset = document.getElementById('planSumBox');
+  _planSumBoxReset.style.display = 'none';
+  // Defesa em profundidade (bug real, homologação Fase F 2026-08-05): zera
+  // explicitamente o custo/área de peças manuais ao abrir o modal para
+  // QUALQUER item — planSumBox é reaproveitado entre itens, então sem isto
+  // um item sem peça manual poderia herdar valores do item anterior.
+  _planSumBoxReset.dataset.planManualMatCost = '0';
+  _planSumBoxReset.dataset.planManualAreaM2  = '0';
   var btn = document.getElementById('planAplicarBtn'); if(btn) btn.disabled = true;
 
   planManualPieces = [];
@@ -22127,7 +22134,20 @@ function _planCalcAndMerge() {
       if(tbody) tbody.appendChild(tr);
     }
   });
-  if(!manualArea) return;
+  if(!manualArea) {
+    // Bug real (homologação Fase F, 2026-08-05): planSumBox é um único
+    // elemento DOM reaproveitado entre TODOS os itens do orçamento. Sem
+    // este reset, um item sem peça manual herdava dataset.planManualMatCost/
+    // planManualAreaM2 deixados pelo item ANTERIOR (que tinha peça manual),
+    // subtraindo área e distorcendo custo/preço do item errado em
+    // planAplicar(). Precisa zerar aqui mesmo quando não há peça manual.
+    var _sumBoxNoManual = document.getElementById('planSumBox');
+    if(_sumBoxNoManual) {
+      _sumBoxNoManual.dataset.planManualMatCost = '0';
+      _sumBoxNoManual.dataset.planManualAreaM2  = '0';
+    }
+    return;
+  }
   // merge com base totals (totalArea set by _planCalcOrig)
   var sumBox = document.getElementById('planSumBox');
   var prevTot = sumBox ? parseFloat(sumBox.dataset.totalArea||'0') : 0;   // FIX: era planTotCm (bug)
