@@ -10501,6 +10501,32 @@ var _kbProdEditMode = false; // true quando editando seleção já feita
 
 function kbIniciarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
+  // Retomada: a baixa de estoque já foi confirmada uma vez para esta OS (producaoStartId
+  // novo, ou matProd legado sem a marca — tratado como já iniciado, ver seção 7.A do
+  // incidente de baixa duplicada). Retomar NUNCA reabre o seletor de material nem gera
+  // nova baixa — apenas volta o status para "Em Produção".
+  if (os.producaoStartId || os.matProd) {
+    os.status = 'producao';
+    kbSaveKbos();
+    var stag = document.getElementById('kstag-' + _kbOsId);
+    if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
+    var stagModal = document.getElementById('kbOsStag');
+    if (stagModal) { stagModal.className = 'stag sp'; stagModal.textContent = 'Em Produção'; }
+    var ib = document.getElementById('kbIniciarProdBox');
+    if (ib) {
+      var ibBtn = ib.querySelector('button');
+      if (ibBtn) { ibBtn.innerHTML = '⏸ Pausar Produção'; ibBtn.style.background = 'linear-gradient(90deg,#6B7280,#4B5563)'; ibBtn.onclick = function(){ kbPausarProd(); }; }
+    }
+    var mb = document.getElementById('kbMatProdBox');
+    if (mb && os.matProd) {
+      mb.style.display = '';
+      var ml = document.getElementById('kbMatProdLabel'); if (ml) ml.textContent = os.matProd.label || '—';
+    }
+    renderOsTable(); syncSidebarBadges();
+    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' retomada — sem nova baixa de estoque');
+    showToast('▶️ Produção retomada — nenhuma nova baixa de estoque.', 'ok');
+    return;
+  }
   _kbProdEditMode = false;
   _kbProdTipo = 'chapa';
   _kbOpenProdOverlay(os);
@@ -10567,6 +10593,7 @@ function kbToggleEtapa(osId, key, el) {
 function kbEditarMatProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   _kbProdEditMode = true;
+  _kbProdEditExpectedStartId = os.producaoStartId || null; // concorrência otimista — ver kbConfirmarProd()
   _kbProdTipo = (os.matProd && os.matProd.isRetalho) ? 'retalho' : 'chapa';
   _kbOpenProdOverlay(os);
 }
@@ -10680,78 +10707,104 @@ function kbProdCheckStock() {
   si.style.display = '';
 }
 
-var _kbProdSubmitting = false; // trava contra clique duplo/reentrância no submit
+var _kbProdSubmitting = false; // trava contra clique duplo/reentrância no submit (proteção de UI apenas — a garantia real é a transação abaixo)
+var _kbProdEditExpectedStartId = null; // concorrência otimista para edição de material (kbEditarMatProd)
 function kbConfirmarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
-  if (_kbProdSubmitting) return; // já em andamento — ignora reclique
+  if (_kbProdSubmitting) return; // já em andamento — ignora reclique (proteção de UI; a garantia real é a transação abaixo)
   var obs = (document.getElementById('kbProdObs')||{}).value||'';
   var _editMode = _kbProdEditMode; // captura antes de qualquer mutação
+  var _osIdLocal = _kbOsId;
+  var _idemKey = 'producao_inicio:' + _osIdLocal;
 
-  // [S2] Helper: UI + auditLog + toast — chamado após sucesso (retalho: síncrono; matKey: dentro do .then())
-  function _finalizar() {
+  // Helper de UI pós-sucesso (chamado depois que a transação já persistiu tudo — nunca grava kb_os aqui)
+  function _finalizar(osAtualizada) {
     _kbProdSubmitting = false;
     var _submitBtn = document.querySelector('#kbProdOverlay .gen-submit'); if(_submitBtn) _submitBtn.disabled = false;
     if (!_editMode) {
-      os.status = 'producao';
-      if(!os.inicioProducaoTs) os.inicioProducaoTs = Date.now(); // medição real de tempo de produção
-      var stag = document.getElementById('kstag-' + _kbOsId);
+      var stag = document.getElementById('kstag-' + _osIdLocal);
       if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
-      document.getElementById('kbOsStag').className = 'stag sp';
-      document.getElementById('kbOsStag').textContent = 'Em Produção';
+      var stagModal = document.getElementById('kbOsStag');
+      if (stagModal) { stagModal.className = 'stag sp'; stagModal.textContent = 'Em Produção'; }
       var ib = document.getElementById('kbIniciarProdBox'); if (ib) ib.style.display = 'none';
     }
-    kbSaveKbos(); // estava faltando — mudança de status/matProd nunca era persistida no Firestore aqui
     var mb = document.getElementById('kbMatProdBox');
     var ml = document.getElementById('kbMatProdLabel');
     var mq = document.getElementById('kbMatProdQtyLabel');
     if (mb) mb.style.display = '';
-    if (ml) ml.textContent = os.matProd.label;
+    if (ml) ml.textContent = osAtualizada.matProd.label;
     if (mq) {
-      if (os.matProd.isRetalho) {
+      if (osAtualizada.matProd.isRetalho) {
         mq.textContent = '✂️ Usando retalho';
       } else {
-        var _qtylabel = os.matProd.qty === 1 ? '1 chapa' : os.matProd.qty + ' chapas';
-        if (os.matProd.qty < 1 || os.matProd.qty !== Math.floor(os.matProd.qty)) _qtylabel = os.matProd.qty + ' chapa(s)';
+        var _qtylabel = osAtualizada.matProd.qty === 1 ? '1 chapa' : osAtualizada.matProd.qty + ' chapas';
+        if (osAtualizada.matProd.qty < 1 || osAtualizada.matProd.qty !== Math.floor(osAtualizada.matProd.qty)) _qtylabel = osAtualizada.matProd.qty + ' chapa(s)';
         mq.textContent = _qtylabel + (obs?' · '+obs:'');
       }
     }
     kbCloseProd();
-    if(os.matProd){
-      var _c=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
-      if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+os.matProd.label+_rest;}}}
+    if(osAtualizada.matProd){
+      var _c=document.querySelector('.kcard[data-osid="'+_osIdLocal+'"');
+      if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+osAtualizada.matProd.label+_rest;}}}
     }
     renderOsTable();
     syncSidebarBadges();
-    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + os.matProd.label);
+    stockRenderHistorico();
+    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + osAtualizada.num + ' → Produção · ' + osAtualizada.matProd.label);
     showToast(_editMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
   }
 
-  if (_kbProdTipo === 'retalho') {
-    // Branch retalho: sem alteração de comportamento
-    var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
-    var rList  = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
-    if (isNaN(retIdx) || !rList[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
-    var retalho = rList[retIdx];
-    _kbProdSubmitting = true;
-    (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
-    if (_editMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) {
-      var rOld = rList[os.matProd.retalhoIdx];
-      if (rOld) { rOld.qty++; if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS); }
+  function _falhar(e) {
+    _kbProdSubmitting = false;
+    (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=false; })();
+    var msg = (e && e.message) || 'Erro ao dar baixa no estoque';
+    if (msg === 'PRODUCAO_JA_INICIADA') {
+      showToast('ℹ️ Produção já havia sido iniciada para esta OS — nenhuma nova baixa foi feita.', 'info');
+      kbCloseProd();
+      try { kbOpen(_osIdLocal); } catch(err) {}
+    } else if (msg === 'EDICAO_CONFLITO') {
+      showToast('⚠️ O material desta OS foi alterado por outra sessão. Reabra a OS para editar novamente.', 'warn');
+      kbCloseProd();
+    } else if (msg.indexOf('INCONSISTENCIA_LEGADO') === 0) {
+      showToast('⚠️ Inconsistência detectada no histórico de estoque desta OS — produção não iniciada. Requer auditoria manual.', 'err');
+      kbCloseProd();
+    } else if (msg === 'EDICAO_RETALHO_LEGADO_SEM_MARCA') {
+      showToast('⚠️ Este retalho foi registrado em um formato antigo e não pode ser identificado com segurança para edição automática. Requer ajuste manual no estoque.', 'err');
+      kbCloseProd();
+    } else if (msg === 'RETALHO_INDISPONIVEL') {
+      showToast('⚠️ Esse retalho não está mais disponível — outra produção pode tê-lo usado. Selecione novamente.', 'warn');
+    } else {
+      showToast(msg, 'err');
     }
-    retalho.qty--;
-    if(typeof _cloudSave==='function'&&_cloudReady)_cloudSave('retalhos',RETALHOS);
-    _retalhoLog('retalho-saida', retalho.mat, retalho.label+' '+retalho.dims+' cm', retalho.codigo||'', os.num||os.id||'');
-    os.matProd = { matKey: null, label: retalho.label + ' ' + retalho.dims, isRetalho: true, retalhoIdx: retIdx, obs: obs };
-    _finalizar();
+  }
+
+  // Constrói uma entrada de STOCK_LOG com os campos legados (tipo/matKey/matLabel/qty/os/obs/dt)
+  // e os campos canônicos de idempotência exigidos pela correção (osId/orcamentoId/materialId/
+  // quantidade/finalidade/idempotencyKey/ts/usuario).
+  function _buildLogEntry(tipo, matKey, matLabel, qty, osAtual, obsTexto, finalidade, idemKeyEntry) {
+    var now = new Date();
+    var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    return {
+      tipo: tipo, matKey: matKey || '', matLabel: matLabel || matKey || '', qty: qty, os: osAtual.num || _osIdLocal, obs: obsTexto || '', dt: dtStr,
+      osId: _osIdLocal, orcamentoId: osAtual.orcRef || null, materialId: matKey || null, quantidade: qty,
+      finalidade: finalidade, idempotencyKey: idemKeyEntry, ts: Date.now(), usuario: comprasQuem()
+    };
+  }
+
+  if (_kbProdTipo === 'retalho') {
+    var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
+    var rListUi = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
+    if (isNaN(retIdx) || !rListUi[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
+    var retalhoEscolhido = { mat: rListUi[retIdx].mat, dims: rListUi[retIdx].dims, label: rListUi[retIdx].label, codigo: rListUi[retIdx].codigo || '' };
+    return _iniciarTransacaoProducao({ novoTipo: 'retalho', retalhoEscolhido: retalhoEscolhido });
   } else {
-    // [S2] Branch matKey: baixa atômica via runTransaction
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
     var qty    = parseFloat((document.getElementById('kbProdQty')||{}).value)||1;
-    var chapasRetirar = Math.ceil(qty);
-    var sobra = +(chapasRetirar - qty).toFixed(4);
     if (!matKey) { showToast('Selecione o material', 'warn'); return; }
     if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
-    // Pré-check rápido via memória (falha imediata para UX; a transação confirma no servidor)
+    var chapasRetirar = Math.ceil(qty);
+    // Pré-check rápido via memória (só UX — falha imediata sem abrir transação; a transação
+    // abaixo é que decide de verdade, contra o estoque real do servidor).
     var _prodAutorizado = false;
     if (STOCK[matKey].qty < chapasRetirar) {
       var _falta = +(chapasRetirar - STOCK[matKey].qty).toFixed(2);
@@ -10773,44 +10826,116 @@ function kbConfirmarProd() {
       _prodAutorizado = true;
       if (typeof secAuditLog === 'function') secAuditLog('producao_autorizada', 'OS #'+os.num+' iniciada com estoque insuficiente de '+_matLabel+' (faltam '+_falta+') — autorizado por '+((_currentSession&&(_currentSession.user||_currentSession.email))||'master'));
     }
+    return _iniciarTransacaoProducao({ novoTipo: 'chapa', matKey: matKey, qty: qty, chapasRetirar: chapasRetirar, prodAutorizado: _prodAutorizado });
+  }
+
+  // Transação única: relê kb_os/stock/retalhos/erp_stock_log do Firestore, valida o estado
+  // canônico da OS, e só então aplica a baixa + grava status/matProd/log — tudo atômico.
+  function _iniciarTransacaoProducao(opts) {
     _kbProdSubmitting = true;
     (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
-    var _prevKey    = (_editMode && os.matProd && !os.matProd.isRetalho) ? os.matProd.matKey : null;
-    var _prevChapas = _prevKey ? (os.matProd.chapasRetiradas || os.matProd.qty || 1) : 0;
+
+    var kbOsRef  = _db.collection(_COL).doc('kb_os');
     var stockRef = _db.collection(_COL).doc('stock');
-    _db.runTransaction(function(txn) {
-      return txn.get(stockRef).then(function(snap) {
-        var sd;
-        try { sd = JSON.parse((snap.exists && snap.data() && snap.data().data) ? snap.data().data : '{}'); } catch(e) { sd = {}; }
-        // Restaurar baixa anterior atomicamente (edição de material)
-        if (_prevKey && sd[_prevKey]) sd[_prevKey].qty = (sd[_prevKey].qty||0) + _prevChapas;
-        if (!sd[matKey]) throw new Error('Material não encontrado no estoque');
-        if (!_prodAutorizado && (sd[matKey].qty||0) < chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[matKey].qty||0) + ' chapas disponíveis)');
-        sd[matKey].qty = (sd[matKey].qty||0) - chapasRetirar;
-        txn.update(stockRef, { data: JSON.stringify(sd) });
-        return sd;
+    var retRef   = _db.collection(_COL).doc('retalhos');
+    var logRef   = _db.collection(_COL).doc('erp_stock_log');
+
+    return _db.runTransaction(function(txn) {
+      return Promise.all([txn.get(kbOsRef), txn.get(stockRef), txn.get(retRef), txn.get(logRef)]).then(function(snaps) {
+        var docOs = snaps[0], docStock = snaps[1], docRet = snaps[2], docLog = snaps[3];
+        function _parse(snap, dflt) { try { return (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? JSON.parse(snap.data().data) : dflt; } catch(e) { return dflt; } }
+        var objOS = _parse(docOs, {});
+        var sd    = _parse(docStock, {});
+        var retList = _parse(docRet, []);
+        var log   = _parse(docLog, []);
+
+        var osFresh = objOS[_osIdLocal];
+        if (!osFresh) throw new Error('OS_NAO_ENCONTRADA');
+
+        var logEntries = [];
+        var retListMutada = false;
+
+        if (!_editMode) {
+          if (['pronta','entregue','cancelado'].indexOf(osFresh.status) >= 0) throw new Error('OS_STATUS_INVALIDO:' + osFresh.status);
+          if (osFresh.producaoStartId) throw new Error('PRODUCAO_JA_INICIADA');
+          if (osFresh.matProd) throw new Error('PRODUCAO_JA_INICIADA'); // dado legado sem marca — tratado como já iniciado
+          var logOrfao = log.some(function(l){ return l.finalidade === 'inicio_producao' && (l.osId === _osIdLocal || String(l.os) === String(osFresh.num)); });
+          if (logOrfao) throw new Error('INCONSISTENCIA_LEGADO:log_sem_matProd');
+        } else {
+          if (['pronta','entregue','cancelado'].indexOf(osFresh.status) >= 0) throw new Error('OS_STATUS_INVALIDO:' + osFresh.status);
+          if (!osFresh.matProd) throw new Error('EDICAO_SEM_PRODUCAO_INICIADA');
+          if (_kbProdEditExpectedStartId && osFresh.producaoStartId !== _kbProdEditExpectedStartId) throw new Error('EDICAO_CONFLITO');
+        }
+
+        // Restaurar a baixa anterior (modo edição) — chapa ou retalho, o que já estava registrado
+        if (_editMode && osFresh.matProd) {
+          if (osFresh.matProd.isRetalho) {
+            // Registros legados (retalhoIdx apontando pra uma lista filtrada que já não existe
+            // mais neste formato) não têm como ser identificados com segurança — bloqueia em vez
+            // de arriscar restaurar o retalho errado ou perder a unidade silenciosamente.
+            if (!osFresh.matProd.retalhoMat && !osFresh.matProd.retalhoCodigo) throw new Error('EDICAO_RETALHO_LEGADO_SEM_MARCA');
+            var oldIdx = retList.findIndex(function(r){ return osFresh.matProd.retalhoCodigo ? r.codigo === osFresh.matProd.retalhoCodigo : (r.mat === osFresh.matProd.retalhoMat && r.dims === osFresh.matProd.retalhoDims); });
+            if (oldIdx >= 0) { retList[oldIdx].qty = (retList[oldIdx].qty||0) + 1; retListMutada = true; }
+          } else if (osFresh.matProd.matKey && sd[osFresh.matProd.matKey]) {
+            var _prevChapas = osFresh.matProd.chapasRetiradas || osFresh.matProd.qty || 1;
+            sd[osFresh.matProd.matKey].qty = (sd[osFresh.matProd.matKey].qty||0) + _prevChapas;
+            logEntries.push(_buildLogEntry('entrada', osFresh.matProd.matKey, sd[osFresh.matProd.matKey].label, _prevChapas, osFresh, 'Correção — material trocado na OS', 'edicao_producao_estorno', 'producao_edicao:' + _osIdLocal + ':' + Date.now() + ':estorno'));
+          }
+        }
+
+        var novoMatProd;
+        if (opts.novoTipo === 'retalho') {
+          var r = opts.retalhoEscolhido;
+          var idx = retList.findIndex(function(x){ return r.codigo ? x.codigo === r.codigo : (x.mat === r.mat && x.dims === r.dims && x.label === r.label); });
+          if (idx < 0 || !retList[idx] || (retList[idx].qty||0) <= 0) throw new Error('RETALHO_INDISPONIVEL');
+          retList[idx].qty = retList[idx].qty - 1;
+          retListMutada = true;
+          novoMatProd = { matKey: null, label: r.label + ' ' + r.dims, isRetalho: true, retalhoMat: r.mat, retalhoDims: r.dims, retalhoCodigo: r.codigo || '', obs: obs };
+          logEntries.push(_buildLogEntry('retalho-saida', r.mat, r.label + ' ' + r.dims + ' cm', 1, osFresh, r.codigo ? 'Cód: ' + r.codigo : '', _editMode ? 'edicao_producao' : 'inicio_producao', _editMode ? ('producao_edicao:' + _osIdLocal + ':' + Date.now()) : _idemKey));
+        } else {
+          var mk = opts.matKey;
+          if (!sd[mk]) throw new Error('Material não encontrado no estoque');
+          if (!opts.prodAutorizado && (sd[mk].qty||0) < opts.chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[mk].qty||0) + ' chapas disponíveis)');
+          sd[mk].qty = (sd[mk].qty||0) - opts.chapasRetirar;
+          var sobra = +(opts.chapasRetirar - opts.qty).toFixed(4);
+          novoMatProd = { matKey: mk, label: sd[mk].label + (sd[mk].cor ? ' ' + sd[mk].cor : '') + (sd[mk].esp ? ' — ' + sd[mk].esp + 'mm' : ''), qty: opts.qty, chapasRetiradas: opts.chapasRetirar, isRetalho: false, obs: obs, sobra: sobra > 0.01 ? sobra : 0 };
+          logEntries.push(_buildLogEntry('saida', mk, sd[mk].label, opts.chapasRetirar, osFresh, 'Produção OS #' + (osFresh.num||_osIdLocal) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''), _editMode ? 'edicao_producao' : 'inicio_producao', _editMode ? ('producao_edicao:' + _osIdLocal + ':' + Date.now()) : _idemKey));
+        }
+
+        osFresh.matProd = novoMatProd;
+        if (!_editMode) {
+          osFresh.status = 'producao';
+          osFresh.producaoStartId = _idemKey;
+          osFresh.producaoIniciadaEm = Date.now();
+          if (!osFresh.inicioProducaoTs) osFresh.inicioProducaoTs = osFresh.producaoIniciadaEm;
+        } else if (!osFresh.producaoStartId) {
+          // Backfill não-destrutivo: OS legada editada agora ganha a marca canônica.
+          osFresh.producaoStartId = _idemKey;
+        }
+        objOS[_osIdLocal] = osFresh;
+
+        log = logEntries.concat(log);
+        if (log.length > 200) log.length = 200;
+
+        txn.set(kbOsRef, { data: JSON.stringify(objOS), ts: Date.now() });
+        txn.set(stockRef, { data: JSON.stringify(sd), ts: Date.now() });
+        txn.set(logRef, { data: JSON.stringify(log), ts: Date.now() });
+        if (retListMutada) txn.set(retRef, { data: JSON.stringify(retList), ts: Date.now() });
+
+        return { objOS: objOS, sd: sd, retList: retList, log: log, osFresh: osFresh, retListMutada: retListMutada };
       });
-    }).then(function(sd) {
-      // Sincronizar memória local (onSnapshot também atualizará em breve)
-      if (_prevKey && STOCK[_prevKey]) {
-        STOCK[_prevKey].qty += _prevChapas;
-        stockUpdateDisplay(_prevKey);
-        _stockLog('entrada', _prevKey, _prevChapas, os.num, 'Correção — material trocado na OS');
-      }
-      if (STOCK[matKey]) STOCK[matKey].qty = sd[matKey].qty;
-      stockUpdateDisplay(matKey);
-      _stockLog('saida', matKey, chapasRetirar, os.num, 'Produção OS #' + (os.num||os.id) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''));
-      if (sobra > 0.01 && typeof retalhoAdicionar === 'function') {
-        retalhoAdicionar(matKey, 'sobra ' + sobra.toFixed(2) + ' chapa — OS #' + (os.num||os.id));
-      }
-      os.matProd = { matKey: matKey, label: STOCK[matKey].label + (STOCK[matKey].cor ? ' ' + STOCK[matKey].cor : '') + (STOCK[matKey].esp ? ' — ' + STOCK[matKey].esp + 'mm' : ''), qty: qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: obs };
-      _finalizar();
-    }).catch(function(e) {
-      _kbProdSubmitting = false;
-      (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=false; })();
-      showToast(e.message || 'Erro ao dar baixa no estoque', 'err');
-    });
-    return; // branch async — _finalizar() será chamado no .then()
+    }).then(function(r) {
+      KB_OS = r.objOS;
+      STOCK = r.sd;
+      STOCK_LOG = r.log;
+      if (r.retListMutada) RETALHOS = r.retList;
+      _cloudLastPayload['kb_os'] = JSON.stringify(r.objOS);
+      _cloudLastPayload['stock'] = JSON.stringify(r.sd);
+      _cloudLastPayload['erp_stock_log'] = JSON.stringify(r.log);
+      if (r.retListMutada) _cloudLastPayload['retalhos'] = JSON.stringify(r.retList);
+      Object.keys(r.sd).forEach(function(k){ stockUpdateDisplay(k); });
+      _finalizar(r.osFresh);
+    }).catch(_falhar);
   }
 }
 
