@@ -16131,6 +16131,17 @@ function crmMoverCongelado(id) {
 
 function crmConverterEmOS(id) {
   var d = CRM_LEADS[id]; if(!d) return;
+  // "kbNovaOS"/"KB_DATA"/"kbSave" nunca existiram neste arquivo (o modelo real
+  // de OS é KB_OS + kbSaveKbos()) — nenhum dos dois ramos abaixo jamais
+  // executou; esta função sempre marcou o lead como "Fechado/OS" e mostrou um
+  // toast de sucesso SEM criar OS nenhuma. Em vez de inventar aqui a lógica de
+  // criação de OS (decisão de regra de negócio fora do escopo desta auditoria
+  // de _cloudSave), o mínimo seguro é parar de afirmar um sucesso que nunca
+  // aconteceu — reportado como bug adicional para uma rodada futura.
+  if (typeof kbNovaOS !== 'function' && typeof KB_DATA === 'undefined') {
+    showToast('⚠️ Conversão automática para OS ainda não está implementada — gere a OS manualmente pelo fluxo de Orçamento.', 'err');
+    return;
+  }
   // Monta a OS no Kanban de Produção
   var os = {
     id: 'os_crm_'+Date.now(),
@@ -16145,7 +16156,6 @@ function crmConverterEmOS(id) {
     dataCriacao: new Date().toLocaleDateString('pt-BR'),
     vendedor: d.vendedor || ''
   };
-  // Tenta usar a função de criação de OS existente
   if(typeof kbNovaOS === 'function') {
     kbNovaOS(os);
   } else if(typeof KB_DATA !== 'undefined') {
@@ -16312,19 +16322,23 @@ function crmFiltrarHoje() {
 function osExcluir(id) {
   var os=KB_OS[id]; if(!os) return;
   if(!confirm('Excluir OS #'+os.num+' — '+os.titulo+'?\nEsta ação não pode ser desfeita.')) return;
+  var _osAnterior = os;
   delete KB_OS[id];
   kbClose();
-  // Remove card do Kanban (usa data-osid)
   document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){
     if(card.parentNode) card.parentNode.removeChild(card);
   });
-  // Fallback: também tenta data-id (compatibilidade)
   document.querySelectorAll('.kcard[data-id="'+id+'"]').forEach(function(card){
     if(card.parentNode) card.parentNode.removeChild(card);
   });
-  kbSaveKbos();
   renderOsTable(); syncSidebarBadges(); kbSyncCounts();
-  showToast('OS #'+os.num+' excluída','info');
+  kbSaveKbos().then(function(res){
+    if (res.ok) { showToast('OS #'+_osAnterior.num+' excluída','info'); return; }
+    KB_OS[id] = _osAnterior;
+    if (typeof kbRender === 'function') kbRender();
+    renderOsTable(); syncSidebarBadges(); kbSyncCounts();
+    showToast('⚠️ Não foi possível excluir a OS #'+_osAnterior.num+' — tente novamente.','err');
+  });
 }
 
 // ============================================================
