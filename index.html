@@ -17434,6 +17434,18 @@ function orcEnvEditar(id) {
 
 // ── Confirmar Pagamento / Converter em OS ──
 var _orcPagtoId = null;
+// Bug real (homologação Fase F, 2026-08-05): orcEnvGerarOS() descobria o
+// tipo de pagamento procurando a cor hexadecimal ("059669") dentro do
+// atributo style do botão ativo — mas o navegador sempre normaliza cores
+// inline para rgb(...) ao serializar o style, então esse seletor NUNCA
+// batia, em nenhum navegador, independente do que o usuário selecionasse.
+// Resultado: toda OS gerada era tratada como "futuro" (a receber), mesmo
+// quando o operador selecionava Integral/50-50/Parcial e informava um
+// valor de entrada real — nenhum recebimento era lançado e o orçamento
+// nunca ficava "pago". Corrigido lendo um estado canônico explícito
+// (_pgtoTipoAtual), atualizado só por orcPagtoTipoSel(), nunca derivado
+// de aparência visual.
+var _pgtoTipoAtual = null;
 function orcEnvConfirmarPgto(id) {
   var lista = orcGetEnviados();
   var o = lista.find(function(x){ return x.id===id; });
@@ -17518,6 +17530,10 @@ function orcPagtoTipoSel(btn){
   });
   btn.style.borderColor='#059669'; btn.style.background='#F0FDF4'; btn.style.color='#059669';
   var tipo=btn.dataset.tipo;
+  // Estado canônico do tipo de pagamento — única fonte usada por
+  // orcEnvGerarOS(). O destaque visual acima é consequência da seleção,
+  // nunca a origem da regra de negócio.
+  _pgtoTipoAtual = tipo;
   var entBox=document.getElementById('pgtoEntradaBox');
   var lista=orcGetEnviados(); var o=lista.find(function(x){return x.id===_orcPagtoId;});
   var valorTotal=o?o.valorFinal:0;
@@ -17539,13 +17555,23 @@ function orcEnvGerarOS(){
   var lista=orcGetEnviados();
   var o=lista.find(function(x){return x.id===_orcPagtoId;});
   if(!o){showToast('Orçamento não encontrado','warn');return;}
-  var tipo=document.querySelector('.pgto-tipo-btn[style*="059669"]')?.dataset?.tipo||'futuro';
+  var tipo=_pgtoTipoAtual||'futuro';
   var forma=(document.getElementById('pgtoForma')||{}).value||'PIX';
   var obs=(document.getElementById('pgtoObs')||{}).value||'';
-  var valorTotal=o.valorFinal||0;
-  var entradaVal=parseFloat((document.getElementById('pgtoEntradaVal')||{}).value)||0;
+  var valorTotal=Math.round((o.valorFinal||0)*100)/100;
+  var entradaRaw=(document.getElementById('pgtoEntradaVal')||{}).value;
+  var entradaVal=Math.round((parseFloat(entradaRaw)||0)*100)/100;
+  // Entrada validada de forma independente da aparência — 50-50 e parcial
+  // compartilham o mesmo campo de texto livre, então ambos precisam de
+  // valor positivo e dentro do total (achado de homologação Fase F).
+  if(tipo==='50-50'||tipo==='parcial'){
+    if(!(entradaRaw!=='' && !isNaN(parseFloat(entradaRaw))) || entradaVal<=0 || entradaVal>valorTotal){
+      showToast('Valor de entrada inválido — informe um valor maior que zero e até o total do orçamento.','warn');
+      return;
+    }
+  }
   var valorEntrada = tipo==='integral'?valorTotal:(tipo==='50-50'||tipo==='parcial')?entradaVal:0;
-  var restante = valorTotal-valorEntrada;
+  var restante = Math.round((valorTotal-valorEntrada)*100)/100;
 
   // Criar OS no Kanban
   var n=(_OS_COUNTER+1);
