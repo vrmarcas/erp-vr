@@ -199,31 +199,51 @@ console.log('\n=== FASE 2-8 (checkpoint) — Cloud Functions de estoque restante
   });
 
   // ── estoqueConsumoAutoOrcamento ───────────────────────────────────────
+  // 'ac3' é a chave REAL do material de baseline (hard-coded dentro da própria
+  // Function sob teste, legado de orcGerarOS) — NUNCA usar seedStock/limparStock
+  // (overwrite-then-delete) nela. Sempre snapshot-and-restore do valor real.
+  async function comAc3Preservado(qtyTemporaria, fn) {
+    var stockRef = db.collection('erp_vr').doc('stock');
+    var antes = await stockRef.get();
+    var dataAntes = JSON.parse(antes.data().data);
+    var ac3Original = dataAntes.ac3 ? Object.assign({}, dataAntes.ac3) : null;
+    var dataTemp = Object.assign({}, dataAntes, { ac3: Object.assign({}, ac3Original || { label: 'Acrílico Cristal 3mm', min: 10, max: 50, esp: 3, cor: 'Cristal' }, { qty: qtyTemporaria }) });
+    await stockRef.set({ data: JSON.stringify(dataTemp), ts: Date.now() });
+    try {
+      await fn();
+    } finally {
+      var depois = await stockRef.get();
+      var dataDepois = JSON.parse(depois.data().data);
+      if (ac3Original) dataDepois.ac3 = ac3Original; else delete dataDepois.ac3;
+      await stockRef.set({ data: JSON.stringify(dataDepois), ts: Date.now() });
+    }
+  }
+
   await test('9. estoqueConsumoAutoOrcamento — Comercial pode chamar (é quem fecha orçamento), decrementa ac3', async function () {
-    await seedStock('ac3', { label: 'AC3', qty: 5 });
-    var r = await estoqueConsumoAutoOrcamento.run({ osRef: 'OS-teste', requestId: novoReqId() }, ctx(UID.comercial, 'comercial'));
-    assertEq(r.ok, true); assertEq(r.aplicado, true);
-    assertEq((await getStock('ac3')).qty, 4);
-    await limparStock('ac3');
+    await comAc3Preservado(5, async function () {
+      var r = await estoqueConsumoAutoOrcamento.run({ osRef: 'OS-teste', requestId: novoReqId() }, ctx(UID.comercial, 'comercial'));
+      assertEq(r.ok, true); assertEq(r.aplicado, true);
+      assertEq((await getStock('ac3')).qty, 4);
+    });
   });
 
   await test('10. estoqueConsumoAutoOrcamento — ac3 com saldo 0 → pula silenciosamente (comportamento legado preservado, não bloqueia OS)', async function () {
-    await seedStock('ac3', { label: 'AC3', qty: 0 });
-    var r = await estoqueConsumoAutoOrcamento.run({ osRef: 'OS-teste2', requestId: novoReqId() }, ctx(UID.comercial, 'comercial'));
-    assertEq(r.ok, true); assertEq(r.aplicado, false, 'deve pular sem erro');
-    assertEq((await getStock('ac3')).qty, 0);
-    await limparStock('ac3');
+    await comAc3Preservado(0, async function () {
+      var r = await estoqueConsumoAutoOrcamento.run({ osRef: 'OS-teste2', requestId: novoReqId() }, ctx(UID.comercial, 'comercial'));
+      assertEq(r.ok, true); assertEq(r.aplicado, false, 'deve pular sem erro');
+      assertEq((await getStock('ac3')).qty, 0);
+    });
   });
 
   await test('11. estoqueConsumoAutoOrcamento — Financeiro → negado (não está entre as roles permitidas nem é master)', async function () {
     var uidFin = 'e2e_est_financeiro_' + Date.now();
     await db.collection('erp_vr_usuarios').doc(uidFin).set({ nome: 'E2E Fin', funcao: 'financeiro', ativo: 1 });
-    await seedStock('ac3', { label: 'AC3', qty: 5 });
-    await assertThrows(function () {
-      return estoqueConsumoAutoOrcamento.run({ osRef: 'x', requestId: novoReqId() }, ctx(uidFin, 'financeiro'));
-    }, 'permission-denied');
-    assertEq((await getStock('ac3')).qty, 5);
-    await limparStock('ac3');
+    await comAc3Preservado(5, async function () {
+      await assertThrows(function () {
+        return estoqueConsumoAutoOrcamento.run({ osRef: 'x', requestId: novoReqId() }, ctx(uidFin, 'financeiro'));
+      }, 'permission-denied');
+      assertEq((await getStock('ac3')).qty, 5);
+    });
   });
 
   // ── estoqueCriarOuEditarItem ──────────────────────────────────────────
