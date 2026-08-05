@@ -28,6 +28,29 @@ function flagsDeProducaoPresentes(argv) {
   return { ok: temAllowProduction && temAuthorization, temAllowProduction, temAuthorization };
 }
 
+// ── Modo de credencial ───────────────────────────────────────────────────
+// --credential-mode=adc usa explicitamente admin.credential.applicationDefault()
+// (Application Default Credentials — gcloud auth application-default login),
+// nunca um arquivo JSON de service account, mesmo que GOOGLE_APPLICATION_
+// CREDENTIALS esteja definida no ambiente por engano — a intenção explícita
+// da flag sempre vence. Só faz sentido combinado com produção; contra o
+// emulador (demo-erp-homolog) a credencial é irrelevante, o emulador não a
+// verifica.
+function usaCredencialADC(argv) {
+  const arg = argv.find(a => a.startsWith('--credential-mode='));
+  return !!(arg && arg.split('=')[1] === 'adc');
+}
+
+function initializeAppComModoCorreto(admin, projectId, argv) {
+  if (admin.apps.length) return admin.app();
+  if (usaCredencialADC(argv)) {
+    // Nunca loga path/token/conteúdo da credencial — só a decisão de modo.
+    console.log('[credencial] modo ADC explícito — ignorando qualquer GOOGLE_APPLICATION_CREDENTIALS de arquivo.');
+    return admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'erp-vrmarcas' });
+  }
+  return admin.initializeApp({ projectId });
+}
+
 // ── Núcleo puro: recebe o estado JÁ CONSULTADO (authUsers, existingNormUids)
 // e valida contra as contagens esperadas. Testável sem Firebase. ──────────
 function validarEstadoEsperado(authUsers, existingNormUids) {
@@ -76,4 +99,4 @@ function validarEstadoEsperado(authUsers, existingNormUids) {
   return { ok: erros.length === 0, erros, resumo: { ativos: ativos.length, aCriar: aCriar.length, existentes: existentes.length, aposentados: aposentados.length } };
 }
 
-module.exports = { flagsDeProducaoPresentes, validarEstadoEsperado, AUTORIZACAO_ESPERADA };
+module.exports = { flagsDeProducaoPresentes, validarEstadoEsperado, AUTORIZACAO_ESPERADA, usaCredencialADC, initializeAppComModoCorreto };

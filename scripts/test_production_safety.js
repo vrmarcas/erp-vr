@@ -1,4 +1,4 @@
-const { flagsDeProducaoPresentes, validarEstadoEsperado } = require('./lib/production_safety');
+const { flagsDeProducaoPresentes, validarEstadoEsperado, usaCredencialADC } = require('./lib/production_safety');
 const { DECISOES_HUMANAS } = require('./lib/user_decisions');
 
 let passed=0, failed=0;
@@ -31,6 +31,11 @@ assert('9. conta técnica presente no Auth mas fora da tabela -> ok (não é err
 
 const authComEmailDuplicado = authCorreto.concat([{uid:'dup', email:'isabellabsil@hotmail.com'}]);
 assert('10. e-mail da tabela com 2 contas no Auth -> nao ok (ambíguo)', validarEstadoEsperado(authComEmailDuplicado, new Set()).ok, false);
+
+console.log('\n-- usaCredencialADC --');
+assert('11. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
+assert('12. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
+assert('13. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
 
 console.log('\n================\n RESULTADO: '+passed+' passed, '+failed+' failed\n================');
 process.exit(failed?1:0);

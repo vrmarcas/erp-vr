@@ -125,14 +125,14 @@ function runMockTests() {
 // ── Execução real ────────────────────────────────────────────────────────
 async function runReal() {
   if (APPLY && !CONFIRM_PROJECT) { console.error('❌ --apply exige --confirm-project=<projectId> explícito.'); process.exit(1); }
-  const { flagsDeProducaoPresentes, validarEstadoEsperado } = require('./lib/production_safety');
+  const { flagsDeProducaoPresentes, validarEstadoEsperado, initializeAppComModoCorreto } = require('./lib/production_safety');
   if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas') {
     const flags = flagsDeProducaoPresentes(process.argv);
     if (!flags.ok) { console.error('❌ Produção exige --allow-production E --authorization=<token> simultaneamente. Abortando (nenhuma escrita).'); process.exit(1); }
   }
   const admin = require('firebase-admin');
   const projectId = CONFIRM_PROJECT || require('../.firebaserc').projects.default;
-  if (!admin.apps.length) admin.initializeApp({ projectId });
+  initializeAppComModoCorreto(admin, projectId, process.argv);
   const db = admin.firestore();
   const auth = admin.auth();
 

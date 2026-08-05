@@ -61,14 +61,14 @@ async function runReal() {
     console.error('❌ --apply exige --confirm-project=<projectId>. Abortando (nenhuma escrita feita).');
     process.exit(1);
   }
-  const { flagsDeProducaoPresentes, validarEstadoEsperado } = require('./lib/production_safety');
+  const { flagsDeProducaoPresentes, validarEstadoEsperado, initializeAppComModoCorreto } = require('./lib/production_safety');
   if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas') {
     const flags = flagsDeProducaoPresentes(process.argv);
     if (!flags.ok) { console.error('❌ Produção exige --allow-production E --authorization=<token> simultaneamente. Abortando.'); process.exit(1); }
   }
   const admin = require('firebase-admin');
   const projectId = CONFIRM_PROJECT || require('../.firebaserc').projects.default;
-  if (!admin.apps.length) admin.initializeApp({ projectId });
+  initializeAppComModoCorreto(admin, projectId, process.argv);
   const auth = admin.auth();
   const db = admin.firestore();
 
