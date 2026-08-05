@@ -161,11 +161,42 @@ service cloud.firestore {
       // mesmo documento — aprovar/precificar fica de fato bloqueado só
       // porque a etapa de pagamento (fin_cp) exige Financeiro.
       allow read, write: if isProducao() && (
-        docId in ['kb_os', 'stock', 'stock_deleted', 'erp_stock_log',
-                  'retalhos', 'retalhos_seq', 'erp_os_counter', 'compras',
+        docId in ['kb_os', 'erp_os_counter', 'compras',
                   'erp_compras_counter', 'erp_fornecedores']
         || docId.matches('erp_plan_.*')
       );
+
+      // ── RULES CANDIDATAS (preparadas, NÃO publicadas — auditoria Fase F,
+      // FASE 2-8, 2026-08-05) ──────────────────────────────────────────────
+      // Achado: 'stock'/'erp_stock_log'/'retalhos' são documentos agregados
+      // (blob JSON em `data`) — Rules não conseguem validar campo a campo
+      // (não dá para permitir escrever `qty` mas negar zerar o documento
+      // inteiro). A única forma de fechar o bypass de verdade é mover TODA
+      // escrita para Cloud Functions (feito nesta rodada — ver
+      // functions/src/estoque.ts e producao.ts, todas usando Admin SDK, que
+      // sempre ignora Rules) e negar escrita client-side aqui.
+      //
+      // ⚠️ BLOQUEADOR DE DEPLOY CONHECIDO, documentado e não escondido: o
+      // fluxo LEGADO de recebimento de Compras v1 (comprasReceberModal(),
+      // ramo `else` — ativo quando _HOMOLOG_MODE é false, ou seja, é o que
+      // roda em PRODUÇÃO hoje, já que _HOMOLOG_MODE só liga com
+      // localhost+?emulator=1) ainda escreve 'stock' diretamente do cliente
+      // ao registrar recebimento (index.html, dentro de comprasReceberModal,
+      // incremento de STOCK[item.material].qty). Publicar este `allow
+      // write: if false` em produção QUEBRARIA esse fluxo legado ainda
+      // ativo. Isso não foi migrado nesta rodada porque pertence à migração
+      // maior, já rastreada separadamente, de Compras v1 → v2 (documento-
+      // por-registro) — mesma arquitetura do bloco erp_vr_compras* abaixo.
+      // Publicar esta Rule específica requer primeiro migrar ou aposentar
+      // esse ramo legado. Ver relatório final desta rodada, item de
+      // pendências.
+      // Escrita client-side ausente de propósito para estes 5 docIds — nenhum
+      // 'allow write' os cobre mais, então o deny-by-default do Firestore se
+      // aplica (mesma convenção do restante deste arquivo — ver nota no fim
+      // do bloco: "Nega tudo o mais por padrão"). Só Admin SDK (Cloud
+      // Functions) escreve, via estoque.ts/producao.ts.
+      allow read: if isProducao() && docId in
+        ['stock', 'stock_deleted', 'erp_stock_log', 'retalhos', 'retalhos_seq'];
       allow read: if isComercial() && docId in ['compras', 'erp_fornecedores', 'erp_plan_produtos'];
 
       // Planejamento de produtos/planificação (catálogo usado tanto no
