@@ -39,6 +39,9 @@ export {
   comprasCancelar,
 } from "./compras";
 
+// ── Produção (fronteira server-side de autorização de estoque) ──────────────
+export { producaoIniciarOuEditar } from "./producao";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,
