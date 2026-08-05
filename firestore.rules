@@ -21,30 +21,43 @@ service cloud.firestore {
       return isAuthenticated() && userRole() == 'master';
     }
 
-    // admin ou master: gerenciam o ERP (config, financeiro, permissões)
+    // master: gerencia o ERP (config, financeiro, permissões, usuários)
+    // NOTA: 'admin' mantido temporariamente para tokens legados enquanto a migração
+    // (scripts/migrate_admin_to_master.js --apply) não for executada e verificada.
+    // Remover 'admin' destas regras somente após confirmar zero registros remanescentes.
     function isAdmin() {
       return isAuthenticated() && (
-        userRole() == 'admin' || userRole() == 'master'
+        userRole() == 'master' || userRole() == 'admin'
       );
     }
 
     // comercial: pode ler/escrever orçamentos, CRM, clientes — não toca em config
     function isComercial() {
       return isAuthenticated() && (
-        userRole() == 'comercial' || userRole() == 'admin' || userRole() == 'master'
+        userRole() == 'comercial' || userRole() == 'master' || userRole() == 'admin'
       );
     }
 
     // produção: acesso operacional (Kanban/OS, estoque)
     function isProducao() {
       return isAuthenticated() && (
-        userRole() == 'producao' || userRole() == 'admin' || userRole() == 'master'
+        userRole() == 'producao' || userRole() == 'master' || userRole() == 'admin'
       );
     }
 
-    // qualquer perfil autorizado
+    // financeiro: módulos financeiros/fiscais + leitura de orçamentos p/ conciliação
+    // (achado real da homologação anterior: esta função não existia — o perfil
+    // financeiro, apesar de válido em toda a Cloud Function e no client-side,
+    // não conseguia nem logar contra as Rules antigas)
+    function isFinanceiro() {
+      return isAuthenticated() && (
+        userRole() == 'financeiro' || userRole() == 'master' || userRole() == 'admin'
+      );
+    }
+
+    // qualquer perfil autorizado (inclui financeiro agora)
     function isAnyStaff() {
-      return isAuthenticated() && userRole() in ['master', 'admin', 'comercial', 'producao'];
+      return isAuthenticated() && userRole() in ['master', 'admin', 'comercial', 'producao', 'financeiro'];
     }
 
     // ── marketing_connections ───────────────────────────────────────────────
@@ -66,28 +79,213 @@ service cloud.firestore {
     }
 
     // ── erp_vr: coleção principal do ERP ───────────────────────────────────
+    // Modelo de dados: cada "tabela" lógica é UM ÚNICO documento contendo um
+    // array inteiro serializado em JSON (campo "data", string). Isso significa
+    // que Rules por documento conseguem controlar QUEM mexe em cada tabela,
+    // mas NÃO conseguem diferenciar operações dentro do mesmo documento (ex.:
+    // "criar uma solicitação de compra" vs. "aprovar/precificar uma compra
+    // existente" são ambas, do ponto de vista do Firestore, a mesma operação
+    // — sobrescrever o campo "data" inteiro de erp_vr/compras). Onde isso
+    // importa (perfil Produção não pode aprovar/precificar/pagar a própria
+    // solicitação de compra), a separação real está registrada como
+    // bloqueador arquitetural no relatório de homologação, não fingida aqui.
     match /erp_vr/{docId} {
-      // Leitura: qualquer perfil autenticado do ERP
-      allow read: if isAnyStaff();
 
-      // Config estrutural e permissões: somente admin/master
-      allow write: if isAdmin()
-        && docId in ['erp_config', 'erp_usuarios', 'erp_permissoes',
-                     'valeria_authorized_agents'];
+      // Login / identificação de perfil — qualquer usuário autenticado pode
+      // ler a lista de usuários do ERP para resolver seu próprio perfil.
+      // Sem isso, qualquer perfil novo (ex.: financeiro) trava no login
+      // antes mesmo de saber que não tem acesso a mais nada (achado real).
+      // Não expõe dado de cliente — só nome/e-mail/função de funcionários.
+      allow read: if isAuthenticated() && docId == 'erp_usuarios';
+      allow write: if isMaster() && docId == 'erp_usuarios';
 
-      // Financeiro: somente admin/master
-      allow write: if isAdmin() && docId == 'fin_tx';
+      // Segredos administrativos — só Master pode ler E escrever.
+      allow read, write: if isMaster() && docId in [
+        'erp_master_pwd', 'erp_bank_config',
+        'erp_mach_presets', 'erp_inact_mins', 'erp_mat_prices',
+        'valeria_authorized_agents'
+      ];
 
-      // CRM/leads: comercial pode escrever
-      allow write: if isComercial()
-        && docId in ['crm_leads', 'crm_prospects', 'crm_reativacao'];
+      // erp_permissoes: matriz de visibilidade de página por perfil
+      // (booleanos, sem segredo nenhum) — consumida no cliente por
+      // usrLoadPerms()/secApplyPerms() para decidir o que cada perfil vê na
+      // sidebar. Achado real desta rodada: estava só-Master (mesmo grupo
+      // acima), o que tornava a personalização de permissões (tela
+      // Config>Usuários) 100% inerte para qualquer perfil não-master — o
+      // cliente nunca conseguia LER o próprio documento de permissões
+      // customizadas, então usrLoadPerms() sempre caía no PERM_DEFAULT
+      // hardcoded (que nem inclui 'compras'/'fornecedores' para produção),
+      // escondendo a página de Compras da sidebar de Produção mesmo com a
+      // Cloud Function comprasCriarSolicitacao exigindo exatamente esse
+      // perfil. Escrita continua exclusiva de Master — não eleva privilégio.
+      allow read: if isAnyStaff() && docId == 'erp_permissoes';
+      allow write: if isMaster() && docId == 'erp_permissoes';
 
-      // Kanban e estoque: perfis produção e acima
-      allow write: if isProducao()
-        && docId in ['kb_os', 'erp_stock'];
+      // erp_config: todo o staff precisa LER (cálculo de preço no orçamento,
+      // taxa de imposto no DRE), mas só Master decide os percentuais.
+      allow read: if isAnyStaff() && docId == 'erp_config';
+      allow write: if isMaster() && docId == 'erp_config';
 
-      // Demais documentos erp_vr: admin/master
-      allow write: if isAdmin();
+      // Auditoria: qualquer perfil grava (append de ações auditadas por
+      // secAuditLog em todas as telas); só Master lê o log completo.
+      allow write: if isAnyStaff() && docId == 'erp_audit_log';
+      allow read: if isMaster() && docId == 'erp_audit_log';
+
+      // Estado de UI (sidebar aberta/fechada) — sem dado sensível.
+      allow read, write: if isAnyStaff() && docId == 'erp_sb_state';
+
+      // Financeiro: Contas a Pagar/Receber e transações de caixa — é aqui
+      // (não em "compras") que aprovação de preço/pagamento/quitação
+      // realmente acontece, então a restrição de perfil aqui É efetiva.
+      allow read, write: if isFinanceiro() && docId in ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant'];
+
+      // Orçamentos: Comercial cria/edita; Financeiro só lê (conciliação de
+      // receita no DRE, contas a receber geradas a partir de orçamento
+      // aprovado). Nenhum campo de custo/markup interno é gravado no
+      // orçamento (corrigido nesta rodada — ver cfgHashNaoReversivel).
+      allow read: if (isComercial() || isFinanceiro()) && docId == 'orcamentos';
+      allow write: if isComercial() && docId == 'orcamentos';
+
+      // CRM, clientes e operação comercial
+      allow read, write: if isComercial() && (
+        docId in ['crm_leads', 'crm_prospects', 'crm_reativacao', 'crm_site_leads',
+                  'crm_base_idx_meta', 'clientes', 'clientes_lixeira',
+                  'erp_client_history', 'erp_vendedores', 'erp_metas_vendedor',
+                  'erp_posvendas', 'erp_orc_produtos', 'chatvolt_agent_id',
+                  'chatvolt_fase', 'chatvolt_marca', 'shopify_cfg']
+        || docId.matches('crm_base_idx_[0-9]+')
+      );
+
+      // Produção: OS, estoque, planificação. Compras: Produção cria/recebe;
+      // Comercial só lê (visibilidade de status para o cliente). Ver nota
+      // acima sobre o limite de Rules para "criar vs. aprovar" dentro do
+      // mesmo documento — aprovar/precificar fica de fato bloqueado só
+      // porque a etapa de pagamento (fin_cp) exige Financeiro.
+      allow read, write: if isProducao() && (
+        docId in ['kb_os', 'stock', 'stock_deleted', 'erp_stock_log',
+                  'retalhos', 'retalhos_seq', 'erp_os_counter', 'compras',
+                  'erp_compras_counter', 'erp_fornecedores']
+        || docId.matches('erp_plan_.*')
+      );
+      allow read: if isComercial() && docId in ['compras', 'erp_fornecedores', 'erp_plan_produtos'];
+
+      // Planejamento de produtos/planificação (catálogo usado tanto no
+      // orçamento quanto na produção) — leitura para qualquer staff,
+      // escrita para quem planeja produto (Produção) ou Master.
+      allow read: if isAnyStaff() && docId == 'erp_plan_produtos';
+      allow write: if isProducao() && docId == 'erp_plan_produtos';
+
+      // Nega tudo o mais por padrão — nenhum catch-all amplo.
+    }
+
+    // ── erp_vr/erp_orc_counter: contador atômico do número oficial de
+    // orçamento (Rodada E.2) — caminho exato, FORA do match genérico
+    // erp_vr/{docId} acima, para que nenhuma regra ampla de outro documento
+    // (ex.: o precedente já existente 'allow read, write: if isProducao()'
+    // usado por erp_compras_counter) se aplique aqui por acidente. Ao
+    // contrário desse precedente — que autoriza escrita irrestrita de
+    // qualquer forma no documento —, este bloco valida o CONTEÚDO da
+    // escrita, não só o papel de quem escreve:
+    //  - create: só aceita o valor inicial canônico (n=1), só o campo 'n';
+    //  - update: só aceita incremento atômico de exatamente +1 sobre o
+    //    valor já gravado (resource.data.n, lido pela própria regra — não
+    //    pelo cliente), nunca reduz/reseta/pula, nunca outro campo;
+    //  - delete: sempre negado (excluir e recriar seria um reset disfarçado).
+    // A atomicidade entre reservas concorrentes continua garantida pela
+    // transação do Firestore (mesma técnica já usada e testada em
+    // comprasProximoNumeroAtomico) — esta regra só impede que uma escrita
+    // (transacional ou não) grave um valor fora do incremento válido.
+    match /erp_vr/erp_orc_counter {
+      allow read: if isComercial();
+
+      allow create: if isComercial()
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n == 1;
+
+      allow update: if isComercial()
+        && resource != null
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n is int
+        && request.resource.data.n == resource.data.n + 1;
+
+      allow delete: if false;
+    }
+
+    // ── erp_vr_usuarios: documento por UID (normalizado, substitui o array
+    // erp_vr/erp_usuarios para fins de login/identificação de perfil) ───────
+    // Cada usuário lê SÓ o próprio documento; só Master lista todos. Nenhum
+    // perfil escreve aqui — toda alteração passa por adminCreateUser/
+    // adminUpdateUserRole/adminToggleStatus (Cloud Functions, Admin SDK),
+    // que verificam master no servidor antes de gravar. Isso, sozinho, já
+    // impede autoelevação: nenhum client-side write é aceito.
+    match /erp_vr_usuarios/{uid} {
+      allow read:  if isAuthenticated() && (request.auth.uid == uid || isMaster());
+      allow write: if false;
+    }
+
+    // ── Compras — documento-por-registro. Toda escrita passa por Cloud
+    // Function (comprasCriarSolicitacao/Aprovar/RegistrarRecebimento/
+    // AdicionarDocumento/RegistrarPagamento/Cancelar em functions/src/
+    // compras.ts), que verifica o perfil do chamador no servidor, valida a
+    // transição de status e é transacional/idempotente. O client NUNCA
+    // escreve direto nessas coleções — só lê. Isso resolve o achado da
+    // rodada anterior: Rules por documento não conseguem diferenciar
+    // "Produção cria uma solicitação" de "Produção aprova uma compra
+    // existente" quando ambas seriam a mesma operação (sobrescrever o
+    // documento); aqui não existe operação de escrita direta alguma —
+    // só a Cloud Function certa para cada transição.
+    match /erp_vr_compras/{compraId} {
+      allow read:  if isAnyStaff();
+      allow write: if false;
+    }
+    match /erp_vr_compras_counter/{docId} {
+      allow read:  if isAnyStaff();
+      allow write: if false; // incrementado só dentro da transação da Cloud Function
+    }
+    match /erp_vr_compras_recebimentos/{recId} {
+      allow read:  if isAnyStaff();
+      allow write: if false;
+    }
+    match /erp_vr_compras_documentos/{docId} {
+      allow read:  if isFinanceiro() || isProducao(); // produção vê que o documento chegou; valores ficam em fin_cp
+      allow write: if false;
+    }
+    match /erp_vr_compras_parcelas/{parcelaId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_fin_cp/{cpId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_fin_pagamentos/{pagId} {
+      allow read:  if isFinanceiro();
+      allow write: if false;
+    }
+    match /erp_vr_stock_movimentos/{movId} {
+      allow read:  if isProducao();
+      allow write: if false;
+    }
+    match /compras_idem_keys/{key} {
+      allow read, write: if false; // uso interno exclusivo das Cloud Functions
+    }
+    match /compras_audit_log/{entryId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+
+    // ── erp_vr_orcamentos: núcleo comercial do orçamento (sem custo/markup) ──
+    // Ver subcoleção /interno abaixo para os dados sensíveis.
+    match /erp_vr_orcamentos/{orcId} {
+      allow read:  if isComercial() || isFinanceiro();
+      allow write: if isComercial();
+
+      // Dados internos (custo, margem, markup, overhead, imposto) — nunca
+      // lidos pelo Comercial. Só Master/Financeiro (conciliação de DRE).
+      match /interno/{doc} {
+        allow read:  if isFinanceiro();
+        allow write: if isMaster();
+      }
     }
 
     // ── valeria_simulations: somente Cloud Functions (service account) ──────
@@ -132,14 +330,27 @@ service cloud.firestore {
       allow write: if false; // somente Cloud Functions
     }
 
-    // ── Demais coleções (comportamento inalterado) ──────────────────────────
+    // ── Nega por padrão qualquer coleção não listada explicitamente acima ────
+    // ACHADO CRÍTICO desta rodada (autodescoberto e autocorrigido): a versão
+    // anterior deste catch-all fazia `allow read,write: if isAuthenticated()
+    // && !(col in [lista fixa])` — como a lista fixa nunca foi atualizada ao
+    // criar as novas coleções (erp_vr_compras, erp_vr_fin_cp, erp_vr_usuarios
+    // etc.), QUALQUER usuário autenticado conseguia ler/escrever direto
+    // nelas, ignorando por completo as regras específicas escritas acima e
+    // as Cloud Functions que deveriam ser o único caminho de escrita. Prova
+    // real: PATCH direto em erp_vr_compras (que tem `allow write: if false`
+    // no match block específico) retornava HTTP 200 antes desta correção —
+    // porque o catch-all, avaliado em paralelo, também "match"ava o mesmo
+    // caminho e concedia com uma condição mais permissiva (Firestore Rules
+    // combina múltiplos match blocks que casam o mesmo caminho com OR: se
+    // QUALQUER um permite, a operação é permitida). Corrigido trocando a
+    // lista de exclusão por negação total — nenhuma coleção legítima do
+    // app depende deste catch-all (todo acesso do cliente já passa pelos
+    // match blocks explícitos acima); um catch-all "permissivo com lista de
+    // exclusão" é exatamente o anti-padrão que a homologação pediu para
+    // evitar, e a lista de exclusão comprovadamente fica desatualizada.
     match /{col}/{docId=**} {
-      allow read, write: if isAuthenticated() && !(col in [
-        'erp_vr', 'valeria_simulations', 'valeria_idem_keys',
-        'valeria_rate_limits', 'valeria_alertas', 'interacoes_valeria',
-        'valeria_conversations', 'valeria_msgs',
-        'marketing_connections', 'marketing_daily_metrics', 'marketing_sync_logs'
-      ]);
+      allow read, write: if false;
     }
 
   }
