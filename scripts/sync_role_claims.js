@@ -132,7 +132,16 @@ async function runReal() {
 
     const docRef = db.collection('erp_vr_usuarios').doc(authUser.uid);
     const doc = await docRef.get();
-    const docFuncaoAtual = doc.exists ? (doc.data().funcao || null) : null;
+    if (!doc.exists) {
+      // Nunca cria o documento aqui — .set(merge:true) num doc inexistente
+      // gravaria só {funcao, sincronizadoEm, sincronizadoPor}, sem o schema
+      // completo (uid, nome, email, ativo, permissoesRef, versaoMigracao,
+      // origem, migradoEm, migradoPor). Criar o doc completo é escopo
+      // exclusivo de migrate_erp_usuarios_normalizado.js (via .create()).
+      console.log('⏭️  pulado (documento normalizado ainda não existe — rode migrate_erp_usuarios_normalizado.js primeiro):', decisao.nome);
+      continue;
+    }
+    const docFuncaoAtual = doc.data().funcao || null;
     const claimAtual = (authUser.customClaims && authUser.customClaims.role) || null;
 
     const plano = planejarSincronizacao(decisao.email, docFuncaoAtual, claimAtual);
