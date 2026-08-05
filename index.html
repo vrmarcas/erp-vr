@@ -20599,44 +20599,11 @@ function authLogin(){
         return _db.collection('erp_vr_usuarios').doc(cred.user.uid).get();
       })
         .then(function(doc){
+          var users = [];
           if(doc.exists && doc.data()){
-            return { fbUser: cred.user, users: [doc.data()] };
+            users = [doc.data()];
           }
-          // ── Fallback transitório para o array legado (Incidente Fase F) ────
-          // erp_vr_usuarios/{uid} ainda não foi migrado para esta conta.
-          // Enquanto a migração (scripts/migrate_erp_usuarios_normalizado.js)
-          // não cobrir 100% dos perfis, o login cai aqui — mas SÓ aceita o
-          // perfil legado se exatamente 1 registro corresponder a ESTA conta
-          // especificamente (por uid gravado no registro, ou pelo próprio
-          // e-mail autenticado — nunca uma varredura ampla de "qual perfil
-          // parece ser este usuário"). 0 ou >1 candidatos = não decide
-          // sozinho, cai no bloqueio do passo seguinte, exatamente como uma
-          // conta sem perfil nenhum. Nunca preenche role por default — a
-          // role sempre vem do registro legado real, nunca de um fallback
-          // fixo (proibição absoluta de promover a master aqui).
-          return _db.collection('erp_vr').doc('erp_usuarios').get().then(function(legacyDoc){
-            var legacyArr = [];
-            if(legacyDoc.exists && legacyDoc.data() && legacyDoc.data().data){
-              try { legacyArr = JSON.parse(legacyDoc.data().data); } catch(e){}
-            }
-            var porUid = legacyArr.filter(function(u){ return u.uid === cred.user.uid; });
-            var porEmail = (!porUid.length && cred.user.email)
-              ? legacyArr.filter(function(u){ return !u.uid && u.email && u.email.toLowerCase() === cred.user.email.toLowerCase(); })
-              : [];
-            var candidatos = porUid.length ? porUid : porEmail;
-            if(candidatos.length === 1){
-              if(typeof secAuditLog==='function') secAuditLog('login_legacy_fallback','Login via fallback legado (uid não migrado ainda): '+cred.user.email);
-              // Garante e-mail = e-mail autenticado (o registro legado
-              // localizado por uid pode não ter o campo email preenchido) —
-              // o passo seguinte (uRec = users.find por email) depende disso.
-              var candidatoResolvido = Object.assign({}, candidatos[0], { email: cred.user.email });
-              return { fbUser: cred.user, users: [candidatoResolvido] };
-            }
-            // ambíguo (>1) ou inexistente (0) — não decide, bloqueia adiante
-            return { fbUser: cred.user, users: [] };
-          }).catch(function(){
-            return { fbUser: cred.user, users: [] };
-          });
+          return { fbUser: cred.user, users: users };
         })
         .catch(function(){
           return { fbUser: cred.user, users: [] };
