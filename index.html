@@ -2490,7 +2490,7 @@ function _authFirebaseError(code){
           <div id="kbReceberSaldoBox" style="display:none;margin-bottom:10px;background:#FEF9C3;border:1.5px dashed #D97706;border-radius:9px;padding:12px 14px">
             <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Saldo na Entrega</div>
             <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px">Restante: <span id="kbSaldoValor">—</span></div>
-            <button onclick="kbReceberSaldo()" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ Confirmar Recebimento do Saldo</button>
+            <button id="kbReceberSaldoBtn" onclick="kbReceberSaldo()" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ Confirmar Recebimento do Saldo</button>
           </div>
           <!-- Exibição do material selecionado para produção -->
           <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
@@ -11022,84 +11022,146 @@ function kbConfirmarProd() {
   }
 }
 
+// kbReceberSaldo() grava em 4 documentos agregados (kb_os, fin_cr, fin_tx,
+// orcamentos). Quatro _cloudSave() independentes (versão anterior) não são
+// atômicos: um pode confirmar e outro falhar, deixando o financeiro
+// incoerente com a OS — e revertendo só o estado LOCAL não desfaz um
+// documento que o servidor já aceitou. A versão abaixo lê os 4 documentos e
+// grava os 4 dentro de uma ÚNICA transação do Firestore: ou os 4 commitam
+// juntos, ou nenhum é alterado. A mutação é aplicada sobre o dado LIDO
+// DENTRO da transação (não sobre a cópia local, que pode estar obsolete) —
+// isso também resolve retry/duas-abas: se o saldo já estiver zerado quando a
+// transação relê o servidor (porque outra aba/retry já confirmou), a
+// operação é tratada como já concluída (idempotente), nunca duplicando o
+// lançamento em fin_tx nem sobrescrevendo o que a outra sessão gravou.
 function kbReceberSaldo() {
   var os = KB_OS[_kbOsId]; if (!os) return;
+  if (!_db) { showToast('Sem conexão — não é possível confirmar o recebimento.','err'); return; }
   if (os._recebendoSaldo) { showToast('Recebimento já em andamento — aguarde.','warn'); return; }
   os._recebendoSaldo = true;
   var _osIdSnap = _kbOsId;
+  var _osNumSnap = os.num;
   var hoje = new Date();
   var dia = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  var dtCurta = dia.slice(0,5);
 
-  var _statusAnterior = os.status;
-  var _restanteAnterior = os.restante;
+  var _btnSaldo = document.getElementById('kbReceberSaldoBtn');
+  if (_btnSaldo) _btnSaldo.disabled = true;
 
-  // Marca CR restante como recebido
-  var crEntry = FIN_CR.find(function(c){ return c.osRef && c.osRef.indexOf(String(os.num))>=0 && c.status==='pendente'; });
-  var _crStatusAnterior = crEntry ? crEntry.status : null;
-  var _crDataAnterior = crEntry ? crEntry.dataRecebimento : null;
-  if (crEntry) { crEntry.status='recebido'; crEntry.dataRecebimento=dia; }
+  function _parsedDoc(snap) {
+    var raw = (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? snap.data().data : null;
+    if (raw === null) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
 
-  // Lança no caixa
-  var _metodo = os.formaPgto || 'PIX';
-  var _txEntry = {data:dia.slice(0,5),cliente:os.cliente,os:String(os.num),marca:os.mk||'vr',valor:os.restante||0,metodo:_metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
-  FIN_TX.unshift(_txEntry);
+  function _tentar() {
+    var refKb = _db.collection(_COL).doc('kb_os');
+    var refCr = _db.collection(_COL).doc('fin_cr');
+    var refTx = _db.collection(_COL).doc('fin_tx');
+    var refOrc = _db.collection(_COL).doc('orcamentos');
+    return _db.runTransaction(function (txn) {
+      return Promise.all([txn.get(refKb), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
+        var kbData = _parsedDoc(snaps[0]) || {};
+        var crArr = _parsedDoc(snaps[1]) || [];
+        var txArr = _parsedDoc(snaps[2]) || [];
+        var orcArr = _parsedDoc(snaps[3]);
 
-  // Atualiza OS
-  os.status='iniciada'; os.restante=0;
+        var osServidor = kbData[_osIdSnap];
+        if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
+        if ((osServidor.restante || 0) <= 0) {
+          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = osServidor; throw eJa;
+        }
 
-  // Se a OS veio de um orçamento em "aguardando_pagamento", conclui o ciclo -> pago
-  var _listaOrc = null, _orcOrigem = null, _orcStatusAnterior = null;
-  if(os.orcRef && typeof orcGetEnviados==='function'){
-    _listaOrc = orcGetEnviados();
-    var _cand = _listaOrc.find(function(o){ return o.id===os.orcRef; });
-    if(_cand && _cand.status==='aguardando_pagamento'){
-      _orcOrigem = _cand; _orcStatusAnterior = _cand.status;
-      _orcOrigem.status = 'pago';
-    }
+        var valorRecebido = osServidor.restante || 0;
+        osServidor.status = 'iniciada';
+        osServidor.restante = 0;
+        kbData[_osIdSnap] = osServidor;
+
+        var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+        if (crEntry) { crEntry.status = 'recebido'; crEntry.dataRecebimento = dia; }
+
+        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: osServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
+        txArr = [novaTx].concat(txArr);
+
+        var orcMutado = false;
+        if (osServidor.orcRef && Array.isArray(orcArr)) {
+          var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+          if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+        }
+
+        var kbPayload = JSON.stringify(kbData), txPayload = JSON.stringify(txArr);
+        var crPayload = crEntry ? JSON.stringify(crArr) : null;
+        var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
+
+        txn.set(refKb, { data: kbPayload, ts: Date.now() });
+        txn.set(refTx, { data: txPayload, ts: Date.now() });
+        if (crEntry) txn.set(refCr, { data: crPayload, ts: Date.now() });
+        if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
+
+        return { osServidor: osServidor, valorRecebido: valorRecebido, kbPayload: kbPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
+      });
+    });
   }
 
   function _refletirNaTela() {
-    try{finRender();}catch(e){}
-    var stg = document.getElementById('kstag-'+_osIdSnap);
-    if(stg){ var sm0=_kbStatusMap[os.status]||{cls:'si',txt:os.status}; stg.className='stag '+sm0.cls; stg.textContent=sm0.txt; }
-    if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
-    try{ orcEnviadosRender(); }catch(e){}
+    try { finRender(); } catch (e) {}
+    var stg = document.getElementById('kstag-' + _osIdSnap);
+    if (stg && KB_OS[_osIdSnap]) { var sm0 = _kbStatusMap[KB_OS[_osIdSnap].status] || { cls: 'si', txt: KB_OS[_osIdSnap].status }; stg.className = 'stag ' + sm0.cls; stg.textContent = sm0.txt; }
+    if (String(_kbOsId) === String(_osIdSnap) && typeof kbOpen === 'function') kbOpen(_osIdSnap);
     kbSyncCounts(); renderOsTable(); syncSidebarBadges();
   }
 
-  var _saldoBoxUp = document.getElementById('kbReceberSaldoBox');
-  if(_saldoBoxUp) _saldoBoxUp.style.display='none';
-  var _iniciarBoxUp = document.getElementById('kbIniciarProdBox');
-  if(_iniciarBoxUp) _iniciarBoxUp.style.display='';
-  _refletirNaTela();
-
-  var _crPromise = crEntry ? _finSaveCR() : Promise.resolve({ok:true});
-  var _txPromise = _cloudSave('fin_tx', FIN_TX);
-  var _kbPromise = kbSaveKbos();
-  var _orcPromise = _orcOrigem ? _cloudSave('orcamentos', _listaOrc) : Promise.resolve({ok:true});
-
-  Promise.all([_crPromise, _txPromise, _kbPromise, _orcPromise]).then(function(results){
+  function _finalizarSucesso(r) {
     os._recebendoSaldo = false;
-    var _crRes=results[0], _txRes=results[1], _kbRes=results[2], _orcRes=results[3];
-    var allOk = _crRes.ok && _txRes.ok && _kbRes.ok && _orcRes.ok;
-    if (allOk) {
-      if(typeof secAuditLog==='function') secAuditLog('fin_recebimento','Saldo de '+finFmt(_txEntry.valor)+' recebido — OS #'+os.num);
-      showToast('✅ Saldo recebido! OS liberada para produção.','ok');
-      return;
-    }
-    // Reverte apenas os documentos que falharam — os que tiveram sucesso já são verdade no servidor.
-    if (crEntry && !_crRes.ok) { crEntry.status=_crStatusAnterior; crEntry.dataRecebimento=_crDataAnterior; }
-    if (!_txRes.ok) { var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); }
-    if (!_kbRes.ok) { os.status=_statusAnterior; os.restante=_restanteAnterior; }
-    if (_orcOrigem && !_orcRes.ok) { _orcOrigem.status=_orcStatusAnterior; }
+    _cloudLastPayload['kb_os'] = r.kbPayload;
+    _cloudLastPayload['fin_tx'] = r.txPayload;
+    if (r.crPayload) _cloudLastPayload['fin_cr'] = r.crPayload;
+    if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
+    KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
+    if (r.crPayload) FIN_CR = r.crArr;
+    FIN_TX = r.txArr;
+    if (r.orcPayload) { _ORC_ENVIADOS_DATA = r.orcArr; try { orcEnviadosRender(); } catch (e) {} }
+    if (_btnSaldo) _btnSaldo.disabled = false;
     _refletirNaTela();
-    var _falhas=[];
-    if(crEntry && !_crRes.ok) _falhas.push('Contas a Receber');
-    if(!_txRes.ok) _falhas.push('lançamento no caixa');
-    if(!_kbRes.ok) _falhas.push('status da OS');
-    if(_orcOrigem && !_orcRes.ok) _falhas.push('orçamento vinculado');
-    showToast('⚠️ Falha ao confirmar recebimento ('+_falhas.join(', ')+') — revise o que já foi salvo antes de repetir a ação.','err');
-  });
+    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento', 'Saldo de ' + finFmt(r.valorRecebido) + ' recebido — OS #' + _osNumSnap);
+    showToast('✅ Saldo recebido! OS liberada para produção.', 'ok');
+    return true;
+  }
+
+  function _tratarErro(e, jaRenovouToken) {
+    if (e && e.code === 'SALDO_JA_QUITADO') {
+      os._recebendoSaldo = false;
+      KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], e.osServidor);
+      if (_btnSaldo) _btnSaldo.disabled = false;
+      _refletirNaTela();
+      showToast('ℹ️ Este saldo já havia sido recebido em outra sessão — tela atualizada.', 'info');
+      return true;
+    }
+    if (e && e.code === 'OS_NAO_ENCONTRADA') {
+      os._recebendoSaldo = false;
+      if (_btnSaldo) _btnSaldo.disabled = false;
+      showToast('⚠️ OS não encontrada no servidor — atualize a página.', 'err');
+      return false;
+    }
+    var ehErroDeAuth = e && (e.code === 'permission-denied' || e.code === 'unauthenticated' || (e.message || '').indexOf('PERMISSION_DENIED') >= 0);
+    if (ehErroDeAuth && !jaRenovouToken && typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+      return firebase.auth().currentUser.getIdToken(true).then(function () {
+        return _tentar().then(_finalizarSucesso).catch(function (e2) { return _tratarErro(e2, true); });
+      }).catch(function () {
+        os._recebendoSaldo = false;
+        if (_btnSaldo) _btnSaldo.disabled = false;
+        showToast('🔒 Sessão expirada — não foi possível confirmar o recebimento. Desbloqueie novamente para continuar.', 'err');
+        return false;
+      });
+    }
+    os._recebendoSaldo = false;
+    if (_btnSaldo) _btnSaldo.disabled = false;
+    console.warn('[Fin] Erro ao confirmar recebimento de saldo:', e);
+    showToast('⚠️ Não foi possível confirmar o recebimento — nada foi salvo, tente novamente.', 'err');
+    return false;
+  }
+
+  return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
 }
 
 function kbMarcarPronto() {
