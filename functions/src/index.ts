@@ -42,6 +42,23 @@ export {
 // ── Produção (fronteira server-side de autorização de estoque) ──────────────
 export { producaoIniciarOuEditar } from "./producao";
 
+// ── Estoque (fronteira server-side para o restante da superfície de
+//    escrita de stock/retalhos/erp_stock_log — auditoria Fase F, FASE 2-8) ──
+export {
+  estoqueRegistrarEntrada,
+  estoqueRegistrarSaidaManual,
+  estoqueConsumoAutoOrcamento,
+  estoqueCriarOuEditarItem,
+  estoqueExcluirItem,
+  estoqueRestaurarItem,
+  estoqueExcluirItemDefinitivo,
+  estoqueLimparHistorico,
+  estoqueCriarRetalho,
+  estoqueEditarRetalho,
+  estoqueConsumirRetalho,
+  estoqueExcluirRetalho,
+} from "./estoque";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,
