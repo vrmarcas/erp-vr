@@ -15340,11 +15340,13 @@ var _lastOsId = null;
     });
 
     // Registra financeiro (entrada parcial ou total)
-    FIN_TX.unshift({data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:_isPartial?_entradaVal:(c.finalPrice||0),metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
-    if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
+    var _txEntry = {data:dia,cliente:nomeCliente,os:String(n),marca:marca,valor:_isPartial?_entradaVal:(c.finalPrice||0),metodo:metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
+    FIN_TX.unshift(_txEntry);
+    var _txPromise = (typeof _cloudSave==='function') ? _cloudSave('fin_tx', FIN_TX) : Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
     finRender();
 
     // ── Auto-cria Contas a Receber vinculado à OS ──────────────────
+    var _crEntry = null, _crPromise = Promise.resolve({ok:true});
     var _autocrId = (function(){
       var totalOS = c.finalPrice||0;
       if(!totalOS) return '';
@@ -15357,7 +15359,7 @@ var _lastOsId = null;
       var vencParts = vencIso.split('-');
       var vencBR = vencParts[2]+'/'+vencParts[1]+'/'+vencParts[0];
       var crId = 'cr'+Date.now();
-      FIN_CR.unshift({
+      _crEntry = {
         id: crId,
         cliente: nomeCliente,
         descricao: crDesc,
@@ -15369,16 +15371,19 @@ var _lastOsId = null;
         osRef: 'OS #0'+n,
         dataCriacao: dia+'/'+hoje.getFullYear(),
         dataRecebimento: crStatus==='recebido' ? dia+'/'+hoje.getFullYear() : null
-      });
-      _finSaveCR();
+      };
+      FIN_CR.unshift(_crEntry);
+      _crPromise = _finSaveCR();
       return crId; // ← Fix #123: expõe crId para o _orc abaixo evitar CR duplicado
     })();
     // ──────────────────────────────────────────────────────────────
 
     // Baixa estoque
-    if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');stockSaveData();}
+    var _stockPromise = Promise.resolve({ok:true});
+    if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');_stockPromise=stockSaveData();}
 
     // Cria/atualiza cliente
+    var _cliPromise = Promise.resolve({ok:true});
     if(nomeCliente&&nomeCliente!=='Cliente'){
       var normTel=function(s){return String(s||'').replace(/\D/g,'');};
       var telNorm=normTel(telCliente);
@@ -15396,7 +15401,7 @@ var _lastOsId = null;
       } else {
         CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nomeCliente,tipo:marca==='vr'?'PJ':'PF',cidade:cidadeCliente||'—',marca:marca,ultimoPedido:dia,tel:telCliente,email:emailCliente,doc:docCliente,contato:'',os:[String(n)]});
       }
-      if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+      if(typeof _cloudSave==='function') _cliPromise = _cloudSave('clientes', CLIENTES_DATA);
       renderClientes();
     }
 
@@ -15466,9 +15471,9 @@ var _lastOsId = null;
     document.getElementById('orcOsNum').textContent='OS #0'+n;
     document.getElementById('orcOsDet').textContent=(isVt?'Vitre':'VR Marcas')+' · Iniciada no Kanban';
     document.getElementById('orcModal').classList.add('open');
-    kbSaveKbos(); renderOsTable(); syncSidebarBadges();
+    var _kbPromise = kbSaveKbos(); renderOsTable(); syncSidebarBadges();
     // Bug #98 — auto-salva em Orçamentos Enviados
-    (function(){
+    var _orcPromise = (function(){
       var _orc={
         id:'ORC-'+String(Date.now()).slice(-6),
         num:String(Date.now()).slice(-6),
@@ -15485,18 +15490,48 @@ var _lastOsId = null;
         osRef:newId, orcNum:String(n)
       };
       var _lista=orcGetEnviados(); _lista.unshift(_orc);
-      orcSetEnviados(_lista);
+      var p = orcSetEnviados(_lista); // já reconcilia com o servidor em caso de conflito
       if(typeof orcAtualizarBadgeEnviados==='function') orcAtualizarBadgeEnviados();
       if(typeof orcLinkClienteOrcamento==='function') orcLinkClienteOrcamento(_orc);
+      return p;
     })();
-    crmPushOrcamento(newId);
-    showToast('OS #0'+n+' criada e adicionada ao Kanban!','ok');
-    // Abrir automaticamente o modal da OS após 1.2s
-    setTimeout(function(){
-      orcCloseModal();
-      nav('kanban', null);
-      setTimeout(function(){ kbOpen(newId); }, 450);
-    }, 1200);
+
+    // Só confirma sucesso (CRM + toast + navegação automática) depois que os
+    // documentos tocados por esta OS confirmarem no servidor. orcSetEnviados()
+    // já reconcilia sozinho em conflito; os demais, se falharem, não têm
+    // rollback automático aqui (fluxo legado com muitos efeitos colaterais de
+    // UI já aplicados) — o operador é avisado com clareza para conferir.
+    Promise.all([_txPromise, _crPromise, _stockPromise, _cliPromise, _kbPromise, _orcPromise]).then(function(results){
+      var _txRes=results[0], _crRes=results[1], _stockRes=results[2], _cliRes=results[3], _kbRes=results[4], _orcRes=results[5];
+      var allOk = _txRes.ok && _crRes.ok && _stockRes.ok && _cliRes.ok && _kbRes.ok && _orcRes.ok;
+      if (allOk) {
+        crmPushOrcamento(newId);
+        showToast('OS #0'+n+' criada e adicionada ao Kanban!','ok');
+        setTimeout(function(){
+          orcCloseModal();
+          nav('kanban', null);
+          setTimeout(function(){ kbOpen(newId); }, 450);
+        }, 1200);
+        return;
+      }
+      var _falhas=[];
+      if(!_txRes.ok) _falhas.push('lançamento no caixa');
+      if(!_crRes.ok) _falhas.push('conta a receber');
+      if(!_stockRes.ok) _falhas.push('baixa de estoque');
+      if(!_cliRes.ok) _falhas.push('cadastro do cliente');
+      if(!_orcRes.ok) _falhas.push('orçamento em Orçamentos Enviados');
+      if(!_kbRes.ok) {
+        _falhas.push('registro da OS no Kanban');
+        // O único efeito que ainda é seguro desfazer sem redesenhar o fluxo
+        // inteiro: remove a OS local e o card injetado, já que "OS criada"
+        // nunca foi de fato confirmado pelo servidor.
+        delete KB_OS[newId];
+        if (typeof kbRender === 'function') kbRender();
+        renderOsTable(); syncSidebarBadges();
+      }
+      console.warn('[Orcamento] orcGerarOS: falha ao confirmar', _falhas, results);
+      showToast('⚠️ OS #0'+n+' — nem tudo foi confirmado no servidor ('+_falhas.join(', ')+'). Verifique antes de prosseguir.','err');
+    });
   };
 })();
 
