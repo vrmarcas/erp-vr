@@ -223,6 +223,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── erp_vr_rascunho_orc: rascunho do Novo Orçamento em andamento (Fase F,
+    // Seção 5) — sobrevive ao bloqueio automático + refresh da página
+    // bloqueada, mas só é legível/gravável pelo PRÓPRIO uid que o criou.
+    // Nunca contém senha/token/sessão — só os campos comerciais do wizard
+    // (nome/doc/email/tel/cidade/vendedor/itens/marca) que já trafegam em
+    // claro no client de qualquer forma. Isolamento total: nem Master lê o
+    // rascunho de outra conta (diferente de erp_vr_usuarios acima) — é um
+    // rascunho pessoal em edição, não um registro administrativo.
+    match /erp_vr_rascunho_orc/{uid} {
+      allow read, write: if isAuthenticated() && request.auth.uid == uid;
+    }
+
     // ── Compras — documento-por-registro. Toda escrita passa por Cloud
     // Function (comprasCriarSolicitacao/Aprovar/RegistrarRecebimento/
     // AdicionarDocumento/RegistrarPagamento/Cancelar em functions/src/

@@ -16791,6 +16791,124 @@ function orcLimparRascunhoAoTrocarConta(){
   var itensBody = document.getElementById('orcItemBody'); if(itensBody) itensBody.innerHTML = '';
   window._orcCalc = null;
   orcLimparNumeroOficial();
+  // Apaga também o rascunho persistido (Fase F, Seção 5) da conta que está
+  // saindo — chamado a partir de authLogout() ANTES do signOut(), então
+  // firebase.auth().currentUser ainda é a conta que está de saída e as
+  // Rules (uid-only) ainda permitem a exclusão. Retorna a Promise para que
+  // authLogout() só chame signOut() depois que ela terminar (ver ali).
+  try{
+    var _fbUser = (typeof firebase!=='undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+    var _uidSaida = (_fbUser && _fbUser.uid) || (_currentSession && _currentSession.uid) || null;
+    if(_uidSaida && typeof orcRascunhoLimpar==='function') return orcRascunhoLimpar(_uidSaida);
+  }catch(e){}
+  return null;
+}
+
+// ── Rascunho seguro do Novo Orçamento (Fase F, Seção 5) ───────────────────
+// Requisito: o rascunho deve sobreviver ao bloqueio automático e ao refresh
+// da página bloqueada, mas só pode ser restaurado para a MESMA conta que o
+// criou. Persistido em erp_vr_rascunho_orc/{uid} (Firestore) — Rules
+// isolam por UID (ver firestore.rules), nunca localStorage aberto, nunca
+// senha/token/sessão. Autosave com debounce; restauração só ocorre quando
+// o wizard está vazio (nunca sobrescreve uma edição em andamento cujo DOM
+// sobreviveu ao bloqueio sem refresh) e só depois que authUnlock() já
+// reautenticou a mesma conta.
+var _orcRascunhoTimer = null;
+
+function orcRascunhoColetar(){
+  var get = function(id){ var e=document.getElementById(id); return e?e.value:''; };
+  var itens = [];
+  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
+    var ri = row.dataset.idx;
+    itens.push({
+      prod: get('oi_prod_'+ri), qty: get('oi_qty_'+ri), mat: get('oi_mat_'+ri),
+      det:  get('oi_det_'+ri),  larg: get('oi_larg_'+ri), alt: get('oi_alt_'+ri)
+    });
+  });
+  return {
+    nome: get('orcClientNome'), doc: get('orcClientDoc'), email: get('orcClientEmail'),
+    tel: get('orcClientTel'), cidade: get('orcClientCidade'), vendedor: get('orcClientVendedor'),
+    marca: document.body.classList.contains('vitre') ? 'vitre' : 'vr',
+    itens: itens, salvoEm: Date.now()
+  };
+}
+
+function orcRascunhoEstaVazio(){
+  // DOMContentLoaded sempre chama orcAddItem() uma vez (semeia 1 linha em
+  // branco no wizard, mesmo com a tela ainda bloqueada) — então "0 linhas"
+  // nunca acontece de verdade após um refresh. Uma linha só conta como
+  // preenchida se o usuário realmente digitou algo nela (det/larg/alt) ou
+  // mudou a quantidade do default "1"; o <select> de produto sempre tem um
+  // valor não-vazio (primeira opção da lista), então não serve de sinal.
+  var nome = (document.getElementById('orcClientNome')||{}).value||'';
+  if(nome.trim()) return false;
+  var linhaPreenchida = false;
+  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
+    var ri = row.dataset.idx;
+    var det  = (document.getElementById('oi_det_'+ri)||{}).value||'';
+    var larg = (document.getElementById('oi_larg_'+ri)||{}).value||'';
+    var alt  = (document.getElementById('oi_alt_'+ri)||{}).value||'';
+    var qty  = (document.getElementById('oi_qty_'+ri)||{}).value||'1';
+    if(det.trim() || larg.trim() || alt.trim() || (qty!=='1' && qty.trim())) linhaPreenchida = true;
+  });
+  return !linhaPreenchida;
+}
+
+function orcRascunhoSalvarAgora(){
+  if(typeof _db==='undefined' || !_db || !_currentSession || !_currentSession.uid) return;
+  if(orcRascunhoEstaVazio()) return;
+  try{
+    _db.collection('erp_vr_rascunho_orc').doc(_currentSession.uid).set(orcRascunhoColetar())
+      .catch(function(e){ console.warn('[orcRascunho] autosave falhou:', e); if(typeof showToast==='function') showToast('⚠️ Não foi possível salvar o rascunho automaticamente','warn'); });
+  }catch(e){ console.warn('[orcRascunho] autosave falhou:', e); }
+}
+
+function orcRascunhoAgendar(){
+  if(_orcRascunhoTimer) clearTimeout(_orcRascunhoTimer);
+  _orcRascunhoTimer = setTimeout(orcRascunhoSalvarAgora, 1500);
+}
+
+// Delegação — cobre os campos estáticos (orcClient*) e as linhas dinâmicas
+// de item (oi_*) sem alterar os handlers oninput/onchange já existentes
+// nesses campos (ex.: autocomplete de cliente, recálculo de preço).
+document.addEventListener('input', function(e){
+  var id = (e.target && e.target.id) || '';
+  if(/^orcClient(Nome|Doc|Email|Tel|Cidade)$/.test(id) || /^oi_(prod|qty|mat|det|larg|alt)_/.test(id)) orcRascunhoAgendar();
+});
+document.addEventListener('change', function(e){
+  var id = (e.target && e.target.id) || '';
+  if(id==='orcClientVendedor' || /^oi_(prod|qty|mat|det|larg|alt)_/.test(id)) orcRascunhoAgendar();
+});
+
+function orcRascunhoLimpar(uid){
+  if(typeof _db==='undefined' || !_db || !uid) return null;
+  try{ return _db.collection('erp_vr_rascunho_orc').doc(uid).delete().catch(function(){}); }catch(e){ return null; }
+}
+
+function orcRascunhoRestaurar(uid){
+  if(typeof _db==='undefined' || !_db || !uid) return;
+  if(!orcRascunhoEstaVazio()) return; // DOM sobreviveu ao bloqueio (sem refresh) — nunca sobrescreve edição em andamento
+  _db.collection('erp_vr_rascunho_orc').doc(uid).get().then(function(doc){
+    if(!doc.exists) return;
+    var d = doc.data()||{};
+    if(!orcRascunhoEstaVazio()) return; // reconfirma — usuário pode ter começado a digitar durante o fetch
+    var set = function(id,v){ var el=document.getElementById(id); if(el && v!=null) el.value=v; };
+    set('orcClientNome', d.nome); set('orcClientDoc', d.doc); set('orcClientEmail', d.email);
+    set('orcClientTel', d.tel); set('orcClientCidade', d.cidade); set('orcClientVendedor', d.vendedor);
+    // Remove a linha em branco que DOMContentLoaded sempre semeia (ver
+    // orcRascunhoEstaVazio) antes de recriar as linhas salvas — senão a
+    // restauração empilha em cima dela em vez de substituí-la.
+    if(d.itens && d.itens.length){ var _ib=document.getElementById('orcItemBody'); if(_ib) _ib.innerHTML=''; }
+    (d.itens||[]).forEach(function(it){
+      if(typeof orcAddItem!=='function') return;
+      orcAddItem();
+      var ri = orcItemCount;
+      set('oi_prod_'+ri, it.prod); set('oi_qty_'+ri, it.qty); set('oi_mat_'+ri, it.mat);
+      set('oi_det_'+ri, it.det); set('oi_larg_'+ri, it.larg); set('oi_alt_'+ri, it.alt);
+    });
+    if(typeof orcRecalc==='function') orcRecalc();
+    if(d.nome || (d.itens&&d.itens.length)) showToast('📝 Rascunho de orçamento restaurado','ok');
+  }).catch(function(e){ console.warn('[orcRascunho] restauração falhou:', e); });
 }
 
 // Achado real: o <select> de Validade (passo 1) nunca teve id — PDF e
@@ -16932,6 +17050,9 @@ async function orcSalvarOrcamento() {
   // Libera a reserva — o PRÓXIMO orçamento (Novo Orçamento) deve gerar a
   // sua própria, nunca reaproveitar o número deste que acabou de salvar.
   orcLimparNumeroOficial();
+  // Orçamento salvo com sucesso — o rascunho persistido (Fase F, Seção 5)
+  // não faz mais sentido para esta conta; limpa para não reaparecer depois.
+  if(_currentSession && _currentSession.uid && typeof orcRascunhoLimpar==='function') orcRascunhoLimpar(_currentSession.uid);
 }
 
 // ── Autocomplete de cliente no orçamento ──────────────────────────────────
@@ -20699,16 +20820,27 @@ function authLogout(){
   // e-mail/itens do cliente anterior) ficava visível para a PRÓXIMA conta
   // que fizesse login nesta aba. authUnlock() (mesma conta) nunca passa por
   // aqui — só authLogout() de fato troca de identidade.
-  if(typeof orcLimparRascunhoAoTrocarConta==='function') orcLimparRascunhoAoTrocarConta();
+  // Retorna uma Promise (ou undefined em builds antigas) — precisamos que a
+  // exclusão do rascunho em erp_vr_rascunho_orc/{uid} (Fase F, Seção 5)
+  // termine ANTES do signOut() abaixo: signOut() invalida o token da
+  // conta, e se a chamada de delete() ainda não tiver sido processada pelo
+  // Firestore nesse momento, ela chega ao servidor sem auth válido e é
+  // rejeitada (permission-denied) — o rascunho ficaria órfão, legível só
+  // pela mesma conta de novo no futuro (não é um vazamento entre contas,
+  // mas também não é a limpeza que este requisito pede).
+  var _limparRascunhoPromise = (typeof orcLimparRascunhoAoTrocarConta==='function') ? orcLimparRascunhoAoTrocarConta() : null;
   // Sem isso, um segundo login (perfil diferente) na MESMA aba herdaria os
   // listeners v2 do perfil anterior — comprasV2Init() é guardado por
   // _comprasV2Unsubs!=null e nunca reavaliaria o novo perfil.
   if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
   if(typeof COMPRAS_V2_CACHE!=='undefined') COMPRAS_V2_CACHE=[];
   if(typeof COMPRAS_V2_FINCP_CACHE!=='undefined') COMPRAS_V2_FINCP_CACHE=[];
-  // Encerrar sessão Firebase Auth (FASE 5)
+  // Encerrar sessão Firebase Auth (FASE 5) — só depois que o delete acima
+  // (se houver) terminar, nunca em paralelo com ele.
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
-  try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); }
+  var _fazerSignOut = function(){ try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); } };
+  if(_limparRascunhoPromise && typeof _limparRascunhoPromise.then==='function') _limparRascunhoPromise.then(_fazerSignOut, _fazerSignOut);
+  else _fazerSignOut();
   secStopInactivityTimer();
   var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
   // Restore all sidebar items
@@ -20840,6 +20972,12 @@ function authUnlock(){
       if(!_cloudIniciou) _cloudIniciar();
       secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
       if(pwdEl) pwdEl.value='';
+      // Restaura o rascunho de Novo Orçamento (Fase F, Seção 5) — só se o
+      // wizard estiver vazio (refresh durante o bloqueio destruiu o DOM;
+      // se o DOM sobreviveu, orcRascunhoRestaurar() detecta e não sobrescreve).
+      // Reautenticação da MESMA conta já está garantida aqui: authUnlock()
+      // só chega a este ponto quando cred.user.uid===lockState.uid.
+      if(typeof orcRascunhoRestaurar==='function') orcRascunhoRestaurar(_currentSession.uid);
     })
     .catch(function(e){
       var msg;
