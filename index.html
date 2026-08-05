@@ -1360,29 +1360,92 @@ _CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
 // não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza
-// drasticamente a cota de gravações do Firebase.
+// drasticamente a cota de gravações do Firebase. Também serve de BASELINE
+// de concorrência otimista: é "a última versão deste documento que esta aba
+// confirmou ter visto" — ver _cloudSave().
 var _cloudLastPayload = {};
 
-// Salvar documento no Firestore
+// Salvar documento no Firestore.
+//
+// Protege contra sobrescrita por estado local obsoleto (achado real, não
+// exclusivo do Emulator: uma aba cujo listener em tempo real ficou para trás
+// — por token de Auth expirado, propagação atrasada, etc. — pode reconstruir
+// um array agregado inteiro a partir da sua cópia desatualizada em memória e
+// gravá-lo de volta, apagando mudanças feitas por qualquer outra sessão
+// nesse intervalo; confirmado reproduzindo o cenário no Emulator). Antes de
+// gravar, relê o documento dentro de uma transação e compara com o último
+// payload que ESTA aba confirmou ter visto (_cloudLastPayload[key]); se o
+// servidor já mudou desde então, a gravação é recusada — nunca perde dado
+// silenciosamente, nunca reaplica um snapshot antigo por conta própria.
+//
+// Sempre retorna uma Promise resolvida com {ok, reason, serverData?} — nunca
+// rejeita — para que chamadores que precisem reagir a falha possam aguardar
+// sem precisar de try/catch, mas chamadores existentes que ignoram o retorno
+// continuam funcionando exatamente como antes.
 function _cloudSave(key, data) {
-  if(!_db) return;
+  if(!_db) return Promise.resolve({ok:false, reason:'sem-conexao'});
   _homologGuardOrThrow();
-  try {
-    var payload = JSON.stringify(data);
-    if(_cloudLastPayload[key] === payload) return; // dado idêntico — nada a gravar
-    _cloudLastPayload[key] = payload;
-    _db.collection(_COL).doc(key).set({ data: payload, ts: Date.now() })
-      .catch(function(e){
-        delete _cloudLastPayload[key]; // permitir nova tentativa
-        console.warn("[Cloud] Erro ao salvar "+key+":", e);
-        if(e && (e.code==='resource-exhausted' || (e.message||'').indexOf('Quota')>=0)){
-          if(typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
-        } else if(e && (e.code==='permission-denied' || (e.message||'').indexOf('permission')>=0 || (e.message||'').indexOf('PERMISSION_DENIED')>=0)){
-          if(typeof showToast==='function') showToast('🔒 Sem permissão para salvar "'+key+'" — contate o administrador','err');
-          console.error('[Cloud] PERMISSÃO NEGADA ao salvar '+key+'. Verifique as Firestore Rules.');
+  var payload;
+  try { payload = JSON.stringify(data); }
+  catch(e){ console.warn("[Cloud] _cloudSave falhou:", e); return Promise.resolve({ok:false, reason:'erro-serializacao', error:e}); }
+  if(_cloudLastPayload[key] === payload) return Promise.resolve({ok:true, unchanged:true}); // dado idêntico — nada a gravar
+
+  var ref = _db.collection(_COL).doc(key);
+  var baseline = _cloudLastPayload[key]; // undefined = nunca observamos este doc nesta aba — grava sem checar
+
+  function tentar(jaRenovouToken) {
+    return _db.runTransaction(function(txn){
+      return txn.get(ref).then(function(snap){
+        var noServidor = (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? snap.data().data : null;
+        if (baseline !== undefined && noServidor !== null && noServidor !== baseline) {
+          var conflito = new Error('CLOUD_SAVE_CONFLITO');
+          conflito.code = 'CLOUD_SAVE_CONFLITO';
+          conflito.serverPayload = noServidor;
+          throw conflito;
         }
+        txn.set(ref, { data: payload, ts: Date.now() });
       });
-  } catch(e) { console.warn("[Cloud] _cloudSave falhou:", e); }
+    }).then(function(){
+      _cloudLastPayload[key] = payload;
+      return {ok:true};
+    }).catch(function(e){
+      if (e && e.code === 'CLOUD_SAVE_CONFLITO') {
+        // Não perder dado silenciosamente: reconcilia o baseline com a verdade do
+        // servidor e devolve para o chamador decidir como atualizar sua variável local
+        // — nunca reaplicamos automaticamente o snapshot antigo por conta própria.
+        _cloudLastPayload[key] = e.serverPayload;
+        var dadoServidor = null;
+        try { dadoServidor = JSON.parse(e.serverPayload); } catch(err) {}
+        if (typeof showToast === 'function') showToast('⚠️ "'+key+'" foi alterado por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.', 'warn');
+        return {ok:false, reason:'conflito', serverData: dadoServidor};
+      }
+      var ehErroDeAuth = e && (e.code === 'permission-denied' || e.code === 'unauthenticated' || (e.message||'').indexOf('PERMISSION_DENIED')>=0);
+      if (ehErroDeAuth && !jaRenovouToken && typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+        // Token de ID pode ter expirado em segundo plano (o SDK renova sozinho, mas
+        // abas em background sofrem throttling do timer) — tenta renovar uma vez,
+        // de forma transparente, antes de desistir e mostrar erro ao usuário.
+        return firebase.auth().currentUser.getIdToken(true).then(function(){
+          return tentar(true);
+        }).catch(function(){
+          if (typeof showToast==='function') showToast('🔒 Sessão expirada — não foi possível salvar "'+key+'". Desbloqueie novamente para continuar.', 'err');
+          return {ok:false, reason:'auth-expirada', error:e};
+        });
+      }
+      delete _cloudLastPayload[key]; // permitir nova tentativa
+      console.warn("[Cloud] Erro ao salvar "+key+":", e);
+      if(e && (e.code==='resource-exhausted' || (e.message||'').indexOf('Quota')>=0)){
+        if(typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
+      } else if(ehErroDeAuth){
+        if(typeof showToast==='function') showToast('🔒 Sem permissão para salvar "'+key+'" — contate o administrador','err');
+        console.error('[Cloud] PERMISSÃO NEGADA ao salvar '+key+'. Verifique as Firestore Rules.');
+      } else {
+        if(typeof showToast==='function') showToast('⚠️ Falha ao salvar "'+key+'" — tente novamente','err');
+      }
+      return {ok:false, reason:'erro', error:e};
+    });
+  }
+
+  return tentar(false);
 }
 
 // Carregar documento do Firestore
@@ -16841,7 +16904,19 @@ var _SHOPIFY_CFG = {};
 var SITE_LEADS = [];
 var _ORC_ENVIADOS_DATA = [];
 function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }
-function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('orcamentos', arr); }
+function orcSetEnviados(arr){
+  _ORC_ENVIADOS_DATA=arr; // otimista — mantém a tela responsiva, igual ao comportamento anterior
+  if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'nuvem-nao-pronta'});
+  return _cloudSave('orcamentos', arr).then(function(res){
+    if(!res.ok && res.reason==='conflito' && res.serverData){
+      // Esta aba estava com uma cópia desatualizada — nunca reaplicar o snapshot
+      // obsoleto por conta própria: reconcilia com a verdade do servidor.
+      _ORC_ENVIADOS_DATA = res.serverData;
+      try{ orcEnviadosRender(); }catch(e){}
+    }
+    return res;
+  });
+}
 
 // Número OFICIAL do orçamento — Rodada E.1 (auditoria): o antigo
 // orcGetNumeroPreview() usava String(Date.now()).slice(-6), que (1) nunca
