@@ -10792,16 +10792,31 @@ function kbProdCheckStock() {
 
 var _kbProdSubmitting = false; // trava contra clique duplo/reentrância no submit (proteção de UI apenas — a garantia real é a transação abaixo)
 var _kbProdEditExpectedStartId = null; // concorrência otimista para edição de material (kbEditarMatProd)
+// kbConfirmarProd() decidia sozinho, no cliente, se estoque insuficiente
+// podia ser autorizado (checando _currentSession.funcao==='master' e um
+// confirm() do navegador) — a transação do Firestore só confiava num
+// booleano prodAutorizado que o PRÓPRIO cliente calculava. Achado da
+// auditoria de 2026-08-05 (incidente_bypass_autorizacao_estoque_negativo):
+// uma sessão de Produção autenticada de verdade conseguiu reproduzir esse
+// payload diretamente via SDK do Firestore e gravar estoque profundamente
+// negativo, sem justificativa, sem auditoria, sem qualquer bloqueio do
+// servidor. Corrigido movendo toda a decisão — leitura fresca de
+// kb_os/stock/retalhos/erp_stock_log, validação de status/idempotência, e a
+// autorização de exceção (Master + justificativa mínima) — para a Cloud
+// Function producaoIniciarOuEditar (functions/src/producao.ts), que obtém a
+// identidade exclusivamente de context.auth (nunca de campos enviados pelo
+// cliente) e reconfere contra erp_vr_usuarios/{uid}. O cliente aqui só
+// coleta os dados do formulário e mostra o resultado — nunca decide sozinho
+// se uma exceção é válida, e não tem fallback para escrita direta se a
+// Function falhar ou estiver indisponível.
 function kbConfirmarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
-  if (_kbProdSubmitting) return; // já em andamento — ignora reclique (proteção de UI; a garantia real é a transação abaixo)
+  if (_kbProdSubmitting) return; // já em andamento — ignora reclique (proteção de UI; a garantia real é a Function)
   var obs = (document.getElementById('kbProdObs')||{}).value||'';
   var _editMode = _kbProdEditMode; // captura antes de qualquer mutação
   var _osIdLocal = _kbOsId;
-  var _idemKey = 'producao_inicio:' + _osIdLocal;
 
-  // Helper de UI pós-sucesso (chamado depois que a transação já persistiu tudo — nunca grava kb_os aqui)
-  function _finalizar(osAtualizada) {
+  function _finalizar(matProd, osStatus) {
     _kbProdSubmitting = false;
     var _submitBtn = document.querySelector('#kbProdOverlay .gen-submit'); if(_submitBtn) _submitBtn.disabled = false;
     if (!_editMode) {
@@ -10815,25 +10830,24 @@ function kbConfirmarProd() {
     var ml = document.getElementById('kbMatProdLabel');
     var mq = document.getElementById('kbMatProdQtyLabel');
     if (mb) mb.style.display = '';
-    if (ml) ml.textContent = osAtualizada.matProd.label;
+    if (ml) ml.textContent = matProd.label;
     if (mq) {
-      if (osAtualizada.matProd.isRetalho) {
+      if (matProd.isRetalho) {
         mq.textContent = '✂️ Usando retalho';
       } else {
-        var _qtylabel = osAtualizada.matProd.qty === 1 ? '1 chapa' : osAtualizada.matProd.qty + ' chapas';
-        if (osAtualizada.matProd.qty < 1 || osAtualizada.matProd.qty !== Math.floor(osAtualizada.matProd.qty)) _qtylabel = osAtualizada.matProd.qty + ' chapa(s)';
+        var _qtylabel = matProd.qty === 1 ? '1 chapa' : matProd.qty + ' chapas';
+        if (matProd.qty < 1 || matProd.qty !== Math.floor(matProd.qty)) _qtylabel = matProd.qty + ' chapa(s)';
         mq.textContent = _qtylabel + (obs?' · '+obs:'');
       }
     }
     kbCloseProd();
-    if(osAtualizada.matProd){
+    if(matProd){
       var _c=document.querySelector('.kcard[data-osid="'+_osIdLocal+'"');
-      if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+osAtualizada.matProd.label+_rest;}}}
+      if(_c){var _sub=_c.querySelector('.kcard-sub');if(_sub){var _pts=_sub.innerHTML.split('<br>');if(_pts.length>1){var _rest=_pts[1].indexOf('·')>=0?' · '+_pts[1].split('·').slice(1).join('·').trim():'';_sub.innerHTML=_pts[0]+'<br>'+matProd.label+_rest;}}}
     }
     renderOsTable();
     syncSidebarBadges();
     stockRenderHistorico();
-    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + osAtualizada.num + ' → Produção · ' + osAtualizada.matProd.label);
     showToast(_editMode ? 'Material atualizado! Estoque corrigido.' : '🔧 Produção iniciada! Baixa no estoque realizada.', 'ok');
   }
 
@@ -10841,7 +10855,8 @@ function kbConfirmarProd() {
     _kbProdSubmitting = false;
     (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=false; })();
     var msg = (e && e.message) || 'Erro ao dar baixa no estoque';
-    if (msg === 'PRODUCAO_JA_INICIADA') {
+    var code = (e && e.code) || '';
+    if (msg === 'PRODUCAO_JA_INICIADA' || code === 'already-exists') {
       showToast('ℹ️ Produção já havia sido iniciada para esta OS — nenhuma nova baixa foi feita.', 'info');
       kbCloseProd();
       try { kbOpen(_osIdLocal); } catch(err) {}
@@ -10856,170 +10871,84 @@ function kbConfirmarProd() {
       kbCloseProd();
     } else if (msg === 'RETALHO_INDISPONIVEL') {
       showToast('⚠️ Esse retalho não está mais disponível — outra produção pode tê-lo usado. Selecione novamente.', 'warn');
+    } else if (msg.indexOf('ESTOQUE_INSUFICIENTE') === 0) {
+      showToast('⚠️ ' + msg.replace('ESTOQUE_INSUFICIENTE: ', ''), 'warn');
+    } else if (msg.indexOf('JUSTIFICATIVA_OBRIGATORIA') === 0) {
+      showToast('⚠️ ' + msg.replace('JUSTIFICATIVA_OBRIGATORIA: ', ''), 'warn');
+    } else if (code === 'unauthenticated' || code === 'permission-denied') {
+      showToast('🔒 Sem permissão para esta operação — sessão pode ter expirado. Desbloqueie novamente.', 'err');
+    } else if (code === 'unavailable' || code === 'internal') {
+      showToast('⚠️ Serviço de produção indisponível no momento — nada foi salvo, tente novamente em instantes.', 'err');
     } else {
       showToast(msg, 'err');
     }
   }
 
-  // Constrói uma entrada de STOCK_LOG com os campos legados (tipo/matKey/matLabel/qty/os/obs/dt)
-  // e os campos canônicos de idempotência exigidos pela correção (osId/orcamentoId/materialId/
-  // quantidade/finalidade/idempotencyKey/ts/usuario).
-  function _buildLogEntry(tipo, matKey, matLabel, qty, osAtual, obsTexto, finalidade, idemKeyEntry) {
-    var now = new Date();
-    var dtStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-    return {
-      tipo: tipo, matKey: matKey || '', matLabel: matLabel || matKey || '', qty: qty, os: osAtual.num || _osIdLocal, obs: obsTexto || '', dt: dtStr,
-      osId: _osIdLocal, orcamentoId: osAtual.orcRef || null, materialId: matKey || null, quantidade: qty,
-      finalidade: finalidade, idempotencyKey: idemKeyEntry, ts: Date.now(), usuario: comprasQuem()
-    };
-  }
+  var requestId = 'kbprod:' + _osIdLocal + ':' + Date.now() + ':' + Math.random().toString(36).slice(2);
+  var payload = { osId: _osIdLocal, editMode: _editMode, obs: obs, requestId: requestId };
 
   if (_kbProdTipo === 'retalho') {
     var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
     var rListUi = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
     if (isNaN(retIdx) || !rListUi[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
-    var retalhoEscolhido = { mat: rListUi[retIdx].mat, dims: rListUi[retIdx].dims, label: rListUi[retIdx].label, codigo: rListUi[retIdx].codigo || '' };
-    return _iniciarTransacaoProducao({ novoTipo: 'retalho', retalhoEscolhido: retalhoEscolhido });
+    if (!rListUi[retIdx].codigo) { showToast('Este retalho não tem código de identificação — ajuste manualmente no estoque.', 'err'); return; }
+    payload.tipo = 'retalho';
+    payload.retalhoCodigo = rListUi[retIdx].codigo;
   } else {
     var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
     var qty    = parseFloat((document.getElementById('kbProdQty')||{}).value)||1;
     if (!matKey) { showToast('Selecione o material', 'warn'); return; }
     if (!STOCK[matKey]) { showToast('Material não encontrado no estoque', 'err'); return; }
     var chapasRetirar = Math.ceil(qty);
-    // Pré-check rápido via memória (só UX — falha imediata sem abrir transação; a transação
-    // abaixo é que decide de verdade, contra o estoque real do servidor).
-    var _prodAutorizado = false;
-    if (STOCK[matKey].qty < chapasRetirar) {
-      var _falta = +(chapasRetirar - STOCK[matKey].qty).toFixed(2);
+    // Pré-checagem só de UX (decide se mostra o diálogo de exceção) — a
+    // decisão que vale de verdade é sempre da Function, contra o estoque
+    // fresco do servidor e a identidade real do chamador.
+    if ((STOCK[matKey].qty||0) < chapasRetirar) {
+      var _falta = +(chapasRetirar - (STOCK[matKey].qty||0)).toFixed(2);
       var _matLabel = STOCK[matKey].label || matKey;
-      var _souMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master';
-      if (!_souMaster) {
+      var _souMasterUi = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master';
+      if (!_souMasterUi) {
         if (confirm('⚠️ Estoque insuficiente de '+_matLabel+' — faltam '+_falta+' chapa(s).\n\nRegistrar uma solicitação de compra agora?')) {
           if (typeof comprasSolicitarDeOS === 'function') comprasSolicitarDeOS(os, matKey, _falta);
         }
         return;
       }
-      var _autoriza = confirm('⚠️ Estoque insuficiente de '+_matLabel+' — faltam '+_falta+' chapa(s).\n\nOK = Iniciar mesmo assim, com autorização (fica registrado em auditoria)\nCancelar = não iniciar agora');
-      if (!_autoriza) {
+      var _justificativa = prompt('⚠️ Estoque insuficiente de '+_matLabel+' — faltam '+_falta+' chapa(s).\n\nEsta é uma exceção registrada em auditoria e validada pelo servidor. Descreva o motivo (mínimo 10 caracteres) para autorizar, ou cancele:');
+      if (_justificativa===null) return;
+      if (_justificativa.trim().length < 10) {
+        showToast('Justificativa muito curta — autorização não enviada (mínimo 10 caracteres).', 'warn');
         if (confirm('Registrar solicitação de compra deste material agora?')) {
           if (typeof comprasSolicitarDeOS === 'function') comprasSolicitarDeOS(os, matKey, _falta);
         }
         return;
       }
-      _prodAutorizado = true;
-      if (typeof secAuditLog === 'function') secAuditLog('producao_autorizada', 'OS #'+os.num+' iniciada com estoque insuficiente de '+_matLabel+' (faltam '+_falta+') — autorizado por '+((_currentSession&&(_currentSession.user||_currentSession.email))||'master'));
+      payload.justificativa = _justificativa.trim();
     }
-    return _iniciarTransacaoProducao({ novoTipo: 'chapa', matKey: matKey, qty: qty, chapasRetirar: chapasRetirar, prodAutorizado: _prodAutorizado });
+    payload.tipo = 'chapa'; payload.matKey = matKey; payload.qty = qty;
   }
 
-  // Transação única: relê kb_os/stock/retalhos/erp_stock_log do Firestore, valida o estado
-  // canônico da OS, e só então aplica a baixa + grava status/matProd/log — tudo atômico.
-  function _iniciarTransacaoProducao(opts) {
-    _kbProdSubmitting = true;
-    (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
+  _kbProdSubmitting = true;
+  (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=true; })();
 
-    var kbOsRef  = _db.collection(_COL).doc('kb_os');
-    var stockRef = _db.collection(_COL).doc('stock');
-    var retRef   = _db.collection(_COL).doc('retalhos');
-    var logRef   = _db.collection(_COL).doc('erp_stock_log');
-
-    return _db.runTransaction(function(txn) {
-      return Promise.all([txn.get(kbOsRef), txn.get(stockRef), txn.get(retRef), txn.get(logRef)]).then(function(snaps) {
-        var docOs = snaps[0], docStock = snaps[1], docRet = snaps[2], docLog = snaps[3];
-        function _parse(snap, dflt) { try { return (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? JSON.parse(snap.data().data) : dflt; } catch(e) { return dflt; } }
-        var objOS = _parse(docOs, {});
-        var sd    = _parse(docStock, {});
-        var retList = _parse(docRet, []);
-        var log   = _parse(docLog, []);
-
-        var osFresh = objOS[_osIdLocal];
-        if (!osFresh) throw new Error('OS_NAO_ENCONTRADA');
-
-        var logEntries = [];
-        var retListMutada = false;
-
-        if (!_editMode) {
-          if (['pronta','entregue','cancelado'].indexOf(osFresh.status) >= 0) throw new Error('OS_STATUS_INVALIDO:' + osFresh.status);
-          if (osFresh.producaoStartId) throw new Error('PRODUCAO_JA_INICIADA');
-          if (osFresh.matProd) throw new Error('PRODUCAO_JA_INICIADA'); // dado legado sem marca — tratado como já iniciado
-          var logOrfao = log.some(function(l){ return l.finalidade === 'inicio_producao' && (l.osId === _osIdLocal || String(l.os) === String(osFresh.num)); });
-          if (logOrfao) throw new Error('INCONSISTENCIA_LEGADO:log_sem_matProd');
-        } else {
-          if (['pronta','entregue','cancelado'].indexOf(osFresh.status) >= 0) throw new Error('OS_STATUS_INVALIDO:' + osFresh.status);
-          if (!osFresh.matProd) throw new Error('EDICAO_SEM_PRODUCAO_INICIADA');
-          if (_kbProdEditExpectedStartId && osFresh.producaoStartId !== _kbProdEditExpectedStartId) throw new Error('EDICAO_CONFLITO');
-        }
-
-        // Restaurar a baixa anterior (modo edição) — chapa ou retalho, o que já estava registrado
-        if (_editMode && osFresh.matProd) {
-          if (osFresh.matProd.isRetalho) {
-            // Registros legados (retalhoIdx apontando pra uma lista filtrada que já não existe
-            // mais neste formato) não têm como ser identificados com segurança — bloqueia em vez
-            // de arriscar restaurar o retalho errado ou perder a unidade silenciosamente.
-            if (!osFresh.matProd.retalhoMat && !osFresh.matProd.retalhoCodigo) throw new Error('EDICAO_RETALHO_LEGADO_SEM_MARCA');
-            var oldIdx = retList.findIndex(function(r){ return osFresh.matProd.retalhoCodigo ? r.codigo === osFresh.matProd.retalhoCodigo : (r.mat === osFresh.matProd.retalhoMat && r.dims === osFresh.matProd.retalhoDims); });
-            if (oldIdx >= 0) { retList[oldIdx].qty = (retList[oldIdx].qty||0) + 1; retListMutada = true; }
-          } else if (osFresh.matProd.matKey && sd[osFresh.matProd.matKey]) {
-            var _prevChapas = osFresh.matProd.chapasRetiradas || osFresh.matProd.qty || 1;
-            sd[osFresh.matProd.matKey].qty = (sd[osFresh.matProd.matKey].qty||0) + _prevChapas;
-            logEntries.push(_buildLogEntry('entrada', osFresh.matProd.matKey, sd[osFresh.matProd.matKey].label, _prevChapas, osFresh, 'Correção — material trocado na OS', 'edicao_producao_estorno', 'producao_edicao:' + _osIdLocal + ':' + Date.now() + ':estorno'));
-          }
-        }
-
-        var novoMatProd;
-        if (opts.novoTipo === 'retalho') {
-          var r = opts.retalhoEscolhido;
-          var idx = retList.findIndex(function(x){ return r.codigo ? x.codigo === r.codigo : (x.mat === r.mat && x.dims === r.dims && x.label === r.label); });
-          if (idx < 0 || !retList[idx] || (retList[idx].qty||0) <= 0) throw new Error('RETALHO_INDISPONIVEL');
-          retList[idx].qty = retList[idx].qty - 1;
-          retListMutada = true;
-          novoMatProd = { matKey: null, label: r.label + ' ' + r.dims, isRetalho: true, retalhoMat: r.mat, retalhoDims: r.dims, retalhoCodigo: r.codigo || '', obs: obs };
-          logEntries.push(_buildLogEntry('retalho-saida', r.mat, r.label + ' ' + r.dims + ' cm', 1, osFresh, r.codigo ? 'Cód: ' + r.codigo : '', _editMode ? 'edicao_producao' : 'inicio_producao', _editMode ? ('producao_edicao:' + _osIdLocal + ':' + Date.now()) : _idemKey));
-        } else {
-          var mk = opts.matKey;
-          if (!sd[mk]) throw new Error('Material não encontrado no estoque');
-          if (!opts.prodAutorizado && (sd[mk].qty||0) < opts.chapasRetirar) throw new Error('Estoque insuficiente (' + (sd[mk].qty||0) + ' chapas disponíveis)');
-          sd[mk].qty = (sd[mk].qty||0) - opts.chapasRetirar;
-          var sobra = +(opts.chapasRetirar - opts.qty).toFixed(4);
-          novoMatProd = { matKey: mk, label: sd[mk].label + (sd[mk].cor ? ' ' + sd[mk].cor : '') + (sd[mk].esp ? ' — ' + sd[mk].esp + 'mm' : ''), qty: opts.qty, chapasRetiradas: opts.chapasRetirar, isRetalho: false, obs: obs, sobra: sobra > 0.01 ? sobra : 0 };
-          logEntries.push(_buildLogEntry('saida', mk, sd[mk].label, opts.chapasRetirar, osFresh, 'Produção OS #' + (osFresh.num||_osIdLocal) + (obs?' · '+obs:'') + (sobra>0.01?' (sobra '+sobra.toFixed(2)+' chapa)':''), _editMode ? 'edicao_producao' : 'inicio_producao', _editMode ? ('producao_edicao:' + _osIdLocal + ':' + Date.now()) : _idemKey));
-        }
-
-        osFresh.matProd = novoMatProd;
-        if (!_editMode) {
-          osFresh.status = 'producao';
-          osFresh.producaoStartId = _idemKey;
-          osFresh.producaoIniciadaEm = Date.now();
-          if (!osFresh.inicioProducaoTs) osFresh.inicioProducaoTs = osFresh.producaoIniciadaEm;
-        } else if (!osFresh.producaoStartId) {
-          // Backfill não-destrutivo: OS legada editada agora ganha a marca canônica.
-          osFresh.producaoStartId = _idemKey;
-        }
-        objOS[_osIdLocal] = osFresh;
-
-        log = logEntries.concat(log);
-        if (log.length > 200) log.length = 200;
-
-        txn.set(kbOsRef, { data: JSON.stringify(objOS), ts: Date.now() });
-        txn.set(stockRef, { data: JSON.stringify(sd), ts: Date.now() });
-        txn.set(logRef, { data: JSON.stringify(log), ts: Date.now() });
-        if (retListMutada) txn.set(retRef, { data: JSON.stringify(retList), ts: Date.now() });
-
-        return { objOS: objOS, sd: sd, retList: retList, log: log, osFresh: osFresh, retListMutada: retListMutada };
-      });
-    }).then(function(r) {
-      KB_OS = r.objOS;
-      STOCK = r.sd;
-      STOCK_LOG = r.log;
-      if (r.retListMutada) RETALHOS = r.retList;
-      _cloudLastPayload['kb_os'] = JSON.stringify(r.objOS);
-      _cloudLastPayload['stock'] = JSON.stringify(r.sd);
-      _cloudLastPayload['erp_stock_log'] = JSON.stringify(r.log);
-      if (r.retListMutada) _cloudLastPayload['retalhos'] = JSON.stringify(r.retList);
-      Object.keys(r.sd).forEach(function(k){ stockUpdateDisplay(k); });
-      _finalizar(r.osFresh);
-    }).catch(_falhar);
-  }
+  firebase.functions().httpsCallable('producaoIniciarOuEditar')(payload).then(function(res){
+    var r = res.data || {};
+    if (r.jaProcessado) {
+      // Retry idempotente confirmado pelo servidor — a OS já reflete o resultado real via listener em tempo real.
+      _kbProdSubmitting = false;
+      (function(){ var _sb=document.querySelector('#kbProdOverlay .gen-submit'); if(_sb) _sb.disabled=false; })();
+      showToast('ℹ️ Esta produção já havia sido confirmada.', 'info');
+      kbCloseProd();
+      try { kbOpen(_osIdLocal); } catch(err) {}
+      return;
+    }
+    // Reconciliação otimista imediata a partir da resposta confirmada do
+    // servidor (o listener em tempo real de kb_os/stock também vai
+    // convergir para o mesmo estado em seguida — sem conflito, é o mesmo dado).
+    if (KB_OS[_osIdLocal]) KB_OS[_osIdLocal].matProd = r.matProd;
+    if (KB_OS[_osIdLocal] && r.osStatus) KB_OS[_osIdLocal].status = r.osStatus;
+    if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + (r.matProd && r.matProd.label));
+    _finalizar(r.matProd, r.osStatus);
+  }).catch(_falhar);
 }
 
 // kbReceberSaldo() grava em 4 documentos agregados (kb_os, fin_cr, fin_tx,
