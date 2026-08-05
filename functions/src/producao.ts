@@ -28,9 +28,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-
-const VALID_ROLES = ["master", "comercial", "producao", "financeiro"] as const;
-type Role = typeof VALID_ROLES[number];
+import { CallerVerificado, getCallerVerificado, requireRole, acquireIdem as acquireIdemShared, writeAudit as writeAuditShared, parseDoc } from "./auth_helper";
 
 const COL = "erp_vr";
 const COL_IDEM = "producao_idem_keys";
@@ -38,94 +36,12 @@ const COL_AUDIT = "erp_vr_audit_log_producao"; // auditoria dedicada, fora do ar
 
 const JUSTIFICATIVA_MIN_LEN = 10;
 
-function normalizeRole(value: unknown): Role | null {
-  if (typeof value !== "string") return null;
-  const r = value.trim().toLowerCase();
-  if (r === "admin") return "master";
-  if ((VALID_ROLES as readonly string[]).includes(r)) return r as Role;
-  return null;
+function acquireIdem(key: string): Promise<boolean> {
+  return acquireIdemShared(COL_IDEM, key);
 }
 
-interface CallerVerificado {
-  uid: string;
-  role: Role;
-}
-
-// Identidade NUNCA vem do payload — só de context.auth (claim) reconferido
-// contra o documento erp_vr_usuarios/{uid} (papel oficial + conta ativa).
-// Falha fechada: qualquer inconsistência (sem claim, sem doc, doc inativo,
-// claim ≠ funcao cadastrada) nega a operação, não tenta "adivinhar" a role.
-async function getCallerVerificado(context: functions.https.CallableContext): Promise<CallerVerificado> {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticação obrigatória.");
-  }
-  const uid = context.auth.uid;
-  const claimRole = normalizeRole(context.auth.token?.role);
-  if (!claimRole) {
-    throw new functions.https.HttpsError("permission-denied", "Perfil sem permissão (claim ausente ou inválida).");
-  }
-
-  const userDoc = await admin.firestore().collection("erp_vr_usuarios").doc(uid).get();
-  if (!userDoc.exists) {
-    throw new functions.https.HttpsError("permission-denied", "Conta sem cadastro em erp_vr_usuarios — acesso negado.");
-  }
-  const u = userDoc.data() || {};
-  if (!(u.ativo === 1 || u.ativo === true)) {
-    throw new functions.https.HttpsError("permission-denied", "Conta desativada — acesso negado.");
-  }
-  const docRole = normalizeRole(u.funcao);
-  if (!docRole || docRole !== claimRole) {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Divergência entre a permissão da sessão e o cadastro — acesso negado. Faça login novamente."
-    );
-  }
-  return { uid, role: claimRole };
-}
-
-function requireRole(caller: CallerVerificado, allowed: Role[], acao: string) {
-  if (caller.role === "master") return;
-  if (!allowed.includes(caller.role)) {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      `Perfil "${caller.role}" não pode ${acao}. Permitido: master, ${allowed.join(", ")}.`
-    );
-  }
-}
-
-async function acquireIdem(key: string): Promise<boolean> {
-  const db = admin.firestore();
-  const ref = db.collection(COL_IDEM).doc(key);
-  const now = Date.now();
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (snap.exists) {
-      const age = now - ((snap.data()?.ts as number) ?? 0);
-      if (age < 5 * 60_000) return false; // já processado nos últimos 5min
-    }
-    tx.set(ref, { ts: now });
-    return true;
-  });
-}
-
-async function writeAudit(action: string, callerUid: string, callerRole: string, detail: Record<string, unknown>): Promise<void> {
-  try {
-    await admin.firestore().collection(COL_AUDIT).add({
-      action, callerUid, callerRole, detail, timestamp: Date.now(),
-    });
-  } catch (e) {
-    functions.logger.error("[producao] falha ao gravar auditoria:", e);
-  }
-}
-
-function parseDoc<T>(snap: FirebaseFirestore.DocumentSnapshot, dflt: T): T {
-  try {
-    const raw = snap.exists ? snap.data()?.data : undefined;
-    if (typeof raw !== "string") return dflt;
-    return JSON.parse(raw) as T;
-  } catch {
-    return dflt;
-  }
+function writeAudit(action: string, callerUid: string, callerRole: string, detail: Record<string, unknown>): Promise<void> {
+  return writeAuditShared(COL_AUDIT, action, callerUid, callerRole, detail);
 }
 
 interface StockItem { label: string; qty: number; cor?: string; esp?: number; min?: number; max?: number; }
