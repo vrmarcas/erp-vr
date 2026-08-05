@@ -144,6 +144,15 @@ reg('planProf', makeEl());
 reg('planManualWrap', makeEl());
 reg('planManualHint', makeEl());
 reg('planModal', makeEl());
+var _canvasClearRectCalls = [];
+reg('planLayoutBox', makeEl({ style: { display: '' } }));
+reg('planCanvas', makeEl({
+  width: 0, height: 0,
+  getContext: function () {
+    return { clearRect: function (x, y, w, h) { _canvasClearRectCalls.push([x, y, w, h]); } };
+  }
+}));
+reg('planLayoutLegenda', makeEl());
 reg('planSumArea', makeEl());
 reg('planSumPecas', makeEl());
 reg('planSumProporcao', makeEl());
@@ -315,6 +324,53 @@ test('6. planPecasManual serializado (JSON) não cruza entre itens após round-t
   var serial1 = JSON.parse(row(1).dataset.planPecasManual);
   assertEq(serial0.length, 1, 'item1 serializado mantém 1 peça manual');
   assertEq(serial1.length, 0, 'item2 serializado não ganha peça manual nenhuma');
+});
+
+// ── Cenário 7 (achado 2, mesma homologação): canvas de corte não deve
+// vazar entre itens ────────────────────────────────────────────────────────
+test('7. abrir item A planificado e depois item B vazio — layout de corte não vaza', function () {
+  registerItem(0, 'Painel M', 100);
+  registerItem(1, 'Painel N', 100);
+
+  abrir(0);
+  setDims(30, 30);
+  mod.planCalc();
+  addManual(5, 5, 1, 100);
+  mod._planCalcAndMerge();
+  mod.planAplicar();
+  // simula o estado "sujo" que o app deixa no DOM real após desenhar o
+  // canvas do item1 (planDrawCanvas real roda via setTimeout, desabilitado
+  // neste harness — replica aqui só o efeito visual que ele produziria)
+  _elements['planLayoutBox'].style.display = '';
+  _elements['planLayoutLegenda'].innerHTML = '<span>Painel M peça manual</span>';
+
+  abrir(1); // item2, sem dimensões ainda
+  assertEq(_elements['planLayoutBox'].style.display, 'none', 'canvas de corte deve ficar oculto ao abrir item sem plano');
+  assertEq(_elements['planLayoutLegenda'].innerHTML, '', 'legenda não pode reter nomes de peças do item anterior');
+  assertEq(_elements['planPiecesBody'].innerHTML, '', 'tabela de peças deve estar vazia para item sem plano');
+  if (_canvasClearRectCalls.length < 1) throw new Error('planCanvas deveria ter sido limpo (clearRect) ao trocar de item');
+});
+
+// ── Cenário 8: reabrir o item planificado depois de abrir outro não corrompe
+// seu próprio estado ────────────────────────────────────────────────────────
+test('8. alternar entre item planificado e item vazio não corrompe o item planificado', function () {
+  registerItem(0, 'Painel O', 100);
+  registerItem(1, 'Painel P', 100);
+
+  abrir(0);
+  setDims(20, 20);
+  mod.planCalc();
+  addManual(4, 4, 1, 90);
+  mod._planCalcAndMerge();
+  mod.planAplicar();
+  var custoItem0 = row(0).dataset.planManualMatCost;
+
+  abrir(1); // item vazio — reseta o modal
+  abrir(0); // reabre item0 — deve restaurar planManualPieces e recalcular igual
+  assertEq(mod.getPlanManualPieces().length, 1, 'peça manual de item0 restaurada ao reabrir após visitar item vazio');
+  mod.planCalc();
+  mod._planCalcAndMerge();
+  assertEq(_elements['planSumBox'].dataset.planManualMatCost, custoItem0, 'custo manual de item0 recalculado é igual ao aplicado originalmente');
 });
 
 console.log('\n=== Nota sobre múltiplas abas ===');

@@ -7806,6 +7806,26 @@ function planAbrir(idx) {
   // um item sem peça manual poderia herdar valores do item anterior.
   _planSumBoxReset.dataset.planManualMatCost = '0';
   _planSumBoxReset.dataset.planManualAreaM2  = '0';
+  delete _planSumBoxReset.dataset.pcs;
+  delete _planSumBoxReset.dataset.planImg;
+  // Bug real (homologação Fase F, 2026-08-05): o canvas de corte
+  // (planCanvas/planLayoutBox/planLayoutLegenda) é reaproveitado entre
+  // itens e só é redesenhado por planDrawCanvas(), que só roda depois de
+  // planCalc() — que planAbrir() NÃO chama automaticamente quando o item
+  // ainda não tem dimensões salvas. Sem este reset, abrir um item novo
+  // exibia o desenho de corte (inclusive nomes de peças manuais) do
+  // último item aberto. Zera aqui incondicionalmente; se o item já tiver
+  // dimensões salvas, o planCalc() logo abaixo redesenha com dados
+  // corretos deste item.
+  var _planLayoutBoxReset = document.getElementById('planLayoutBox');
+  if(_planLayoutBoxReset) _planLayoutBoxReset.style.display = 'none';
+  var _planCanvasReset = document.getElementById('planCanvas');
+  if(_planCanvasReset){
+    var _planCtxReset = _planCanvasReset.getContext && _planCanvasReset.getContext('2d');
+    if(_planCtxReset) _planCtxReset.clearRect(0, 0, _planCanvasReset.width, _planCanvasReset.height);
+  }
+  var _planLegendaReset = document.getElementById('planLayoutLegenda');
+  if(_planLegendaReset) _planLegendaReset.innerHTML = '';
   var btn = document.getElementById('planAplicarBtn'); if(btn) btn.disabled = true;
 
   planManualPieces = [];
