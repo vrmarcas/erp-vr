@@ -1312,7 +1312,8 @@ function _stockTombSave() {
     var ts = (v && typeof v === 'object') ? v.ts : v;
     if(ts && ts < cut) delete _STOCK_TOMB[k];
   });
-  if(typeof _cloudSave === 'function') _cloudSave('stock_deleted', _STOCK_TOMB);
+  if(typeof _cloudSave !== 'function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
+  return _cloudSave('stock_deleted', _STOCK_TOMB);
 }
 _CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
   if(doc.exists && doc.data() && doc.data().data){
@@ -1446,6 +1447,25 @@ function _cloudSave(key, data) {
   }
 
   return tentar(false);
+}
+
+// Helper reutilizável para operações críticas (dinheiro, estoque, status de OS):
+// só mostra sucesso ao usuário DEPOIS que a Promise de _cloudSave() confirma o
+// commit real; se a gravação falhar (conflito, auth, erro), desfaz a mutação
+// local via reverter() e avisa com clareza — nunca finge sucesso, nunca deixa
+// o estado local divergente do que foi de fato persistido.
+function _confirmarAposSalvar(savePromise, reverter, render, msgSucesso, msgFalhaPrefixo) {
+  return savePromise.then(function(res){
+    var ok = res && res.ok;
+    if (!ok && typeof reverter === 'function') { try { reverter(); } catch(e) {} }
+    if (render) { try { render(); } catch(e) {} }
+    if (ok) {
+      if (msgSucesso && typeof showToast === 'function') showToast(msgSucesso, 'ok');
+    } else {
+      if (typeof showToast === 'function') showToast((msgFalhaPrefixo || 'Falha ao salvar') + ' — nada foi confirmado, tente novamente.', 'err');
+    }
+    return ok;
+  });
 }
 
 // Carregar documento do Firestore
@@ -9293,7 +9313,8 @@ let CRM_LEADS = Object.assign({}, CRM_LEADS_DEFAULT);
 let crmLeadIdCounter = 100;
 
 function crmSaveLeads() {
-  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('crm_leads', CRM_LEADS);
+  if(typeof _cloudSave!=='function' || !_cloudReady) return Promise.resolve({ok:false, reason:'sem-conexao'});
+  return _cloudSave('crm_leads', CRM_LEADS);
 }
 
 function crmOpenCard(id) {
@@ -10326,11 +10347,10 @@ function kbExcluirSelecionados() {
 
 // ── KB_OS cloud save helper ───────────────────────────────────────────────────
 function kbSaveKbos() {
-  if(typeof _cloudSave==='function') {
-    var kbCopy={};
-    Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
-    _cloudSave('kb_os', kbCopy);
-  }
+  if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
+  var kbCopy={};
+  Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
+  return _cloudSave('kb_os', kbCopy);
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────
 function kbInitWeekHeaders() {
@@ -11004,52 +11024,101 @@ function kbConfirmarProd() {
 
 function kbReceberSaldo() {
   var os = KB_OS[_kbOsId]; if (!os) return;
+  if (os._recebendoSaldo) { showToast('Recebimento já em andamento — aguarde.','warn'); return; }
+  os._recebendoSaldo = true;
+  var _osIdSnap = _kbOsId;
   var hoje = new Date();
   var dia = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+
+  var _statusAnterior = os.status;
+  var _restanteAnterior = os.restante;
+
   // Marca CR restante como recebido
   var crEntry = FIN_CR.find(function(c){ return c.osRef && c.osRef.indexOf(String(os.num))>=0 && c.status==='pendente'; });
-  if (crEntry) { crEntry.status='recebido'; crEntry.dataRecebimento=dia; _finSaveCR(); try{finRender();}catch(e){} }
+  var _crStatusAnterior = crEntry ? crEntry.status : null;
+  var _crDataAnterior = crEntry ? crEntry.dataRecebimento : null;
+  if (crEntry) { crEntry.status='recebido'; crEntry.dataRecebimento=dia; }
+
   // Lança no caixa
   var _metodo = os.formaPgto || 'PIX';
-  FIN_TX.unshift({data:dia.slice(0,5),cliente:os.cliente,os:String(os.num),marca:os.mk||'vr',valor:os.restante||0,metodo:_metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  try{finRender();}catch(e){}
+  var _txEntry = {data:dia.slice(0,5),cliente:os.cliente,os:String(os.num),marca:os.mk||'vr',valor:os.restante||0,metodo:_metodo,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
+  FIN_TX.unshift(_txEntry);
+
   // Atualiza OS
   os.status='iniciada'; os.restante=0;
-  kbSaveKbos();
+
   // Se a OS veio de um orçamento em "aguardando_pagamento", conclui o ciclo -> pago
+  var _listaOrc = null, _orcOrigem = null, _orcStatusAnterior = null;
   if(os.orcRef && typeof orcGetEnviados==='function'){
-    var _listaOrc = orcGetEnviados();
-    var _orcOrigem = _listaOrc.find(function(o){ return o.id===os.orcRef; });
-    if(_orcOrigem && _orcOrigem.status==='aguardando_pagamento'){
+    _listaOrc = orcGetEnviados();
+    var _cand = _listaOrc.find(function(o){ return o.id===os.orcRef; });
+    if(_cand && _cand.status==='aguardando_pagamento'){
+      _orcOrigem = _cand; _orcStatusAnterior = _cand.status;
       _orcOrigem.status = 'pago';
-      orcSetEnviados(_listaOrc);
-      try{ orcEnviadosRender(); }catch(e){}
     }
   }
-  // Atualiza badge no card
-  var stg = document.getElementById('kstag-'+_kbOsId);
-  if(stg){stg.className='stag si';stg.textContent='Iniciada';}
-  // Atualiza modal
-  var _sm = _kbStatusMap['iniciada'];
-  var _stag = document.getElementById('kbOsStag');
-  if(_stag){_stag.className='stag '+_sm.cls;_stag.textContent=_sm.txt;}
+
+  function _refletirNaTela() {
+    try{finRender();}catch(e){}
+    var stg = document.getElementById('kstag-'+_osIdSnap);
+    if(stg){ var sm0=_kbStatusMap[os.status]||{cls:'si',txt:os.status}; stg.className='stag '+sm0.cls; stg.textContent=sm0.txt; }
+    if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
+    try{ orcEnviadosRender(); }catch(e){}
+    kbSyncCounts(); renderOsTable(); syncSidebarBadges();
+  }
+
   var _saldoBoxUp = document.getElementById('kbReceberSaldoBox');
   if(_saldoBoxUp) _saldoBoxUp.style.display='none';
   var _iniciarBoxUp = document.getElementById('kbIniciarProdBox');
   if(_iniciarBoxUp) _iniciarBoxUp.style.display='';
-  kbSyncCounts(); renderOsTable(); syncSidebarBadges();
-  showToast('✅ Saldo recebido! OS liberada para produção.','ok');
+  _refletirNaTela();
+
+  var _crPromise = crEntry ? _finSaveCR() : Promise.resolve({ok:true});
+  var _txPromise = _cloudSave('fin_tx', FIN_TX);
+  var _kbPromise = kbSaveKbos();
+  var _orcPromise = _orcOrigem ? _cloudSave('orcamentos', _listaOrc) : Promise.resolve({ok:true});
+
+  Promise.all([_crPromise, _txPromise, _kbPromise, _orcPromise]).then(function(results){
+    os._recebendoSaldo = false;
+    var _crRes=results[0], _txRes=results[1], _kbRes=results[2], _orcRes=results[3];
+    var allOk = _crRes.ok && _txRes.ok && _kbRes.ok && _orcRes.ok;
+    if (allOk) {
+      if(typeof secAuditLog==='function') secAuditLog('fin_recebimento','Saldo de '+finFmt(_txEntry.valor)+' recebido — OS #'+os.num);
+      showToast('✅ Saldo recebido! OS liberada para produção.','ok');
+      return;
+    }
+    // Reverte apenas os documentos que falharam — os que tiveram sucesso já são verdade no servidor.
+    if (crEntry && !_crRes.ok) { crEntry.status=_crStatusAnterior; crEntry.dataRecebimento=_crDataAnterior; }
+    if (!_txRes.ok) { var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); }
+    if (!_kbRes.ok) { os.status=_statusAnterior; os.restante=_restanteAnterior; }
+    if (_orcOrigem && !_orcRes.ok) { _orcOrigem.status=_orcStatusAnterior; }
+    _refletirNaTela();
+    var _falhas=[];
+    if(crEntry && !_crRes.ok) _falhas.push('Contas a Receber');
+    if(!_txRes.ok) _falhas.push('lançamento no caixa');
+    if(!_kbRes.ok) _falhas.push('status da OS');
+    if(_orcOrigem && !_orcRes.ok) _falhas.push('orçamento vinculado');
+    showToast('⚠️ Falha ao confirmar recebimento ('+_falhas.join(', ')+') — revise o que já foi salvo antes de repetir a ação.','err');
+  });
 }
 
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
+  if (os._marcandoPronto) { showToast('Ação já em andamento — aguarde.','warn'); return; }
+  os._marcandoPronto = true;
   // Saldo pendente (normalmente pago na retirada) NÃO bloqueia mais "Pronta" — apenas
   // alerta. O saldo continua rastreado normalmente em Contas a Receber (os.restante,
   // FIN_CR) até ser recebido via kbReceberSaldo(); só a entrega final é bloqueada
   // (ver osLiberar), pois cobrar na retirada é o fluxo normal, não uma exceção.
   var _saldoPendente = (os.restante||0) > 0;
+  var _osIdSnap = _kbOsId;
+  var _statusAnterior = os.status;
+  var _prontoAnterior = os.pronto;
+  var _progAnterior = os.prog;
+  var _ckAnterior = os._ck ? os._ck.slice() : os._ck;
+  var _kbDayAnterior = os.kbDay;
+
   var _pCard=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
   if(_pCard&&_pCard.parentElement) os.kbDay=_pCard.parentElement.id;
   var _pDest=document.getElementById('kbProntas');
@@ -11088,12 +11157,23 @@ function kbMarcarPronto() {
   var entBtn0 = document.getElementById('kbEntregarBtn');
   if(entBtn0){ entBtn0.style.display=''; entBtn0.textContent = _saldoPendente ? '📦 Entregar ao Cliente (saldo pendente)' : '📦 Entregar ao Cliente'; }
 
-  kbSaveKbos(); // estava faltando — status "Pronta" nunca era persistido no Firestore
   renderOsTable(); syncSidebarBadges();
-  if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
   setTimeout(function(){
-    if(_saldoPendente) showToast('⚠️ OS #'+os.num+' Pronta — saldo de '+finFmt(os.restante)+' ainda pendente (cobrar na retirada)','warn');
-    else showToast('OS #'+os.num+' marcada como Pronta! 🎉', 'ok');
+    _confirmarAposSalvar(
+      kbSaveKbos(),
+      function(){
+        os.status = _statusAnterior; os.pronto = _prontoAnterior; os.prog = _progAnterior; os._ck = _ckAnterior; os.kbDay = _kbDayAnterior;
+        if (typeof kbRender === 'function') kbRender();
+        if (avisarBox) avisarBox.style.display = 'none';
+        if (String(_kbOsId) === String(_osIdSnap) && typeof kbOpen === 'function') kbOpen(_osIdSnap);
+      },
+      function(){ renderOsTable(); syncSidebarBadges(); },
+      _saldoPendente ? '⚠️ OS #'+os.num+' Pronta — saldo de '+finFmt(os.restante)+' ainda pendente (cobrar na retirada)' : 'OS #'+os.num+' marcada como Pronta! 🎉',
+      'Não foi possível marcar a OS #'+os.num+' como Pronta'
+    ).then(function(ok){
+      os._marcandoPronto = false;
+      if(ok && typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+    });
   }, 150);
 }
 
@@ -11655,11 +11735,12 @@ var STOCK = {}; // Inicia vazio — preenchido pelo Firebase. Defaults aplicados
 var _stockServerConfirmed = false; // True após receber dados confirmados pelo servidor (não apenas cache local)
 
 function stockSaveData() {
-  if(!_db) return;
-  try {
-    _db.collection(_COL).doc('stock').set({ data: JSON.stringify(STOCK), ts: Date.now() })
-      .catch(function(e){ console.warn('[Stock] Erro ao salvar:', e); showToast('Erro ao salvar estoque na nuvem — verifique permissões','warn'); });
-  } catch(e) { console.warn('[Stock] falhou:', e); }
+  // Antes gravava direto via _db.set(), sem transação nem verificação de
+  // conflito — era o único caminho de escrita de estoque que não passava por
+  // _cloudSave(), então uma aba com listener atrasado podia sobrescrever
+  // quantidades/exclusões feitas por outra sessão sem qualquer detecção.
+  if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
+  return _cloudSave('stock', STOCK);
 }
 
 var FIN_TX = [
@@ -11932,6 +12013,7 @@ function renderOsTable() {
 }
 function osLiberar(id) {
   var os=KB_OS[id]; if(!os) return;
+  if (os._liberando) { showToast('Entrega já em andamento — aguarde.','warn'); return; }
   // Entrega/conclusão definitiva é bloqueada se ainda houver saldo, salvo exceção
   // explícita e justificada — que registra usuário/data/motivo e mantém a dívida aberta
   // (não mexe em os.restante nem no lançamento pendente em FIN_CR).
@@ -11942,18 +12024,37 @@ function osLiberar(id) {
     var _quem=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.user||_currentSession.email))||'desconhecido';
     if(typeof secAuditLog==='function') secAuditLog('os_entrega_excecao','OS #'+os.num+' entregue com saldo pendente de '+finFmt(os.restante)+' — responsável: '+_quem+' — justificativa: '+justificativa.trim());
   }
+  var _statusAnterior = os.status;
   os.status='entregue';
-  kbSaveKbos();
-  document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){stag.className='stag sm ok';stag.textContent='✅ Entregue';}});
-  // Atualiza o modal se estiver aberto nesta mesma OS
-  if(typeof _kbOsId!=='undefined' && String(_kbOsId)===String(id)){
-    var entBtn=document.getElementById('kbEntregarBtn'); if(entBtn) entBtn.style.display='none';
-    var pBtn=document.getElementById('kbProntoBtn'); if(pBtn){ pBtn.className='kb-pronto-btn done'; pBtn.textContent='✓ OS Entregue'; }
-    var stagEl=document.getElementById('kbOsStag'); if(stagEl){ stagEl.className='stag sm ok'; stagEl.textContent='✅ Entregue'; }
-    var avisarBox2=document.getElementById('kbAvisarClienteBox'); if(avisarBox2) avisarBox2.style.display='none';
+  os._liberando = true;
+  function _refletirNaTela() {
+    document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){ if(os.status==='entregue'){stag.className='stag sm ok';stag.textContent='✅ Entregue';} else { var sm=_kbStatusMap[os.status]||{cls:'si',txt:os.status}; stag.className='stag '+sm.cls; stag.textContent=sm.txt; } }});
+    if(typeof _kbOsId!=='undefined' && String(_kbOsId)===String(id)){
+      var entBtn=document.getElementById('kbEntregarBtn');
+      var pBtn=document.getElementById('kbProntoBtn');
+      var stagEl=document.getElementById('kbOsStag');
+      var avisarBox2=document.getElementById('kbAvisarClienteBox');
+      if(os.status==='entregue'){
+        if(entBtn) entBtn.style.display='none';
+        if(pBtn){ pBtn.className='kb-pronto-btn done'; pBtn.textContent='✓ OS Entregue'; }
+        if(stagEl){ stagEl.className='stag sm ok'; stagEl.textContent='✅ Entregue'; }
+        if(avisarBox2) avisarBox2.style.display='none';
+      } else {
+        if(entBtn) entBtn.style.display='';
+        if(pBtn){ pBtn.className='kb-pronto-btn done'; pBtn.textContent='✓ OS Pronta'; }
+        var sm2=_kbStatusMap[os.status]||{cls:'si',txt:os.status};
+        if(stagEl){ stagEl.className='stag '+sm2.cls; stagEl.textContent=sm2.txt; }
+      }
+    }
+    renderOsTable(); syncSidebarBadges();
   }
-  renderOsTable(); syncSidebarBadges();
-  showToast(saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!','ok');
+  _confirmarAposSalvar(
+    kbSaveKbos(),
+    function(){ os.status = _statusAnterior; },
+    _refletirNaTela,
+    saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!',
+    'Não foi possível liberar a OS #'+os.num
+  ).then(function(){ os._liberando = false; });
 }
 
 // ============================================================
@@ -12009,8 +12110,8 @@ var _FIN_CP_DEFAULT = [
 ];
 var FIN_CP = [];
 
-function _finSaveCR(){ _cloudSave('fin_cr', FIN_CR); }
-function _finSaveCP(){ _cloudSave('fin_cp', FIN_CP); }
+function _finSaveCR(){ return _cloudSave('fin_cr', FIN_CR); }
+function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }
 
 // ============================================================
 // COMPRAS — Necessidade → Solicitação → Cotação → Aprovação → Pedido →
@@ -12046,7 +12147,7 @@ var PC_STATUS_COLOR = {solicitada:'#6B7280',cotacao:'#D97706',aprovada:'#3B82F6'
 var _pcCounter = 0;
 var _comprasRecebendoIds = {}; // reentrância por pedido — impede baixa dupla em clique duplo
 
-function comprasSave(){ _cloudSave('compras', COMPRAS); }
+function comprasSave(){ return _cloudSave('compras', COMPRAS); }
 
 function comprasQuem(){ return (typeof _currentSession!=='undefined' && _currentSession && (_currentSession.user||_currentSession.email)) || 'desconhecido'; }
 
@@ -13196,14 +13297,27 @@ function _finCRBaixaConfirmar(id, dtISO) {
   // Idempotência: sem esta guarda, clique duplo/reexecução lançava um segundo
   // registro em FIN_TX para o mesmo recebimento (duplicidade real de caixa).
   if(r.status==='recebido'){ showToast('Este recebimento já foi confirmado.','info'); return; }
+  if(r._baixando){ showToast('Confirmação já em andamento — aguarde.','warn'); return; }
+  r._baixando = true;
+  var _statusAnterior = r.status, _dataAnterior = r.dataRecebimento;
   var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
   r.status='recebido'; r.dataRecebimento=dtBR;
   var d=new Date(dtISO+'T12:00:00');
-  FIN_TX.unshift({data:dtBR,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:1,sem:1,mes:d.getMonth()+1});
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  _finSaveCR();
+  var _txEntry={data:dtBR,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:1,sem:1,mes:d.getMonth()+1};
+  FIN_TX.unshift(_txEntry);
   finCRRender(); finDashKPIs(); finBarChartRender();
-  showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
+  Promise.all([_cloudSave('fin_tx', FIN_TX), _finSaveCR()]).then(function(results){
+    r._baixando = false;
+    var _txRes=results[0], _crRes=results[1];
+    if (_txRes.ok && _crRes.ok) {
+      showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
+      return;
+    }
+    if (!_txRes.ok) { var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); }
+    if (!_crRes.ok) { r.status=_statusAnterior; r.dataRecebimento=_dataAnterior; }
+    finCRRender(); finDashKPIs(); finBarChartRender();
+    showToast('⚠️ Falha ao confirmar recebimento — nada foi perdido, tente novamente.','err');
+  });
 }
 function finCREstornar(id) {
   var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
@@ -13602,11 +13716,19 @@ function finCPPagar(id) {
 function _finCPPagarConfirmar(id, dtISO) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
   if(r.status==='pago'){ showToast('Este pagamento já foi confirmado.','info'); return; }
+  if(r._pagando){ showToast('Confirmação já em andamento — aguarde.','warn'); return; }
+  r._pagando = true;
+  var _statusAnterior = r.status, _dataAnterior = r.dataPagamento;
   var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
   r.status='pago'; r.dataPagamento=dtBR;
-  _finSaveCP();
   finCPRender(); finDashKPIs(); finDonutRender();
-  showToast(r.descricao+' marcado como pago em '+dtBR,'ok');
+  _confirmarAposSalvar(
+    _finSaveCP(),
+    function(){ r.status=_statusAnterior; r.dataPagamento=_dataAnterior; },
+    function(){ finCPRender(); finDashKPIs(); finDonutRender(); },
+    r.descricao+' marcado como pago em '+dtBR,
+    'Não foi possível confirmar o pagamento de '+r.descricao
+  ).then(function(){ r._pagando = false; });
 }
 function finCPEstornar(id) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
@@ -13817,10 +13939,15 @@ function finEditTX(osRef, data, cliente) {
   if(novaData===null) return;
   var novoMetodo = prompt('Método (PIX / Dinheiro / Cartão):', t.metodo||'PIX');
   if(novoMetodo===null) return;
+  var _txAnterior = Object.assign({}, t);
   FIN_TX[idx] = Object.assign({}, t, { valor:v, data:novaData.trim()||t.data, metodo:novoMetodo.trim()||t.metodo });
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  finRender(); try{ finDashKPIs(); dashRender(); }catch(e){}
-  showToast('Transação atualizada','ok');
+  _confirmarAposSalvar(
+    _cloudSave('fin_tx', FIN_TX),
+    function(){ FIN_TX[idx] = _txAnterior; },
+    function(){ finRender(); try{ finDashKPIs(); dashRender(); }catch(e){} },
+    'Transação atualizada',
+    'Não foi possível atualizar a transação'
+  );
 }
 
 // ── Excluir transação FIN_TX (master only) ───────────────────────────────────
@@ -13828,10 +13955,15 @@ function finDeleteTX(osRef, data, cliente) {
   if(!confirm('Excluir transação OS #'+osRef+' ('+cliente+' — '+data+')?\nEssa ação não pode ser desfeita.')) return;
   var idx = FIN_TX.findIndex(function(t){ return String(t.os)===String(osRef)&&t.data===data&&t.cliente===cliente; });
   if(idx<0){ alert('Transação não encontrada.'); return; }
+  var _txRemovido = FIN_TX[idx];
   FIN_TX.splice(idx,1);
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  finRenderTx();
-  try { finDashKPIs(); dashRender(); } catch(e){}
+  _confirmarAposSalvar(
+    _cloudSave('fin_tx', FIN_TX),
+    function(){ FIN_TX.splice(idx,0,_txRemovido); },
+    function(){ finRenderTx(); try { finDashKPIs(); dashRender(); } catch(e){} },
+    'Transação excluída',
+    'Não foi possível excluir a transação'
+  );
 }
 // ── Antecipar recebimento de Cartão (simula taxa MP/Nubank ~3,49%) ────────────
 function finAntecipar(osRef, valor) {
@@ -13842,11 +13974,17 @@ function finAntecipar(osRef, valor) {
   if(!confirm(msg)) return;
   var t = FIN_TX.find(function(x){return String(x.os)===String(osRef)&&x.status!=='antecipado';});
   if(!t){ showToast('Transação não encontrada','err'); return; }
+  var _statusAnterior = t.status, _valorAnterior = t.valor;
   t.status='antecipado';
   t.valor=parseFloat((t.valor*(1-taxa)).toFixed(2));
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  finRender(); finDashKPIs();
-  showToast('Antecipação de '+finFmt(t.valor)+' registrada (taxa '+taxaDisplay+'%)','ok');
+  var _valorAntecipado = t.valor;
+  _confirmarAposSalvar(
+    _cloudSave('fin_tx', FIN_TX),
+    function(){ t.status=_statusAnterior; t.valor=_valorAnterior; },
+    function(){ finRender(); finDashKPIs(); },
+    'Antecipação de '+finFmt(_valorAntecipado)+' registrada (taxa '+taxaDisplay+'%)',
+    'Não foi possível registrar a antecipação'
+  );
 }
 
 function finBaixaManual(marca) {
@@ -13855,10 +13993,15 @@ function finBaixaManual(marca) {
   var v=parseFloat(val), hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
   var m=marca||(confirm('VR Marcas? (OK=VR, Cancelar=Vitre)')?'vr':'vit');
-  FIN_TX.unshift({data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
-  if(typeof _cloudSave==='function') _cloudSave('fin_tx', FIN_TX);
-  finRender(); finDashKPIs();
-  showToast('Baixa de '+finFmt(v)+' registrada!','ok');
+  var _txEntry={data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
+  FIN_TX.unshift(_txEntry);
+  _confirmarAposSalvar(
+    _cloudSave('fin_tx', FIN_TX),
+    function(){ var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); },
+    function(){ finRender(); finDashKPIs(); },
+    'Baixa de '+finFmt(v)+' registrada!',
+    'Não foi possível registrar a baixa manual'
+  );
 }
 
 // ============================================================
@@ -14151,8 +14294,17 @@ function relSalvarCaixaAnt() {
   if(!dtIn||!dtIn.value){ showToast('Selecione uma data primeiro','warn'); return; }
   var p=dtIn.value.split('-'); var dtBR=p[2]+'/'+p[1]+'/'+p[0];
   var val=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
-  if(typeof _cloudSave==='function'&&_cloudReady){ try{_CX_ALL[dtBR]=val; _cloudSave('erp_caixa_ant',_CX_ALL);}catch(e){} }
-  showToast('Caixa anterior salvo para '+dtBR,'ok');
+  if(typeof _cloudSave!=='function'||!_cloudReady){ showToast('Sem conexão — não foi possível salvar','err'); return; }
+  var _valorAnterior = _CX_ALL[dtBR];
+  var _existiaAntes = Object.prototype.hasOwnProperty.call(_CX_ALL, dtBR);
+  _CX_ALL[dtBR]=val;
+  _confirmarAposSalvar(
+    _cloudSave('erp_caixa_ant',_CX_ALL),
+    function(){ if(_existiaAntes) _CX_ALL[dtBR]=_valorAnterior; else delete _CX_ALL[dtBR]; },
+    null,
+    'Caixa anterior salvo para '+dtBR,
+    'Não foi possível salvar o caixa anterior de '+dtBR
+  );
 }
 
 // ── RELATÓRIO MENSAL ──────────────────────────────────────────────────────────
@@ -14408,13 +14560,31 @@ function stockPopulateSelects() {
 function stockExcluirItem(key) {
   if (!STOCK[key]) return;
   if (!confirm('Mover "' + STOCK[key].label + '" para a lixeira?')) return;
+  if (STOCK._excluindo && STOCK._excluindo[key]) { showToast('Exclusão já em andamento — aguarde.','warn'); return; }
+  if (!STOCK._excluindo) Object.defineProperty(STOCK, '_excluindo', { value:{}, enumerable:false, configurable:true });
+  STOCK._excluindo[key] = true;
   var item = STOCK[key];
   delete STOCK[key];
   // Lixeira/lápide — guarda o item para restaurar e impede que versões antigas o "ressuscitem"
-  if(typeof _STOCK_TOMB !== 'undefined'){ _STOCK_TOMB[key] = { ts: Date.now(), item: item }; if(typeof _stockTombSave==='function') _stockTombSave(); }
-  stockSaveData();
+  var _tombPromise = Promise.resolve({ok:true});
+  if(typeof _STOCK_TOMB !== 'undefined'){
+    _STOCK_TOMB[key] = { ts: Date.now(), item: item };
+    if(typeof _stockTombSave==='function') _tombPromise = _stockTombSave();
+  }
   stockRenderItems();
-  showToast('🗑 Material movido para a lixeira — clique em "Lixeira" para restaurar', 'info');
+  Promise.all([_tombPromise, stockSaveData()]).then(function(results){
+    STOCK._excluindo[key] = false;
+    var _tombRes=results[0], _stockRes=results[1];
+    if (_tombRes.ok && _stockRes.ok) {
+      showToast('🗑 Material movido para a lixeira — clique em "Lixeira" para restaurar', 'info');
+      return;
+    }
+    // Reverte — não deixa o item "desaparecido" localmente sem confirmação do servidor
+    if (!_stockRes.ok) { STOCK[key] = item; }
+    if (!_tombRes.ok && typeof _STOCK_TOMB !== 'undefined') { delete _STOCK_TOMB[key]; }
+    stockRenderItems();
+    showToast('⚠️ Não foi possível excluir "'+item.label+'" — tente novamente.','err');
+  });
 }
 
 // ── LIXEIRA DE ESTOQUE ──────────────────────────────────────────────
@@ -14448,20 +14618,35 @@ function stockLixeiraRender(){
 function stockLixeiraRestaurar(key){
   var t=_STOCK_TOMB[key];
   if(!t || typeof t!=='object' || !t.item){ showToast('Item sem dados para restaurar','warn'); return; }
+  var _tombAnterior = t;
   STOCK[key]=t.item;
   delete _STOCK_TOMB[key];
-  _stockTombSave();
-  stockSaveData();
   stockRenderItems();
   stockLixeiraRender();
-  showToast('Material "'+(t.item.label||key)+'" restaurado ao estoque','ok');
+  Promise.all([_stockTombSave(), stockSaveData()]).then(function(results){
+    var _tombRes=results[0], _stockRes=results[1];
+    if (_tombRes.ok && _stockRes.ok) {
+      showToast('Material "'+(t.item.label||key)+'" restaurado ao estoque','ok');
+      return;
+    }
+    if (!_stockRes.ok) { delete STOCK[key]; }
+    if (!_tombRes.ok) { _STOCK_TOMB[key] = _tombAnterior; }
+    stockRenderItems();
+    stockLixeiraRender();
+    showToast('⚠️ Não foi possível restaurar o material — tente novamente.','err');
+  });
 }
 function stockLixeiraExcluirDef(key){
   if(!confirm('Excluir definitivamente? Não será possível restaurar.')) return;
+  var _tombAnterior = _STOCK_TOMB[key];
   delete _STOCK_TOMB[key];
-  _stockTombSave();
   stockLixeiraRender();
-  showToast('Item excluído definitivamente','info');
+  _stockTombSave().then(function(res){
+    if (res.ok) { showToast('Item excluído definitivamente','info'); return; }
+    _STOCK_TOMB[key] = _tombAnterior;
+    stockLixeiraRender();
+    showToast('⚠️ Não foi possível excluir definitivamente — tente novamente.','err');
+  });
 }
 
 var _stockEditKey = null; // chave sendo editada (null = novo)
@@ -14494,24 +14679,34 @@ function stockSalvarNovoItem() {
   var min  = parseInt((document.getElementById('sniMin')||{}).value)||5;
   var max  = parseInt((document.getElementById('sniMax')||{}).value)||50;
   if (!nome.trim()) { showToast('Informe o nome do material', 'warn'); return; }
+  var _msgSucesso, _valorAnterior, _keyUsada, _eraNovo, _tombAnterior;
   if (_stockEditKey) {
     // Editar item existente — preservar a chave
+    _keyUsada = _stockEditKey; _eraNovo = false;
+    _valorAnterior = Object.assign({}, STOCK[_stockEditKey]);
     STOCK[_stockEditKey] = Object.assign(STOCK[_stockEditKey]||{}, { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max });
-    showToast('Material atualizado!', 'ok');
+    _msgSucesso = 'Material atualizado!';
   } else {
     // Novo item — gerar chave única
     var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
     var key = baseKey; var n = 1;
     while (STOCK[key]) { key = baseKey + '_' + (n++); }
+    _keyUsada = key; _eraNovo = true;
     // Se o material está sendo recriado, remover a lápide para não ser excluído de novo
+    _tombAnterior = (typeof _STOCK_TOMB !== 'undefined') ? _STOCK_TOMB[key] : undefined;
     if(typeof _STOCK_TOMB !== 'undefined' && _STOCK_TOMB[key]){ delete _STOCK_TOMB[key]; if(typeof _stockTombSave==='function') _stockTombSave(); }
     STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
-    showToast('Material "' + nome + '" adicionado ao estoque!', 'ok');
+    _msgSucesso = 'Material "' + nome + '" adicionado ao estoque!';
   }
-  stockSaveData();
   stockRenderItems();
   stockCloseNovoItem();
-  syncSidebarBadges();
+  stockSaveData().then(function(res){
+    if (res.ok) { showToast(_msgSucesso, 'ok'); syncSidebarBadges(); return; }
+    if (_eraNovo) { delete STOCK[_keyUsada]; if(_tombAnterior!==undefined && typeof _STOCK_TOMB!=='undefined') _STOCK_TOMB[_keyUsada]=_tombAnterior; }
+    else { STOCK[_keyUsada] = _valorAnterior; }
+    stockRenderItems();
+    showToast('⚠️ Não foi possível salvar o material — tente novamente.','err');
+  });
 }
 
 function stockOpenEntrada(){
@@ -14841,41 +15036,86 @@ function cliEditar(id){
 function cliExcluir(id){
   var c=CLIENTES_DATA.find(function(x){return x.id===id;}); if(!c) return;
   if(!confirm('Mover "'+c.nome+'" para a lixeira?')) return;
+  if(c._excluindo){ showToast('Exclusão já em andamento — aguarde.','warn'); return; }
+  c._excluindo = true;
+  var _clientesAnterior = CLIENTES_DATA;
+  var _lixeiraAnterior = CLIENTES_LIXEIRA;
   c.deletedAt = new Date().toISOString();
-  CLIENTES_LIXEIRA.unshift(c);
-  CLIENTES_DATA=CLIENTES_DATA.filter(function(x){return x.id!==id;});
-  cliSaveLixeira();
-  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+  CLIENTES_LIXEIRA = [c].concat(CLIENTES_LIXEIRA);
+  CLIENTES_DATA = CLIENTES_DATA.filter(function(x){return x.id!==id;});
   renderClientes();
-  showToast('Cliente movido para a Lixeira. Acesse a aba Lixeira para restaurar.','info');
+  Promise.all([cliSaveLixeira(), cliSaveClientes()]).then(function(results){
+    c._excluindo = false;
+    var _lixRes=results[0], _cliRes=results[1];
+    if (_lixRes.ok && _cliRes.ok) {
+      showToast('Cliente movido para a Lixeira. Acesse a aba Lixeira para restaurar.','info');
+      return;
+    }
+    delete c.deletedAt;
+    CLIENTES_DATA = _clientesAnterior;
+    CLIENTES_LIXEIRA = _lixeiraAnterior;
+    renderClientes();
+    showToast('⚠️ Não foi possível mover "'+c.nome+'" para a lixeira — tente novamente.','err');
+  });
 }
 function cliSaveLixeira(){
-  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('clientes_lixeira', CLIENTES_LIXEIRA);
+  if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'sem-conexao'});
+  return _cloudSave('clientes_lixeira', CLIENTES_LIXEIRA);
+}
+function cliSaveClientes(){
+  if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
+  return _cloudSave('clientes', CLIENTES_DATA);
 }
 function cliRestaurar(id){
   var c=CLIENTES_LIXEIRA.find(function(x){return x.id===id;}); if(!c) return;
+  if(c._restaurando){ showToast('Restauração já em andamento — aguarde.','warn'); return; }
+  c._restaurando = true;
+  var _clientesAnterior = CLIENTES_DATA;
+  var _lixeiraAnterior = CLIENTES_LIXEIRA;
+  var _deletedAtAnterior = c.deletedAt;
   delete c.deletedAt;
-  CLIENTES_DATA.unshift(c);
-  CLIENTES_LIXEIRA=CLIENTES_LIXEIRA.filter(function(x){return x.id!==id;});
-  cliSaveLixeira();
-  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+  CLIENTES_DATA = [c].concat(CLIENTES_DATA);
+  CLIENTES_LIXEIRA = CLIENTES_LIXEIRA.filter(function(x){return x.id!==id;});
   renderClientes(); cliRenderLixeira();
-  showToast('Cliente "'+c.nome+'" restaurado!','ok');
+  Promise.all([cliSaveLixeira(), cliSaveClientes()]).then(function(results){
+    c._restaurando = false;
+    var _lixRes=results[0], _cliRes=results[1];
+    if (_lixRes.ok && _cliRes.ok) {
+      showToast('Cliente "'+c.nome+'" restaurado!','ok');
+      return;
+    }
+    c.deletedAt = _deletedAtAnterior;
+    CLIENTES_DATA = _clientesAnterior;
+    CLIENTES_LIXEIRA = _lixeiraAnterior;
+    renderClientes(); cliRenderLixeira();
+    showToast('⚠️ Não foi possível restaurar "'+c.nome+'" — tente novamente.','err');
+  });
 }
 function cliExcluirPermanente(id){
   var c=CLIENTES_LIXEIRA.find(function(x){return x.id===id;}); if(!c) return;
   if(!confirm('Excluir "'+c.nome+'" PERMANENTEMENTE? Esta ação não pode ser desfeita.')) return;
+  var _lixeiraAnterior = CLIENTES_LIXEIRA;
   CLIENTES_LIXEIRA=CLIENTES_LIXEIRA.filter(function(x){return x.id!==id;});
-  cliSaveLixeira();
   cliRenderLixeira();
-  showToast('Cliente excluído permanentemente.','warn');
+  cliSaveLixeira().then(function(res){
+    if (res.ok) { showToast('Cliente excluído permanentemente.','warn'); return; }
+    CLIENTES_LIXEIRA = _lixeiraAnterior;
+    cliRenderLixeira();
+    showToast('⚠️ Não foi possível excluir "'+c.nome+'" — tente novamente.','err');
+  });
 }
 function cliEsvaziarLixeira(){
   if(!CLIENTES_LIXEIRA.length) return;
   if(!confirm('Excluir TODOS os '+CLIENTES_LIXEIRA.length+' clientes da lixeira permanentemente?')) return;
+  var _lixeiraAnterior = CLIENTES_LIXEIRA;
   CLIENTES_LIXEIRA=[];
-  cliSaveLixeira(); cliRenderLixeira();
-  showToast('Lixeira esvaziada.','warn');
+  cliRenderLixeira();
+  cliSaveLixeira().then(function(res){
+    if (res.ok) { showToast('Lixeira esvaziada.','warn'); return; }
+    CLIENTES_LIXEIRA = _lixeiraAnterior;
+    cliRenderLixeira();
+    showToast('⚠️ Não foi possível esvaziar a lixeira — tente novamente.','err');
+  });
 }
 function cliRenderLixeira(){
   var tbody=document.getElementById('cliLixeiraTbody'); if(!tbody) return;
@@ -14925,17 +15165,30 @@ function cliConfirmarNovo() {
   var email=(document.getElementById('cliNovoEmail')||{}).value||'';
   var doc=(document.getElementById('cliNovoDoc')||{}).value||'';
   var contato=(document.getElementById('cliNovoContato')||{}).value||'';
+  var _msgSucesso, _reverter;
   if(_cliEditId){
     var idx=CLIENTES_DATA.findIndex(function(x){return x.id===_cliEditId;});
-    if(idx>=0){Object.assign(CLIENTES_DATA[idx],{nome:nome,tipo:tipo,cidade:cidade,marca:marca,tel:tel,email:email,doc:doc,contato:contato});}
-    renderClientes(); cliCloseNovo(); showToast('Cliente '+nome+' atualizado!','ok');
+    if(idx<0){ showToast('Cliente não encontrado','err'); return; }
+    var _anterior = Object.assign({}, CLIENTES_DATA[idx]);
+    Object.assign(CLIENTES_DATA[idx],{nome:nome,tipo:tipo,cidade:cidade,marca:marca,tel:tel,email:email,doc:doc,contato:contato});
+    _msgSucesso = 'Cliente '+nome+' atualizado!';
+    _reverter = function(){ CLIENTES_DATA[idx] = _anterior; };
   } else {
     var hoje=new Date(), ds=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-    CLIENTES_DATA.unshift({id:'c'+Date.now(),nome:nome,tipo:tipo,cidade:cidade,marca:marca,ultimoPedido:ds,tel:tel,email:email,doc:doc,contato:contato,os:[]});
-    renderClientes(); cliCloseNovo(); showToast('Cliente '+nome+' cadastrado!','ok');
-    ['cliNovoNome','cliNovoCidade','cliNovoTel','cliNovoEmail','cliNovoDoc','cliNovoContato'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+    var _novo = {id:'c'+Date.now(),nome:nome,tipo:tipo,cidade:cidade,marca:marca,ultimoPedido:ds,tel:tel,email:email,doc:doc,contato:contato,os:[]};
+    CLIENTES_DATA.unshift(_novo);
+    _msgSucesso = 'Cliente '+nome+' cadastrado!';
+    _reverter = function(){ var _ix=CLIENTES_DATA.indexOf(_novo); if(_ix>=0) CLIENTES_DATA.splice(_ix,1); };
   }
-  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
+  renderClientes(); cliCloseNovo();
+  ['cliNovoNome','cliNovoCidade','cliNovoTel','cliNovoEmail','cliNovoDoc','cliNovoContato'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  _confirmarAposSalvar(
+    cliSaveClientes(),
+    function(){ _reverter(); renderClientes(); },
+    null,
+    _msgSucesso,
+    'Não foi possível salvar o cliente '+nome
+  );
 }
 
 // ============================================================
