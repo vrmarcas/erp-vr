@@ -1,0 +1,79 @@
+/**
+ * production_safety.js
+ * Trava compartilhada por todos os scripts de migração de usuários para
+ * qualquer execução --apply contra o projeto de produção (erp-vrmarcas).
+ * Não afrouxa a trava anterior — adiciona camadas por cima dela.
+ *
+ * Para --apply --confirm-project=erp-vrmarcas ser aceito, TODAS as
+ * condições abaixo precisam ser verdadeiras simultaneamente:
+ *   1. --allow-production presente:
+ *   2. --authorization=FASE_F_USERS_2026_08_05 presente (token da
+ *      autorização humana desta rodada específica — não é secreto, é só
+ *      um identificador de rastreabilidade, igual um número de ticket);
+ *   3. o estado ATUAL do Auth/Firestore bate exatamente com o esperado
+ *      (validarEstadoEsperado), verificado ANTES de qualquer escrita.
+ *
+ * Qualquer divergência aborta com exit(1) e nenhuma escrita é feita.
+ */
+'use strict';
+
+const { DECISOES_HUMANAS, CONTAS_TECNICAS } = require('./user_decisions');
+
+const AUTORIZACAO_ESPERADA = 'FASE_F_USERS_2026_08_05';
+
+function flagsDeProducaoPresentes(argv) {
+  const temAllowProduction = argv.includes('--allow-production');
+  const authArg = argv.find(a => a.startsWith('--authorization='));
+  const temAuthorization = !!(authArg && authArg.split('=')[1] === AUTORIZACAO_ESPERADA);
+  return { ok: temAllowProduction && temAuthorization, temAllowProduction, temAuthorization };
+}
+
+// ── Núcleo puro: recebe o estado JÁ CONSULTADO (authUsers, existingNormUids)
+// e valida contra as contagens esperadas. Testável sem Firebase. ──────────
+function validarEstadoEsperado(authUsers, existingNormUids) {
+  const authByEmail = new Map(authUsers.filter(u => u.email).map(u => [u.email.toLowerCase(), u]));
+  const tecnicas = new Set(CONTAS_TECNICAS.map(e => e.toLowerCase()));
+
+  const erros = [];
+
+  const ativos = DECISOES_HUMANAS.filter(d => d.acao !== 'aposentar');
+  const aCriar = DECISOES_HUMANAS.filter(d => d.acao === 'criar-conta');
+  const existentes = DECISOES_HUMANAS.filter(d => d.acao === 'normalizar-existente' || d.acao === 'normalizar-com-claim');
+  const aposentados = DECISOES_HUMANAS.filter(d => d.acao === 'aposentar');
+
+  if (ativos.length !== 7) erros.push('esperado 7 usuários ativos na tabela, encontrado ' + ativos.length);
+  if (aCriar.length !== 3) erros.push('esperado 3 contas a criar na tabela, encontrado ' + aCriar.length);
+  if (existentes.length !== 4) erros.push('esperado 4 contas existentes na tabela, encontrado ' + existentes.length);
+  if (aposentados.length !== 1) erros.push('esperado 1 aposentado na tabela, encontrado ' + aposentados.length);
+
+  // As 3 "a criar" DEVEM estar ausentes do Auth agora (senão o passo de
+  // criação seria redundante/perigoso — para nisso e exige nova conciliação).
+  aCriar.forEach(d => {
+    if (authByEmail.has(d.email.toLowerCase())) erros.push('conta "' + d.nome + '" já existe no Auth, mas a tabela espera criar — pare e reconcilie');
+  });
+
+  // As 4 "existentes" DEVEM estar presentes no Auth agora.
+  existentes.forEach(d => {
+    if (!authByEmail.has(d.email.toLowerCase())) erros.push('conta "' + d.nome + '" não encontrada no Auth, mas a tabela espera que já exista');
+  });
+
+  // O aposentado deve existir (não pode aposentar quem não existe).
+  aposentados.forEach(d => {
+    if (!authByEmail.has(d.email.toLowerCase())) erros.push('conta aposentada "' + d.nome + '" não encontrada no Auth');
+  });
+
+  // Nenhuma conta técnica pode coincidir com nenhuma decisão da tabela.
+  DECISOES_HUMANAS.forEach(d => {
+    if (tecnicas.has(d.email.toLowerCase())) erros.push('ERRO GRAVE: conta técnica "' + d.email + '" está associada a uma decisão de role — abortando');
+  });
+
+  // 0 ambiguidade: nenhum e-mail da tabela pode aparecer mais de 1x no Auth.
+  DECISOES_HUMANAS.forEach(d => {
+    const matches = authUsers.filter(u => u.email && u.email.toLowerCase() === d.email.toLowerCase());
+    if (matches.length > 1) erros.push('e-mail "' + d.email + '" corresponde a ' + matches.length + ' contas no Auth — ambíguo, abortando');
+  });
+
+  return { ok: erros.length === 0, erros, resumo: { ativos: ativos.length, aCriar: aCriar.length, existentes: existentes.length, aposentados: aposentados.length } };
+}
+
+module.exports = { flagsDeProducaoPresentes, validarEstadoEsperado, AUTORIZACAO_ESPERADA };

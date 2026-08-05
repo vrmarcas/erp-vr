@@ -69,12 +69,27 @@ function runMockTests() {
 
 async function runReal() {
   if (APPLY && !CONFIRM_PROJECT) { console.error('❌ --apply exige --confirm-project=<projectId>.'); process.exit(1); }
-  if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas') { console.error('❌ Esta rodada NÃO autoriza aposentar contas em produção.'); process.exit(1); }
+  const { flagsDeProducaoPresentes, validarEstadoEsperado } = require('./lib/production_safety');
+  if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas') {
+    const flags = flagsDeProducaoPresentes(process.argv);
+    if (!flags.ok) { console.error('❌ Produção exige --allow-production E --authorization=<token> simultaneamente. Abortando.'); process.exit(1); }
+  }
   const admin = require('firebase-admin');
   const projectId = CONFIRM_PROJECT || require('../.firebaserc').projects.default;
   if (!admin.apps.length) admin.initializeApp({ projectId });
   const auth = admin.auth();
   const db = admin.firestore();
+
+  if (APPLY && CONFIRM_PROJECT === 'erp-vrmarcas' && !REACTIVATE) {
+    let allUsers = [], pt;
+    do { const r = await auth.listUsers(1000, pt); allUsers = allUsers.concat(r.users.map(u=>({uid:u.uid,email:u.email}))); pt = r.pageToken; } while (pt);
+    const norm = await db.collection('erp_vr_usuarios').get();
+    const check = validarEstadoEsperado(allUsers, new Set(norm.docs.map(d=>d.id)));
+    console.log('=== validação de estado esperado (produção) ===');
+    console.log(JSON.stringify(check.resumo));
+    if (!check.ok) { console.error('❌ Estado real diverge do esperado — abortando ANTES de qualquer escrita:'); check.erros.forEach(e => console.error('  -', e)); process.exit(1); }
+    console.log('✅ estado confere com o esperado — prosseguindo.\n');
+  }
 
   let authUser;
   try { authUser = await auth.getUserByEmail(ALVO.email); }
