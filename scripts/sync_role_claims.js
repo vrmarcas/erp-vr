@@ -89,6 +89,9 @@ function runMockTests() {
   assert('10. e-mail antigo já substituído (cortevr@gmail.com) -> recusa, mesmo com doc/claim residuais',
     planejarSincronizacao('cortevr@gmail.com', 'producao', 'producao').motivo, 'conta-substituida-nunca-recebe-role');
 
+  assert('11. Anna Carla: doc e claim já master -> nenhuma ação, tokens NÃO revogados',
+    planejarSincronizacao('nannacarla0@gmail.com', 'master', 'master').acao, 'nenhuma');
+
   console.log('\n================================================================\n RESULTADO: ' + passed + ' passed, ' + failed + ' failed\n================================================================\n');
   if (failed) { console.log('Existem testes falhando.'); process.exit(1); }
   console.log('Todos os testes passaram.');

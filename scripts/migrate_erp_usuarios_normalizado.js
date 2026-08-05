@@ -106,14 +106,15 @@ function runMockTests() {
   })();
 
   (function() {
-    // Cenário real completo: 8 decisões, 3 ainda sem conta Auth, 1 aposentado, 4 normalizáveis.
+    // Cenário real completo: 9 decisões (8 ativas + 1 aposentado), 3 ainda sem conta Auth, 5 normalizáveis (incl. Anna Carla).
     const { DECISOES_HUMANAS } = require('./lib/user_decisions');
     const authSimulado = DECISOES_HUMANAS.filter(d => d.acao !== 'criar-conta' && d.acao !== 'aposentar')
       .map((d,i) => ({ uid: 'u'+i, email: d.email }));
     const r = planejarMigracao(DECISOES_HUMANAS, authSimulado, new Set());
-    assert('7. cenário real: 4 criados (Isabella, Valéria, Gabriel principal, Gabriel secundário)', r.criar.length, 4);
+    assert('7. cenário real: 5 criados (Isabella, Valéria, Gabriel principal, Gabriel secundário, Anna Carla)', r.criar.length, 5);
     assert('8. cenário real: 4 pulados (3 sem conta ainda + 1 aposentado)', r.pular.length, 4);
     assert('9. Isabella grava master, não admin', r.criar.find(c=>c.nome.includes('ISABELLA')).funcao, 'master');
+    assert('9b. Anna Carla grava master', r.criar.find(c=>c.nome==='Anna Carla').funcao, 'master');
   })();
 
   console.log('\n================================================================\n RESULTADO: ' + passed + ' passed, ' + failed + ' failed\n================================================================\n');

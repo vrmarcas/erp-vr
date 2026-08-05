@@ -17,7 +17,7 @@ assert('5. as duas certas -> ok', flagsDeProducaoPresentes(['--allow-production'
 console.log('\n-- validarEstadoEsperado --');
 // monta o estado CORRETO esperado a partir da própria tabela de decisões
 const authCorreto = DECISOES_HUMANAS.filter(d=>d.acao!=='criar-conta').map((d,i)=>({uid:'u'+i, email:d.email}));
-assert('6. estado correto (4 existentes+1 aposentado no Auth, 3 ausentes) -> ok', validarEstadoEsperado(authCorreto, new Set()).ok, true);
+assert('6. estado correto (5 existentes+1 aposentado no Auth, 3 ausentes) -> ok', validarEstadoEsperado(authCorreto, new Set()).ok, true);
 
 const authComContaJaCriada = authCorreto.concat([{uid:'novo', email:'cleiton_1310@hotmail.com'}]);
 assert('7. uma das "a criar" já existe no Auth -> nao ok (evita duplicar)', validarEstadoEsperado(authComContaJaCriada, new Set()).ok, false);
@@ -61,10 +61,20 @@ assert('15. CONTAS_SUBSTITUIDAS tem exatamente 1 entrada hoje (Paulo Victor)', C
 assert('16. cortevr@gmail.com (e-mail antigo já substituído) não está mais em DECISOES_HUMANAS',
   DECISOES_HUMANAS.some(d => d.email.toLowerCase() === CONTAS_SUBSTITUIDAS[0].emailAntigo.toLowerCase()), false);
 
+console.log('\n-- Anna Carla — formalização na tabela (incidente 2026-08-05) --');
+assert('17. exatamente 8 usuários ativos na tabela', DECISOES_HUMANAS.filter(d=>d.acao!=='aposentar').length, 8);
+assert('18. Anna Carla está na tabela como master, normalizar-existente, temporária',
+  DECISOES_HUMANAS.find(d => d.email === 'nannacarla0@gmail.com'),
+  { legacyIndex: null, nome: 'Anna Carla', email: 'nannacarla0@gmail.com', funcaoFinal: 'master', acao: 'normalizar-existente', temporario: true, observacao: 'acesso temporário durante desenvolvimento/entrega do ERP — desligamento formal fica para depois da confirmação humana de conclusão do projeto' });
+const authComAnna = DECISOES_HUMANAS.filter(d=>d.acao!=='criar-conta').map((d,i)=>({uid:'u'+i, email:d.email}));
+assert('19. estado com as 5 "existentes" (incl. Anna) presentes -> ok', validarEstadoEsperado(authComAnna, new Set()).ok, true);
+const authSemAnna = authComAnna.filter(u => u.email !== 'nannacarla0@gmail.com');
+assert('20. Anna ausente do Auth apesar de estar como "existente" na tabela -> nao ok', validarEstadoEsperado(authSemAnna, new Set()).ok, false);
+
 console.log('\n-- usaCredencialADC --');
-assert('17. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
-assert('18. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
-assert('19. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
+assert('21. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
+assert('22. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
+assert('23. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
 
 console.log('\n================\n RESULTADO: '+passed+' passed, '+failed+' failed\n================');
 process.exit(failed?1:0);

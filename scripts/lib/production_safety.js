@@ -85,9 +85,9 @@ function validarEstadoEsperado(authUsers, existingNormUids, exigirACriarAusente)
   const existentes = DECISOES_HUMANAS.filter(d => d.acao === 'normalizar-existente' || d.acao === 'normalizar-com-claim');
   const aposentados = DECISOES_HUMANAS.filter(d => d.acao === 'aposentar');
 
-  if (ativos.length !== 7) erros.push('esperado 7 usuários ativos na tabela, encontrado ' + ativos.length);
+  if (ativos.length !== 8) erros.push('esperado 8 usuários ativos na tabela, encontrado ' + ativos.length);
   if (aCriar.length !== 3) erros.push('esperado 3 contas a criar na tabela, encontrado ' + aCriar.length);
-  if (existentes.length !== 4) erros.push('esperado 4 contas existentes na tabela, encontrado ' + existentes.length);
+  if (existentes.length !== 5) erros.push('esperado 5 contas existentes na tabela, encontrado ' + existentes.length);
   if (aposentados.length !== 1) erros.push('esperado 1 aposentado na tabela, encontrado ' + aposentados.length);
 
   if (exigirACriarAusente === null) {

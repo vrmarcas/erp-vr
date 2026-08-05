@@ -22,6 +22,15 @@
  * mas NÃO é a mesma coisa que um colaborador que efetivamente se desligou —
  * scripts/replace_erp_user.js trata exclusivamente desta lista, nunca de
  * DECISOES_HUMANAS.acao==='aposentar', e vice-versa em scripts/retire_erp_user.js.
+ *
+ * Anna Carla (nannacarla0@gmail.com) — decisão humana registrada em
+ * 2026-08-05: identificada durante a auditoria do incidente de escalação de
+ * privilégio como conta legítima com claim master já atribuído por origem
+ * não comprovada (ver relatório do incidente). Marcada como acesso
+ * TEMPORÁRIO (`temporario: true`) — vale para o período de desenvolvimento e
+ * entrega do ERP; o desligamento formal (ver scripts/lib/PLANO_DESLIGAMENTO
+ * documentado, não automatizado) depende de confirmação humana explícita de
+ * que o projeto foi concluído, nunca de uma data agendada automaticamente.
  */
 'use strict';
 
@@ -33,6 +42,7 @@ const DECISOES_HUMANAS = [
   { legacyIndex: 3, nome: 'Valéria Vieira Borges e Silva',  email: 'vrronaldo@hotmail.com',        funcaoFinal: 'master',    acao: 'normalizar-existente' },
   { legacyIndex: 5, nome: 'Gabriel (conta principal)',      email: 'gabrieelborges@hotmail.com',   funcaoFinal: 'master',    acao: 'normalizar-com-claim' },
   { legacyIndex: 6, nome: 'Gabriel Borges (conta secundária)', email: 'gabrieelborges8@gmail.com', funcaoFinal: 'master',    acao: 'normalizar-existente' },
+  { legacyIndex: null, nome: 'Anna Carla',                  email: 'nannacarla0@gmail.com',        funcaoFinal: 'master',    acao: 'normalizar-existente', temporario: true, observacao: 'acesso temporário durante desenvolvimento/entrega do ERP — desligamento formal fica para depois da confirmação humana de conclusão do projeto' },
   { legacyIndex: 7, nome: 'Gabriel Borges (conta aposentada)', email: 'gabrieelborges8@hotmail.com', funcaoFinal: null,      acao: 'aposentar' },
 ];
 
