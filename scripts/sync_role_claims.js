@@ -12,7 +12,7 @@
  */
 'use strict';
 
-const { DECISOES_HUMANAS, CONTAS_TECNICAS, VALID_ROLES } = require('./lib/user_decisions');
+const { DECISOES_HUMANAS, CONTAS_TECNICAS, VALID_ROLES, isEmailSubstituido } = require('./lib/user_decisions');
 
 const APPLY = process.argv.includes('--apply');
 const MOCK  = process.argv.includes('--mock');
@@ -25,6 +25,9 @@ const CONFIRM_PROJECT = CONFIRM_PROJECT_ARG ? CONFIRM_PROJECT_ARG.split('=')[1] 
 function planejarSincronizacao(email, docFuncaoAtual, claimAtual) {
   if (CONTAS_TECNICAS.map(e=>e.toLowerCase()).includes((email||'').toLowerCase())) {
     return { acao: 'recusar', motivo: 'conta-tecnica-nunca-recebe-role' };
+  }
+  if (isEmailSubstituido(email)) {
+    return { acao: 'recusar', motivo: 'conta-substituida-nunca-recebe-role' };
   }
   const decisao = DECISOES_HUMANAS.find(d => d.email.toLowerCase() === (email||'').toLowerCase());
   if (!decisao) return { acao: 'recusar', motivo: 'conta-sem-perfil-na-tabela-de-decisoes' };
@@ -82,6 +85,9 @@ function runMockTests() {
 
   assert('9. nunca atribui role fora da tabela — Cleiton (comercial) nunca vira master mesmo se doc estiver errado',
     planejarSincronizacao('cleiton_1310@hotmail.com', 'master', 'master').funcaoFinal, 'comercial');
+
+  assert('10. e-mail antigo já substituído (cortevr@gmail.com) -> recusa, mesmo com doc/claim residuais',
+    planejarSincronizacao('cortevr@gmail.com', 'producao', 'producao').motivo, 'conta-substituida-nunca-recebe-role');
 
   console.log('\n================================================================\n RESULTADO: ' + passed + ' passed, ' + failed + ' failed\n================================================================\n');
   if (failed) { console.log('Existem testes falhando.'); process.exit(1); }

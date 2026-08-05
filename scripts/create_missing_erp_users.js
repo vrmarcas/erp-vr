@@ -50,6 +50,15 @@ function runMockTests() {
   assert('1. conta a criar, e-mail livre -> cria', planejarCriacao({acao:'criar-conta', email:'x@y.com', nome:'X', funcaoFinal:'comercial'}, false).acao, 'criar');
   assert('2. conta a criar, e-mail já existe -> aborta (não sobrescreve)', planejarCriacao({acao:'criar-conta', email:'x@y.com'}, true).acao, 'abortar-conciliacao');
   assert('3. decisão que não é criar-conta -> ignora', planejarCriacao({acao:'normalizar-existente'}, false).acao, 'ignorar');
+
+  console.log('\n── correção Paulo Victor: cortevr@gmail.com nunca mais é recriado ──');
+  const { DECISOES_HUMANAS } = require('./lib/user_decisions');
+  assert('4. cortevr@gmail.com não existe mais em DECISOES_HUMANAS (não pode ser recriado)',
+    DECISOES_HUMANAS.some(d => d.email.toLowerCase() === 'cortevr@gmail.com'), false);
+  assert('5. Paulo Victor agora aponta contato@aprovain.com, ainda acao criar-conta',
+    DECISOES_HUMANAS.find(d => d.nome === 'Paulo Victor'),
+    { legacyIndex: 4, nome: 'Paulo Victor', email: 'contato@aprovain.com', funcaoFinal: 'producao', acao: 'criar-conta' });
+
   console.log('\n================================================================\n RESULTADO: ' + passed + ' passed, ' + failed + ' failed\n================================================================\n');
   if (failed) { console.log('Existem testes falhando.'); process.exit(1); }
   console.log('Todos os testes passaram.');
@@ -76,7 +85,10 @@ async function runReal() {
     let allUsers = [], pt;
     do { const r = await auth.listUsers(1000, pt); allUsers = allUsers.concat(r.users.map(u=>({uid:u.uid,email:u.email}))); pt = r.pageToken; } while (pt);
     const norm = await db.collection('erp_vr_usuarios').get();
-    const check = validarEstadoEsperado(allUsers, new Set(norm.docs.map(d=>d.id)), false);
+    // null: esta é a própria etapa que cria as contas "a criar" — algumas
+    // podem já existir (rodada anterior), outras não (é o que estamos
+    // prestes a corrigir). Ver comentário de validarEstadoEsperado().
+    const check = validarEstadoEsperado(allUsers, new Set(norm.docs.map(d=>d.id)), null);
     console.log('=== validação de estado esperado (produção) ===');
     console.log(JSON.stringify(check.resumo));
     if (!check.ok) { console.error('❌ Estado real diverge do esperado — abortando ANTES de qualquer escrita:'); check.erros.forEach(e => console.error('  -', e)); process.exit(1); }

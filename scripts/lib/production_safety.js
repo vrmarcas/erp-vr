@@ -17,7 +17,7 @@
  */
 'use strict';
 
-const { DECISOES_HUMANAS, CONTAS_TECNICAS } = require('./user_decisions');
+const { DECISOES_HUMANAS, CONTAS_TECNICAS, CONTAS_SUBSTITUIDAS } = require('./user_decisions');
 
 const AUTORIZACAO_ESPERADA = 'FASE_F_USERS_2026_08_05';
 
@@ -54,12 +54,23 @@ function initializeAppComModoCorreto(admin, projectId, argv) {
 // ── Núcleo puro: recebe o estado JÁ CONSULTADO (authUsers, existingNormUids)
 // e valida contra as contagens esperadas. Testável sem Firebase. ──────────
 //
-// exigirACriarAusente (default true): SÓ faz sentido para
-// create_missing_erp_users.js — o único script que roda ANTES das 3 contas
-// existirem. Os demais scripts (migrate_erp_usuarios_normalizado.js,
-// sync_role_claims.js, retire_erp_user.js) rodam DEPOIS da criação, quando
-// as 3 contas "a criar" já existem por design — passar false ali evita um
-// falso-positivo que abortaria uma sequência correta e já em andamento.
+// exigirACriarAusente (default true):
+//   true  — as contas "a criar" DEVEM estar ausentes do Auth ainda. Nunca é
+//           realmente usado por nenhum script hoje (ver null abaixo), mas
+//           continua suportado/testado como o estágio conceitual "antes de
+//           qualquer criação".
+//   false — as contas "a criar" DEVEM já estar presentes. Usado por
+//           migrate_erp_usuarios_normalizado.js e sync_role_claims.js, que
+//           operam sobre contas Auth já existentes.
+//   null  — não valida presença NEM ausência das contas "a criar" (cada uma
+//           pode estar em estágio diferente — algumas já criadas, outras
+//           ainda não). Usado por create_missing_erp_users.js, cujo próprio
+//           laço por decisão já trata isso de forma idempotente e segura
+//           (cria se ausente, aborta-conciliação individual se presente
+//           inesperadamente) — um gate binário global aqui bloquearia
+//           incorretamente a criação de uma conta corrigida enquanto outras
+//           já existem de uma rodada anterior (bug real encontrado e
+//           corrigido durante a correção do e-mail de Paulo Victor).
 // A checagem de "existentes devem estar presentes", ambiguidade e conta
 // técnica continuam valendo em TODOS os estágios, sem exceção.
 function validarEstadoEsperado(authUsers, existingNormUids, exigirACriarAusente) {
@@ -79,7 +90,9 @@ function validarEstadoEsperado(authUsers, existingNormUids, exigirACriarAusente)
   if (existentes.length !== 4) erros.push('esperado 4 contas existentes na tabela, encontrado ' + existentes.length);
   if (aposentados.length !== 1) erros.push('esperado 1 aposentado na tabela, encontrado ' + aposentados.length);
 
-  if (exigirACriarAusente) {
+  if (exigirACriarAusente === null) {
+    // Não valida presença nem ausência — ver comentário da função.
+  } else if (exigirACriarAusente) {
     // As 3 "a criar" DEVEM estar ausentes do Auth agora (senão o passo de
     // criação seria redundante/perigoso — para nisso e exige nova conciliação).
     aCriar.forEach(d => {
@@ -114,7 +127,18 @@ function validarEstadoEsperado(authUsers, existingNormUids, exigirACriarAusente)
     if (matches.length > 1) erros.push('e-mail "' + d.email + '" corresponde a ' + matches.length + ' contas no Auth — ambíguo, abortando');
   });
 
-  return { ok: erros.length === 0, erros, resumo: { ativos: ativos.length, aCriar: aCriar.length, existentes: existentes.length, aposentados: aposentados.length } };
+  // Um e-mail antigo já substituído (ver CONTAS_SUBSTITUIDAS) nunca pode
+  // reaparecer como decisão ativa — protege contra reintroduzir por engano
+  // uma conta corrigida (ex.: cortevr@gmail.com após a correção para
+  // contato@aprovain.com).
+  const emailsSubstituidos = new Set(CONTAS_SUBSTITUIDAS.map(s => s.emailAntigo.toLowerCase()));
+  DECISOES_HUMANAS.forEach(d => {
+    if (emailsSubstituidos.has(d.email.toLowerCase())) {
+      erros.push('ERRO GRAVE: e-mail "' + d.email + '" já foi substituído (ver CONTAS_SUBSTITUIDAS) mas ainda aparece como decisão ativa na tabela — abortando');
+    }
+  });
+
+  return { ok: erros.length === 0, erros, resumo: { ativos: ativos.length, aCriar: aCriar.length, existentes: existentes.length, aposentados: aposentados.length, substituidos: CONTAS_SUBSTITUIDAS.length } };
 }
 
 module.exports = { flagsDeProducaoPresentes, validarEstadoEsperado, AUTORIZACAO_ESPERADA, usaCredencialADC, initializeAppComModoCorreto };

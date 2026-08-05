@@ -1,5 +1,5 @@
 const { flagsDeProducaoPresentes, validarEstadoEsperado, usaCredencialADC } = require('./lib/production_safety');
-const { DECISOES_HUMANAS } = require('./lib/user_decisions');
+const { DECISOES_HUMANAS, CONTAS_SUBSTITUIDAS } = require('./lib/user_decisions');
 
 let passed=0, failed=0;
 function assert(desc, got, exp) {
@@ -43,10 +43,28 @@ assert('11. pós-criação: as 3 "a criar" JÁ presentes -> ok (esperado, não �
 const authPosCriacaoFaltandoUma = authTodos7Presentes.filter(u => u.email !== 'cleiton_1310@hotmail.com');
 assert('12. pós-criação: uma das "a criar" AINDA ausente -> nao ok (create_missing ainda não rodou)', validarEstadoEsperado(authPosCriacaoFaltandoUma, new Set(), false).ok, false);
 
+console.log('\n-- validarEstadoEsperado (modo null — estágio misto, correção Paulo Victor) --');
+// Bug real #2, pego durante a correção do e-mail de Paulo Victor: rodar
+// create_missing_erp_users.js quando 2 das 3 "a criar" já existem (rodada
+// anterior) e a 3ª (a conta corrigida) ainda não, não pode abortar — é
+// exatamente o estágio em que este script deve poder criar só a que falta.
+const authMisto = DECISOES_HUMANAS.filter(d => d.acao !== 'criar-conta' && d.acao !== 'aposentar').map((d,i)=>({uid:'u'+i, email:d.email}))
+  .concat(DECISOES_HUMANAS.filter(d=>d.acao==='aposentar').map((d,i)=>({uid:'ap'+i, email:d.email})))
+  .concat([{uid:'c1', email:'cleiton_1310@hotmail.com'}, {uid:'c2', email:'marialuizasstival@gmail.com'}]); // Paulo Victor (contato@aprovain.com) ausente
+assert('13. estágio misto (2 de 3 "a criar" já existem, 1 ainda não) -> ok com modo null', validarEstadoEsperado(authMisto, new Set(), null).ok, true);
+
+const authTodosAusentes = DECISOES_HUMANAS.filter(d => d.acao !== 'criar-conta').map((d,i)=>({uid:'u'+i, email:d.email}));
+assert('14. modo null com as 3 "a criar" totalmente ausentes -> também ok (não valida nem exige nem proíbe)', validarEstadoEsperado(authTodosAusentes, new Set(), null).ok, true);
+
+console.log('\n-- validarEstadoEsperado (defesa: e-mail substituído nunca pode voltar à tabela ativa) --');
+assert('15. CONTAS_SUBSTITUIDAS tem exatamente 1 entrada hoje (Paulo Victor)', CONTAS_SUBSTITUIDAS.length, 1);
+assert('16. cortevr@gmail.com (e-mail antigo já substituído) não está mais em DECISOES_HUMANAS',
+  DECISOES_HUMANAS.some(d => d.email.toLowerCase() === CONTAS_SUBSTITUIDAS[0].emailAntigo.toLowerCase()), false);
+
 console.log('\n-- usaCredencialADC --');
-assert('13. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
-assert('14. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
-assert('15. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
+assert('17. sem a flag -> nao usa ADC', usaCredencialADC([]), false);
+assert('18. --credential-mode=adc -> usa ADC', usaCredencialADC(['--credential-mode=adc']), true);
+assert('19. --credential-mode=outracoisa -> nao usa ADC', usaCredencialADC(['--credential-mode=servico']), false);
 
 console.log('\n================\n RESULTADO: '+passed+' passed, '+failed+' failed\n================');
 process.exit(failed?1:0);
