@@ -14555,27 +14555,18 @@ function stockExcluirItem(key) {
   if (!STOCK._excluindo) Object.defineProperty(STOCK, '_excluindo', { value:{}, enumerable:false, configurable:true });
   STOCK._excluindo[key] = true;
   var item = STOCK[key];
-  delete STOCK[key];
-  // Lixeira/lápide — guarda o item para restaurar e impede que versões antigas o "ressuscitem"
-  var _tombPromise = Promise.resolve({ok:true});
-  if(typeof _STOCK_TOMB !== 'undefined'){
-    _STOCK_TOMB[key] = { ts: Date.now(), item: item };
-    if(typeof _stockTombSave==='function') _tombPromise = _stockTombSave();
-  }
-  stockRenderItems();
-  Promise.all([_tombPromise, stockSaveData()]).then(function(results){
-    STOCK._excluindo[key] = false;
-    var _tombRes=results[0], _stockRes=results[1];
-    if (_tombRes.ok && _stockRes.ok) {
-      showToast('🗑 Material movido para a lixeira — clique em "Lixeira" para restaurar', 'info');
-      return;
-    }
-    // Reverte — não deixa o item "desaparecido" localmente sem confirmação do servidor
-    if (!_stockRes.ok) { STOCK[key] = item; }
-    if (!_tombRes.ok && typeof _STOCK_TOMB !== 'undefined') { delete _STOCK_TOMB[key]; }
+  var label = item.label;
+  var requestId = 'stockdel:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueExcluirItem')({matKey:key, requestId:requestId}).then(function(){
+    delete STOCK[key];
+    if (typeof _STOCK_TOMB !== 'undefined') _STOCK_TOMB[key] = { ts: Date.now(), item: item };
     stockRenderItems();
-    showToast('⚠️ Não foi possível excluir "'+item.label+'" — tente novamente.','err');
-  });
+    showToast('🗑 Material movido para a lixeira — clique em "Lixeira" para restaurar', 'info');
+  }).catch(function(e){
+    if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para excluir item de estoque.', 'err');
+    else showToast('⚠️ Não foi possível excluir "'+label+'" — tente novamente.','err');
+  }).finally(function(){ if (STOCK._excluindo) STOCK._excluindo[key] = false; });
 }
 
 // ── LIXEIRA DE ESTOQUE ──────────────────────────────────────────────
@@ -14609,34 +14600,31 @@ function stockLixeiraRender(){
 function stockLixeiraRestaurar(key){
   var t=_STOCK_TOMB[key];
   if(!t || typeof t!=='object' || !t.item){ showToast('Item sem dados para restaurar','warn'); return; }
-  var _tombAnterior = t;
-  STOCK[key]=t.item;
-  delete _STOCK_TOMB[key];
-  stockRenderItems();
-  stockLixeiraRender();
-  Promise.all([_stockTombSave(), stockSaveData()]).then(function(results){
-    var _tombRes=results[0], _stockRes=results[1];
-    if (_tombRes.ok && _stockRes.ok) {
-      showToast('Material "'+(t.item.label||key)+'" restaurado ao estoque','ok');
-      return;
-    }
-    if (!_stockRes.ok) { delete STOCK[key]; }
-    if (!_tombRes.ok) { _STOCK_TOMB[key] = _tombAnterior; }
+  var label = t.item.label||key;
+  var requestId = 'stockrest:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueRestaurarItem')({matKey:key, requestId:requestId}).then(function(){
+    STOCK[key]=t.item;
+    delete _STOCK_TOMB[key];
     stockRenderItems();
     stockLixeiraRender();
-    showToast('⚠️ Não foi possível restaurar o material — tente novamente.','err');
+    showToast('Material "'+label+'" restaurado ao estoque','ok');
+  }).catch(function(e){
+    if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para restaurar item de estoque.', 'err');
+    else showToast('⚠️ Não foi possível restaurar o material — tente novamente.','err');
   });
 }
 function stockLixeiraExcluirDef(key){
   if(!confirm('Excluir definitivamente? Não será possível restaurar.')) return;
-  var _tombAnterior = _STOCK_TOMB[key];
-  delete _STOCK_TOMB[key];
-  stockLixeiraRender();
-  _stockTombSave().then(function(res){
-    if (res.ok) { showToast('Item excluído definitivamente','info'); return; }
-    _STOCK_TOMB[key] = _tombAnterior;
+  var requestId = 'stockdeldef:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueExcluirItemDefinitivo')({matKey:key, requestId:requestId}).then(function(){
+    delete _STOCK_TOMB[key];
     stockLixeiraRender();
-    showToast('⚠️ Não foi possível excluir definitivamente — tente novamente.','err');
+    showToast('Item excluído definitivamente','info');
+  }).catch(function(e){
+    if (e && e.code==='permission-denied') showToast('Apenas Master pode excluir definitivamente.', 'err');
+    else if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else showToast('⚠️ Não foi possível excluir definitivamente — tente novamente.','err');
   });
 }
 
@@ -14662,6 +14650,7 @@ function stockEditarItem(key) {
   document.getElementById('stockNovoItemOverlay').classList.add('open');
 }
 function stockCloseNovoItem() { document.getElementById('stockNovoItemOverlay').classList.remove('open'); _stockEditKey = null; }
+var _stockSalvarItemSubmitting = false;
 function stockSalvarNovoItem() {
   var nome = (document.getElementById('sniNome')||{}).value||'';
   var cor  = (document.getElementById('sniCor') ||{}).value||'';
@@ -14670,34 +14659,38 @@ function stockSalvarNovoItem() {
   var min  = parseInt((document.getElementById('sniMin')||{}).value)||5;
   var max  = parseInt((document.getElementById('sniMax')||{}).value)||50;
   if (!nome.trim()) { showToast('Informe o nome do material', 'warn'); return; }
-  var _msgSucesso, _valorAnterior, _keyUsada, _eraNovo, _tombAnterior;
-  if (_stockEditKey) {
-    // Editar item existente — preservar a chave
-    _keyUsada = _stockEditKey; _eraNovo = false;
-    _valorAnterior = Object.assign({}, STOCK[_stockEditKey]);
-    STOCK[_stockEditKey] = Object.assign(STOCK[_stockEditKey]||{}, { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max });
-    _msgSucesso = 'Material atualizado!';
-  } else {
-    // Novo item — gerar chave única
+  if (qty < 0) { showToast('Quantidade não pode ser negativa', 'warn'); return; }
+  if (_stockSalvarItemSubmitting) return;
+
+  var _eraNovo = !_stockEditKey;
+  var _keyUsada = _stockEditKey;
+  if (_eraNovo) {
     var baseKey = nome.toLowerCase().replace(/[^a-z0-9]/g,'_').substring(0,12);
     var key = baseKey; var n = 1;
     while (STOCK[key]) { key = baseKey + '_' + (n++); }
-    _keyUsada = key; _eraNovo = true;
-    // Se o material está sendo recriado, remover a lápide para não ser excluído de novo
-    _tombAnterior = (typeof _STOCK_TOMB !== 'undefined') ? _STOCK_TOMB[key] : undefined;
-    if(typeof _STOCK_TOMB !== 'undefined' && _STOCK_TOMB[key]){ delete _STOCK_TOMB[key]; if(typeof _stockTombSave==='function') _stockTombSave(); }
-    STOCK[key] = { label: nome, cor: cor, esp: esp, qty: qty, min: min, max: max };
-    _msgSucesso = 'Material "' + nome + '" adicionado ao estoque!';
+    _keyUsada = key;
   }
-  stockRenderItems();
-  stockCloseNovoItem();
-  stockSaveData().then(function(res){
-    if (res.ok) { showToast(_msgSucesso, 'ok'); syncSidebarBadges(); return; }
-    if (_eraNovo) { delete STOCK[_keyUsada]; if(_tombAnterior!==undefined && typeof _STOCK_TOMB!=='undefined') _STOCK_TOMB[_keyUsada]=_tombAnterior; }
-    else { STOCK[_keyUsada] = _valorAnterior; }
+
+  _stockSalvarItemSubmitting = true;
+  var _sb = document.getElementById('stockNovoItemBtn'); if (_sb) _sb.disabled = true;
+  var requestId = 'stockitem:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueCriarOuEditarItem')({
+    matKey: _keyUsada, label: nome, cor: cor, esp: esp||undefined, qty: qty, min: min, max: max, requestId: requestId
+  }).then(function(res){
+    var r = res.data||{};
+    STOCK[_keyUsada] = Object.assign(STOCK[_keyUsada]||{}, { label: nome, cor: cor, esp: esp, qty: r.qtyDepois, min: min, max: max });
+    if (_eraNovo && typeof _STOCK_TOMB !== 'undefined' && _STOCK_TOMB[_keyUsada]) delete _STOCK_TOMB[_keyUsada];
     stockRenderItems();
-    showToast('⚠️ Não foi possível salvar o material — tente novamente.','err');
-  });
+    stockCloseNovoItem();
+    showToast(_eraNovo ? ('Material "'+nome+'" adicionado ao estoque!') : 'Material atualizado!', 'ok');
+    syncSidebarBadges();
+  }).catch(function(e){
+    var msg = (e&&e.message)||'';
+    if (e && e.code==='invalid-argument') showToast('Dados inválidos: '+msg, 'err');
+    else if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para salvar item de estoque.', 'err');
+    else showToast('⚠️ Não foi possível salvar o material — tente novamente.', 'err');
+  }).finally(function(){ _stockSalvarItemSubmitting = false; if (_sb) _sb.disabled = false; });
 }
 
 function stockOpenEntrada(){
@@ -14705,17 +14698,31 @@ function stockOpenEntrada(){
   document.getElementById('stockEntradaOverlay').classList.add('open');
 }
 function stockCloseEntrada(){document.getElementById('stockEntradaOverlay').classList.remove('open');}
+var _stockEntradaSubmitting = false;
 function stockConfirmarEntrada() {
   var key=(document.getElementById('stEntMat')||{}).value||'';
   var qty=parseInt((document.getElementById('stEntQty')||{}).value)||0;
   var forn=(document.getElementById('stEntForn')||{}).value||'';
   if(!key){showToast('Selecione o material','warn');return;}
   if(!qty||qty<1){showToast('Informe uma quantidade válida','warn');return;}
-  if(!STOCK[key]) STOCK[key]={label:key,qty:0,min:5,max:50};
-  STOCK[key].qty+=qty; stockUpdateDisplay(key); stockSaveData(); stockCloseEntrada();
-  _stockLog('entrada', key, qty, '', forn||'');
-  showToast('Entrada de '+qty+' un de '+STOCK[key].label+(forn?' ('+forn+')':''),'ok');
-  syncSidebarBadges();
+  if(_stockEntradaSubmitting) return;
+  if(!STOCK[key]){showToast('Material não encontrado no estoque — cadastre-o primeiro.','err');return;}
+  _stockEntradaSubmitting = true;
+  var requestId = 'stockent:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueRegistrarEntrada')({matKey:key, qty:qty, obs:forn||'', requestId:requestId}).then(function(res){
+    var r = res.data||{};
+    if(STOCK[key]) STOCK[key].qty = r.qtyDepois;
+    stockUpdateDisplay(key); stockCloseEntrada();
+    showToast('Entrada de '+qty+' un de '+(r.label||STOCK[key].label)+(forn?' ('+forn+')':''),'ok');
+    syncSidebarBadges();
+  }).catch(function(e){
+    var msg = (e&&e.message)||'';
+    if(msg.indexOf('MATERIAL_NAO_ENCONTRADO')>=0) showToast('Material não encontrado no estoque.','err');
+    else if(e&&e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.','err');
+    else if(e&&e.code==='permission-denied') showToast('Sem permissão para registrar entrada.','err');
+    else if(e&&(e.code==='unavailable'||e.code==='internal')) showToast('Serviço indisponível — tente novamente em instantes.','err');
+    else showToast('Não foi possível registrar a entrada.','err');
+  }).finally(function(){ _stockEntradaSubmitting = false; });
 }
 function stockUpdateDisplay(key) {
   var s=STOCK[key]; if(!s) return;
@@ -14726,18 +14733,21 @@ function stockUpdateDisplay(key) {
   if(pEl){var pct=Math.min(100,Math.round(s.qty/s.max*100)); pEl.style.width=pct+'%'; pEl.style.background=col;}
 }
 
+var _stockLimparHistSubmitting = false;
 function stockLimparHistorico() {
   if (!confirm('Limpar todo o histórico de movimentações de estoque? Esta ação não pode ser desfeita.')) return;
-  var _anterior = STOCK_LOG;
-  STOCK_LOG = [];
-  stockRenderHistorico();
-  if (typeof _cloudSave !== 'function' || !_cloudReady) { showToast('Sem conexão — não foi possível limpar o histórico', 'err'); STOCK_LOG = _anterior; stockRenderHistorico(); return; }
-  _cloudSave('erp_stock_log', STOCK_LOG).then(function (res) {
-    if (res.ok) { showToast('Histórico limpo', 'info'); return; }
-    STOCK_LOG = _anterior;
+  if (_stockLimparHistSubmitting) return;
+  _stockLimparHistSubmitting = true;
+  var requestId = 'stockhist:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueLimparHistorico')({requestId:requestId}).then(function(){
+    STOCK_LOG = [];
     stockRenderHistorico();
-    showToast('⚠️ Não foi possível limpar o histórico — tente novamente.', 'err');
-  });
+    showToast('Histórico limpo', 'info');
+  }).catch(function(e){
+    if (e && e.code==='permission-denied') showToast('Apenas Master pode limpar o histórico de estoque.', 'err');
+    else if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else showToast('⚠️ Não foi possível limpar o histórico — tente novamente.', 'err');
+  }).finally(function(){ _stockLimparHistSubmitting = false; });
 }
 function _stockLogSalvar(entry) {
   STOCK_LOG.unshift(entry);
@@ -15307,9 +15317,16 @@ var _lastOsId = null;
     })();
     // ──────────────────────────────────────────────────────────────
 
-    // Baixa estoque
-    var _stockPromise = Promise.resolve({ok:true});
-    if(STOCK.ac3&&STOCK.ac3.qty>0){STOCK.ac3.qty--;stockUpdateDisplay('ac3');_stockPromise=stockSaveData();}
+    // Baixa estoque — via Cloud Function (nunca escrita direta); requestId
+    // estável gerado uma única vez aqui, reconciliação otimista só depois
+    // da confirmação do servidor.
+    var _stockPromise = firebase.functions().httpsCallable('estoqueConsumoAutoOrcamento')({
+      osRef: 'OS #0'+n, requestId: 'autoorc:'+n+':'+Date.now()+':'+Math.random().toString(36).slice(2)
+    }).then(function(res){
+      var r = res.data||{};
+      if (r.aplicado && STOCK.ac3) { STOCK.ac3.qty = r.qtyDepois; stockUpdateDisplay('ac3'); }
+      return {ok:true};
+    }).catch(function(){ return {ok:false}; });
 
     // Cria/atualiza cliente
     var _cliPromise = Promise.resolve({ok:true});
@@ -15773,7 +15790,7 @@ function retalhoRender() {
         +'<td style="color:var(--muted);font-size:10px">'+(r.obs||'—')+'</td>'
         +'<td style="color:var(--muted)">'+r.data+'</td>'
         +'<td style="display:flex;gap:5px;align-items:center">'
-        +'<button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+ri+')">✅ Usar</button>'
+        +'<button style="background:#059669;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 10px;font-weight:700;cursor:pointer;white-space:nowrap" onclick="retalhoConfirmarUso('+ri+')" data-ri="'+ri+'">✅ Usar</button>'
         +'<button style="background:#2563EB;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 9px;font-weight:700;cursor:pointer" title="Editar retalho" onclick="retalhoEditarAbrir('+ri+')">✏️</button>'
         +'<button style="background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:10px;padding:5px 9px;font-weight:700;cursor:pointer" title="Excluir retalho" onclick="retalhoExcluirConfirmar('+ri+')">🗑</button>'
         +'</td></tr>';
@@ -15782,25 +15799,39 @@ function retalhoRender() {
 
 function retalhoAdicionar(mat, dims) {
   if(!dims||!dims.trim()) return;
-  var label=STOCK[mat]?STOCK[mat].label:mat;
-  var hoje=new Date(), d=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  // [S3] Código gerado atomicamente no servidor para evitar duplicatas
-  _retalhoNextCod(mat, function(cod) {
-    RETALHOS.push({mat:mat,label:label,dims:dims.trim(),qty:1,data:d,codigo:cod});
-    retalhoSalvar();
+  var requestId = 'retcriar:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueCriarRetalho')({mat:mat, dims:dims.trim(), requestId:requestId}).then(function(res){
+    var r = res.data||{};
+    RETALHOS.push({mat:mat,label:r.label||(STOCK[mat]?STOCK[mat].label:mat),dims:dims.trim(),qty:1,data:(function(){var h=new Date();return h.getDate().toString().padStart(2,'0')+'/'+(h.getMonth()+1).toString().padStart(2,'0');})(),codigo:r.codigo});
     retalhoRender();
-    _retalhoLog('retalho-entrada', mat, label+' '+dims.trim()+' cm', cod, '');
-    showToast('Retalho '+label+' ('+dims+' cm) — Cód: '+cod+' adicionado!','ok');
+    showToast('Retalho '+(r.label||mat)+' ('+dims+' cm) — Cód: '+r.codigo+' adicionado!','ok');
+  }).catch(function(e){
+    if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para criar retalho.', 'err');
+    else showToast('⚠️ Não foi possível salvar o retalho — tente novamente.', 'err');
   });
 }
 
 function retalhoRemover(idx) {
-  if(!RETALHOS[idx]) return;
-  RETALHOS[idx].qty--;
-  if(RETALHOS[idx].qty<=0) RETALHOS.splice(idx,1);
-  retalhoSalvar();
-  retalhoRender();
-  showToast('Retalho marcado como utilizado','info');
+  var r = RETALHOS[idx]; if(!r) return;
+  if (!r.codigo) { showToast('Este retalho não tem código de identificação — ajuste manualmente no estoque.', 'err'); return; }
+  var requestId = 'retusar:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueConsumirRetalho')({codigo:r.codigo, requestId:requestId}).then(function(res){
+    var rr = res.data||{};
+    var idxAtual = RETALHOS.findIndex(function(x){ return x.codigo===r.codigo; });
+    if (idxAtual>=0) {
+      if (rr.removido) RETALHOS.splice(idxAtual,1);
+      else RETALHOS[idxAtual].qty = rr.qtyDepois;
+    }
+    retalhoRender();
+    showToast('Retalho marcado como utilizado','info');
+  }).catch(function(e){
+    var msg=(e&&e.message)||'';
+    if (msg.indexOf('RETALHO_INDISPONIVEL')>=0) showToast('Retalho indisponível — pode já ter sido usado.', 'warn');
+    else if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para consumir retalho.', 'err');
+    else showToast('⚠️ Não foi possível registrar o uso do retalho — tente novamente.', 'err');
+  });
 }
 
 function retalhoConfirmarUso(idx) {
@@ -15833,28 +15864,42 @@ function retalhoEditarFechar() {
 function retalhoEditarSalvar() {
   var idx=parseInt((document.getElementById('retalhoEditIdx')||{}).value);
   if(isNaN(idx)||!RETALHOS[idx]) { showToast('Erro: retalho não encontrado','err'); return; }
+  var r = RETALHOS[idx];
+  if (!r.codigo) { showToast('Este retalho não tem código de identificação — não pode ser editado por aqui.', 'err'); return; }
   var matKey=(document.getElementById('retalhoEditMat')||{}).value||'';
   var dims=((document.getElementById('retalhoEditDims')||{}).value||'').replace(/x/gi,'×').trim();
   var qty=parseInt((document.getElementById('retalhoEditQty')||{}).value)||1;
   var obs=((document.getElementById('retalhoEditObs')||{}).value||'').trim();
   if(!dims){ showToast('Informe as dimensões','warn'); return; }
-  RETALHOS[idx].mat   = matKey;
-  RETALHOS[idx].label = STOCK[matKey]?STOCK[matKey].label:matKey;
-  RETALHOS[idx].dims  = dims;
-  RETALHOS[idx].qty   = qty;
-  RETALHOS[idx].obs   = obs;
-  retalhoSalvar();
-  retalhoRender();
-  retalhoEditarFechar();
-  showToast('Retalho atualizado','ok');
+  if(qty<0){ showToast('Quantidade não pode ser negativa','warn'); return; }
+  var requestId = 'reteditar:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueEditarRetalho')({codigo:r.codigo, mat:matKey, dims:dims, qty:qty, obs:obs, requestId:requestId}).then(function(){
+    r.mat=matKey; r.label=STOCK[matKey]?STOCK[matKey].label:matKey; r.dims=dims; r.qty=qty; r.obs=obs;
+    retalhoRender();
+    retalhoEditarFechar();
+    showToast('Retalho atualizado','ok');
+  }).catch(function(e){
+    if (e && e.code==='invalid-argument') showToast('Dados inválidos para o retalho.', 'err');
+    else if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para editar retalho.', 'err');
+    else showToast('⚠️ Não foi possível atualizar o retalho — tente novamente.', 'err');
+  });
 }
 function retalhoExcluirConfirmar(idx) {
   var r = RETALHOS[idx]; if(!r) return;
   if(!confirm('Confirma a remoção do retalho "'+r.label+' ('+r.dims+' cm)" do estoque?\nEsta ação não pode ser desfeita.')) return;
-  RETALHOS.splice(idx,1);
-  retalhoSalvar();
-  retalhoRender();
-  showToast('Retalho removido do estoque','info');
+  if (!r.codigo) { showToast('Este retalho não tem código de identificação — ajuste manualmente no estoque.', 'err'); return; }
+  var requestId = 'retexcluir:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueExcluirRetalho')({codigo:r.codigo, requestId:requestId}).then(function(){
+    var idxAtual = RETALHOS.findIndex(function(x){ return x.codigo===r.codigo; });
+    if (idxAtual>=0) RETALHOS.splice(idxAtual,1);
+    retalhoRender();
+    showToast('Retalho removido do estoque','info');
+  }).catch(function(e){
+    if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para excluir retalho.', 'err');
+    else showToast('⚠️ Não foi possível remover o retalho — tente novamente.', 'err');
+  });
 }
 function retalhoToggleForm() {
   var wrap = document.getElementById('retalhoFormWrap');
@@ -15871,22 +15916,23 @@ function retalhoAdicionarManual() {
   var dims = (document.getElementById('retalhoFormDims')||{}).value || '';
   var obs  = (document.getElementById('retalhoFormObs')||{}).value  || '';
   if(!dims.trim()) { showToast('Informe as dimensões do retalho', 'warn'); return; }
-  // Normalize dims: replace lowercase x with ×
   dims = dims.replace(/x/gi, '×').trim();
-  var label = STOCK[mat] ? STOCK[mat].label : mat;
-  var hoje  = new Date();
-  var d     = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
-  // [S3] Código gerado atomicamente no servidor para evitar duplicatas
-  _retalhoNextCod(mat, function(cod) {
-    RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:cod});
-    retalhoSalvar();
+  var requestId = 'retmanual:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  firebase.functions().httpsCallable('estoqueCriarRetalho')({mat:mat, dims:dims, obs:obs, requestId:requestId}).then(function(res){
+    var r = res.data||{};
+    var label = r.label||(STOCK[mat]?STOCK[mat].label:mat);
+    var hoje  = new Date();
+    var d     = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
+    RETALHOS.push({mat:mat, label:label, dims:dims, qty:1, data:d, obs:obs, codigo:r.codigo});
     retalhoRender();
-    _retalhoLog('retalho-entrada', mat, label+' '+dims+' cm', cod, '');
-    // Reset form
     var dEl = document.getElementById('retalhoFormDims'); if(dEl) dEl.value = '';
     var oEl = document.getElementById('retalhoFormObs');  if(oEl) oEl.value = '';
     document.getElementById('retalhoFormWrap').style.display = 'none';
-    showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+cod, 'ok');
+    showToast('Retalho de '+label+' ('+dims+' cm) — Código: '+r.codigo, 'ok');
+  }).catch(function(e){
+    if (e && e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.', 'err');
+    else if (e && e.code==='permission-denied') showToast('Sem permissão para criar retalho.', 'err');
+    else showToast('⚠️ Não foi possível salvar o retalho — tente novamente.', 'err');
   });
 }
 
@@ -15927,18 +15973,21 @@ function stockRegistrarSaidaComRetalho() {
   var rl=parseFloat((document.getElementById('stRetalhoLarg')||{}).value)||0;
   var rc=parseFloat((document.getElementById('stRetalhoComp')||{}).value)||0;
   var matKey=(document.getElementById('stSaidaMat')||{}).value||'ac3';
-  _stockFazSaida();
-  if(rl>0&&rc>0) retalhoAdicionar(matKey, rl+'×'+rc);
-  else showToast('Preencha as dimensões da sobra para guardar o retalho','warn');
+  if(!(rl>0&&rc>0)){ showToast('Preencha as dimensões da sobra para guardar o retalho','warn'); return; }
+  _stockFazSaida().then(function(ok){
+    if(ok) retalhoAdicionar(matKey, rl+'×'+rc);
+  });
 }
+var _stockSaidaSubmitting = false;
 function _stockFazSaida() {
   var matKey=(document.getElementById('stSaidaMat')||{}).value||'ac3';
   var qty=parseFloat((document.getElementById('stSaidaQty')||{}).value)||0;
-  if(!matKey||!qty||qty<=0){showToast('Selecione material e quantidade','warn');return;}
-  if(!STOCK[matKey]){showToast('Material não encontrado','err');return;}
+  if(!matKey||!qty||qty<=0){showToast('Selecione material e quantidade','warn');return Promise.resolve(false);}
+  if(!STOCK[matKey]){showToast('Material não encontrado','err');return Promise.resolve(false);}
+  if(_stockSaidaSubmitting) return Promise.resolve(false);
   var minQty=qty<1?1:Math.round(qty);
-  if(STOCK[matKey].qty<minQty){showToast('Estoque insuficiente ('+STOCK[matKey].qty+' disponíveis)','warn');return;}
-  STOCK[matKey].qty-=minQty; stockUpdateDisplay(matKey); stockSaveData();
+  if(STOCK[matKey].qty<minQty){showToast('Estoque insuficiente ('+STOCK[matKey].qty+' disponíveis)','warn');return Promise.resolve(false);}
+
   var _osVinc=Array.from(document.querySelectorAll('#stSaidaOSChips .os-chip-sel')).map(function(el){return el.dataset.osid;}).join(', ');
   var _obsVinc=(document.getElementById('stSaidaObs')||{}).value||'';
   var _larg=(document.getElementById('stSaidaLarg')||{}).value;
@@ -15947,11 +15996,26 @@ function _stockFazSaida() {
   var _rl=(document.getElementById('stRetalhoLarg')||{}).value;
   var _rc=(document.getElementById('stRetalhoComp')||{}).value;
   if(_larg&&_comp){ var _dimObs=_larg+'×'+_comp+'cm'; if(_qtdP&&parseInt(_qtdP)>1)_dimObs+=' ×'+_qtdP+'pçs'; if(_rl&&_rc)_dimObs+=' | retalho:'+_rl+'×'+_rc+'cm'; _obsVinc=_dimObs+(_obsVinc?' · '+_obsVinc:''); }
-  _stockLog('saida', matKey, qty, _osVinc, _obsVinc);
-  ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp','stRetalhoCodPreview'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
-  var _qpEl=document.getElementById('stSaidaQtdPecas');if(_qpEl)_qpEl.value='1';
-  showToast('Saída de '+qty.toFixed(2)+' chapa(s) de '+STOCK[matKey].label+' registrada','ok');
-  syncSidebarBadges();
+
+  _stockSaidaSubmitting = true;
+  var requestId = 'stocksaida:'+Date.now()+':'+Math.random().toString(36).slice(2);
+  return firebase.functions().httpsCallable('estoqueRegistrarSaidaManual')({matKey:matKey, qty:qty, obs:_obsVinc, osRef:_osVinc, requestId:requestId}).then(function(res){
+    var r = res.data||{};
+    if(STOCK[matKey]) STOCK[matKey].qty = r.qtyDepois;
+    stockUpdateDisplay(matKey);
+    ['stSaidaQty','stSaidaLarg','stSaidaComp','stSaidaObs','stRetalhoLarg','stRetalhoComp','stRetalhoCodPreview'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+    var _qpEl=document.getElementById('stSaidaQtdPecas');if(_qpEl)_qpEl.value='1';
+    showToast('Saída de '+qty.toFixed(2)+' chapa(s) de '+(r.label||STOCK[matKey].label)+' registrada','ok');
+    syncSidebarBadges();
+    return true;
+  }).catch(function(e){
+    var msg=(e&&e.message)||'';
+    if(msg.indexOf('ESTOQUE_INSUFICIENTE')>=0) showToast('Estoque insuficiente para esta saída.','warn');
+    else if(e&&e.code==='unauthenticated') showToast('Sessão expirada — faça login novamente.','err');
+    else if(e&&e.code==='permission-denied') showToast('Sem permissão para registrar saída de estoque.','err');
+    else showToast('⚠️ Não foi possível registrar a saída — tente novamente.','err');
+    return false;
+  }).finally(function(){ _stockSaidaSubmitting = false; });
 }
 // ── Popula chips de OS na Baixa de Estoque ────────────────────────────────
 function stockPopulateOsChips() {
