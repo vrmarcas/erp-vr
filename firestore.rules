@@ -91,12 +91,11 @@ service cloud.firestore {
     // bloqueador arquitetural no relatório de homologação, não fingida aqui.
     match /erp_vr/{docId} {
 
-      // Login / identificação de perfil — qualquer usuário autenticado pode
-      // ler a lista de usuários do ERP para resolver seu próprio perfil.
-      // Sem isso, qualquer perfil novo (ex.: financeiro) trava no login
-      // antes mesmo de saber que não tem acesso a mais nada (achado real).
-      // Não expõe dado de cliente — só nome/e-mail/função de funcionários.
-      allow read: if isAuthenticated() && docId == 'erp_usuarios';
+      // Array legado de usuários — NÃO é mais a fonte do login (o frontend
+      // atual lê exclusivamente erp_vr_usuarios/{uid}). Leitura restrita a
+      // Master, só para auditoria/histórico do período de transição; nunca
+      // mais uma dependência de acesso para Comercial/Produção/Financeiro.
+      allow read: if isMaster() && docId == 'erp_usuarios';
       allow write: if isMaster() && docId == 'erp_usuarios';
 
       // Segredos administrativos — só Master pode ler E escrever.
