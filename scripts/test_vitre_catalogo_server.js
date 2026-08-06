@@ -215,6 +215,38 @@ console.log('\n=== FASE G — Catálogo Vitre: Cloud Functions reais ===\n');
     }, 'permission-denied');
   });
 
+  await test('21. Conta sem cadastro em erp_vr_usuarios (claim válida, sem doc) → negada (B11)', async function () {
+    await assertThrows(function () {
+      return vitreCriarOuEditarProduto.run({ sku: 'x', nome: 'x', requestId: reqId() }, ctx(UID.semPerfil, 'producao'));
+    }, 'permission-denied');
+  });
+
+  await test('22. Criação concorrente do MESMO SKU novo (duas gravações simultâneas, sem requestId compartilhado) → transação serializa, resultado final consistente, nenhum dado corrompido (B11 — concorrência)', async function () {
+    var sku = 'E2E_FASEF_VITRE_TEST22';
+    var r = await Promise.all([
+      vitreCriarOuEditarProduto.run({ sku: sku, nome: 'Versão A', custo: 10, precoVenda: 20, status: 'ativo', requestId: reqId() }, ctx(UID.master, 'master')),
+      vitreCriarOuEditarProduto.run({ sku: sku, nome: 'Versão B', custo: 15, precoVenda: 30, status: 'ativo', requestId: reqId() }, ctx(UID.master, 'master')),
+    ]);
+    assertTruthy(r[0].ok && r[1].ok, 'ambas as chamadas devem completar sem erro — a transação do Firestore serializa, não corrompe');
+    var doc = await db.collection('vitre_produtos').doc(sku).get();
+    assertTruthy(doc.exists, 'produto deve existir após as duas gravações concorrentes');
+    var nome = doc.data().nome;
+    assertTruthy(nome === 'Versão A' || nome === 'Versão B', 'o documento final deve ser exatamente uma das duas versões (last-write-wins da transação), nunca um mix corrompido — obtido: ' + nome);
+    await limparProduto(sku);
+  });
+
+  await test('23. Orçamento com item de SKU inexistente entre itens válidos → bloqueia o orçamento inteiro (fail-closed, não cria parcialmente) — B11', async function () {
+    var skuValido = 'E2E_FASEF_VITRE_TEST23';
+    var clienteUnico = 'E2E_FASEF_VITRE_TEST23_CLIENTE_' + Date.now();
+    await vitreCriarOuEditarProduto.run({ sku: skuValido, nome: 'x', custo: 5, precoVenda: 10, status: 'ativo', requestId: reqId() }, ctx(UID.master, 'master'));
+    await assertThrows(function () {
+      return vitreCriarOrcamento.run({ clienteNome: clienteUnico, itens: [{ sku: skuValido, qtd: 1 }, { sku: 'SKU_QUE_NAO_EXISTE_JAMAIS', qtd: 1 }], requestId: reqId() }, ctx(UID.comercial, 'comercial'));
+    }, 'PRODUTO_NAO_ENCONTRADO');
+    var criados = await db.collection('vitre_orcamentos').where('clienteNome', '==', clienteUnico).get();
+    assertEq(criados.size, 0, 'nenhum orçamento parcial deve ter sido criado quando um item falha a validação');
+    await limparProduto(skuValido);
+  });
+
   console.log('\n=== resultado ===');
   console.log('passed=' + passed + ' failed=' + failed);
   process.exitCode = failed ? 1 : 0;
