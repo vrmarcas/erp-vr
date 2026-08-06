@@ -324,7 +324,16 @@ interface ItemOrcamentoVitre {
   acrescimo?: AcrescimoInput | null; acrescimoCentavos?: number; itemTotalCentavos?: number;
 }
 interface ParcelaPagamento { valorCentavos: number; vencimento: string | null; }
-interface PagamentoPlano { tipo: "integral" | "entrada_saldo" | "parcelado"; parcelas: ParcelaPagamento[]; }
+interface PagamentoPlano { tipo: "integral" | "entrada_saldo" | "parcelado" | "futuro"; formaPagamento: string; parcelas: ParcelaPagamento[]; }
+interface AprovacaoCliente {
+  status: "aprovado" | "recusado" | "aguardando_resposta" | "solicitado_ajuste" | "cancelado";
+  em: number; porUid: string; canal: string | null; observacao: string | null;
+  versao: number; totalCentavos: number | null;
+}
+// Mesmos literais já usados no fluxo VR (modal "Confirmar Pagamento",
+// index.html) — reaproveitados aqui para nunca inventar um vocabulário
+// novo de forma de pagamento.
+const FORMAS_PAGAMENTO_VALIDAS = ["PIX", "Cartão de Crédito", "Cartão de Débito", "Dinheiro", "Boleto", "Transferência", "Outras"];
 
 function toCentavos(v: unknown): number {
   const n = Number(v);
@@ -359,23 +368,86 @@ function validarEAplicarAcrescimo(baseCentavos: number, input: unknown, callerRo
  * em centavos, sem nenhuma parcela negativa ou zerada. */
 function validarPagamento(totalCentavos: number, input: unknown): PagamentoPlano | null {
   if (!input) return null;
-  const p = input as { tipo?: string; parcelas?: Array<{ valor: unknown; vencimento?: unknown }> };
-  if (!["integral", "entrada_saldo", "parcelado"].includes(String(p.tipo))) {
+  const p = input as { tipo?: string; formaPagamento?: string; parcelas?: Array<{ valor: unknown; vencimento?: unknown }> };
+  if (!["integral", "entrada_saldo", "parcelado", "futuro"].includes(String(p.tipo))) {
     throw new functions.https.HttpsError("invalid-argument", "Tipo de pagamento inválido.");
   }
+  const formaPagamento = FORMAS_PAGAMENTO_VALIDAS.includes(String(p.formaPagamento)) ? String(p.formaPagamento) : "PIX";
   const parcelasInput = Array.isArray(p.parcelas) ? p.parcelas : [];
   if (!parcelasInput.length) throw new functions.https.HttpsError("invalid-argument", "Plano de pagamento sem parcelas.");
   let soma = 0;
   const parcelas: ParcelaPagamento[] = parcelasInput.map((pc) => {
     const valorCentavos = toCentavos(pc.valor);
     if (valorCentavos <= 0) throw new functions.https.HttpsError("invalid-argument", "Parcela com valor inválido.");
+    if (valorCentavos > totalCentavos) throw new functions.https.HttpsError("invalid-argument", "ENTRADA_MAIOR_QUE_TOTAL");
     soma += valorCentavos;
     return { valorCentavos, vencimento: pc.vencimento ? String(pc.vencimento) : null };
   });
   if (soma !== totalCentavos) {
     throw new functions.https.HttpsError("invalid-argument", `SOMA_PARCELAS_DIFERENTE_DO_TOTAL:${soma}:${totalCentavos}`);
   }
-  return { tipo: p.tipo as PagamentoPlano["tipo"], parcelas };
+  return { tipo: p.tipo as PagamentoPlano["tipo"], formaPagamento, parcelas };
+}
+
+/** Resolve itens (snapshot + centavos) e totais de um orçamento Vitre.
+ * Compartilhado por vitreCriarOrcamento e por vitreAtualizarOrcamento
+ * (edição de itens permitida só enquanto status==='rascunho') — nunca
+ * duplicar esta lógica de cálculo em dois lugares. */
+async function resolverItensEValores(
+  db: FirebaseFirestore.Firestore,
+  itensInput: unknown[],
+  acrescimoGlobalInput: unknown,
+  descontoPct: number,
+  frete: number,
+  callerRole: string
+): Promise<{
+  itensSnapshot: ItemOrcamentoVitre[]; subtotalProdutosCentavos: number; acrescimosItensCentavos: number;
+  acrescimoGlobalCentavos: number; acrescimoGlobalSnapshot: AcrescimoInput | null;
+  valorDescontoCentavos: number; freteCentavos: number; totalCentavos: number;
+}> {
+  const itensSnapshot: ItemOrcamentoVitre[] = [];
+  let subtotalProdutosCentavos = 0;
+  let acrescimosItensCentavos = 0;
+  for (const itRaw of itensInput) {
+    const it = itRaw as { sku?: string; qtd?: unknown; adicionais?: Array<{ nome?: string }>; acrescimo?: unknown };
+    const sku = String(it.sku || "").trim();
+    const qtd = Number(it.qtd);
+    if (!sku) throw new functions.https.HttpsError("invalid-argument", "item sem sku.");
+    if (!Number.isInteger(qtd) || qtd < 1) throw new functions.https.HttpsError("invalid-argument", "QTD_INVALIDA:" + sku);
+    const prodSnap = await db.collection(COL_PRODUTOS).doc(sku).get();
+    if (!prodSnap.exists) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_NAO_ENCONTRADO:" + sku);
+    const prod = prodSnap.data() as VitreProduto;
+    if (prod.status !== "ativo") throw new functions.https.HttpsError("failed-precondition", "PRODUTO_INATIVO:" + sku);
+    if (calcularNivelCompletude(prod) < 1) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_ABAIXO_DO_NIVEL_MINIMO:" + sku);
+    const adicionaisInput: Array<{ nome?: string }> = Array.isArray(it.adicionais) ? it.adicionais : [];
+    // SNAPSHOT — nunca uma referência viva ao produto. Só aceita adicionais
+    // que estejam de fato pré-cadastrados no produto (nunca confia no preço vindo do cliente).
+    const adicionais: Array<{ nome: string; preco: number }> = adicionaisInput
+      .map((a) => (prod.personalizacoes || []).find((p) => p.nome === a?.nome))
+      .filter((p): p is { nome: string; preco: number } => !!p);
+    const precoSnapshotCentavos = toCentavos(prod.precoVenda);
+    const adicionaisCentavosUnit = adicionais.reduce((s: number, a) => s + toCentavos(a.preco), 0);
+    const itemBaseCentavos = (precoSnapshotCentavos + adicionaisCentavosUnit) * qtd;
+    const { centavos: itemAcrescimoCentavos, snapshot: acrescimoSnapshot } = validarEAplicarAcrescimo(itemBaseCentavos, it.acrescimo, callerRole);
+    subtotalProdutosCentavos += itemBaseCentavos;
+    acrescimosItensCentavos += itemAcrescimoCentavos;
+    itensSnapshot.push({
+      sku, nomeSnapshot: prod.nome, precoSnapshot: prod.precoVenda || 0, precoSnapshotCentavos, qtd,
+      adicionais, acrescimo: acrescimoSnapshot, acrescimoCentavos: itemAcrescimoCentavos,
+      itemTotalCentavos: itemBaseCentavos + itemAcrescimoCentavos,
+    });
+  }
+
+  // Ordem oficial do cálculo (FASE 7 do hotfix): produtos → acréscimos de
+  // item → acréscimo global → desconto → frete → total.
+  const { centavos: acrescimoGlobalCentavos, snapshot: acrescimoGlobalSnapshot } =
+    validarEAplicarAcrescimo(subtotalProdutosCentavos + acrescimosItensCentavos, acrescimoGlobalInput, callerRole);
+  const baseCentavos = subtotalProdutosCentavos + acrescimosItensCentavos + acrescimoGlobalCentavos;
+  const valorDescontoCentavos = Math.round(baseCentavos * descontoPct / 100);
+  const freteCentavos = toCentavos(frete);
+  const totalCentavos = baseCentavos - valorDescontoCentavos + freteCentavos;
+  if (totalCentavos < 0) throw new functions.https.HttpsError("invalid-argument", "TOTAL_NEGATIVO");
+  return { itensSnapshot, subtotalProdutosCentavos, acrescimosItensCentavos, acrescimoGlobalCentavos, acrescimoGlobalSnapshot, valorDescontoCentavos, freteCentavos, totalCentavos };
 }
 
 export const vitreCriarOrcamento = functions.https.onCall(async (data, context) => {
@@ -411,51 +483,14 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
   }
 
   const db = admin.firestore();
-  const itensSnapshot: ItemOrcamentoVitre[] = [];
-  let subtotalProdutosCentavos = 0;
-  let acrescimosItensCentavos = 0;
-  for (const it of itensInput) {
-    const sku = String(it.sku || "").trim();
-    const qtd = Number(it.qtd);
-    if (!sku) throw new functions.https.HttpsError("invalid-argument", "item sem sku.");
-    if (!Number.isInteger(qtd) || qtd < 1) throw new functions.https.HttpsError("invalid-argument", "QTD_INVALIDA:" + sku);
-    const prodSnap = await db.collection(COL_PRODUTOS).doc(sku).get();
-    if (!prodSnap.exists) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_NAO_ENCONTRADO:" + sku);
-    const prod = prodSnap.data() as VitreProduto;
-    if (prod.status !== "ativo") throw new functions.https.HttpsError("failed-precondition", "PRODUTO_INATIVO:" + sku);
-    if (calcularNivelCompletude(prod) < 1) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_ABAIXO_DO_NIVEL_MINIMO:" + sku);
-    const adicionaisInput: Array<{ nome?: string }> = Array.isArray(it.adicionais) ? it.adicionais : [];
-    // SNAPSHOT — nunca uma referência viva ao produto. Só aceita adicionais
-    // que estejam de fato pré-cadastrados no produto (nunca confia no preço vindo do cliente).
-    const adicionais: Array<{ nome: string; preco: number }> = adicionaisInput
-      .map((a) => (prod.personalizacoes || []).find((p) => p.nome === a?.nome))
-      .filter((p): p is { nome: string; preco: number } => !!p);
-    const precoSnapshotCentavos = toCentavos(prod.precoVenda);
-    const adicionaisCentavosUnit = adicionais.reduce((s: number, a) => s + toCentavos(a.preco), 0);
-    const itemBaseCentavos = (precoSnapshotCentavos + adicionaisCentavosUnit) * qtd;
-    const { centavos: itemAcrescimoCentavos, snapshot: acrescimoSnapshot } = validarEAplicarAcrescimo(itemBaseCentavos, it.acrescimo, caller.role);
-    subtotalProdutosCentavos += itemBaseCentavos;
-    acrescimosItensCentavos += itemAcrescimoCentavos;
-    itensSnapshot.push({
-      sku, nomeSnapshot: prod.nome, precoSnapshot: prod.precoVenda || 0, precoSnapshotCentavos, qtd,
-      adicionais, acrescimo: acrescimoSnapshot, acrescimoCentavos: itemAcrescimoCentavos,
-      itemTotalCentavos: itemBaseCentavos + itemAcrescimoCentavos,
-    });
-  }
-
-  // Ordem oficial do cálculo (FASE 7 do hotfix): produtos → acréscimos de
-  // item → acréscimo global → desconto → frete → total.
-  const { centavos: acrescimoGlobalCentavos, snapshot: acrescimoGlobalSnapshot } =
-    validarEAplicarAcrescimo(subtotalProdutosCentavos + acrescimosItensCentavos, data?.acrescimoGlobal, caller.role);
-  const baseCentavos = subtotalProdutosCentavos + acrescimosItensCentavos + acrescimoGlobalCentavos;
-  const valorDescontoCentavos = Math.round(baseCentavos * descontoPct / 100);
-  const freteCentavos = toCentavos(frete);
-  const totalCentavos = baseCentavos - valorDescontoCentavos + freteCentavos;
-  if (totalCentavos < 0) throw new functions.https.HttpsError("invalid-argument", "TOTAL_NEGATIVO");
+  const {
+    itensSnapshot, subtotalProdutosCentavos, acrescimosItensCentavos, acrescimoGlobalCentavos,
+    acrescimoGlobalSnapshot, valorDescontoCentavos, freteCentavos, totalCentavos,
+  } = await resolverItensEValores(db, itensInput, data?.acrescimoGlobal, descontoPct, frete, caller.role);
 
   const docRef = db.collection(COL_ORC).doc();
   const registro = {
-    id: docRef.id, requestId, tipo: "catalogo_vitre", marca: "vitre", status: "rascunho",
+    id: docRef.id, requestId, tipo: "catalogo_vitre", marca: "vitre", status: "rascunho", versao: 1,
     clienteNome, clienteTipo, clienteDocumento, clienteEmail, clienteTel, clienteCidade, clienteExistenteId,
     observacoes, origemAtendimento,
     itens: itensSnapshot,
@@ -490,22 +525,273 @@ export const vitreAtualizarOrcamento = functions.https.onCall(async (data, conte
   if (!id) throw new functions.https.HttpsError("invalid-argument", "id obrigatório.");
   const db = admin.firestore();
   const ref = db.collection(COL_ORC).doc(id);
+
+  // Editar itens/valores só é permitido com o orçamento ainda em rascunho —
+  // resolve os produtos ANTES da transação (mesma janela de risco já aceita
+  // em vitreCriarOrcamento: o status é revalidado dentro da transação, o
+  // preço do produto não — se mudar entre a leitura e o commit, o próximo
+  // "salvar" já traz o preço atualizado).
+  let itensCalc: Awaited<ReturnType<typeof resolverItensEValores>> | null = null;
+  if (Array.isArray(data?.itens)) {
+    const descontoPctNovo = Number(data?.descontoPct) || 0;
+    const freteNovo = Number(data?.frete) || 0;
+    if (!data.itens.length) throw new functions.https.HttpsError("invalid-argument", "Ao menos um item é obrigatório.");
+    if (descontoPctNovo < 0 || descontoPctNovo > 100) throw new functions.https.HttpsError("invalid-argument", "descontoPct inválido.");
+    if (freteNovo < 0) throw new functions.https.HttpsError("invalid-argument", "Frete não pode ser negativo.");
+    itensCalc = await resolverItensEValores(db, data.itens, data?.acrescimoGlobal, descontoPctNovo, freteNovo, caller.role);
+  }
+
   const resultado = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
     const cur = snap.data()!;
     if (["convertido", "cancelado"].includes(cur.status)) throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + cur.status);
     const update: Record<string, unknown> = { atualizadoEm: Date.now() };
-    if (status && ["rascunho", "enviado", "cancelado"].includes(status)) update.status = status;
-    if (data?.pagamento !== undefined) {
-      update.pagamento = validarPagamento(Number(cur.totalCentavos) || 0, data.pagamento);
+
+    if (itensCalc) {
+      if (cur.status !== "rascunho") throw new functions.https.HttpsError("failed-precondition", "SO_PODE_EDITAR_ITENS_EM_RASCUNHO:" + cur.status);
+      Object.assign(update, {
+        itens: itensCalc.itensSnapshot, descontoPct: Number(data.descontoPct) || 0,
+        acrescimoGlobal: itensCalc.acrescimoGlobalSnapshot,
+        subtotal: centavosParaReais(itensCalc.subtotalProdutosCentavos),
+        acrescimosItensTotal: centavosParaReais(itensCalc.acrescimosItensCentavos),
+        acrescimoGlobalTotal: centavosParaReais(itensCalc.acrescimoGlobalCentavos),
+        valorDesconto: centavosParaReais(itensCalc.valorDescontoCentavos),
+        frete: centavosParaReais(itensCalc.freteCentavos),
+        total: centavosParaReais(itensCalc.totalCentavos),
+        subtotalCentavos: itensCalc.subtotalProdutosCentavos, acrescimosItensCentavos: itensCalc.acrescimosItensCentavos,
+        acrescimoGlobalCentavos: itensCalc.acrescimoGlobalCentavos, valorDescontoCentavos: itensCalc.valorDescontoCentavos,
+        freteCentavos: itensCalc.freteCentavos, totalCentavos: itensCalc.totalCentavos,
+        // Total pode ter mudado — um plano de pagamento anterior fica inválido, precisa ser refeito.
+        pagamento: null,
+      });
     }
-    if (data?.marcarEnviado === true) { update.enviadoEm = Date.now(); update.enviadoPorUid = caller.uid; if (!status) update.status = "enviado"; }
+
+    if (status && ["rascunho", "enviado", "cancelado"].includes(status)) update.status = status;
+
+    if (data?.pagamento !== undefined) {
+      const totalParaValidar = (update.totalCentavos as number | undefined) ?? (Number(cur.totalCentavos) || 0);
+      update.pagamento = validarPagamento(totalParaValidar, data.pagamento);
+    }
+
+    if (data?.marcarEnviado === true) {
+      if (cur.status !== "rascunho") throw new functions.https.HttpsError("failed-precondition", "SO_PODE_ENVIAR_A_PARTIR_DE_RASCUNHO:" + cur.status);
+      const versaoAtual = Number(cur.versao) || 1;
+      const totalNoEnvio = (update.totalCentavos as number | undefined) ?? (Number(cur.totalCentavos) || 0);
+      const itensNoEnvio = (update.itens as unknown[] | undefined) ?? cur.itens;
+      update.status = "enviado";
+      update.enviadoEm = Date.now();
+      update.enviadoPorUid = caller.uid;
+      update.enviadoCanal = data?.canal ? String(data.canal) : null;
+      update.enviadoVersao = versaoAtual;
+      update.enviadoTotalCentavos = totalNoEnvio;
+      update.enviadoItensSnapshot = itensNoEnvio;
+      update.aprovacao = null; // uma nova rodada de envio zera qualquer aprovação/recusa anterior
+    }
+
     tx.set(ref, update, { merge: true });
     return { statusFinal: update.status || cur.status };
   });
   await writeAudit("orcamento_atualizado", caller.uid, caller.role, { id, ...resultado });
   return { ok: true, ...resultado };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// vitreIniciarNovaVersao — única forma de voltar a editar um orçamento que
+// já foi enviado/aprovado/recusado: arquiva a versão atual (itens, totais,
+// status, envio, aprovação) numa subcoleção e volta o orçamento para
+// "rascunho" com a versão incrementada. Bloqueado depois que a venda já
+// foi confirmada — a partir daí, uma correção precisa de um novo
+// orçamento, nunca reescrever um já vendido.
+// ══════════════════════════════════════════════════════════════════════════
+const STATUS_BLOQUEIA_NOVA_VERSAO = ["venda_confirmada", "pagamento_pendente", "pagamento_parcial", "pago", "convertido", "cancelado"];
+
+export const vitreIniciarNovaVersao = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "revisar orçamento de catálogo Vitre");
+  const id = String(data?.id || "").trim();
+  const requestId = String(data?.requestId || "");
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "id obrigatório.");
+  if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+
+  const idemKey = `nova_versao:${requestId}`;
+  if (!(await acquireIdem(idemKey))) return { ok: true, jaProcessado: true };
+
+  const db = admin.firestore();
+  const ref = db.collection(COL_ORC).doc(id);
+  const resultado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+    const cur = snap.data()!;
+    if (STATUS_BLOQUEIA_NOVA_VERSAO.includes(cur.status)) {
+      throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_JA_AVANCOU_DEMAIS:" + cur.status);
+    }
+    const versaoAtual = Number(cur.versao) || 1;
+    const versaoRef = ref.collection("versoes").doc(String(versaoAtual));
+    tx.set(versaoRef, {
+      versao: versaoAtual, status: cur.status, itens: cur.itens ?? [], descontoPct: cur.descontoPct ?? 0,
+      acrescimoGlobal: cur.acrescimoGlobal ?? null, subtotalCentavos: cur.subtotalCentavos ?? null,
+      acrescimosItensCentavos: cur.acrescimosItensCentavos ?? null, acrescimoGlobalCentavos: cur.acrescimoGlobalCentavos ?? null,
+      valorDescontoCentavos: cur.valorDescontoCentavos ?? null, freteCentavos: cur.freteCentavos ?? null,
+      totalCentavos: cur.totalCentavos ?? null, enviadoEm: cur.enviadoEm ?? null, aprovacao: cur.aprovacao ?? null,
+      arquivadoEm: Date.now(), arquivadoPorUid: caller.uid,
+    });
+    tx.set(ref, {
+      versao: versaoAtual + 1, status: "rascunho", aprovacao: null, pagamento: null,
+      atualizadoEm: Date.now(),
+    }, { merge: true });
+    return { versaoNova: versaoAtual + 1 };
+  });
+  await writeAudit("orcamento_nova_versao", caller.uid, caller.role, { id, ...resultado });
+  return { ok: true, jaProcessado: false, ...resultado };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// vitreRegistrarAprovacaoCliente — registra a resposta do cliente a um
+// orçamento já enviado. "aprovado" avança o orçamento para o estado
+// "aprovado" (pré-requisito de vitreConfirmarVenda); as demais respostas
+// só ficam registradas em `aprovacao`, sem tirar o orçamento de "enviado"
+// (uma "recusa" ou "ajuste solicitado" não é um estado final — o
+// vendedor pode revisar via vitreIniciarNovaVersao e reenviar).
+// ══════════════════════════════════════════════════════════════════════════
+const STATUS_APROVACAO_VALIDOS = ["aprovado", "recusado", "aguardando_resposta", "solicitado_ajuste", "cancelado"] as const;
+
+export const vitreRegistrarAprovacaoCliente = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "registrar aprovação do cliente");
+  const id = String(data?.id || "").trim();
+  const statusAprovacao = String(data?.status || "");
+  const canal = data?.canal ? String(data.canal) : null;
+  const observacao = data?.observacao ? String(data.observacao) : null;
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "id obrigatório.");
+  if (!(STATUS_APROVACAO_VALIDOS as readonly string[]).includes(statusAprovacao)) {
+    throw new functions.https.HttpsError("invalid-argument", "STATUS_APROVACAO_INVALIDO:" + statusAprovacao);
+  }
+
+  const db = admin.firestore();
+  const ref = db.collection(COL_ORC).doc(id);
+  const resultado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+    const cur = snap.data()!;
+    if (cur.status !== "enviado") throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_NAO_ENVIADO:" + cur.status);
+    const aprovacao: AprovacaoCliente = {
+      status: statusAprovacao as AprovacaoCliente["status"], em: Date.now(), porUid: caller.uid, canal, observacao,
+      versao: Number(cur.versao) || 1, totalCentavos: cur.totalCentavos ?? null,
+    };
+    const update: Record<string, unknown> = { aprovacao, atualizadoEm: Date.now() };
+    if (statusAprovacao === "aprovado") update.status = "aprovado";
+    else if (statusAprovacao === "cancelado") update.status = "cancelado";
+    // recusado / aguardando_resposta / solicitado_ajuste: fica registrado em `aprovacao`, status continua "enviado".
+    tx.set(ref, update, { merge: true });
+    return { statusFinal: update.status || cur.status, aprovacaoStatus: statusAprovacao };
+  });
+  await writeAudit("orcamento_aprovacao_registrada", caller.uid, caller.role, { id, ...resultado });
+  return { ok: true, ...resultado };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// vitreConfirmarVenda — fecha a venda de um orçamento já aprovado pelo
+// cliente, com pagamento já registrado. Cria o(s) lançamento(s) de Contas
+// a Receber no MESMO documento agregado `erp_vr/fin_cr` já usado pelo
+// fluxo VR (campo `marca` já suporta 'vitre' — um único painel Financeiro
+// para as duas marcas, nunca um modelo paralelo). A chave de negócio real
+// é o próprio `status` do orçamento, revalidado dentro da transação: uma
+// segunda chamada, mesmo com requestId diferente, nunca confirma a venda
+// duas vezes. Não emite cobrança real — só registra a condição já
+// combinada (mesma regra do hotfix anterior).
+// ══════════════════════════════════════════════════════════════════════════
+const STATUS_VENDA_JA_CONFIRMADA = ["venda_confirmada", "pagamento_pendente", "pagamento_parcial", "pago", "convertido"];
+
+export const vitreConfirmarVenda = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "confirmar venda de catálogo Vitre");
+  const id = String(data?.id || "").trim();
+  const requestId = String(data?.requestId || "");
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "id obrigatório.");
+  if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+
+  const idemKey = `venda_confirmar:${requestId}`;
+  const acquired = await acquireIdem(idemKey);
+  const db = admin.firestore();
+  const ref = db.collection(COL_ORC).doc(id);
+  if (!acquired) {
+    const snap0 = await ref.get();
+    if (snap0.exists && STATUS_VENDA_JA_CONFIRMADA.includes(snap0.data()!.status) && snap0.data()!.requestIdVenda === requestId) {
+      return { ok: true, jaProcessado: true, id };
+    }
+  }
+
+  const crRef = db.collection("erp_vr").doc("fin_cr");
+
+  const resultado = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+    const cur = snap.data()!;
+    // Chave de negócio: o status por si só impede uma segunda confirmação,
+    // mesmo vinda de um requestId diferente (dois cliques distintos, duas
+    // abas, ou um retry com novo requestId nunca criam uma segunda venda).
+    if (STATUS_VENDA_JA_CONFIRMADA.includes(cur.status) || cur.status === "cancelado") {
+      throw new functions.https.HttpsError("failed-precondition", "VENDA_JA_CONFIRMADA:" + cur.status);
+    }
+    if (cur.status !== "aprovado") throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_NAO_APROVADO:" + cur.status);
+    const aprovacao = cur.aprovacao as AprovacaoCliente | undefined;
+    if (!aprovacao || aprovacao.status !== "aprovado" || aprovacao.versao !== (Number(cur.versao) || 1)) {
+      throw new functions.https.HttpsError("failed-precondition", "VERSAO_APROVADA_DIVERGENTE");
+    }
+    const pagamento = cur.pagamento as PagamentoPlano | null;
+    if (!pagamento) throw new functions.https.HttpsError("failed-precondition", "PAGAMENTO_NAO_REGISTRADO");
+    const totalCentavos = Number(cur.totalCentavos) || 0;
+    const somaParcelas = pagamento.parcelas.reduce((s, p) => s + p.valorCentavos, 0);
+    if (somaParcelas !== totalCentavos) throw new functions.https.HttpsError("failed-precondition", "SOMA_PARCELAS_DIFERENTE_DO_TOTAL");
+
+    // Entrada = valor já tratado como recebido no momento da confirmação
+    // (integral ou a 1ª parcela de entrada+saldo). Parcelado/futuro: nada é
+    // tratado como recebido agora — este hotfix não emite cobrança real.
+    let entradaCentavos = 0;
+    if (pagamento.tipo === "integral") entradaCentavos = totalCentavos;
+    else if (pagamento.tipo === "entrada_saldo") entradaCentavos = pagamento.parcelas[0]?.valorCentavos || 0;
+    if (entradaCentavos > totalCentavos) throw new functions.https.HttpsError("failed-precondition", "ENTRADA_MAIOR_QUE_TOTAL");
+    const saldoCentavos = totalCentavos - entradaCentavos;
+    if (saldoCentavos < 0) throw new functions.https.HttpsError("failed-precondition", "SALDO_NEGATIVO");
+    const statusPagamento = saldoCentavos <= 0 ? "pago" : entradaCentavos > 0 ? "pagamento_parcial" : "pagamento_pendente";
+
+    const crSnap = await tx.get(crRef);
+    const crAtual: Array<Record<string, unknown>> = crSnap.exists && typeof crSnap.data()?.data === "string"
+      ? JSON.parse(crSnap.data()!.data as string) : [];
+    const dataStr = new Date().toLocaleDateString("pt-BR"); // mesmo formato DD/MM/YYYY do fluxo VR
+    const novosCR: Array<Record<string, unknown>> = [];
+    if (entradaCentavos > 0) {
+      novosCR.push({
+        id: `cr${Date.now()}a`, cliente: cur.clienteNome, descricao: `Entrada — Orçamento Vitre ${id.slice(0, 8)}`,
+        valor: centavosParaReais(entradaCentavos), vencimento: dataStr, status: "recebido", marca: "vitre",
+        metodo: pagamento.formaPagamento, osRef: "", dataCriacao: dataStr, dataRecebimento: dataStr,
+        origem: "vitre_venda_confirmada", orcamentoId: id,
+      });
+    }
+    if (saldoCentavos > 0) {
+      novosCR.push({
+        id: `cr${Date.now()}b`, cliente: cur.clienteNome, descricao: `Saldo — Orçamento Vitre ${id.slice(0, 8)}`,
+        valor: centavosParaReais(saldoCentavos),
+        vencimento: pagamento.parcelas[pagamento.parcelas.length - 1]?.vencimento || dataStr,
+        status: "pendente", marca: "vitre", metodo: pagamento.formaPagamento, osRef: "",
+        dataCriacao: dataStr, dataRecebimento: null, origem: "vitre_venda_confirmada", orcamentoId: id,
+      });
+    }
+    if (novosCR.length) tx.set(crRef, { data: JSON.stringify(crAtual.concat(novosCR)), ts: Date.now() });
+
+    tx.set(ref, {
+      status: "venda_confirmada", statusPagamento,
+      vendaConfirmadaEm: Date.now(), vendaConfirmadaPorUid: caller.uid, requestIdVenda: requestId,
+      entradaCentavos, saldoCentavos, crIds: novosCR.map((c) => c.id as string),
+      atualizadoEm: Date.now(),
+    }, { merge: true });
+
+    return { statusFinal: "venda_confirmada", statusPagamento, entradaCentavos, saldoCentavos, totalCentavos };
+  });
+
+  await writeAudit("venda_confirmada", caller.uid, caller.role, { id, ...resultado });
+  return { ok: true, jaProcessado: false, id, ...resultado };
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -575,7 +861,12 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
   if (!orcSnap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
   const orc = orcSnap.data()!;
   if (orc.tipo !== "catalogo_vitre") throw new functions.https.HttpsError("failed-precondition", "NAO_E_ORCAMENTO_VITRE");
-  if (["convertido", "cancelado"].includes(orc.status)) throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + orc.status);
+  if (orc.status === "convertido") throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:convertido");
+  if (orc.status === "cancelado") throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:cancelado");
+  // Só gera OS depois que a venda foi confirmada (vitreConfirmarVenda) — nunca antes.
+  if (!STATUS_VENDA_JA_CONFIRMADA.includes(orc.status)) {
+    throw new functions.https.HttpsError("failed-precondition", "VENDA_NAO_CONFIRMADA:" + orc.status);
+  }
 
   // ── 1. Classificar cada item lendo o estado ATUAL do produto ────────────
   const itens: ItemClassificado[] = [];
@@ -614,14 +905,23 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
   // ── 2. Todos os itens automatizáveis — baixa de estoque + criação da OS,
   //       tudo dentro de UMA transação (nunca baixa parcial se a OS falhar) ──
   const osRef = db.collection(COL_OS).doc();
+  const crRef = db.collection("erp_vr").doc("fin_cr");
   await db.runTransaction(async (tx) => {
     // Rele o orçamento dentro da transação — protege contra conversão
     // concorrente (duas abas/dois cliques) do MESMO orçamento.
     const orcTx = await tx.get(orcRef);
     if (!orcTx.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
-    if (["convertido", "cancelado"].includes(orcTx.data()!.status)) {
-      throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + orcTx.data()!.status);
+    const statusTx = orcTx.data()!.status;
+    if (statusTx === "convertido" || statusTx === "cancelado") {
+      throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + statusTx);
     }
+    if (!STATUS_VENDA_JA_CONFIRMADA.includes(statusTx)) {
+      throw new functions.https.HttpsError("failed-precondition", "VENDA_NAO_CONFIRMADA:" + statusTx);
+    }
+    // Firestore exige TODAS as leituras da transação antes de qualquer
+    // escrita — lê o fin_cr aqui em cima, mesmo que só seja usado depois.
+    const crIds: string[] = Array.isArray(orcTx.data()!.crIds) ? orcTx.data()!.crIds : [];
+    const crSnap = crIds.length ? await tx.get(crRef) : null;
     // Rele e baixa o estoque pronto de cada item pronta_entrega dentro da
     // MESMA transação (protege contra duas conversões concorrentes
     // consumindo o mesmo estoque pronto além do disponível).
@@ -647,9 +947,20 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
       pagamento: orc.pagamento ?? null,
       subtotalCentavos: orc.subtotalCentavos ?? null, totalCentavos: orc.totalCentavos ?? null,
       valorDescontoCentavos: orc.valorDescontoCentavos ?? null, freteCentavos: orc.freteCentavos ?? null,
+      entradaCentavos: orc.entradaCentavos ?? null, saldoCentavos: orc.saldoCentavos ?? null,
+      statusPagamento: orc.statusPagamento ?? null,
       criadoPorUid: caller.uid, criadoPorRole: caller.role, criadoEm: Date.now(),
     });
     tx.set(orcRef, { status: "convertido", osId: osRef.id, atualizadoEm: Date.now() }, { merge: true });
+
+    // Traça de volta a OS nos lançamentos de Contas a Receber já criados em
+    // vitreConfirmarVenda (mesmo padrão do fluxo VR: osRef preenchido depois
+    // que a OS existe).
+    if (crSnap && crSnap.exists && typeof crSnap.data()?.data === "string") {
+      const crAtual: Array<Record<string, unknown>> = JSON.parse(crSnap.data()!.data as string);
+      const crAtualizado = crAtual.map((c) => (crIds.includes(c.id as string) ? { ...c, osRef: `VTOS-${osRef.id.slice(0, 6)}` } : c));
+      tx.set(crRef, { data: JSON.stringify(crAtualizado), ts: Date.now() });
+    }
   });
 
   await writeAudit("conversao_os_realizada", caller.uid, caller.role, { orcamentoId, osId: osRef.id, itens });

@@ -20,6 +20,7 @@ const db = admin.firestore();
 const { UID, ctx } = require('./e2e_shared_fixtures');
 const {
   vitreCriarOuEditarProduto, vitreCriarOrcamento, vitreConverterOrcamentoParaOS,
+  vitreAtualizarOrcamento, vitreRegistrarAprovacaoCliente, vitreConfirmarVenda,
 } = require('../functions/lib/vitre.js');
 
 let passed = 0, failed = 0;
@@ -43,12 +44,25 @@ async function limparProduto(sku) { await db.collection('vitre_produtos').doc(sk
 var FICHA_COMPLETA = { componentes: [{ nome: 'Tampo', material: 'Acrílico Cristal', espessuraMm: 10, qtd: 1 }], tempoCorteMin: 12, tempoMontagemMin: 20 };
 var ARQUIVO_CORTE = { caminho: 'cortes/E2E_OS_teste.dxf', versao: 1, checksum: 'abc123' };
 
+// Complemento (2026-08-06): vitreConverterOrcamentoParaOS agora exige a
+// venda já confirmada (vitreConfirmarVenda) antes de gerar OS — todo
+// orçamento de teste desta suíte passa pelo pipeline completo
+// enviado→aprovado→pagamento→venda_confirmada antes de tentar converter.
+async function confirmarVendaCompleta(orcId) {
+  await vitreAtualizarOrcamento.run({ id: orcId, marcarEnviado: true }, ctx(UID.comercial, 'comercial'));
+  await vitreRegistrarAprovacaoCliente.run({ id: orcId, status: 'aprovado' }, ctx(UID.comercial, 'comercial'));
+  var orc = (await db.collection('vitre_orcamentos').doc(orcId).get()).data();
+  await vitreAtualizarOrcamento.run({ id: orcId, pagamento: { tipo: 'integral', formaPagamento: 'PIX', parcelas: [{ valor: orc.total }] } }, ctx(UID.comercial, 'comercial'));
+  await vitreConfirmarVenda.run({ id: orcId, requestId: reqId() }, ctx(UID.comercial, 'comercial'));
+}
 async function criarOrcamento(sku, qtd) {
   var r = await vitreCriarOrcamento.run({ clienteNome: 'E2E OS Cliente ' + Date.now(), itens: [{ sku: sku, qtd: qtd }], requestId: reqId() }, ctx(UID.comercial, 'comercial'));
+  await confirmarVendaCompleta(r.id);
   return r.id;
 }
 async function criarOrcamentoMultiItem(itens) {
   var r = await vitreCriarOrcamento.run({ clienteNome: 'E2E OS Multi ' + Date.now(), itens: itens, requestId: reqId() }, ctx(UID.comercial, 'comercial'));
+  await confirmarVendaCompleta(r.id);
   return r.id;
 }
 
@@ -92,7 +106,7 @@ console.log('\n=== FASE G — Parte 9: conversão de orçamento Vitre em OS ===\
     assertEq(r.itens[0].tipo, 'ficha_incompleta');
     assertTruthy(r.itens[0].motivoBloqueio, 'deve explicar o motivo, nunca inventar dado');
     var orc = (await db.collection('vitre_orcamentos').doc(orcId).get()).data();
-    assertEq(orc.status, 'rascunho', 'orçamento não deve mudar de status quando bloqueado');
+    assertEq(orc.status, 'venda_confirmada', 'venda já confirmada antes da tentativa — bloqueio na conversão não deve alterar esse status');
     assertEq(orc.osId, undefined, 'nenhuma OS deve ser vinculada');
     await limparProduto(sku);
   });
