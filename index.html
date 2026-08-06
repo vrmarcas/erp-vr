@@ -3350,40 +3350,86 @@ function _authFirebaseError(code){
         <!-- STEP 3: ENVIO AO CLIENTE -->
         <div id="vopg3" class="vitre-orc-pg" style="display:none">
           <div class="card">
-            <div class="card-h"><div class="card-h-left">📤 Revisão e Envio ao Cliente</div></div>
+            <div class="card-h"><div class="card-h-left">📤 Revisão e Envio ao Cliente</div><span id="vitreOrcStatusBadge" style="margin-left:auto;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px"></span></div>
             <div id="vitreOrcRevisao" style="display:flex;flex-direction:column;gap:14px"></div>
             <div style="display:flex;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px">
               <button class="topbar-btn ghost" onclick="vitreOrcStep(2)">← Itens</button>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="topbar-btn" style="background:#1E7A86;border:none;color:#fff" onclick="vitreOrcSalvar()">💾 Salvar Rascunho</button>
+                <button class="topbar-btn" id="vitreOrcBtnSalvar" style="background:#1E7A86;border:none;color:#fff" onclick="vitreOrcSalvar()">💾 Salvar Rascunho</button>
                 <button class="topbar-btn ghost ready-hide" id="vitreOrcBtnPdf" style="display:none" onclick="vitreOrcGerarPDF()">🖨️ PDF Vitre</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnWA" style="display:none;background:#25D366;color:#fff" onclick="vitreOrcEnviarWhatsApp()">📱 Preview WhatsApp</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnMarcarEnviado" style="display:none" onclick="vitreOrcMarcarEnviado()">✓ Marcar como enviado</button>
+                <button class="topbar-btn ghost" id="vitreOrcBtnNovaVersao" style="display:none;border-color:#D97706;color:#D97706" onclick="vitreOrcNovaVersao()">✎ Revisar / Nova versão</button>
+                <button class="topbar-btn" id="vitreOrcBtnIrPagamento" style="display:none;background:#059669;border:none;color:#fff" onclick="vitreOrcStep(4)">Avançar → Pagamento</button>
               </div>
             </div>
+          </div>
+
+          <!-- Resposta do cliente — só depois de "Marcar como enviado" -->
+          <div class="card" id="vitreOrcAprovacaoCard" style="display:none;margin-top:14px">
+            <div class="card-h"><div class="card-h-left">🗣️ Resposta do Cliente</div></div>
+            <div id="vitreOrcAprovacaoAtual" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+            <div class="fg-row">
+              <div class="fg"><label>Resposta</label>
+                <select id="vitreOrcAprovacaoStatus">
+                  <option value="aprovado">✅ Aprovado</option>
+                  <option value="recusado">❌ Recusado</option>
+                  <option value="aguardando_resposta">⏳ Aguardando resposta</option>
+                  <option value="solicitado_ajuste">✏️ Solicitado ajuste</option>
+                  <option value="cancelado">🚫 Cancelado</option>
+                </select>
+              </div>
+              <div class="fg"><label>Canal</label>
+                <select id="vitreOrcAprovacaoCanal">
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="telefone">Telefone</option>
+                  <option value="presencial">Presencial</option>
+                  <option value="email">E-mail</option>
+                </select>
+              </div>
+            </div>
+            <div class="fg"><label>Observação</label><input type="text" id="vitreOrcAprovacaoObs" placeholder="Opcional"></div>
+            <button class="topbar-btn" style="background:#1E7A86;border:none;color:#fff;margin-top:6px" onclick="vitreOrcRegistrarAprovacao()">Registrar resposta</button>
           </div>
         </div>
 
         <!-- STEP 4: PAGAMENTO → OS -->
         <div id="vopg4" class="vitre-orc-pg" style="display:none">
-          <div class="card" style="max-width:560px;margin:0 auto">
-            <div class="card-h"><div class="card-h-left">💳 Condição de Pagamento → OS</div></div>
-            <div id="vitreOrcPgtoAviso" style="font-size:11px;color:var(--muted);margin-bottom:10px">Salve o rascunho na etapa de Envio antes de configurar o pagamento.</div>
+          <div class="card" style="max-width:620px;margin:0 auto">
+            <div class="card-h"><div class="card-h-left">💳 Pagamento → Confirmação da Venda → OS</div></div>
+            <div id="vitreOrcPgtoAviso" style="font-size:11px;color:var(--muted);margin-bottom:10px">Salve o rascunho e aguarde a aprovação do cliente antes de configurar o pagamento.</div>
             <div id="vitreOrcPgtoBox" style="display:none;flex-direction:column;gap:10px">
-              <div class="fg">
-                <label>Condição</label>
-                <select id="vitreOrcPgtoTipo" onchange="vitreOrcPgtoRenderParcelas()">
-                  <option value="integral">Integral (à vista)</option>
-                  <option value="entrada_saldo">Entrada + Saldo</option>
-                  <option value="parcelado">Parcelado</option>
-                </select>
+              <div class="fg-row">
+                <div class="fg"><label>Condição</label>
+                  <select id="vitreOrcPgtoTipo" onchange="vitreOrcPgtoRenderParcelas()">
+                    <option value="integral">Integral (à vista)</option>
+                    <option value="entrada_saldo">Entrada + Saldo</option>
+                    <option value="parcelado">Parcelado</option>
+                    <option value="futuro">Pagamento futuro (nada agora)</option>
+                  </select>
+                </div>
+                <div class="fg"><label>Forma de pagamento</label>
+                  <select id="vitreOrcPgtoForma">
+                    <option>PIX</option><option>Cartão de Crédito</option><option>Cartão de Débito</option>
+                    <option>Dinheiro</option><option>Boleto</option><option>Transferência</option><option>Outras</option>
+                  </select>
+                </div>
               </div>
               <div id="vitreOrcPgtoParcelasWrap" style="display:flex;flex-direction:column;gap:8px"></div>
               <div id="vitreOrcPgtoSomaAviso" style="font-size:11px"></div>
               <button class="topbar-btn" style="background:#1E7A86;border:none;color:#fff" onclick="vitreOrcSalvarPagamento()">💾 Salvar condição de pagamento</button>
-              <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-                <button class="topbar-btn" style="width:100%;background:#059669;justify-content:center" id="vitreOrcBtnConverterOS" onclick="vitreOrcConverterEmOSAtual()">🏭 Converter em Ordem de Serviço</button>
+
+              <div id="vitreOrcVendaBox" style="display:none;border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
+                <div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:8px">Resumo final antes de confirmar</div>
+                <div id="vitreOrcVendaResumo" style="background:var(--bg);border-radius:10px;padding:12px 16px;font-size:12px;line-height:1.8;margin-bottom:10px"></div>
+                <button class="topbar-btn" id="vitreOrcBtnConfirmarVenda" style="width:100%;background:#7A2F73;border:none;color:#fff;justify-content:center;font-weight:800" onclick="vitreOrcConfirmarVendaAtual()">✓ Confirmar Venda</button>
+              </div>
+
+              <div id="vitreOrcOSBox" style="display:none;border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
+                <div id="vitreOrcVendaConfirmadaInfo" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+                <button class="topbar-btn" style="width:100%;background:#059669;justify-content:center" id="vitreOrcBtnConverterOS" onclick="vitreOrcConverterEmOSAtual()">🏭 Gerar Ordem de Serviço</button>
                 <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha incompleta).</div>
+                <div id="vitreOrcOSCriada" style="display:none;margin-top:10px;background:#ECFDF5;border:1.5px solid #6EE7B7;border-radius:9px;padding:10px 12px;font-size:12px;color:#065F46"></div>
               </div>
             </div>
             <div style="display:flex;justify-content:flex-start;margin-top:14px">
@@ -16998,8 +17044,15 @@ var VITRE_ORC_BUSCA_LISTA = [];
 var VITRE_ORC_BUSCA_IDX = -1;
 var _vitreOrcUnsub = null;
 var _vitreOrcCliMatches = [];
-var VITRE_ORC_STATUS_LABEL = { rascunho: 'Rascunho', enviado: 'Enviado', convertido: 'Convertido', cancelado: 'Cancelado' };
-var VITRE_ORC_STATUS_COLOR = { rascunho: '#6B7280', enviado: '#3B82F6', convertido: '#16A34A', cancelado: '#DC2626' };
+var VITRE_ORC_STATUS_LABEL = {
+  rascunho: 'Rascunho', enviado: 'Enviado', aprovado: 'Aprovado', recusado: 'Recusado', convertido: 'OS gerada', cancelado: 'Cancelado',
+  venda_confirmada: 'Venda confirmada', pagamento_pendente: 'Pag. pendente', pagamento_parcial: 'Pag. parcial', pago: 'Pago',
+  aguardando_resposta: 'Aguardando resposta', solicitado_ajuste: 'Solicitado ajuste',
+};
+var VITRE_ORC_STATUS_COLOR = {
+  rascunho: '#6B7280', enviado: '#3B82F6', aprovado: '#059669', recusado: '#DC2626', convertido: '#16A34A', cancelado: '#DC2626',
+  venda_confirmada: '#7A2F73', pagamento_pendente: '#D97706', pagamento_parcial: '#D97706', pago: '#059669',
+};
 
 // ── Dinheiro em centavos inteiros (espelho de exibição — o servidor é
 // sempre a fonte de verdade, cada Function recalcula do zero). ──
@@ -17071,6 +17124,7 @@ function vitreOrcResetEstado() {
   VITRE_ORC_SELECIONADO_ADICIONAIS = [];
   VITRE_ORC_ATUAL_ID = null;
   VITRE_ORC_ULTIMO = null;
+  VITRE_ORC_ATUAL = null;
   VITRE_ORC_CLIENTE_EXISTENTE_ID = null;
   ['vitreOrcClienteNome', 'vitreOrcClienteDoc', 'vitreOrcClienteTel', 'vitreOrcClienteEmail', 'vitreOrcClienteCidade', 'vitreOrcObservacoes', 'vitreOrcBusca'].forEach(function (id) {
     var el = document.getElementById(id); if (el) el.value = '';
@@ -17084,6 +17138,10 @@ function vitreOrcResetEstado() {
   var pdf = document.getElementById('vitreOrcBtnPdf'); if (pdf) pdf.style.display = 'none';
   var wa = document.getElementById('vitreOrcBtnWA'); if (wa) wa.style.display = 'none';
   var me = document.getElementById('vitreOrcBtnMarcarEnviado'); if (me) me.style.display = 'none';
+  var nv = document.getElementById('vitreOrcBtnNovaVersao'); if (nv) nv.style.display = 'none';
+  var ip = document.getElementById('vitreOrcBtnIrPagamento'); if (ip) ip.style.display = 'none';
+  var badge = document.getElementById('vitreOrcStatusBadge'); if (badge) badge.style.display = 'none';
+  var apc = document.getElementById('vitreOrcAprovacaoCard'); if (apc) apc.style.display = 'none';
   vitreOrcRenderItens();
 }
 function vitreOrcDocLabelUpdate() {
@@ -17343,6 +17401,19 @@ function vitreOrcRecalcular() {
 }
 
 // ── STEP 3: ENVIO AO CLIENTE — revisão completa antes de salvar/enviar. ──
+// Estado completo do orçamento em edição, sempre relido do servidor após
+// qualquer ação (marcar enviado, aprovação, pagamento, venda confirmada,
+// OS) — nunca inferido/mantido só em memória, para as duas etapas
+// (Envio e Pagamento→OS) sempre mostrarem o botão certo pro status real.
+var VITRE_ORC_ATUAL = null;
+function vitreOrcAtualizarEstadoAtual() {
+  if (!VITRE_ORC_ATUAL_ID || typeof _db === 'undefined' || !_db) return Promise.resolve();
+  return _db.collection('vitre_orcamentos').doc(VITRE_ORC_ATUAL_ID).get().then(function (snap) {
+    VITRE_ORC_ATUAL = snap.exists ? snap.data() : null;
+    vitreOrcRenderRevisao();
+    vitreOrcPgtoInit();
+  });
+}
 function vitreOrcRenderRevisao() {
   var wrap = document.getElementById('vitreOrcRevisao'); if (!wrap) return;
   var calc = vitreOrcRecalcular();
@@ -17369,6 +17440,34 @@ function vitreOrcRenderRevisao() {
     + 'Frete: +' + orcFmt(calc.freteCentavos / 100) + '<br>'
     + 'Validade: ' + document.getElementById('vitreOrcValidade').value + ' dias · Pagamento: a definir na próxima etapa<br>'
     + '<span style="font-size:15px;font-weight:900;color:#1E7A86">Total: ' + orcFmt(calc.totalCentavos / 100) + '</span></div>';
+
+  var status = VITRE_ORC_ATUAL ? VITRE_ORC_ATUAL.status : null;
+  var badge = document.getElementById('vitreOrcStatusBadge');
+  if (badge) {
+    if (status) { badge.style.display = ''; badge.style.background = (VITRE_ORC_STATUS_COLOR[status] || '#6B7280') + '22'; badge.style.color = VITRE_ORC_STATUS_COLOR[status] || '#6B7280'; badge.textContent = VITRE_ORC_STATUS_LABEL[status] || status; }
+    else badge.style.display = 'none';
+  }
+  // Nenhuma etapa fica sem próximo botão — cada status mostra exatamente
+  // as ações válidas a partir dali.
+  var podeEditar = !status || status === 'rascunho';
+  var jaEnviado = !!status && status !== 'rascunho';
+  var podeNovaVersao = jaEnviado && !['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido', 'cancelado'].includes(status);
+  var podeIrPagamento = status === 'aprovado' || ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(status);
+  var el;
+  el = document.getElementById('vitreOrcBtnSalvar'); if (el) el.style.display = podeEditar ? '' : 'none';
+  el = document.getElementById('vitreOrcBtnMarcarEnviado'); if (el) el.style.display = (VITRE_ORC_ATUAL_ID && status === 'rascunho') ? '' : 'none';
+  el = document.getElementById('vitreOrcBtnNovaVersao'); if (el) el.style.display = podeNovaVersao ? '' : 'none';
+  el = document.getElementById('vitreOrcBtnIrPagamento'); if (el) el.style.display = podeIrPagamento ? '' : 'none';
+
+  var aprovCard = document.getElementById('vitreOrcAprovacaoCard');
+  if (aprovCard) {
+    aprovCard.style.display = (status === 'enviado' || status === 'aprovado') ? '' : 'none';
+    var atualDiv = document.getElementById('vitreOrcAprovacaoAtual');
+    if (atualDiv) {
+      var ap = VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.aprovacao;
+      atualDiv.textContent = ap ? ('Última resposta registrada: ' + (VITRE_ORC_STATUS_LABEL[ap.status] || ap.status) + (ap.observacao ? ' — ' + ap.observacao : '')) : 'Nenhuma resposta registrada ainda.';
+    }
+  }
 }
 function vitreOrcSalvar() {
   if (!vitreOrcConfirmarSelecaoPendente()) return;
@@ -17380,6 +17479,26 @@ function vitreOrcSalvar() {
   var globalValor = Number(document.getElementById('vitreOrcAcrescGlobalValor').value) || 0;
   var globalMotivo = document.getElementById('vitreOrcAcrescGlobalMotivo').value.trim();
   var acrescimoGlobal = (globalTipo && globalValor > 0) ? { tipo: globalTipo, valor: globalValor, motivo: globalMotivo || undefined } : undefined;
+  var itensPayload = VITRE_ORC_ITENS.map(function (it) {
+    return { sku: it.sku, qtd: it.qtd, adicionais: (it.adicionais && it.adicionais.length) ? it.adicionais.map(function (a) { return { nome: a.nome }; }) : undefined, acrescimo: it.acrescimo || undefined };
+  });
+  var descontoPct = Number(document.getElementById('vitreOrcDesconto').value) || 0;
+  var frete = Number(document.getElementById('vitreOrcFrete').value) || 0;
+  var prazoValidadeDias = Number(document.getElementById('vitreOrcValidade').value) || 7;
+
+  // Já existe um rascunho em edição (ex.: depois de "Nova versão") — atualiza
+  // os itens/valores dele em vez de criar um orçamento novo.
+  if (VITRE_ORC_ATUAL_ID && VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.status === 'rascunho') {
+    firebase.functions().httpsCallable('vitreAtualizarOrcamento')({
+      id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+    }).then(function () {
+      showToast('Rascunho atualizado — total ' + orcFmt(calc.totalCentavos / 100) + '.', 'ok');
+      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
+      vitreOrcAtualizarEstadoAtual();
+    }).catch(function (e) { showToast('Erro ao atualizar rascunho: ' + ((e && e.message) || ''), 'err'); });
+    return;
+  }
+
   var payload = {
     clienteNome: clienteNome,
     clienteTipo: document.getElementById('vitreOrcClienteTipo').value,
@@ -17390,14 +17509,8 @@ function vitreOrcSalvar() {
     clienteExistenteId: VITRE_ORC_CLIENTE_EXISTENTE_ID || undefined,
     observacoes: document.getElementById('vitreOrcObservacoes').value.trim() || undefined,
     origemAtendimento: document.getElementById('vitreOrcOrigem').value,
-    itens: VITRE_ORC_ITENS.map(function (it) {
-      return { sku: it.sku, qtd: it.qtd, adicionais: (it.adicionais && it.adicionais.length) ? it.adicionais.map(function (a) { return { nome: a.nome }; }) : undefined, acrescimo: it.acrescimo || undefined };
-    }),
-    descontoPct: Number(document.getElementById('vitreOrcDesconto').value) || 0,
-    frete: Number(document.getElementById('vitreOrcFrete').value) || 0,
-    acrescimoGlobal: acrescimoGlobal,
-    prazoValidadeDias: Number(document.getElementById('vitreOrcValidade').value) || 7,
-    requestId: vitreCatReqId(),
+    itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+    prazoValidadeDias: prazoValidadeDias, requestId: vitreCatReqId(),
   };
   firebase.functions().httpsCallable('vitreCriarOrcamento')(payload).then(function (res) {
     showToast('Orçamento Vitre salvo — total ' + orcFmt(res.data.total || 0) + '.', 'ok');
@@ -17410,7 +17523,7 @@ function vitreOrcSalvar() {
     };
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
-    document.getElementById('vitreOrcBtnMarcarEnviado').style.display = '';
+    vitreOrcAtualizarEstadoAtual();
   }).catch(function (e) {
     var msg = (e && e.message) || '';
     if (msg.indexOf('PRODUTO_INATIVO') >= 0) showToast('Um dos produtos foi desativado — remova e tente novamente.', 'err');
@@ -17424,31 +17537,102 @@ function vitreOrcMarcarEnviado() {
   if (!VITRE_ORC_ATUAL_ID) { showToast('Salve o rascunho antes de marcar como enviado.', 'err'); return; }
   firebase.functions().httpsCallable('vitreAtualizarOrcamento')({ id: VITRE_ORC_ATUAL_ID, marcarEnviado: true }).then(function () {
     showToast('Orçamento marcado como enviado.', 'ok');
-  }).catch(function (e) { showToast('Erro: ' + ((e && e.message) || ''), 'err'); });
+    vitreOrcAtualizarEstadoAtual();
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('SO_PODE_ENVIAR_A_PARTIR_DE_RASCUNHO') >= 0) showToast('Este orçamento já foi enviado — use "Revisar / Nova versão" para editar e reenviar.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
+}
+function vitreOrcNovaVersao() {
+  if (!VITRE_ORC_ATUAL_ID) return;
+  if (!_e2eDlgConfirm('Isso arquiva a versão atual (mantém o histórico) e volta o orçamento para rascunho, permitindo editar os itens de novo. Continuar?')) return;
+  firebase.functions().httpsCallable('vitreIniciarNovaVersao')({ id: VITRE_ORC_ATUAL_ID, requestId: vitreCatReqId() }).then(function (res) {
+    showToast('Nova versão criada (v' + res.data.versaoNova + ') — pode editar os itens de novo.', 'ok');
+    document.getElementById('vitreOrcBtnPdf').style.display = 'none';
+    document.getElementById('vitreOrcBtnWA').style.display = 'none';
+    vitreOrcAtualizarEstadoAtual().then(function () { vitreOrcStep(2); });
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('ORCAMENTO_JA_AVANCOU_DEMAIS') >= 0) showToast('Este orçamento já avançou demais para ser revisado — a venda já foi confirmada.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
+}
+function vitreOrcRegistrarAprovacao() {
+  if (!VITRE_ORC_ATUAL_ID) return;
+  var status = document.getElementById('vitreOrcAprovacaoStatus').value;
+  var canal = document.getElementById('vitreOrcAprovacaoCanal').value;
+  var observacao = document.getElementById('vitreOrcAprovacaoObs').value.trim();
+  firebase.functions().httpsCallable('vitreRegistrarAprovacaoCliente')({ id: VITRE_ORC_ATUAL_ID, status: status, canal: canal, observacao: observacao || undefined }).then(function () {
+    showToast('Resposta do cliente registrada.', 'ok');
+    document.getElementById('vitreOrcAprovacaoObs').value = '';
+    vitreOrcAtualizarEstadoAtual();
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('ORCAMENTO_NAO_ENVIADO') >= 0) showToast('Só é possível registrar resposta de um orçamento já enviado.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
 }
 
-// ── STEP 4: PAGAMENTO → OS — só registra a CONDIÇÃO combinada (nunca
-// cobrança/pagamento real, que este hotfix não está autorizado a emitir);
-// garante soma das parcelas === total, em centavos, no servidor. A OS
-// carrega o mesmo plano copiado do orçamento (nunca recalcula). ──
+// ── STEP 4: PAGAMENTO → CONFIRMAÇÃO DA VENDA → OS — o pagamento só
+// registra a CONDIÇÃO combinada (nunca cobrança/pagamento real, que este
+// hotfix não está autorizado a emitir); garante soma das parcelas ===
+// total, em centavos, no servidor. Confirmar a venda cria o financeiro
+// (Contas a Receber) e libera a geração de OS — nunca antes disso. ──
 function vitreOrcPgtoInit() {
   var aviso = document.getElementById('vitreOrcPgtoAviso');
   var box = document.getElementById('vitreOrcPgtoBox');
-  if (!VITRE_ORC_ATUAL_ID) { aviso.style.display = 'block'; box.style.display = 'none'; return; }
+  var vendaBox = document.getElementById('vitreOrcVendaBox');
+  var osBox = document.getElementById('vitreOrcOSBox');
+  var status = VITRE_ORC_ATUAL ? VITRE_ORC_ATUAL.status : null;
+  if (!VITRE_ORC_ATUAL_ID || !status) { aviso.style.display = 'block'; aviso.textContent = 'Salve o rascunho antes de configurar o pagamento.'; box.style.display = 'none'; return; }
+  if (status === 'rascunho' || status === 'enviado') { aviso.style.display = 'block'; aviso.textContent = 'Aguardando a aprovação do cliente (etapa de Envio) antes de configurar o pagamento.'; box.style.display = 'none'; return; }
   aviso.style.display = 'none'; box.style.display = 'flex';
+
+  var vendaJaConfirmada = ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(status);
+  // Condição de pagamento só pode ser (re)editada antes da venda confirmada.
+  document.getElementById('vitreOrcPgtoTipo').closest ? null : null;
+  var pgtoForm = document.getElementById('vitreOrcPgtoTipo').parentElement.parentElement;
+  if (pgtoForm) pgtoForm.style.opacity = vendaJaConfirmada ? '.6' : '1';
+  ['vitreOrcPgtoTipo', 'vitreOrcPgtoForma'].forEach(function (id) { var el = document.getElementById(id); if (el) el.disabled = vendaJaConfirmada; });
   vitreOrcPgtoRenderParcelas();
+
+  vendaBox.style.display = (!vendaJaConfirmada && VITRE_ORC_ATUAL.pagamento) ? 'block' : 'none';
+  if (!vendaJaConfirmada && VITRE_ORC_ATUAL.pagamento) vitreOrcVendaResumoRender();
+
+  osBox.style.display = vendaJaConfirmada ? 'block' : 'none';
+  if (vendaJaConfirmada) {
+    var info = document.getElementById('vitreOrcVendaConfirmadaInfo');
+    var entrada = (VITRE_ORC_ATUAL.entradaCentavos || 0) / 100;
+    var saldo = (VITRE_ORC_ATUAL.saldoCentavos || 0) / 100;
+    info.innerHTML = '✓ Venda confirmada — ' + (VITRE_ORC_STATUS_LABEL[status] || status) + '<br>Entrada recebida: ' + orcFmt(entrada) + ' · Saldo: ' + orcFmt(saldo);
+    var btnOS = document.getElementById('vitreOrcBtnConverterOS');
+    var criada = document.getElementById('vitreOrcOSCriada');
+    if (VITRE_ORC_ATUAL.osId) {
+      if (btnOS) btnOS.style.display = 'none';
+      if (criada) { criada.style.display = 'block'; criada.textContent = '🏭 OS já gerada — ' + VITRE_ORC_ATUAL.osId.slice(0, 8); }
+    } else {
+      if (btnOS) btnOS.style.display = '';
+      if (criada) criada.style.display = 'none';
+    }
+  }
 }
 function vitreOrcPgtoRenderParcelas() {
   var tipo = document.getElementById('vitreOrcPgtoTipo').value;
   var wrap = document.getElementById('vitreOrcPgtoParcelasWrap');
-  var totalReais = (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0;
+  var totalReais = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0;
+  var vendaJaConfirmada = VITRE_ORC_ATUAL && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(VITRE_ORC_ATUAL.status);
+  var dis = vendaJaConfirmada ? ' disabled' : '';
   if (tipo === 'integral') {
     wrap.innerHTML = '<div class="fg"><label>Valor (integral)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>';
   } else if (tipo === 'entrada_saldo') {
-    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="0" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"></div>'
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="0" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
       + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div></div>';
+  } else if (tipo === 'futuro') {
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Valor total (a receber depois)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>'
+      + '<div class="fg"><label>Vencimento previsto</label><input type="date" id="vitreOrcPgtoVenc0"' + dis + '></div></div>';
   } else {
-    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()">' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '">' + n + 'x</option>'; }).join('') + '</select></div>'
+    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()"' + dis + '>' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '">' + n + 'x</option>'; }).join('') + '</select></div>'
       + '<div id="vitreOrcPgtoParcelasList"></div>';
     vitreOrcPgtoGerarParcelas();
     return;
@@ -17456,29 +17640,31 @@ function vitreOrcPgtoRenderParcelas() {
   vitreOrcPgtoAtualizarAviso();
 }
 function vitreOrcPgtoAtualizarSaldo() {
-  var totalC = vitreOrcToCentavos((VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
+  var totalC = vitreOrcToCentavos((VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
   var entradaC = vitreOrcToCentavos(document.getElementById('vitreOrcPgtoParcela0').value);
   var saldoC = Math.max(totalC - entradaC, 0);
   document.getElementById('vitreOrcPgtoParcela1').value = (saldoC / 100).toFixed(2);
   vitreOrcPgtoAtualizarAviso();
 }
 function vitreOrcPgtoGerarParcelas() {
+  var vendaJaConfirmada = VITRE_ORC_ATUAL && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(VITRE_ORC_ATUAL.status);
+  var dis = vendaJaConfirmada ? ' disabled' : '';
   var n = Number(document.getElementById('vitreOrcPgtoNumParcelas').value) || 2;
-  var totalC = vitreOrcToCentavos((VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
+  var totalC = vitreOrcToCentavos((VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
   var base = Math.floor(totalC / n);
   var resto = totalC - base * n; // resto sempre na última parcela — nenhum centavo perdido
   var html = '';
   for (var i = 0; i < n; i++) {
     var valorC = base + (i === n - 1 ? resto : 0);
-    html += '<div class="fg-row"><div class="fg"><label>Parcela ' + (i + 1) + ' (R$)</label><input type="number" id="vitreOrcPgtoParcela' + i + '" value="' + (valorC / 100).toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarAviso()"></div>'
-      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '"></div></div>';
+    html += '<div class="fg-row"><div class="fg"><label>Parcela ' + (i + 1) + ' (R$)</label><input type="number" id="vitreOrcPgtoParcela' + i + '" value="' + (valorC / 100).toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarAviso()"' + dis + '></div>'
+      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '"' + dis + '></div></div>';
   }
   document.getElementById('vitreOrcPgtoParcelasList').innerHTML = html;
   vitreOrcPgtoAtualizarAviso();
 }
 function vitreOrcPgtoColetarParcelas() {
   var tipo = document.getElementById('vitreOrcPgtoTipo').value;
-  var n = tipo === 'integral' ? 1 : tipo === 'entrada_saldo' ? 2 : (Number((document.getElementById('vitreOrcPgtoNumParcelas') || {}).value) || 2);
+  var n = (tipo === 'integral' || tipo === 'futuro') ? 1 : tipo === 'entrada_saldo' ? 2 : (Number((document.getElementById('vitreOrcPgtoNumParcelas') || {}).value) || 2);
   var parcelas = [];
   for (var i = 0; i < n; i++) {
     var el = document.getElementById('vitreOrcPgtoParcela' + i); if (!el) continue;
@@ -17488,7 +17674,7 @@ function vitreOrcPgtoColetarParcelas() {
   return parcelas;
 }
 function vitreOrcPgtoAtualizarAviso() {
-  var totalC = vitreOrcToCentavos((VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
+  var totalC = vitreOrcToCentavos((VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
   var parcelas = vitreOrcPgtoColetarParcelas();
   var somaC = parcelas.reduce(function (s, p) { return s + vitreOrcToCentavos(p.valor); }, 0);
   var el = document.getElementById('vitreOrcPgtoSomaAviso');
@@ -17500,10 +17686,41 @@ function vitreOrcSalvarPagamento() {
   if (!VITRE_ORC_ATUAL_ID) { showToast('Salve o rascunho antes.', 'err'); return; }
   if (!vitreOrcPgtoAtualizarAviso()) { showToast('A soma das parcelas precisa ser igual ao total do orçamento.', 'err'); return; }
   var tipo = document.getElementById('vitreOrcPgtoTipo').value;
+  var formaPagamento = document.getElementById('vitreOrcPgtoForma').value;
   var parcelas = vitreOrcPgtoColetarParcelas();
-  firebase.functions().httpsCallable('vitreAtualizarOrcamento')({ id: VITRE_ORC_ATUAL_ID, pagamento: { tipo: tipo, parcelas: parcelas } }).then(function () {
+  firebase.functions().httpsCallable('vitreAtualizarOrcamento')({ id: VITRE_ORC_ATUAL_ID, pagamento: { tipo: tipo, formaPagamento: formaPagamento, parcelas: parcelas } }).then(function () {
     showToast('Condição de pagamento salva.', 'ok');
+    vitreOrcAtualizarEstadoAtual();
   }).catch(function (e) { showToast('Erro: ' + ((e && e.message) || ''), 'err'); });
+}
+function vitreOrcVendaResumoRender() {
+  var el = document.getElementById('vitreOrcVendaResumo'); if (!el || !VITRE_ORC_ATUAL) return;
+  var o = VITRE_ORC_ATUAL;
+  var pgto = o.pagamento || {};
+  var parcelasTxt = (pgto.parcelas || []).map(function (p, i) { return (i + 1) + 'ª: ' + orcFmt(p.valorCentavos / 100) + (p.vencimento ? ' (' + p.vencimento + ')' : ''); }).join(' · ');
+  el.innerHTML =
+    'Cliente: ' + cfgEsc(o.clienteNome) + '<br>'
+    + 'Itens: ' + (o.itens || []).length + ' produto(s)<br>'
+    + 'Subtotal: ' + orcFmt((o.subtotalCentavos || 0) / 100) + (o.acrescimosItensCentavos ? ' · Acréscimos: ' + orcFmt(o.acrescimosItensCentavos / 100) : '') + '<br>'
+    + 'Desconto: -' + orcFmt((o.valorDescontoCentavos || 0) / 100) + ' · Frete: +' + orcFmt((o.freteCentavos || 0) / 100) + '<br>'
+    + 'Prazo/validade: ' + (o.prazoValidadeDias || '—') + ' dias · Tipo de produção: definido na conversão em OS<br>'
+    + 'Pagamento: ' + (pgto.tipo || '—') + ' via ' + (pgto.formaPagamento || '—') + '<br>' + (parcelasTxt ? parcelasTxt + '<br>' : '')
+    + '<span style="font-size:15px;font-weight:900;color:#7A2F73">Total: ' + orcFmt((o.totalCentavos || 0) / 100) + '</span>';
+}
+function vitreOrcConfirmarVendaAtual() {
+  if (!VITRE_ORC_ATUAL_ID) return;
+  if (!_e2eDlgConfirm('Confirmar esta venda? Isso registra o financeiro (Contas a Receber) e libera a geração de OS — não é possível desfazer.')) return;
+  firebase.functions().httpsCallable('vitreConfirmarVenda')({ id: VITRE_ORC_ATUAL_ID, requestId: vitreCatReqId() }).then(function (res) {
+    showToast('Venda confirmada — entrada ' + orcFmt(res.data.entradaCentavos / 100) + ', saldo ' + orcFmt(res.data.saldoCentavos / 100) + '.', 'ok');
+    vitreOrcAtualizarEstadoAtual();
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('VENDA_JA_CONFIRMADA') >= 0) showToast('Esta venda já havia sido confirmada.', 'err');
+    else if (msg.indexOf('ORCAMENTO_NAO_APROVADO') >= 0) showToast('O cliente ainda não aprovou este orçamento.', 'err');
+    else if (msg.indexOf('PAGAMENTO_NAO_REGISTRADO') >= 0) showToast('Salve a condição de pagamento antes de confirmar a venda.', 'err');
+    else if (msg.indexOf('VERSAO_APROVADA_DIVERGENTE') >= 0) showToast('A versão aprovada é diferente da atual — peça uma nova aprovação do cliente.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
 }
 function vitreOrcConverterEmOSAtual() {
   if (!VITRE_ORC_ATUAL_ID) { showToast('Salve o rascunho antes de converter em OS.', 'err'); return; }
@@ -17520,8 +17737,9 @@ function vitreOrcListenerInit() {
     if (!lista.length) { wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Nenhum orçamento Vitre ainda.</div>'; return; }
     wrap.innerHTML = lista.map(function (o) {
       var podeCancel = ['rascunho', 'enviado'].indexOf(o.status) >= 0;
-      var podeConverter = podeCancel && (vitreCatMinhaFuncao() === 'comercial' || vitreCatSouMaster());
-      var podeContinuar = o.status === 'rascunho' && podeConverter;
+      var temPermissao = (vitreCatMinhaFuncao() === 'comercial' || vitreCatSouMaster());
+      var podeContinuar = o.status === 'rascunho' && temPermissao;
+      var podeConverter = temPermissao && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago'].indexOf(o.status) >= 0 && !o.osId;
       return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:9px 12px;font-size:12px;flex-wrap:wrap;gap:6px">'
         + '<span>' + cfgEsc(o.clienteNome || '') + ' — ' + (o.itens || []).length + ' item(ns) — <strong>' + orcFmt(o.total || 0) + '</strong></span>'
         + '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
@@ -17564,9 +17782,9 @@ function vitreOrcAbrirRascunho(id) {
       document.getElementById('vitreOrcAcrescGlobalMotivo').value = o.acrescimoGlobal.motivo || '';
     }
     VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
+    VITRE_ORC_ATUAL = o;
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
-    document.getElementById('vitreOrcBtnMarcarEnviado').style.display = '';
     vitreOrcStep(2);
     vitreOrcRenderItens();
     showToast('Rascunho carregado — valores mantidos como salvos originalmente.', 'info');
@@ -17594,6 +17812,7 @@ function vitreOrcConverterEmOS(id) {
     } else {
       showToast('OS Vitre gerada com sucesso.', 'ok');
       alert('OS gerada com sucesso!\n\n' + linhas);
+      if (id === VITRE_ORC_ATUAL_ID) vitreOrcAtualizarEstadoAtual();
     }
   }).catch(function (e) {
     var msg = (e && e.message) || '';
