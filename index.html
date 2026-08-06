@@ -16960,10 +16960,13 @@ function vitreOrcListenerInit() {
     if (!lista.length) { wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Nenhum orçamento Vitre ainda.</div>'; return; }
     wrap.innerHTML = lista.map(function (o) {
       var podeCancel = ['rascunho', 'enviado'].indexOf(o.status) >= 0;
+      var podeConverter = podeCancel && (vitreCatMinhaFuncao() === 'comercial' || vitreCatSouMaster());
       return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:9px 12px;font-size:12px">'
         + '<span>' + cfgEsc(o.clienteNome || '') + ' — ' + (o.itens || []).length + ' item(ns) — <strong>' + orcFmt(o.total || 0) + '</strong></span>'
         + '<span style="display:flex;gap:8px;align-items:center">'
         + '<span style="background:' + VITRE_ORC_STATUS_COLOR[o.status] + '22;color:' + VITRE_ORC_STATUS_COLOR[o.status] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">' + (VITRE_ORC_STATUS_LABEL[o.status] || o.status) + '</span>'
+        + (o.status === 'convertido' && o.osId ? '<span style="font-size:10px;color:var(--muted)">OS ' + o.osId.slice(0, 6) + '</span>' : '')
+        + (podeConverter ? '<button onclick="vitreOrcConverterEmOS(\'' + o.id + '\')" style="border:1px solid #1E7A86;background:transparent;color:#1E7A86;border-radius:6px;font-size:10px;padding:3px 8px;cursor:pointer">🏭 Converter em OS</button>' : '')
         + (podeCancel ? '<button onclick="vitreOrcCancelar(\'' + o.id + '\')" style="border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:6px;font-size:10px;padding:3px 8px;cursor:pointer">Cancelar</button>' : '')
         + '</span></div>';
     }).join('');
@@ -16976,6 +16979,25 @@ function vitreOrcCancelar(id) {
   }).catch(function (e) {
     var msg = (e && e.message) || '';
     if (msg.indexOf('ORCAMENTO_EM_ESTADO_FINAL') >= 0) showToast('Este orçamento já está em estado final — não pode ser cancelado.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
+}
+var VITRE_OS_TIPO_LABEL = { pronta_entrega: '📦 Pronta entrega', produzido_apos_pedido: '🏭 Produzido após o pedido', ficha_incompleta: '⚠️ Ficha incompleta — revisão humana', produto_removido: '⚠️ Produto removido do catálogo' };
+function vitreOrcConverterEmOS(id) {
+  if (!_e2eDlgConfirm('Converter este orçamento em Ordem de Serviço? Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha incompleta).')) return;
+  firebase.functions().httpsCallable('vitreConverterOrcamentoParaOS')({ orcamentoId: id, requestId: vitreCatReqId() }).then(function (res) {
+    var r = res.data;
+    var linhas = (r.itens || []).map(function (it) { return '• ' + it.qtd + 'x ' + it.nomeSnapshot + ' — ' + (VITRE_OS_TIPO_LABEL[it.tipo] || it.tipo) + (it.motivoBloqueio ? ' (' + it.motivoBloqueio + ')' : ''); }).join('\n');
+    if (r.bloqueado) {
+      showToast('Conversão bloqueada — ao menos um item precisa de revisão humana antes de gerar OS.', 'err');
+      alert('Conversão BLOQUEADA — nenhuma OS foi gerada, nenhum estoque foi baixado.\n\n' + linhas);
+    } else {
+      showToast('OS Vitre gerada com sucesso.', 'ok');
+      alert('OS gerada com sucesso!\n\n' + linhas);
+    }
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('ORCAMENTO_EM_ESTADO_FINAL') >= 0) showToast('Este orçamento já está em estado final.', 'err');
     else showToast('Erro: ' + msg, 'err');
   });
 }

@@ -59,6 +59,9 @@ export interface VitreProduto {
   qtyMinima?: number | null;
   prazoDias?: number | null;
   disponibilidade?: "pronta_entrega" | "sob_encomenda" | "sob_encomenda_opcoes_limitadas" | "indisponivel" | null;
+  // estoque de peças já prontas (unidades acabadas em prateleira, não matéria-prima) —
+  // usado só pela conversão de orçamento Vitre em OS (Parte 9 da homologação)
+  estoqueProntoUnidades?: number | null;
   // dimensões
   espessuraMm?: number | null;
   comprimentoCm?: number | null;
@@ -383,4 +386,146 @@ export const vitreAtualizarOrcamento = functions.https.onCall(async (data, conte
   });
   await writeAudit("orcamento_atualizado", caller.uid, caller.role, { id, ...resultado });
   return { ok: true, ...resultado };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// vitreConverterOrcamentoParaOS (FASE G, Parte 9 da homologação guiada,
+// 2026-08-06) — converte um orçamento de catálogo Vitre em Ordem de
+// Serviço, classificando CADA item, na hora da conversão (não no
+// momento em que o orçamento foi salvo), em exatamente um de três
+// caminhos, lendo o estado ATUAL do produto (produção pode ter mudado
+// a ficha técnica ou o estoque depois do orçamento — o snapshot
+// comercial de preço/nome nunca é usado aqui):
+//
+//   pronta_entrega       — há unidade(s) já prontas em
+//                           estoqueProntoUnidades >= qtd pedida. Baixa
+//                           de estoque, sem gerar nenhuma ficha de
+//                           produção nova (não é replanificado).
+//   produzido_apos_pedido— sem estoque pronto suficiente, mas a ficha
+//                           técnica está completa (componentes +
+//                           arquivo de corte cadastrados). Gera OS com
+//                           SNAPSHOT da ficha técnica/arquivo de corte
+//                           — o arquivo nunca é aberto/executado aqui,
+//                           só referenciado (caminho+versão+checksum)
+//                           para quem for cortar depois, manualmente.
+//   ficha_incompleta      — nem estoque pronto nem ficha técnica
+//                           completa. NUNCA inventamos material,
+//                           tempo ou arquivo de corte.
+//
+// Fail-closed por design (mesmo padrão do teste 23 do catálogo): se
+// QUALQUER item cair em ficha_incompleta (ou o produto tiver sido
+// removido do catálogo depois do orçamento), a conversão inteira é
+// bloqueada — nenhuma baixa de estoque parcial, nenhuma OS parcial.
+// A resposta sempre traz a classificação completa, para a tela
+// mostrar exatamente o que falta e para quem decidir.
+// ══════════════════════════════════════════════════════════════════════════
+const COL_OS = "vitre_os";
+
+interface ItemClassificado {
+  sku: string; nomeSnapshot: string; qtd: number;
+  tipo: "pronta_entrega" | "produzido_apos_pedido" | "ficha_incompleta" | "produto_removido";
+  motivoBloqueio?: string;
+  fichaTecnicaSnapshot?: VitreProduto["fichaTecnica"];
+  arquivoCorteRef?: VitreProduto["arquivoCorte"];
+  prazoProducaoDiasEstimado?: number | null;
+}
+
+export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  // Comercial (dono do orçamento) confirma a conversão — mesma fronteira de
+  // leitura já em vigor para vitre_orcamentos nas Rules (Produção não lê
+  // orçamento comercial diretamente, só o resultado em vitre_os depois).
+  requireRole(caller, ["comercial"], "converter orçamento Vitre em OS");
+
+  const orcamentoId = String(data?.orcamentoId || "").trim();
+  const requestId = String(data?.requestId || "");
+  if (!orcamentoId) throw new functions.https.HttpsError("invalid-argument", "orcamentoId obrigatório.");
+  if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+
+  const idemKey = `conv_os:${requestId}`;
+  const acquired = await acquireIdem(idemKey);
+  if (!acquired) {
+    const existing = await admin.firestore().collection(COL_OS).where("requestId", "==", requestId).limit(1).get();
+    if (!existing.empty) return { ok: true, jaProcessado: true, id: existing.docs[0].id };
+  }
+
+  const db = admin.firestore();
+  const orcRef = db.collection(COL_ORC).doc(orcamentoId);
+  const orcSnap = await orcRef.get();
+  if (!orcSnap.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+  const orc = orcSnap.data()!;
+  if (orc.tipo !== "catalogo_vitre") throw new functions.https.HttpsError("failed-precondition", "NAO_E_ORCAMENTO_VITRE");
+  if (["convertido", "cancelado"].includes(orc.status)) throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + orc.status);
+
+  // ── 1. Classificar cada item lendo o estado ATUAL do produto ────────────
+  const itens: ItemClassificado[] = [];
+  for (const it of (orc.itens || []) as Array<{ sku: string; nomeSnapshot: string; qtd: number }>) {
+    const prodSnap = await db.collection(COL_PRODUTOS).doc(it.sku).get();
+    if (!prodSnap.exists) {
+      itens.push({ sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "produto_removido", motivoBloqueio: "Produto não existe mais no catálogo." });
+      continue;
+    }
+    const prod = prodSnap.data() as VitreProduto;
+    const estoquePronto = Number(prod.estoqueProntoUnidades) || 0;
+    const temFichaCompleta = !!(prod.fichaTecnica && prod.fichaTecnica.componentes && prod.fichaTecnica.componentes.length && prod.arquivoCorte);
+    if (estoquePronto >= it.qtd) {
+      itens.push({ sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "pronta_entrega" });
+    } else if (temFichaCompleta) {
+      itens.push({
+        sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "produzido_apos_pedido",
+        fichaTecnicaSnapshot: prod.fichaTecnica, arquivoCorteRef: prod.arquivoCorte, prazoProducaoDiasEstimado: prod.prazoDias ?? null,
+      });
+    } else {
+      itens.push({
+        sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "ficha_incompleta",
+        motivoBloqueio: estoquePronto > 0
+          ? `Estoque pronto insuficiente (${estoquePronto}/${it.qtd}) e ficha técnica incompleta — não é possível decidir automaticamente.`
+          : "Sem estoque pronto e sem ficha técnica completa (componentes/arquivo de corte) — requer cadastro humano antes de gerar OS.",
+      });
+    }
+  }
+
+  const bloqueado = itens.some((i) => i.tipo === "ficha_incompleta" || i.tipo === "produto_removido");
+  if (bloqueado) {
+    await writeAudit("conversao_os_bloqueada", caller.uid, caller.role, { orcamentoId, itens });
+    return { ok: false, bloqueado: true, itens };
+  }
+
+  // ── 2. Todos os itens automatizáveis — baixa de estoque + criação da OS,
+  //       tudo dentro de UMA transação (nunca baixa parcial se a OS falhar) ──
+  const osRef = db.collection(COL_OS).doc();
+  await db.runTransaction(async (tx) => {
+    // Rele o orçamento dentro da transação — protege contra conversão
+    // concorrente (duas abas/dois cliques) do MESMO orçamento.
+    const orcTx = await tx.get(orcRef);
+    if (!orcTx.exists) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+    if (["convertido", "cancelado"].includes(orcTx.data()!.status)) {
+      throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + orcTx.data()!.status);
+    }
+    // Rele e baixa o estoque pronto de cada item pronta_entrega dentro da
+    // MESMA transação (protege contra duas conversões concorrentes
+    // consumindo o mesmo estoque pronto além do disponível).
+    for (const it of itens) {
+      if (it.tipo !== "pronta_entrega") continue;
+      const prodRef = db.collection(COL_PRODUTOS).doc(it.sku);
+      const prodTx = await tx.get(prodRef);
+      const estoqueAtual = Number(prodTx.data()?.estoqueProntoUnidades) || 0;
+      if (estoqueAtual < it.qtd) {
+        throw new functions.https.HttpsError("aborted", "ESTOQUE_MUDOU_DURANTE_CONVERSAO:" + it.sku);
+      }
+      tx.set(prodRef, { estoqueProntoUnidades: estoqueAtual - it.qtd }, { merge: true });
+    }
+    const temProduzido = itens.some((i) => i.tipo === "produzido_apos_pedido");
+    const temProntaEntrega = itens.some((i) => i.tipo === "pronta_entrega");
+    const statusOS = temProduzido && temProntaEntrega ? "mista_aguardando_producao" : temProduzido ? "aguardando_producao" : "pronta_expedicao";
+    tx.set(osRef, {
+      id: osRef.id, orcamentoId, requestId, marca: "vitre",
+      clienteNome: orc.clienteNome, itens, status: statusOS,
+      criadoPorUid: caller.uid, criadoPorRole: caller.role, criadoEm: Date.now(),
+    });
+    tx.set(orcRef, { status: "convertido", osId: osRef.id, atualizadoEm: Date.now() }, { merge: true });
+  });
+
+  await writeAudit("conversao_os_realizada", caller.uid, caller.role, { orcamentoId, osId: osRef.id, itens });
+  return { ok: true, bloqueado: false, id: osRef.id, itens };
 });

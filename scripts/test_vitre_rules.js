@@ -172,6 +172,31 @@ console.log('\n=== FASE G B11 — Rules do Catálogo Vitre (vitre_*): leitura po
     assertEq(r.status, 403);
   });
 
+  // ── vitre_os (Parte 9 da homologação, 2026-08-06): Comercial/Produção/
+  // Financeiro leem (Produção precisa ver a OS resultante, mesmo sem ler
+  // o orçamento comercial de origem); escrita sempre negada — só
+  // vitreConverterOrcamentoParaOS grava ──
+  await test('24. Master lê vitre_os → permitido', async function () {
+    var r = await fsRead(tokMaster, 'vitre_os', 'inexistente');
+    assertEq(r.status !== 403, true, 'esperado leitura permitida, obtido ' + r.status);
+  });
+  await test('25. Comercial lê vitre_os → permitido', async function () {
+    var r = await fsRead(tokComercial, 'vitre_os', 'inexistente');
+    assertEq(r.status !== 403, true, 'esperado leitura permitida, obtido ' + r.status);
+  });
+  await test('26. Produção lê vitre_os → permitido (mesmo sem ler o orçamento de origem)', async function () {
+    var r = await fsRead(tokProducao, 'vitre_os', 'inexistente');
+    assertEq(r.status !== 403, true, 'esperado leitura permitida, obtido ' + r.status);
+  });
+  await test('27. Não autenticado lê vitre_os → negado', async function () {
+    var r = await fsRead(null, 'vitre_os', 'inexistente');
+    assertEq(r.status, 403);
+  });
+  await test('28. Master escreve vitre_os diretamente (tentando forjar OS pronta_expedicao sem passar pela Function) → negado', async function () {
+    var r = await fsWrite(tokMaster, 'vitre_os', 'HACKOS', { status: 'pronta_expedicao' });
+    assertEq(r.status, 403);
+  });
+
   console.log('\n=== resultado ===\npassed=' + passed + ' failed=' + failed + '\n');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error('Erro fatal:', e); process.exit(1); });

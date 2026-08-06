@@ -339,6 +339,14 @@ service cloud.firestore {
       allow read:  if isComercial() || isFinanceiro();
       allow write: if false;
     }
+    // vitre_os (Parte 9 da homologação, 2026-08-06) — resultado da
+    // conversão de orçamento em Ordem de Serviço. Produção só vê ISTO,
+    // nunca o orçamento comercial de origem (vitre_orcamentos acima
+    // continua Produção-negado, decisão já testada/homologada).
+    match /vitre_os/{osId} {
+      allow read:  if isComercial() || isProducao() || isFinanceiro();
+      allow write: if false; // só vitreConverterOrcamentoParaOS grava
+    }
     match /vitre_idem_keys/{key} {
       allow read, write: if false; // uso interno exclusivo das Cloud Functions
     }
