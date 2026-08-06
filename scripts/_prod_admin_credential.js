@@ -27,10 +27,15 @@ const PROJECT_ID = 'erp-vrmarcas';
 let app = null;
 function getProdApp() {
   if (app) return app;
+  // App DEFAULT (sem nome) de propósito — vitre.ts/auth_helper.ts (código
+  // real compilado, chamado via .run() pelos scripts de go-live) usam
+  // admin.firestore()/admin.auth() sem especificar app, o que só resolve
+  // contra o app default.
+  if (admin.apps.length) { app = admin.app(); return app; }
   app = admin.initializeApp({
     credential: admin.credential.applicationDefault(),
     projectId: PROJECT_ID,
-  }, 'prod-golive');
+  });
   return app;
 }
 
