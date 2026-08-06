@@ -317,3 +317,110 @@ export const valeriaVitreEncaminharVR = functions.https.onRequest(async (req, re
   await writeAudit(COL_AUDIT, "encaminhado_para_vr", "valeria", "valeria_agent", { id: docRef.id, motivo, conversationId: env.conversationId });
   res.json({ ok: true, id: docRef.id });
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6. valeriaVitreAtualizarRascunho — POST atualiza itens/valores de um
+//    rascunho existente (status='rascunho') que pertença à mesma conversa.
+//    Idempotente por requestId — retry seguro.
+// ══════════════════════════════════════════════════════════════════════════
+export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (req, res) => {
+  cors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (!await checkAuth(req, res)) return;
+  if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
+
+  const body = req.body as {
+    orcamentoId?: string;
+    itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>;
+    descontoPct?: number; frete?: number; requestId?: string;
+  };
+  const env = requireEnv(body as unknown as Record<string, unknown>);
+  if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios" }); return; }
+  const orcamentoId = String(body.orcamentoId || "").trim();
+  if (!orcamentoId) { res.status(400).json({ ok: false, error: "orcamentoId obrigatório" }); return; }
+  const requestId = String(body.requestId || "").trim();
+  if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }
+  const itensInput = Array.isArray(body.itens) ? body.itens : [];
+  if (!itensInput.length) { res.status(400).json({ ok: false, error: "itens obrigatório" }); return; }
+
+  const idemKey = `valeria_orc_upd:${env.conversationId}:${requestId}`;
+  const acquired = await acquireIdem(COL_IDEM, idemKey);
+  if (!acquired) { res.json({ ok: true, jaProcessado: true, orcamentoId }); return; }
+
+  const db = admin.firestore();
+  const docRef = db.collection(COL_ORC).doc(orcamentoId);
+  const docSnap = await docRef.get();
+  if (!docSnap.exists) { res.status(404).json({ ok: false, error: "ORCAMENTO_NAO_ENCONTRADO" }); return; }
+  const docData = docSnap.data() as { conversationId?: string; status?: string };
+  if (docData.conversationId !== env.conversationId) { res.status(403).json({ ok: false, error: "ORCAMENTO_OUTRA_CONVERSA" }); return; }
+  if (docData.status !== "rascunho") { res.status(400).json({ ok: false, error: "ORCAMENTO_NAO_EDITAVEL:status=" + docData.status }); return; }
+
+  const itensSnapshot: Array<{ sku: string; nomeSnapshot: string; precoSnapshot: number; qtd: number; adicionais: Array<{ nome: string; preco: number }> }> = [];
+  const adicionaisRejeitadosGlobal: Array<{ sku: string; nome: string }> = [];
+  for (const it of itensInput) {
+    const sku = String(it.sku || "").trim();
+    const qtd = Number(it.qtd) || 1;
+    const snap = await db.collection(COL_PRODUTOS).doc(sku).get();
+    if (!snap.exists) { res.json({ ok: false, error: "PRODUTO_NAO_ENCONTRADO:" + sku }); return; }
+    const p = snap.data() as VitreProdutoValeria;
+    if (!produtoElegivelValeria(p)) { res.json({ ok: false, error: "PRODUTO_NAO_ELEGIVEL:" + sku }); return; }
+    const { aplicados, rejeitados } = resolverAdicionais(p, it.adicionais);
+    rejeitados.forEach((nome) => adicionaisRejeitadosGlobal.push({ sku, nome }));
+    itensSnapshot.push({ sku, nomeSnapshot: p.nome, precoSnapshot: p.precoVenda as number, qtd, adicionais: aplicados });
+  }
+  const descontoPct = Math.max(0, Math.min(100, Number(body.descontoPct) || 0));
+  const frete = Math.max(0, Number(body.frete) || 0);
+  const subtotal = itensSnapshot.reduce((s, it) => s + (it.precoSnapshot + it.adicionais.reduce((a, ad) => a + ad.preco, 0)) * it.qtd, 0);
+  const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
+  const total = +(subtotal - valorDesconto + frete).toFixed(2);
+
+  await docRef.update({ itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total, atualizadoEm: Date.now() });
+  await writeAudit(COL_AUDIT, "orcamento_atualizado_valeria", "valeria", "valeria_agent", { id: orcamentoId, total, conversationId: env.conversationId });
+  res.json({ ok: true, orcamentoId, total, adicionaisRejeitados: adicionaisRejeitadosGlobal });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7. valeriaVitreConsultarRascunho — GET ?orcamentoId=&conversationId=&
+//    organizationId=. Retorna dados não sensíveis do rascunho para que a
+//    Valéria possa confirmar o que foi salvo antes de apresentar ao cliente.
+// ══════════════════════════════════════════════════════════════════════════
+export const valeriaVitreConsultarRascunho = functions.https.onRequest(async (req, res) => {
+  cors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (!await checkAuth(req, res)) return;
+  if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
+
+  const orcamentoId = String(req.query.orcamentoId || "").trim();
+  const conversationId = String(req.query.conversationId || "").trim();
+  const organizationId = String(req.query.organizationId || "").trim();
+  if (!orcamentoId || !conversationId || !organizationId) {
+    res.status(400).json({ ok: false, error: "orcamentoId, conversationId e organizationId são obrigatórios" });
+    return;
+  }
+
+  const db = admin.firestore();
+  const docSnap = await db.collection(COL_ORC).doc(orcamentoId).get();
+  if (!docSnap.exists) { res.status(404).json({ ok: false, error: "ORCAMENTO_NAO_ENCONTRADO" }); return; }
+  const d = docSnap.data() as {
+    conversationId?: string; status?: string; clienteNome?: string;
+    itens?: unknown[]; subtotal?: number; valorDesconto?: number; frete?: number; total?: number;
+    descontoPct?: number; prazoValidadeDias?: number; criadoEm?: number; atualizadoEm?: number;
+  };
+  if (d.conversationId !== conversationId) { res.status(403).json({ ok: false, error: "ORCAMENTO_OUTRA_CONVERSA" }); return; }
+
+  res.json({
+    ok: true,
+    orcamentoId,
+    status: d.status,
+    clienteNome: d.clienteNome,
+    itens: d.itens,
+    subtotal: d.subtotal,
+    descontoPct: d.descontoPct,
+    valorDesconto: d.valorDesconto,
+    frete: d.frete,
+    total: d.total,
+    prazoValidadeDias: d.prazoValidadeDias,
+    criadoEm: d.criadoEm,
+    atualizadoEm: d.atualizadoEm,
+  });
+});
