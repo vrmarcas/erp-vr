@@ -59,6 +59,16 @@ export {
   estoqueExcluirRetalho,
 } from "./estoque";
 
+// ── Catálogo Vitre + Orçamento de Catálogo (Fase G, 2026-08-06) ─────────────
+export {
+  vitreImportarProdutos,
+  vitreCriarOuEditarProduto,
+  vitreAtivarDesativarProduto,
+  vitreDuplicarProduto,
+  vitreCriarOrcamento,
+  vitreAtualizarOrcamento,
+} from "./vitre";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,
