@@ -47,16 +47,10 @@ async function assertThrows(fn, trecho, msg) {
     if (texto.indexOf(trecho) < 0) throw new Error((msg || 'erro inesperado') + ' — esperava conter "' + trecho + '", obtido: ' + texto);
   }
 }
-function ctx(uid, role) { return uid ? { auth: { uid: uid, token: { role: role } } } : { auth: undefined }; }
 function reqId() { return 'req_cv2_' + Date.now() + '_' + Math.random().toString(36).slice(2); }
 
-var UID = {
-  master: 'e2e_cv2_master_' + Date.now(),
-  producao: 'e2e_cv2_producao_' + Date.now(),
-  producao2: 'e2e_cv2_producao2_' + Date.now(),
-  comercial: 'e2e_cv2_comercial_' + Date.now(),
-  financeiro: 'e2e_cv2_financeiro_' + Date.now(),
-};
+// Identidades fixas do ambiente limpo (node scripts/e2e_clean_env.js reset).
+const { UID, ctx } = require('./e2e_shared_fixtures');
 
 async function auditFind(action, compraId) {
   var snap = await db.collection('compras_audit_log').where('action', '==', action).where('detail.compraId', '==', compraId).limit(5).get();
@@ -66,14 +60,7 @@ async function auditFind(action, compraId) {
 console.log('\n=== FASE 11 (checkpoint) — Compras v2: Cloud Functions reais (nível Function, não UI) ===\n');
 
 (async function main() {
-  await Promise.all([
-    db.collection('erp_vr_usuarios').doc(UID.master).set({ nome: 'E2E CV2 Master', funcao: 'master', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.producao).set({ nome: 'E2E CV2 Producao', funcao: 'producao', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.producao2).set({ nome: 'E2E CV2 Producao2', funcao: 'producao', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.comercial).set({ nome: 'E2E CV2 Comercial', funcao: 'comercial', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.financeiro).set({ nome: 'E2E CV2 Financeiro', funcao: 'financeiro', ativo: 1 }),
-  ]);
-
+  // Usuários já semeados pelo reset do ambiente limpo — nada a fazer aqui.
   var compraId;
 
   await test('1. Produção cria solicitação de compra (sem preço/fornecedor)', async function () {

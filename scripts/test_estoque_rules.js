@@ -63,31 +63,20 @@ function firestoreRead(idToken, docId) {
   return httpJson({ hostname: 'localhost', port: 8080, path: `/v1/projects/demo-erp-homolog/databases/(default)/documents/erp_vr/${docId}`, method: 'GET', headers: idToken ? { Authorization: 'Bearer ' + idToken } : {} });
 }
 
-var FIX = {
-  producao: { email: 'e2e.fasef.rules.producao@example.com', role: 'producao' },
-  master:   { email: 'e2e.fasef.rules.master@example.com',   role: 'master' },
-  comercial:{ email: 'e2e.fasef.rules.comercial@example.com',role: 'comercial' },
-  semPerfil:{ email: 'e2e.fasef.rules.semperfil@example.com',role: 'producao', semDoc: true },
-  desabilitado:{ email: 'e2e.fasef.rules.desabilitado@example.com', role: 'producao', ativo: 0 },
-};
-var PASSWORD = 'FaseF2026Rules!';
+// Identidades do ambiente limpo (node scripts/e2e_clean_env.js reset) — já
+// existem no Auth+Firestore Emulator; aqui só mapeamos email/senha/role
+// para poder logar de verdade (esta suíte precisa de idToken real via
+// Auth Emulator REST, diferente das suítes .run() que usam context
+// sintético).
+const { USUARIOS, SENHA_PADRAO } = require('./e2e_clean_env');
+var FIX = {};
+USUARIOS.forEach((u) => { FIX[u.name] = { email: u.email, role: u.role, semDoc: u.semDoc, ativo: u.ativo, uid: u.uid }; });
+var PASSWORD = SENHA_PADRAO;
 
 async function ensureFixtureUsers() {
+  // Nada a criar — já semeado pelo reset do ambiente limpo. Só valida que existe.
   for (var key in FIX) {
-    var f = FIX[key];
-    var uid;
-    try {
-      var existing = await authAdmin.getUserByEmail(f.email);
-      uid = existing.uid;
-    } catch (e) {
-      var created = await authAdmin.createUser({ email: f.email, password: PASSWORD, emailVerified: true });
-      uid = created.uid;
-    }
-    await authAdmin.setCustomUserClaims(uid, { role: f.role });
-    if (!f.semDoc) {
-      await db.collection('erp_vr_usuarios').doc(uid).set({ nome: 'E2E Rules ' + key, funcao: f.role, ativo: f.ativo === 0 ? 0 : 1 });
-    }
-    f.uid = uid;
+    await authAdmin.getUser(FIX[key].uid); // lança se não existir — falha alto e cedo
   }
 }
 

@@ -53,23 +53,11 @@ async function assertThrows(fn, codeOuTrecho, msg) {
     if (texto.indexOf(codeOuTrecho) < 0) throw new Error((msg || 'erro inesperado') + ' — esperava conter "' + codeOuTrecho + '", obtido: ' + texto);
   }
 }
-function ctx(uid, role) { return uid ? { auth: { uid: uid, token: { role: role } } } : { auth: undefined }; }
-
-var UID = {
-  master: 'e2e_est_master_' + Date.now(),
-  producao: 'e2e_est_producao_' + Date.now(),
-  comercial: 'e2e_est_comercial_' + Date.now(),
-  semPerfil: 'e2e_est_sem_perfil_' + Date.now(),
-  desabilitado: 'e2e_est_desabilitado_' + Date.now(),
-};
+// Identidades fixas do ambiente limpo (node scripts/e2e_clean_env.js reset).
+const { UID, ctx } = require('./e2e_shared_fixtures');
 
 async function seedUsuarios() {
-  await Promise.all([
-    db.collection('erp_vr_usuarios').doc(UID.master).set({ nome: 'E2E Est Master', funcao: 'master', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.producao).set({ nome: 'E2E Est Producao', funcao: 'producao', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.comercial).set({ nome: 'E2E Est Comercial', funcao: 'comercial', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.desabilitado).set({ nome: 'E2E Est Desabilitado', funcao: 'producao', ativo: 0 }),
-  ]);
+  // Já semeado pelo reset do ambiente limpo — nada a fazer aqui.
 }
 
 async function seedStock(matKey, item) {
@@ -236,11 +224,9 @@ console.log('\n=== FASE 2-8 (checkpoint) — Cloud Functions de estoque restante
   });
 
   await test('11. estoqueConsumoAutoOrcamento — Financeiro → negado (não está entre as roles permitidas nem é master)', async function () {
-    var uidFin = 'e2e_est_financeiro_' + Date.now();
-    await db.collection('erp_vr_usuarios').doc(uidFin).set({ nome: 'E2E Fin', funcao: 'financeiro', ativo: 1 });
     await comAc3Preservado(5, async function () {
       await assertThrows(function () {
-        return estoqueConsumoAutoOrcamento.run({ osRef: 'x', requestId: novoReqId() }, ctx(uidFin, 'financeiro'));
+        return estoqueConsumoAutoOrcamento.run({ osRef: 'x', requestId: novoReqId() }, ctx(UID.financeiro, 'financeiro'));
       }, 'permission-denied');
       assertEq((await getStock('ac3')).qty, 5);
     });

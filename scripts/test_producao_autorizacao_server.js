@@ -57,26 +57,18 @@ async function assertThrows(fn, codeOuTrecho, msg) {
     if (texto.indexOf(codeOuTrecho) < 0) throw new Error((msg||'erro inesperado') + ' — esperava conter "'+codeOuTrecho+'", obtido: ' + texto);
   }
 }
-function ctx(uid, role) { return uid ? { auth: { uid: uid, token: { role: role } } } : { auth: undefined }; }
-
-var UID = {
-  master: 'e2e_srv_master_' + Date.now(),
-  producao: 'e2e_srv_producao_' + Date.now(),
-  comercial: 'e2e_srv_comercial_' + Date.now(),
-  semPerfil: 'e2e_srv_sem_perfil_' + Date.now(),
-  desabilitado: 'e2e_srv_desabilitado_' + Date.now(),
-  divergente: 'e2e_srv_divergente_' + Date.now(), // claim diz master, doc diz producao
-};
+// Identidades fixas do ambiente limpo (node scripts/e2e_clean_env.js reset)
+// — não recria fixture de usuário aqui, só lê a definição determinística.
+const { UID: SHARED_UID, ctx } = require('./e2e_shared_fixtures');
+var UID = Object.assign({}, SHARED_UID, {
+  divergente: 'e2efasef20260805divergente', // claim diz master, doc diz producao — específico desta suíte
+});
 
 async function seedUsuarios() {
-  await Promise.all([
-    db.collection('erp_vr_usuarios').doc(UID.master).set({ nome: 'E2E Srv Master', funcao: 'master', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.producao).set({ nome: 'E2E Srv Producao', funcao: 'producao', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.comercial).set({ nome: 'E2E Srv Comercial', funcao: 'comercial', ativo: 1 }),
-    db.collection('erp_vr_usuarios').doc(UID.desabilitado).set({ nome: 'E2E Srv Desabilitado', funcao: 'producao', ativo: 0 }),
-    db.collection('erp_vr_usuarios').doc(UID.divergente).set({ nome: 'E2E Srv Divergente', funcao: 'producao', ativo: 1 }),
-    // UID.semPerfil: propositalmente SEM documento em erp_vr_usuarios
-  ]);
+  // O conjunto padrão (master/producao/comercial/financeiro/desabilitado/
+  // semPerfil) já vem do reset+seed do ambiente limpo. Só cria o extra
+  // específico desta suíte (divergência claim x doc).
+  await db.collection('erp_vr_usuarios').doc(UID.divergente).set({ nome: 'E2E Divergente', funcao: 'producao', ativo: 1 });
 }
 
 async function seedOsEStoque(osId, opts) {
@@ -448,8 +440,12 @@ console.log('\n=== FASE 10 — 30 cenários de segurança: producaoIniciarOuEdit
     await limparOS(osId); await limparMaterial(matKey);
   });
 
-  // Limpeza dos usuários fixture
-  await Promise.all(Object.values(UID).map(function (uid) { return db.collection('erp_vr_usuarios').doc(uid).delete().catch(function () {}); }));
+  // Limpeza: só o usuário extra criado por ESTA suíte (divergente) — as
+  // identidades padrão (master/producao/etc.) vêm do reset+seed do
+  // ambiente limpo compartilhado com as demais suítes e NÃO são desta
+  // suíte para apagar (apagar aqui já causou falhas em cascata nas
+  // suítes seguintes quando UID passou a ser o objeto compartilhado).
+  await db.collection('erp_vr_usuarios').doc(UID.divergente).delete().catch(function () {});
 
   console.log('\n=== resultado ===');
   console.log('passed=' + passed + ' failed=' + failed);
