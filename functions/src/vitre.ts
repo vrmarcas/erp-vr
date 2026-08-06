@@ -310,14 +310,88 @@ export const vitreDuplicarProduto = functions.https.onCall(async (data, context)
 // ══════════════════════════════════════════════════════════════════════════
 // Orçamento de Catálogo — Vitre. Snapshot do produto no momento da
 // criação (nunca recalcula planificação/matéria-prima — B7-B9).
+//
+// HOTFIX orcamento-vitre-wizard (2026-08-06): cálculo financeiro
+// migrado para centavos inteiros como fonte de verdade (nunca ponto
+// flutuante) — os campos decimais (subtotal/total/...) continuam
+// gravados para compatibilidade com PDF/WhatsApp/telas existentes,
+// mas são sempre DERIVADOS dos campos *Centavos, nunca o contrário.
 // ══════════════════════════════════════════════════════════════════════════
-interface ItemOrcamentoVitre { sku: string; nomeSnapshot: string; precoSnapshot: number; qtd: number; adicionais?: Array<{ nome: string; preco: number }>; }
+interface AcrescimoInput { tipo: "fixo" | "pct"; valor: number; motivo?: string | null; visivelCliente?: boolean; }
+interface ItemOrcamentoVitre {
+  sku: string; nomeSnapshot: string; precoSnapshot: number; precoSnapshotCentavos: number; qtd: number;
+  adicionais?: Array<{ nome: string; preco: number }>;
+  acrescimo?: AcrescimoInput | null; acrescimoCentavos?: number; itemTotalCentavos?: number;
+}
+interface ParcelaPagamento { valorCentavos: number; vencimento: string | null; }
+interface PagamentoPlano { tipo: "integral" | "entrada_saldo" | "parcelado"; parcelas: ParcelaPagamento[]; }
+
+function toCentavos(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+function centavosParaReais(c: number): number { return +(c / 100).toFixed(2); }
+
+/** Valida e converte um acréscimo (item ou global) em centavos. Nunca aceita
+ * fixo+pct simultâneos (a própria estrutura {tipo, valor} já impede isso).
+ * Exige motivo/justificativa para qualquer role que não seja master
+ * (FASE 8 — "Comercial pode aplicar dentro das regras comerciais
+ * configuradas"; a regra aplicada aqui é: acréscimo sempre auditável). */
+function validarEAplicarAcrescimo(baseCentavos: number, input: unknown, callerRole: string): { centavos: number; snapshot: AcrescimoInput | null } {
+  if (!input) return { centavos: 0, snapshot: null };
+  const a = input as Partial<AcrescimoInput>;
+  const tipo = a.tipo;
+  const valor = Number(a.valor);
+  if (tipo !== "fixo" && tipo !== "pct") throw new functions.https.HttpsError("invalid-argument", "Tipo de acréscimo inválido — use \"fixo\" ou \"pct\".");
+  if (!Number.isFinite(valor) || valor < 0) throw new functions.https.HttpsError("invalid-argument", "Valor de acréscimo inválido ou negativo.");
+  if (tipo === "pct" && valor > 1000) throw new functions.https.HttpsError("invalid-argument", "Percentual de acréscimo implausível.");
+  const motivo = typeof a.motivo === "string" ? a.motivo.trim() : "";
+  if (callerRole !== "master" && !motivo) {
+    throw new functions.https.HttpsError("invalid-argument", "Acréscimo requer motivo/justificativa (exceto para Master).");
+  }
+  const centavos = tipo === "fixo" ? toCentavos(valor) : Math.round(baseCentavos * valor / 100);
+  return { centavos, snapshot: { tipo, valor, motivo: motivo || null, visivelCliente: a.visivelCliente !== false } };
+}
+
+/** Valida um plano de pagamento (condição, nunca cobrança real — o hotfix
+ * de wizard NÃO está autorizado a emitir cobrança/pagamento real, só a
+ * registrar a condição combinada). Garante soma das parcelas === total,
+ * em centavos, sem nenhuma parcela negativa ou zerada. */
+function validarPagamento(totalCentavos: number, input: unknown): PagamentoPlano | null {
+  if (!input) return null;
+  const p = input as { tipo?: string; parcelas?: Array<{ valor: unknown; vencimento?: unknown }> };
+  if (!["integral", "entrada_saldo", "parcelado"].includes(String(p.tipo))) {
+    throw new functions.https.HttpsError("invalid-argument", "Tipo de pagamento inválido.");
+  }
+  const parcelasInput = Array.isArray(p.parcelas) ? p.parcelas : [];
+  if (!parcelasInput.length) throw new functions.https.HttpsError("invalid-argument", "Plano de pagamento sem parcelas.");
+  let soma = 0;
+  const parcelas: ParcelaPagamento[] = parcelasInput.map((pc) => {
+    const valorCentavos = toCentavos(pc.valor);
+    if (valorCentavos <= 0) throw new functions.https.HttpsError("invalid-argument", "Parcela com valor inválido.");
+    soma += valorCentavos;
+    return { valorCentavos, vencimento: pc.vencimento ? String(pc.vencimento) : null };
+  });
+  if (soma !== totalCentavos) {
+    throw new functions.https.HttpsError("invalid-argument", `SOMA_PARCELAS_DIFERENTE_DO_TOTAL:${soma}:${totalCentavos}`);
+  }
+  return { tipo: p.tipo as PagamentoPlano["tipo"], parcelas };
+}
 
 export const vitreCriarOrcamento = functions.https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
-  requireRole(caller, ["comercial", "producao"], "criar orçamento de catálogo Vitre");
+  // FASE 13 do hotfix: Produção não cria orçamento comercial — só Comercial (Master sempre passa via requireRole).
+  requireRole(caller, ["comercial"], "criar orçamento de catálogo Vitre");
 
   const clienteNome = String(data?.clienteNome || "").trim();
+  const clienteTipo = data?.clienteTipo === "pf" ? "pf" : data?.clienteTipo === "pj" ? "pj" : null;
+  const clienteDocumento = data?.clienteDocumento ? String(data.clienteDocumento).trim() : null;
+  const clienteEmail = data?.clienteEmail ? String(data.clienteEmail).trim() : null;
+  const clienteTel = data?.clienteTel ? String(data.clienteTel).trim() : null;
+  const clienteCidade = data?.clienteCidade ? String(data.clienteCidade).trim() : null;
+  const clienteExistenteId = data?.clienteExistenteId ? String(data.clienteExistenteId).trim() : null;
+  const observacoes = data?.observacoes ? String(data.observacoes).trim() : null;
+  const origemAtendimento = data?.origemAtendimento ? String(data.origemAtendimento).trim() : "manual";
   const itensInput = Array.isArray(data?.itens) ? data.itens : [];
   const descontoPct = Number(data?.descontoPct) || 0;
   const frete = Number(data?.frete) || 0;
@@ -327,6 +401,7 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
   if (!itensInput.length) throw new functions.https.HttpsError("invalid-argument", "Ao menos um item é obrigatório.");
   if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
   if (descontoPct < 0 || descontoPct > 100) throw new functions.https.HttpsError("invalid-argument", "descontoPct inválido.");
+  if (frete < 0) throw new functions.https.HttpsError("invalid-argument", "Frete não pode ser negativo.");
 
   const idemKey = `orc_criar:${requestId}`;
   const acquired = await acquireIdem(idemKey);
@@ -337,38 +412,79 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
 
   const db = admin.firestore();
   const itensSnapshot: ItemOrcamentoVitre[] = [];
+  let subtotalProdutosCentavos = 0;
+  let acrescimosItensCentavos = 0;
   for (const it of itensInput) {
     const sku = String(it.sku || "").trim();
-    const qtd = Number(it.qtd) || 1;
+    const qtd = Number(it.qtd);
     if (!sku) throw new functions.https.HttpsError("invalid-argument", "item sem sku.");
+    if (!Number.isInteger(qtd) || qtd < 1) throw new functions.https.HttpsError("invalid-argument", "QTD_INVALIDA:" + sku);
     const prodSnap = await db.collection(COL_PRODUTOS).doc(sku).get();
     if (!prodSnap.exists) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_NAO_ENCONTRADO:" + sku);
     const prod = prodSnap.data() as VitreProduto;
     if (prod.status !== "ativo") throw new functions.https.HttpsError("failed-precondition", "PRODUTO_INATIVO:" + sku);
     if (calcularNivelCompletude(prod) < 1) throw new functions.https.HttpsError("failed-precondition", "PRODUTO_ABAIXO_DO_NIVEL_MINIMO:" + sku);
-    const adicionais = Array.isArray(it.adicionais) ? it.adicionais.filter((a: any) => (prod.personalizacoes || []).some((p) => p.nome === a.nome)) : [];
-    // SNAPSHOT — nunca uma referência viva ao produto.
-    itensSnapshot.push({ sku, nomeSnapshot: prod.nome, precoSnapshot: prod.precoVenda || 0, qtd, adicionais });
+    const adicionaisInput: Array<{ nome?: string }> = Array.isArray(it.adicionais) ? it.adicionais : [];
+    // SNAPSHOT — nunca uma referência viva ao produto. Só aceita adicionais
+    // que estejam de fato pré-cadastrados no produto (nunca confia no preço vindo do cliente).
+    const adicionais: Array<{ nome: string; preco: number }> = adicionaisInput
+      .map((a) => (prod.personalizacoes || []).find((p) => p.nome === a?.nome))
+      .filter((p): p is { nome: string; preco: number } => !!p);
+    const precoSnapshotCentavos = toCentavos(prod.precoVenda);
+    const adicionaisCentavosUnit = adicionais.reduce((s: number, a) => s + toCentavos(a.preco), 0);
+    const itemBaseCentavos = (precoSnapshotCentavos + adicionaisCentavosUnit) * qtd;
+    const { centavos: itemAcrescimoCentavos, snapshot: acrescimoSnapshot } = validarEAplicarAcrescimo(itemBaseCentavos, it.acrescimo, caller.role);
+    subtotalProdutosCentavos += itemBaseCentavos;
+    acrescimosItensCentavos += itemAcrescimoCentavos;
+    itensSnapshot.push({
+      sku, nomeSnapshot: prod.nome, precoSnapshot: prod.precoVenda || 0, precoSnapshotCentavos, qtd,
+      adicionais, acrescimo: acrescimoSnapshot, acrescimoCentavos: itemAcrescimoCentavos,
+      itemTotalCentavos: itemBaseCentavos + itemAcrescimoCentavos,
+    });
   }
 
-  const subtotal = itensSnapshot.reduce((s, it) => s + it.precoSnapshot * it.qtd + (it.adicionais || []).reduce((a, ad) => a + ad.preco, 0) * it.qtd, 0);
-  const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
-  const total = +(subtotal - valorDesconto + frete).toFixed(2);
+  // Ordem oficial do cálculo (FASE 7 do hotfix): produtos → acréscimos de
+  // item → acréscimo global → desconto → frete → total.
+  const { centavos: acrescimoGlobalCentavos, snapshot: acrescimoGlobalSnapshot } =
+    validarEAplicarAcrescimo(subtotalProdutosCentavos + acrescimosItensCentavos, data?.acrescimoGlobal, caller.role);
+  const baseCentavos = subtotalProdutosCentavos + acrescimosItensCentavos + acrescimoGlobalCentavos;
+  const valorDescontoCentavos = Math.round(baseCentavos * descontoPct / 100);
+  const freteCentavos = toCentavos(frete);
+  const totalCentavos = baseCentavos - valorDescontoCentavos + freteCentavos;
+  if (totalCentavos < 0) throw new functions.https.HttpsError("invalid-argument", "TOTAL_NEGATIVO");
 
   const docRef = db.collection(COL_ORC).doc();
-  await docRef.set({
+  const registro = {
     id: docRef.id, requestId, tipo: "catalogo_vitre", marca: "vitre", status: "rascunho",
-    clienteNome, itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total,
+    clienteNome, clienteTipo, clienteDocumento, clienteEmail, clienteTel, clienteCidade, clienteExistenteId,
+    observacoes, origemAtendimento,
+    itens: itensSnapshot,
+    descontoPct,
+    acrescimoGlobal: acrescimoGlobalSnapshot,
+    // Campos decimais — mantidos por compatibilidade com PDF/WhatsApp/telas
+    // existentes; sempre DERIVADOS dos campos *Centavos abaixo.
+    subtotal: centavosParaReais(subtotalProdutosCentavos),
+    acrescimosItensTotal: centavosParaReais(acrescimosItensCentavos),
+    acrescimoGlobalTotal: centavosParaReais(acrescimoGlobalCentavos),
+    valorDesconto: centavosParaReais(valorDescontoCentavos),
+    frete: centavosParaReais(freteCentavos),
+    total: centavosParaReais(totalCentavos),
+    // Fonte de verdade — inteiros, nunca ponto flutuante.
+    subtotalCentavos: subtotalProdutosCentavos, acrescimosItensCentavos, acrescimoGlobalCentavos,
+    valorDescontoCentavos, freteCentavos, totalCentavos,
     prazoValidadeDias, validoAte: Date.now() + prazoValidadeDias * 86400000,
+    vendedorUid: caller.uid,
     criadoPorUid: caller.uid, criadoPorRole: caller.role, criadoEm: Date.now(),
-  });
-  await writeAudit("orcamento_criado", caller.uid, caller.role, { id: docRef.id, total });
-  return { ok: true, jaProcessado: false, id: docRef.id, total };
+  };
+  await docRef.set(registro);
+  await writeAudit("orcamento_criado", caller.uid, caller.role, { id: docRef.id, total: registro.total });
+  return { ok: true, jaProcessado: false, id: docRef.id, total: registro.total, totalCentavos };
 });
 
 export const vitreAtualizarOrcamento = functions.https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
-  requireRole(caller, ["comercial", "producao"], "atualizar orçamento de catálogo Vitre");
+  // FASE 13 do hotfix: pagamento/status são dados comerciais — Produção não altera (Master sempre passa).
+  requireRole(caller, ["comercial"], "atualizar orçamento de catálogo Vitre");
   const id = String(data?.id || "").trim();
   const status = data?.status ? String(data.status) : null;
   if (!id) throw new functions.https.HttpsError("invalid-argument", "id obrigatório.");
@@ -381,6 +497,10 @@ export const vitreAtualizarOrcamento = functions.https.onCall(async (data, conte
     if (["convertido", "cancelado"].includes(cur.status)) throw new functions.https.HttpsError("failed-precondition", "ORCAMENTO_EM_ESTADO_FINAL:" + cur.status);
     const update: Record<string, unknown> = { atualizadoEm: Date.now() };
     if (status && ["rascunho", "enviado", "cancelado"].includes(status)) update.status = status;
+    if (data?.pagamento !== undefined) {
+      update.pagamento = validarPagamento(Number(cur.totalCentavos) || 0, data.pagamento);
+    }
+    if (data?.marcarEnviado === true) { update.enviadoEm = Date.now(); update.enviadoPorUid = caller.uid; if (!status) update.status = "enviado"; }
     tx.set(ref, update, { merge: true });
     return { statusFinal: update.status || cur.status };
   });
@@ -520,7 +640,13 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
     const statusOS = temProduzido && temProntaEntrega ? "mista_aguardando_producao" : temProduzido ? "aguardando_producao" : "pronta_expedicao";
     tx.set(osRef, {
       id: osRef.id, orcamentoId, requestId, marca: "vitre",
-      clienteNome: orc.clienteNome, itens, status: statusOS,
+      clienteNome: orc.clienteNome, clienteTel: orc.clienteTel ?? null, clienteDocumento: orc.clienteDocumento ?? null,
+      itens, status: statusOS,
+      // Coerência Pagamento ↔ OS (FASE 12 do hotfix) — copia a condição já
+      // validada no orçamento; a OS nunca recalcula nem inventa valores.
+      pagamento: orc.pagamento ?? null,
+      subtotalCentavos: orc.subtotalCentavos ?? null, totalCentavos: orc.totalCentavos ?? null,
+      valorDescontoCentavos: orc.valorDescontoCentavos ?? null, freteCentavos: orc.freteCentavos ?? null,
       criadoPorUid: caller.uid, criadoPorRole: caller.role, criadoEm: Date.now(),
     });
     tx.set(orcRef, { status: "convertido", osId: osRef.id, atualizadoEm: Date.now() }, { merge: true });
