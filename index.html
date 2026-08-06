@@ -5782,7 +5782,7 @@ function _authFirebaseError(code){
         <div style="flex:1"></div>
         <button class="topbar-btn ghost" onclick="vitreCatIncompletosToggle()" style="font-size:12px" id="vitreCatBtnIncompletos">📋 Cadastros incompletos</button>
         <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
-        <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff">＋ Novo Produto</button>
+        <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff" id="vitreCatBtnNovo">＋ Novo Produto</button>
       </div>
       <div id="vitreCatIncompletosPanel" style="display:none;margin-bottom:16px">
         <div class="card" style="padding:14px">
@@ -16497,6 +16497,22 @@ function vitreCatalogoInit() {
 
 function vitreCatalogoRender() {
   var wrap = document.getElementById('vitreCatList'); if (!wrap) return;
+
+  // Parte 7 da homologação guiada (2026-08-06) — achado: os botões de
+  // topo ("Novo Produto"/"Importar planilha") ficavam visíveis para
+  // Comercial mesmo sem permissão nenhuma nas Functions
+  // (vitreCriarOuEditarProduto/vitreImportarProdutos), resultando num
+  // clique que só falha com permission-denied em vez de nunca aparecer.
+  // Mesma checagem de perfil já usada nos botões por card.
+  (function () {
+    var souMaster = vitreCatSouMaster();
+    var minhaFuncao = vitreCatMinhaFuncao();
+    var btnNovo = document.getElementById('vitreCatBtnNovo');
+    var btnImp = document.getElementById('vitreCatBtnImportar');
+    if (btnNovo) btnNovo.style.display = (souMaster || minhaFuncao === 'producao') ? '' : 'none';
+    if (btnImp) btnImp.style.display = souMaster ? '' : 'none';
+  })();
+
   var busca = ((document.getElementById('vitreCatFiltroBusca') || {}).value || '').trim().toLowerCase();
   var fStatus = (document.getElementById('vitreCatFiltroStatus') || {}).value || '';
   var fCategoria = (document.getElementById('vitreCatFiltroCategoria') || {}).value || '';
