@@ -1186,6 +1186,9 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+<!-- Config central de marca (Fase G, 2026-08-06) — nome/cores/logo/textos por
+     marca (VR Marcas / Vitre), fonte única para UI, PDF e prévia de WhatsApp. -->
+<script src="assets/brands/brand-config.js"></script>
 <script>
 // ═══════════════════════════════════════════════════
 // FIREBASE — SYNC EM NUVEM (erp-vrmarcas)
@@ -2038,6 +2041,7 @@ function _authFirebaseError(code){
     <div class="sb-group" id="sbG-comercial">
       <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
       <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
+      <div class="sb-item" onclick="nav('vitre-catalogo',this)"><span class="ico">🌸</span> Catálogo Vitre</div>
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
       <!-- Inteligência Comercial removida a pedido -->
       <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
@@ -5669,6 +5673,42 @@ function _authFirebaseError(code){
       </div>
     </div>
 
+    <!-- ==============================
+         CATÁLOGO VITRE (Fase G)
+         ============================== -->
+    <div id="pg-vitre-catalogo" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <input type="text" id="vitreCatFiltroBusca" placeholder="Buscar por SKU ou nome..." oninput="vitreCatalogoRender()"
+          style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);min-width:200px">
+        <select id="vitreCatFiltroStatus" onchange="vitreCatalogoRender()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <option value="">Todos os status</option>
+          <option value="ativo">Ativo</option>
+          <option value="inativo">Inativo</option>
+        </select>
+        <select id="vitreCatFiltroCategoria" onchange="vitreCatalogoRender()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <option value="">Todas as categorias</option>
+        </select>
+        <select id="vitreCatFiltroNivel" onchange="vitreCatalogoRender()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <option value="">Todos os níveis</option>
+          <option value="0">Nível 0 — incompleto</option>
+          <option value="1">Nível 1 — básico</option>
+          <option value="2">Nível 2</option>
+          <option value="3">Nível 3</option>
+          <option value="4">Nível 4 — completo</option>
+        </select>
+        <span id="vitreCatTotal" style="font-size:11px;color:var(--muted)"></span>
+        <div style="flex:1"></div>
+        <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
+        <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff">＋ Novo Produto</button>
+      </div>
+      <div id="vitreCatEmpty" style="display:none;text-align:center;padding:60px 20px">
+        <div style="font-size:64px;margin-bottom:16px;opacity:.5">🌸</div>
+        <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhum produto no catálogo Vitre</div>
+        <div style="font-size:13px;color:var(--muted)">Importe a planilha de produtos ou cadastre manualmente.</div>
+      </div>
+      <div id="vitreCatList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px"></div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 
@@ -5723,6 +5763,108 @@ function _authFirebaseError(code){
         <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="fornCloseModal()">Cancelar</button>
         <button class="gen-submit" style="flex:2" onclick="fornSalvar()">💾 Salvar Fornecedor</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Catálogo Vitre — Novo/Editar Produto -->
+<div class="gen-overlay" id="vitreCatOverlay" onclick="if(event.target===this)vitreCatalogoFecharModal()">
+  <div class="gen-modal wide" style="width:640px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#134E4A,#1E7A86);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff" id="vitreCatModalTitle">🌸 Novo Produto Vitre</div>
+      <button class="gen-close" onclick="vitreCatalogoFecharModal()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <input type="hidden" id="vitreCatEditSku">
+      <div id="vitreCatNivelBadge" style="margin-bottom:10px"></div>
+      <div class="fg2">
+        <div class="fg">
+          <label>SKU *</label>
+          <input type="text" id="vitreCatSku" placeholder="Ex: CPC001">
+        </div>
+        <div class="fg">
+          <label>Nome *</label>
+          <input type="text" id="vitreCatNome" placeholder="Nome do produto">
+        </div>
+      </div>
+      <div class="fg2" id="vitreCatComercialFields">
+        <div class="fg">
+          <label>Custo (R$)</label>
+          <input type="number" step="0.01" id="vitreCatCusto">
+        </div>
+        <div class="fg">
+          <label>Preço de venda (R$)</label>
+          <input type="number" step="0.01" id="vitreCatPrecoVenda">
+        </div>
+      </div>
+      <div class="fg2" id="vitreCatComercialFields2">
+        <div class="fg">
+          <label>Categoria</label>
+          <input type="text" id="vitreCatCategoria" placeholder="Ex: Porta-copos">
+        </div>
+        <div class="fg">
+          <label>Status</label>
+          <select id="vitreCatStatus">
+            <option value="ativo">Ativo</option>
+            <option value="inativo">Inativo</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Peso (kg)</label>
+          <input type="number" step="0.01" id="vitreCatPeso">
+        </div>
+        <div class="fg">
+          <label>Embalagem</label>
+          <input type="text" id="vitreCatEmbalagem" placeholder="Ex: 20x15x5cm">
+        </div>
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Comprimento (cm)</label>
+          <input type="number" step="0.01" id="vitreCatComprimento">
+        </div>
+        <div class="fg">
+          <label>Largura (cm)</label>
+          <input type="number" step="0.01" id="vitreCatLargura">
+        </div>
+      </div>
+      <div class="fg" id="vitreCatDescField">
+        <label>Descrição curta</label>
+        <textarea id="vitreCatDescricao" rows="2" placeholder="Descrição comercial curta do produto"
+          style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;resize:vertical;background:var(--bg);color:var(--text)"></textarea>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px" id="vitreCatPermHint"></div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="vitreCatalogoFecharModal()">Cancelar</button>
+        <button class="gen-submit" style="flex:2" onclick="vitreCatalogoSalvar()">💾 Salvar Produto</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Catálogo Vitre — Info de Importação -->
+<div class="gen-overlay" id="vitreCatImportOverlay" onclick="if(event.target===this)vitreCatalogoFecharImportModal()">
+  <div class="gen-modal" style="width:520px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#134E4A,#1E7A86);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">📥 Importação de Planilha — Catálogo Vitre</div>
+      <button class="gen-close" onclick="vitreCatalogoFecharImportModal()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <p style="font-size:12px;color:var(--text);line-height:1.6">
+        A importação em massa da planilha real de produtos Vitre é feita pelo script
+        auditado <code>scripts/vitre_importar_planilha.js</code> (Master-only, idempotente,
+        com relatório de dry-run antes de gravar). Rode no terminal, no ambiente de homologação:
+      </p>
+      <pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;overflow-x:auto">node scripts/vitre_importar_planilha.js "&lt;caminho da planilha.xlsx&gt;"        # dry-run
+node scripts/vitre_importar_planilha.js "&lt;caminho da planilha.xlsx&gt;" --apply # grava de verdade</pre>
+      <p style="font-size:12px;color:var(--muted);line-height:1.6">
+        Esta tela (Catálogo Vitre) é para cadastro manual, edição, ativação/desativação,
+        duplicação e evolução progressiva de nível de completude de produtos já
+        importados ou criados manualmente.
+      </p>
+      <button class="topbar-btn ghost" style="width:100%;padding:10px;margin-top:6px" onclick="vitreCatalogoFecharImportModal()">Entendi</button>
     </div>
   </div>
 </div>
@@ -7372,7 +7514,7 @@ function nav(page, el) {
   // então só Master alcançava a página pela sidebar, e raramente saía dela
   // sem recarregar). Agora que Produção/Financeiro navegam para Compras
   // rotineiramente, o conteúdo ficava vazando por baixo de outras páginas.
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','vitre-catalogo','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -7392,6 +7534,7 @@ function nav(page, el) {
     dashboard: 'Dashboard', kanban: 'Kanban de OS',
     'os-list': 'Todas as OS', orcamento: 'Novo Orçamento',
     'orcamentos-enviados': 'Orçamentos Enviados',
+    'vitre-catalogo': '🌸 Catálogo Vitre',
     comercial: 'Dashboard Comercial',
     inteligencia: '🧠 Inteligência Comercial',
     crm: 'CRM',
@@ -7424,6 +7567,7 @@ function nav(page, el) {
   if (page === 'config-usr') { setTimeout(function(){ usrRender(); usrRenderPerms(); try{vendedoresRender();}catch(e){} try{iaCfgLoad();}catch(e){} }, 0); }
   // Ao entrar em Orçamentos Enviados, renderizar lista
   if (page === 'orcamentos-enviados') { setTimeout(function(){ orcEnviadosRender(); }, 0); }
+  if (page === 'vitre-catalogo') { setTimeout(function(){ if(typeof vitreCatalogoInit==='function') vitreCatalogoInit(); if(typeof vitreCatalogoRender==='function') vitreCatalogoRender(); }, 0); }
   if (page === 'comercial') { setTimeout(function(){ comercialRender(); }, 0); }
   if (page === 'estoque')   { setTimeout(function(){ stockRenderItems(); retalhoRender(); stockRenderHistorico(); if(typeof dashRender==='function') dashRender(); stockPopulateOsChips(); }, 0); }
   if (page === 'compras')   { setTimeout(function(){ comprasRender(); }, 0); }
@@ -16142,6 +16286,216 @@ function orcCheckRetalho(idx) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// CATÁLOGO VITRE (Fase G, 2026-08-06) — CRUD server-side via Cloud Functions
+// (functions/src/vitre.ts). Nenhuma escrita direta no Firestore — mesma
+// arquitetura documento-por-registro do módulo Compras v2 acima. Listener
+// em tempo real só para leitura; toda mutação passa por
+// vitreCriarOuEditarProduto/vitreAtivarDesativarProduto/vitreDuplicarProduto.
+// ══════════════════════════════════════════════════════════════════════════
+var VITRE_CATALOGO_CACHE = [];
+var _vitreCatUnsub = null;
+var VITRE_CAMPOS_COMERCIAIS = ['custo', 'precoVenda', 'descricaoCurta', 'descricaoCompleta', 'status', 'categoria', 'familia'];
+var VITRE_NIVEL_LABEL = { 0: 'Nível 0 — incompleto', 1: 'Nível 1 — básico', 2: 'Nível 2', 3: 'Nível 3', 4: 'Nível 4 — completo' };
+var VITRE_NIVEL_COLOR = { 0: '#DC2626', 1: '#F59E0B', 2: '#3B82F6', 3: '#8B5CF6', 4: '#16A34A' };
+
+function vitreCatReqId() { return 'req_vitre_' + Date.now() + '_' + Math.random().toString(36).slice(2); }
+
+// Espelha calcularNivelCompletude() de functions/src/vitre.ts — só para
+// exibição na lista; a fonte de verdade continua sendo o retorno da Cloud
+// Function a cada gravação, nunca um campo "nivel" persistido cru.
+function vitreCatNivel(p) {
+  if (!p) return 0;
+  var nivel1 = !!(p.sku && p.nome && p.precoVenda != null && p.custo != null && p.status);
+  if (!nivel1) return 0;
+  var nivel2 = !!(p.categoria && p.fotos && p.fotos.length && p.descricaoCurta && p.prazoDias != null && p.embalagem && p.pesoKg != null);
+  if (!nivel2) return 1;
+  var nivel3 = !!(p.usos && p.usos.length && p.beneficios && p.beneficios.length && p.palavrasChave && p.palavrasChave.length && p.disponibilidade);
+  if (!nivel3) return 2;
+  var nivel4 = !!(p.fichaTecnica && p.fichaTecnica.componentes && p.fichaTecnica.componentes.length);
+  if (!nivel4) return 3;
+  return 4;
+}
+
+function vitreCatSouMaster() {
+  var fn = _normalizeRole((typeof _currentSession !== 'undefined' && _currentSession && _currentSession.funcao) || '') || '';
+  return fn === 'master';
+}
+function vitreCatMinhaFuncao() {
+  return _normalizeRole((typeof _currentSession !== 'undefined' && _currentSession && _currentSession.funcao) || '') || '';
+}
+
+function vitreCatalogoInit() {
+  if (_vitreCatUnsub || typeof _db === 'undefined' || !_db) return;
+  _vitreCatUnsub = _db.collection('vitre_produtos').onSnapshot(function (snap) {
+    VITRE_CATALOGO_CACHE = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (a.sku || '').localeCompare(b.sku || ''); });
+    if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
+  }, function (err) { console.warn('[Vitre] listener vitre_produtos falhou:', err); });
+}
+
+function vitreCatalogoRender() {
+  var wrap = document.getElementById('vitreCatList'); if (!wrap) return;
+  var busca = ((document.getElementById('vitreCatFiltroBusca') || {}).value || '').trim().toLowerCase();
+  var fStatus = (document.getElementById('vitreCatFiltroStatus') || {}).value || '';
+  var fCategoria = (document.getElementById('vitreCatFiltroCategoria') || {}).value || '';
+  var fNivel = (document.getElementById('vitreCatFiltroNivel') || {}).value || '';
+
+  // Popula o filtro de categorias dinamicamente a partir do catálogo real.
+  var selCat = document.getElementById('vitreCatFiltroCategoria');
+  if (selCat) {
+    var categoriasAtuais = Array.from(new Set(VITRE_CATALOGO_CACHE.map(function (p) { return p.categoria; }).filter(Boolean))).sort();
+    var valorAtual = selCat.value;
+    selCat.innerHTML = '<option value="">Todas as categorias</option>' + categoriasAtuais.map(function (c) { return '<option value="' + cfgEsc(c) + '">' + cfgEsc(c) + '</option>'; }).join('');
+    selCat.value = valorAtual;
+  }
+
+  var lista = VITRE_CATALOGO_CACHE.filter(function (p) {
+    if (fStatus && p.status !== fStatus) return false;
+    if (fCategoria && p.categoria !== fCategoria) return false;
+    if (fNivel !== '' && String(vitreCatNivel(p)) !== fNivel) return false;
+    if (busca && (p.sku || '').toLowerCase().indexOf(busca) < 0 && (p.nome || '').toLowerCase().indexOf(busca) < 0) return false;
+    return true;
+  });
+
+  var totEl = document.getElementById('vitreCatTotal');
+  if (totEl) totEl.textContent = lista.length + ' produto(s) de ' + VITRE_CATALOGO_CACHE.length;
+  var empty = document.getElementById('vitreCatEmpty');
+  if (empty) empty.style.display = VITRE_CATALOGO_CACHE.length ? 'none' : '';
+
+  var souMaster = vitreCatSouMaster();
+  var minhaFuncao = vitreCatMinhaFuncao();
+  var podeEditar = souMaster || minhaFuncao === 'producao';
+
+  wrap.innerHTML = lista.map(function (p) {
+    var nivel = vitreCatNivel(p);
+    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+    var acoes = '';
+    if (podeEditar) acoes += '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">✏️ Editar</button>';
+    if (souMaster) {
+      acoes += '<button onclick="vitreCatalogoAtivarDesativar(\'' + cfgEsc(p.sku) + '\',' + (p.status === 'ativo') + ')" style="font-size:11px;padding:5px 10px;border:1px solid ' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';background:transparent;color:' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';border-radius:6px;cursor:pointer;margin-left:6px">' + (p.status === 'ativo' ? '🚫 Desativar' : '✅ Ativar') + '</button>';
+      acoes += '<button onclick="vitreCatalogoDuplicar(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer;margin-left:6px">📄 Duplicar</button>';
+    }
+    return '<div class="card" style="padding:14px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+      + '<div><strong>' + cfgEsc(p.nome || '(sem nome)') + '</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">SKU ' + cfgEsc(p.sku) + (p.categoria ? ' · ' + cfgEsc(p.categoria) : '') + '</div></div>'
+      + '<span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + (p.status === 'ativo' ? 'ATIVO' : 'INATIVO') + '</span>'
+      + '</div>'
+      + '<div style="margin-top:8px;font-size:13px">' + (p.precoVenda != null ? '<strong>R$ ' + Number(p.precoVenda).toFixed(2) + '</strong>' : '<span style="color:var(--muted)">sem preço</span>') + (p.custo != null ? ' <span style="font-size:11px;color:var(--muted)">(custo R$ ' + Number(p.custo).toFixed(2) + ')</span>' : '') + '</div>'
+      + '<div style="margin-top:8px"><span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">' + VITRE_NIVEL_LABEL[nivel] + '</span></div>'
+      + (acoes ? '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">' + acoes + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function vitreCatalogoAplicarPermissoesForm() {
+  var souMaster = vitreCatSouMaster();
+  var hint = document.getElementById('vitreCatPermHint');
+  ['vitreCatCusto', 'vitreCatPrecoVenda', 'vitreCatCategoria', 'vitreCatStatus', 'vitreCatDescricao'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.disabled = !souMaster;
+  });
+  if (hint) hint.textContent = souMaster ? '' : 'Seu perfil pode editar ficha técnica (peso, embalagem, dimensões) — campos comerciais (custo, preço, categoria, status, descrição) são exclusivos do Master.';
+}
+
+function vitreCatalogoNovoModal() {
+  document.getElementById('vitreCatEditSku').value = '';
+  document.getElementById('vitreCatModalTitle').textContent = '🌸 Novo Produto Vitre';
+  ['vitreCatSku', 'vitreCatNome', 'vitreCatCusto', 'vitreCatPrecoVenda', 'vitreCatCategoria', 'vitreCatPeso', 'vitreCatEmbalagem', 'vitreCatComprimento', 'vitreCatLargura', 'vitreCatDescricao'].forEach(function (id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  document.getElementById('vitreCatSku').disabled = false;
+  document.getElementById('vitreCatStatus').value = 'ativo';
+  document.getElementById('vitreCatNivelBadge').innerHTML = '';
+  vitreCatalogoAplicarPermissoesForm();
+  document.getElementById('vitreCatOverlay').classList.add('open');
+}
+
+function vitreCatalogoEditarModal(sku) {
+  var p = VITRE_CATALOGO_CACHE.find(function (x) { return x.sku === sku; });
+  if (!p) { showToast('Produto não encontrado.', 'err'); return; }
+  document.getElementById('vitreCatEditSku').value = p.sku;
+  document.getElementById('vitreCatModalTitle').textContent = '🌸 Editar Produto — ' + p.sku;
+  document.getElementById('vitreCatSku').value = p.sku;
+  document.getElementById('vitreCatSku').disabled = true; // SKU é o ID do documento — não é editável após criado
+  document.getElementById('vitreCatNome').value = p.nome || '';
+  document.getElementById('vitreCatCusto').value = p.custo != null ? p.custo : '';
+  document.getElementById('vitreCatPrecoVenda').value = p.precoVenda != null ? p.precoVenda : '';
+  document.getElementById('vitreCatCategoria').value = p.categoria || '';
+  document.getElementById('vitreCatStatus').value = p.status || 'ativo';
+  document.getElementById('vitreCatPeso').value = p.pesoKg != null ? p.pesoKg : '';
+  document.getElementById('vitreCatEmbalagem').value = p.embalagem || '';
+  document.getElementById('vitreCatComprimento').value = p.comprimentoCm != null ? p.comprimentoCm : '';
+  document.getElementById('vitreCatLargura').value = p.larguraCm != null ? p.larguraCm : '';
+  document.getElementById('vitreCatDescricao').value = p.descricaoCurta || '';
+  var nivel = vitreCatNivel(p);
+  document.getElementById('vitreCatNivelBadge').innerHTML = '<span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">' + VITRE_NIVEL_LABEL[nivel] + '</span>';
+  vitreCatalogoAplicarPermissoesForm();
+  document.getElementById('vitreCatOverlay').classList.add('open');
+}
+
+function vitreCatalogoFecharModal() {
+  document.getElementById('vitreCatOverlay').classList.remove('open');
+}
+
+function vitreCatalogoImportarModal() { document.getElementById('vitreCatImportOverlay').classList.add('open'); }
+function vitreCatalogoFecharImportModal() { document.getElementById('vitreCatImportOverlay').classList.remove('open'); }
+
+function vitreCatalogoSalvar() {
+  var editando = !!document.getElementById('vitreCatEditSku').value;
+  var sku = document.getElementById('vitreCatSku').value.trim();
+  var nome = document.getElementById('vitreCatNome').value.trim();
+  if (!sku) { showToast('SKU é obrigatório.', 'err'); return; }
+  if (!nome) { showToast('Nome é obrigatório.', 'err'); return; }
+
+  var souMaster = vitreCatSouMaster();
+  var payload = { sku: sku, nome: nome, requestId: vitreCatReqId() };
+  function num(id) { var v = document.getElementById(id).value; return v === '' ? null : Number(v); }
+  function str(id) { var v = document.getElementById(id).value.trim(); return v === '' ? null : v; }
+  // Ficha técnica/dimensões — qualquer perfil autorizado (Produção inclusive) pode editar.
+  payload.pesoKg = num('vitreCatPeso');
+  payload.embalagem = str('vitreCatEmbalagem');
+  payload.comprimentoCm = num('vitreCatComprimento');
+  payload.larguraCm = num('vitreCatLargura');
+  // Campos comerciais — só enviados quando Master está logado (Produção não
+  // deve nem tentar, evita depender só do bloqueio server-side p/ UX limpa;
+  // o bloqueio real e definitivo continua sendo requireRole em vitre.ts).
+  if (souMaster) {
+    payload.custo = num('vitreCatCusto');
+    payload.precoVenda = num('vitreCatPrecoVenda');
+    payload.categoria = str('vitreCatCategoria');
+    payload.status = document.getElementById('vitreCatStatus').value;
+    payload.descricaoCurta = str('vitreCatDescricao');
+  }
+
+  firebase.functions().httpsCallable('vitreCriarOuEditarProduto')(payload).then(function (res) {
+    var nivel = res.data && res.data.nivel;
+    showToast((editando ? 'Produto atualizado' : 'Produto criado') + (nivel != null ? ' — ' + VITRE_NIVEL_LABEL[nivel] : '') + '.', 'ok');
+    vitreCatalogoFecharModal();
+  }).catch(function (e) {
+    showToast('Erro ao salvar produto: ' + (e && e.message || e), 'err');
+  });
+}
+
+function vitreCatalogoAtivarDesativar(sku, estaAtivo) {
+  var novoAtivo = !estaAtivo;
+  if (!_e2eDlgConfirm((novoAtivo ? 'Ativar' : 'Desativar') + ' o produto ' + sku + '?')) return;
+  firebase.functions().httpsCallable('vitreAtivarDesativarProduto')({ sku: sku, ativo: novoAtivo, requestId: vitreCatReqId() }).then(function () {
+    showToast('Produto ' + (novoAtivo ? 'ativado' : 'desativado') + '.', 'ok');
+  }).catch(function (e) { showToast('Erro: ' + (e && e.message || e), 'err'); });
+}
+
+function vitreCatalogoDuplicar(skuOrigem) {
+  var skuNovo = _e2eDlgPrompt('SKU do novo produto (cópia de ' + skuOrigem + '):', skuOrigem + '-COPIA');
+  if (!skuNovo) return;
+  firebase.functions().httpsCallable('vitreDuplicarProduto')({ skuOrigem: skuOrigem, skuNovo: skuNovo.trim(), requestId: vitreCatReqId() }).then(function () {
+    showToast('Produto duplicado como ' + skuNovo.trim() + '.', 'ok');
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('SKU_JA_EXISTE') >= 0) showToast('Já existe um produto com o SKU "' + skuNovo.trim() + '".', 'err');
+    else showToast('Erro ao duplicar: ' + msg, 'err');
+  });
+}
+
 // ============================================================
 // CRM — AGENDA DE FOLLOW-UP
 // ============================================================
@@ -19455,6 +19809,7 @@ var MODULOS = [
   { id:'kanban',       nome:'Kanban OS' },
   { id:'os-list',      nome:'Todas as OS' },
   { id:'orcamento',    nome:'Orçamentos' },
+  { id:'vitre-catalogo', nome:'Catálogo Vitre' },
   { id:'crm',          nome:'CRM' },
   { id:'clientes',     nome:'Clientes' },
   { id:'estoque',      nome:'Estoque' },
@@ -19466,7 +19821,7 @@ var MODULOS = [
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque','compras'].includes(m.id), financeiro: ['dashboard','financeiro','os-list','compras'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','vitre-catalogo','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque','compras','vitre-catalogo'].includes(m.id), financeiro: ['dashboard','financeiro','os-list','compras'].includes(m.id) };
 });
 // Achado real desta rodada: 'compras' nunca esteve em MODULOS — PERM_DEFAULT
 // nunca tinha uma entrada para o módulo, então getPermForMod() (secApplyPerms)
@@ -25459,6 +25814,7 @@ async function mktForceSync() {
   <div class="mdrw-section" id="mspSec-comercial">Comercial</div>
   <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
   <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+  <div class="mdrw-item" id="mspItem-vitre-catalogo" onclick="mobilePanelNav('vitre-catalogo')"><span class="mdrw-ico">🌸</span> Catálogo Vitre</div>
   <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
   <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
   <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>

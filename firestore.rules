@@ -316,6 +316,37 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Catálogo Vitre + Orçamento de Catálogo (Fase G, 2026-08-06) ─────────
+    // Mesma arquitetura documento-por-registro + Cloud Function do bloco
+    // Compras acima — nenhuma escrita client-side em nenhuma destas
+    // coleções (vitreImportarProdutos/CriarOuEditarProduto/
+    // AtivarDesativarProduto/DuplicarProduto/CriarOrcamento/
+    // AtualizarOrcamento em functions/src/vitre.ts fazem toda a validação
+    // de perfil/campo comercial/nível mínimo no servidor).
+    match /vitre_produtos/{sku} {
+      allow read:  if isAnyStaff(); // Comercial consulta p/ orçamento; Produção consulta ficha técnica
+      allow write: if false;
+    }
+    match /vitre_produto_historico/{id} {
+      allow read:  if isAnyStaff();
+      allow write: if false;
+    }
+    match /vitre_importacoes/{id} {
+      allow read:  if isMaster(); // só quem importa (master-only) vê o histórico de importação
+      allow write: if false;
+    }
+    match /vitre_orcamentos/{orcId} {
+      allow read:  if isComercial() || isFinanceiro();
+      allow write: if false;
+    }
+    match /vitre_idem_keys/{key} {
+      allow read, write: if false; // uso interno exclusivo das Cloud Functions
+    }
+    match /vitre_audit_log/{entryId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+
     // ── erp_vr_orcamentos: núcleo comercial do orçamento (sem custo/markup) ──
     // Ver subcoleção /interno abaixo para os dados sensíveis.
     match /erp_vr_orcamentos/{orcId} {
