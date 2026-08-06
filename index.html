@@ -1222,6 +1222,19 @@ function _homologFatal(reason) {
 }
 
 var _HOMOLOG_MODE = _homologComputeMode(location.hostname, new URLSearchParams(location.search).get('emulator'));
+
+// Arquitetura oficial de Compras (RODADA FINAL, 2026-08-06) — independente
+// de _HOMOLOG_MODE (que só decide A QUAL projeto Firebase conectar,
+// nunca qual arquitetura de negócio usar). Antes desta rodada, Compras
+// v1 (array legado erp_vr/compras, escrita direta de stock) e v2 (Cloud
+// Functions, erp_vr_compras_*) coexistiam escondidos atrás de
+// _HOMOLOG_MODE — o que significava que PRODUÇÃO sempre rodava v1 (o
+// caminho inseguro), e só localhost+?emulator=1 via v2. Esta flag torna
+// v2 a única arquitetura candidata, em qualquer ambiente. O ramo v1
+// permanece no código (rollback), mas nenhum caminho ativo o alcança
+// mais enquanto esta flag for true. Ver
+// scripts/AUDITORIA_FASE2_COMPRAS_V1_V2_PARIDADE_2026-08-06.md.
+var _COMPRAS_V2_OFICIAL = true;
 var firebaseConfig = _HOMOLOG_MODE ? {
   apiKey: "demo-homolog-key",
   authDomain: "demo-erp-homolog.firebaseapp.com",
@@ -11768,7 +11781,7 @@ function syncSidebarBadges() {
   var estqCount=Object.values(STOCK).filter(function(s){return s.qty<s.min;}).length;
   var stBadge=document.getElementById('sbBadgeEstoque');
   if(stBadge){stBadge.textContent=estqCount||'';stBadge.style.display=estqCount?'':'none';}
-  var _comprasFonteBadge=(typeof _HOMOLOG_MODE!=='undefined'&&_HOMOLOG_MODE)?(typeof COMPRAS_V2_CACHE!=='undefined'?COMPRAS_V2_CACHE:[]):(typeof COMPRAS!=='undefined'?COMPRAS:[]);
+  var _comprasFonteBadge=(typeof _COMPRAS_V2_OFICIAL!=='undefined'&&_COMPRAS_V2_OFICIAL)?(typeof COMPRAS_V2_CACHE!=='undefined'?COMPRAS_V2_CACHE:[]):(typeof COMPRAS!=='undefined'?COMPRAS:[]);
   var comprasCount=_comprasFonteBadge.filter(function(p){return p.status!=='recebida'&&p.status!=='cancelada';}).length;
   var pcBadge=document.getElementById('sbBadgeCompras');
   if(pcBadge){pcBadge.textContent=comprasCount||'';pcBadge.style.display=comprasCount?'':'none';}
@@ -12181,14 +12194,14 @@ function comprasSolicitarDeOS(os, matKey, qtdFalta){
     return Promise.resolve(null);
   }
   // Arquitetura v2 (documento-por-registro, mediada por Cloud Function) —
-  // ver bloco "COMPRAS v2" abaixo. Em _HOMOLOG_MODE a UI NUNCA mais cria
+  // ver bloco "COMPRAS v2" abaixo. Em _COMPRAS_V2_OFICIAL a UI NUNCA mais cria
   // solicitação no array legado (COMPRAS/erp_vr/compras); o ramo legado
   // logo abaixo só continua ativo fora de homologação (produção real ainda
   // não tem as Cloud Functions de Compras publicadas — ver relatório de
   // homologação, Task 4). Critério objetivo de remoção do ramo legado:
   // Functions de compras publicadas + firestore.rules normalizadas
   // publicadas + migração de erp_vr/compras executada contra produção.
-  if(_HOMOLOG_MODE){
+  if(_COMPRAS_V2_OFICIAL){
     var jaExisteV2 = COMPRAS_V2_CACHE.some(function(pc){ return pc.origem && (pc.origem.osId===os.id || pc.origem.osNum===os.num) && pc.status!=='cancelada'; });
     if(jaExisteV2){
       showToast('Já existe uma solicitação de compra em aberto para esta OS.','info');
@@ -12292,7 +12305,7 @@ function comprasGerarNecessidades(){
     var matKey = comprasResolverMaterialPorNome(matNome);
     var semEstoque = !matKey || (STOCK[matKey].qty||0) <= 0;
     if(!semEstoque) return proximo();
-    var fonteChecagem = _HOMOLOG_MODE ? COMPRAS_V2_CACHE : COMPRAS; // v2 nunca lê o array legado
+    var fonteChecagem = _COMPRAS_V2_OFICIAL ? COMPRAS_V2_CACHE : COMPRAS; // v2 nunca lê o array legado
     var jaExiste = fonteChecagem.some(function(pc){ return pc.origem && pc.origem.osNum===os.num && pc.status!=='cancelada'; });
     if(jaExiste) return proximo();
     comprasSolicitarDeOS(os, matKey||null, os.qty||1).then(function(){ geradas++; proximo(); });
@@ -12306,7 +12319,7 @@ function comprasNovaSolicitacaoModal(){
   var qtd = parseFloat(prompt('Quantidade necessária:', '1'))||1;
   var marca = (typeof _finBrand!=='undefined' && _finBrand!=='todas') ? _finBrand : 'vr';
   var matKey = comprasResolverMaterialPorNome(nomeItem);
-  if(_HOMOLOG_MODE){
+  if(_COMPRAS_V2_OFICIAL){
     // v2: fornecedor/preço NÃO são definidos na criação — só na aprovação
     // (comprasV2Aprovar, Master apenas). Essa separação é intencional
     // (é exatamente o requisito "Produção não pode aprovar a própria
@@ -12353,7 +12366,7 @@ function comprasNovaSolicitacaoModal(){
 var PC_FLUXO = ['solicitada','cotacao','aprovada','pedida','recebida_parcial','recebida'];
 
 function comprasAvancarStatus(id){
-  if(_HOMOLOG_MODE) return comprasV2AvancarStatus(id);
+  if(_COMPRAS_V2_OFICIAL) return comprasV2AvancarStatus(id);
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status==='cancelada' || pc.status==='recebida'){ showToast('Este pedido já está em estado final.','info'); return; }
   if(pc.status==='pedida'){ comprasReceberModal(id); return; } // "avançar" de pedida = registrar recebimento
@@ -12378,7 +12391,7 @@ function comprasAvancarStatus(id){
 
 // Cancelamento NUNCA apaga histórico/recebimentos — só marca o status.
 function comprasCancelar(id){
-  if(_HOMOLOG_MODE){
+  if(_COMPRAS_V2_OFICIAL){
     var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
     if(pcV2.status==='cancelada'){ return; }
     if(pcV2.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
@@ -12419,14 +12432,14 @@ function comprasCancelar(id){
 // valida a transição de status e é transacional/idempotente.
 //
 // Escopo desta rodada: implementado e testado contra o Firebase Emulator
-// Suite (Functions+Firestore+Auth). Só ativo/chamável quando _HOMOLOG_MODE
+// Suite (Functions+Firestore+Auth). Só ativo/chamável quando _COMPRAS_V2_OFICIAL
 // está ligado — em produção estas funções não são invocadas por nenhum
 // botão existente (a UI de Compras em produção continua no fluxo antigo,
 // acima, intocado). Ativar isso em produção exige plano de integração
 // próprio (ver relatório de homologação) — não é este commit que decide
 // isso, só prova que o mecanismo funciona.
 function comprasV2RequerHomolog(){
-  if(!_HOMOLOG_MODE) throw new Error('[Compras v2] disponível somente em modo homologação (?emulator=1) nesta branch.');
+  if(!_COMPRAS_V2_OFICIAL) throw new Error('[Compras v2] arquitetura v2 desativada (_COMPRAS_V2_OFICIAL=false) nesta build.');
 }
 function comprasV2CriarSolicitacao(label, qtyNecessaria, material, marca, origem){
   comprasV2RequerHomolog();
@@ -12461,14 +12474,14 @@ function comprasV2Cancelar(compraId, motivo){
 // (erp_vr_compras / erp_vr_fin_cp) — leitura pura, nunca escrita direta do
 // cliente (Rules dessas coleções: allow write: if false; toda escrita passa
 // por Cloud Function, ver functions/src/compras.ts). Só é inicializado em
-// _HOMOLOG_MODE; fora de homologação essas variáveis ficam sempre vazias e
+// _COMPRAS_V2_OFICIAL; fora de homologação essas variáveis ficam sempre vazias e
 // a tela de Compras usa exclusivamente o fluxo legado (COMPRAS).
 var COMPRAS_V2_CACHE = [];
 var COMPRAS_V2_FINCP_CACHE = [];
 var _comprasV2Unsubs = null;
 var _comprasV2RecebendoIds = {}; // mesma trava de reentrância do fluxo legado, aplicada aos ids v2
 function comprasV2Init(){
-  if(!_HOMOLOG_MODE || _comprasV2Unsubs || typeof _db==='undefined' || !_db) return;
+  if(!_COMPRAS_V2_OFICIAL || _comprasV2Unsubs || typeof _db==='undefined' || !_db) return;
   _comprasV2Unsubs = [
     _db.collection('erp_vr_compras').onSnapshot(function(snap){
       COMPRAS_V2_CACHE = snap.docs.map(function(d){ return d.data(); }).sort(function(a,b){ return (b.numero||0)-(a.numero||0); });
@@ -12534,7 +12547,7 @@ function comprasV2RegistrarPagamentoUI(cpId, valorSugerido){
 // compra (ver comprasSincronizarObrigacaoProvisoria). O documento do
 // fornecedor é registrado depois, separadamente, via comprasAdicionarDocumento().
 function comprasReceberModal(id){
-  if(_HOMOLOG_MODE){
+  if(_COMPRAS_V2_OFICIAL){
     if(_comprasV2RecebendoIds[id]){ showToast('Recebimento já em andamento para este pedido.','info'); return; }
     var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
     if(['aprovada','pedida','recebida_parcial'].indexOf(pcV2.status)<0){ showToast('Só é possível receber pedidos aprovados/pedidos/parciais.','warn'); return; }
@@ -12649,7 +12662,7 @@ function comprasSincronizarObrigacaoProvisoria(pc){
 // obrigação provisória em seguida (nunca fica provisória+definitiva juntas
 // para o mesmo valor).
 function comprasAdicionarDocumento(id){
-  if(_HOMOLOG_MODE){
+  if(_COMPRAS_V2_OFICIAL){
     var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
     if(!(pcV2.qtyRecebidaTotal>0)){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
     var numeroV2 = (prompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
@@ -12780,7 +12793,7 @@ function comprasV2Render(){
 }
 
 function comprasRender(){
-  if(_HOMOLOG_MODE) return comprasV2Render();
+  if(_COMPRAS_V2_OFICIAL) return comprasV2Render();
   var wrap = document.getElementById('comprasList'); if(!wrap) return;
   var filtro = (document.getElementById('comprasFiltroStatus')||{}).value||'';
   var lista = COMPRAS.filter(function(pc){ return !filtro || pc.status===filtro; });

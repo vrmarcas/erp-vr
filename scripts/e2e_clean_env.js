@@ -135,7 +135,10 @@ async function seed() {
     }
     await authAdmin.setCustomUserClaims(u.uid, { role: u.role });
     if (!u.semDoc) {
-      await db.collection('erp_vr_usuarios').doc(u.uid).set({ nome: u.email, funcao: u.role, ativo: u.ativo });
+      // 'email' é o campo que o fluxo de login (index.html) usa para casar
+      // a conta autenticada com o cadastro — sem ele, login sempre cai em
+      // "Conta sem perfil atribuído" mesmo com claim+doc corretos.
+      await db.collection('erp_vr_usuarios').doc(u.uid).set({ nome: u.email, email: u.email, funcao: u.role, ativo: u.ativo });
     }
   }
 
