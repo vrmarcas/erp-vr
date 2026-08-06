@@ -16644,10 +16644,22 @@ function vitreCatImportNum(v) {
   return isNaN(n) ? null : n;
 }
 function vitreCatImportStr(v) { return (v === null || v === undefined) ? null : (String(v).trim() || null); }
+// GO-LIVE 2026-08-06 — Etapa 1: mesmas decisões humanas aprovadas do
+// importador de terminal (scripts/vitre_importar_planilha.js) — chave
+// = SKU original + nome exato, nunca altera outro dado da linha.
+var VITRE_SKU_DECISOES_APROVADAS = {
+  'CPC001|Cubo Porta Cápsulas': 'CPCAP001',
+  'MLP001|Mesa Lateral Potenza': 'MLPT001',
+  'MLR001|Mesa Lateral Rennes': 'MLRE001',
+  'PPCI001|PLACA PET CATS': 'PPCAT001',
+};
 function vitreCatImportNormalizarLinha(raw) {
+  var skuOriginal = vitreCatImportStr(raw['SKU']);
+  var nome = vitreCatImportStr(raw['Nome dos Produtos']);
+  var sku = VITRE_SKU_DECISOES_APROVADAS[skuOriginal + '|' + nome] || skuOriginal;
   return {
-    sku: vitreCatImportStr(raw['SKU']),
-    nome: vitreCatImportStr(raw['Nome dos Produtos']),
+    sku: sku,
+    nome: nome,
     espessuraMm: vitreCatImportNum(raw['Espessura (mm)']),
     comprimentoCm: vitreCatImportNum(raw['Comprimento (cm)']),
     larguraCm: vitreCatImportNum(raw['Largura (cm)']),

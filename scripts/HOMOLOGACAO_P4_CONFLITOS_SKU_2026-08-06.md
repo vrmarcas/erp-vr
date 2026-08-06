@@ -1,11 +1,16 @@
-# Parte 4 — Conflitos de SKU da Planilha Real (decisão humana pendente)
+# Parte 4 — Conflitos de SKU da Planilha Real — DECISÕES APROVADAS (GO-LIVE 2026-08-06)
 
-**Nenhuma destas 4 linhas foi importada.** O importador (`vitreImportarProdutos`)
-bloqueia SKU duplicado com dados diferentes — não escolhe automaticamente,
-nunca gravou nenhuma das duas versões. As sugestões de novo SKU abaixo
-foram usadas **apenas em teste de fixture** (script separado,
-`scripts/test_vitre_sku_conflitos_fixture.js`, ver seção final) para provar
-que a resolução funcionaria — **nada foi gravado no catálogo real**.
+**Atualização GO-LIVE:** as 4 decisões abaixo foram aprovadas
+explicitamente pelo usuário na instrução de go-live de 2026-08-06 e
+aplicadas em `scripts/vitre_importar_planilha.js` e
+`vitreCatImportNormalizarLinha` (index.html) via mapa
+`SKU_DECISOES_APROVADAS` (chave = SKU original + nome exato do
+produto). Novo dry-run confirmado: **110/110 linhas válidas, zero
+conflito de SKU**, avisos não-bloqueantes preservados (ver
+`scripts/HOMOLOGACAO_P5_AVISOS_PLANILHA_2026-08-06.md` para a contagem
+original — a contagem sobe de 86 para 93 porque as 8 linhas antes
+bloqueadas agora contribuem seus próprios avisos de campo ausente,
+diferença 100% explicada, nenhuma linha nova nem dado inventado).
 
 ---
 
@@ -23,7 +28,7 @@ que a resolução funcionaria — **nada foi gravado no catálogo real**.
 | Descrição | "Caixa para sachês de chá, desenvolvido em acrílico cast cristal 4mm, com 6 nichos e tampa articulada" | "O Cubo Porta Cápsulas é uma peça clean que oferece elegância e praticidade para o seu espaço do café..." |
 
 **Sugestão:** `CPC001` permanece com Caixa Porta-chás (produto 1) · `CPCAP001` para Cubo Porta Cápsulas (produto 2).
-**Decisão humana:** ☐ pendente
+**Decisão humana:** ✅ aprovada e aplicada (GO-LIVE 2026-08-06)
 
 ---
 
@@ -44,7 +49,7 @@ que a resolução funcionaria — **nada foi gravado no catálogo real**.
 **Observação adicional:** produto 2 (Potenza) já está bem abaixo do nível
 mínimo de completude mesmo depois de resolvido o conflito de SKU — falta
 dimensões, embalagem, peso e descrição (ver Parte 5).
-**Decisão humana:** ☐ pendente
+**Decisão humana:** ✅ aprovada e aplicada (GO-LIVE 2026-08-06)
 
 ---
 
@@ -62,7 +67,7 @@ dimensões, embalagem, peso e descrição (ver Parte 5).
 | Descrição | "Mesa lateral, desenvolvido em acrílico cast cristal 5mm e 8mm." | "Mesa desenvolvida em acrílico cast cristal 10mm. Móvel lindo para decorar sua sala..." |
 
 **Sugestão:** `MLR001` permanece com Mesa Lateral Ragusa (produto 1) · `MLRE001` para Mesa Lateral Rennes (produto 2).
-**Decisão humana:** ☐ pendente
+**Decisão humana:** ✅ aprovada e aplicada (GO-LIVE 2026-08-06)
 
 ---
 
@@ -83,7 +88,7 @@ original (copy-paste de outra linha). Preservado literalmente, sem
 correção silenciosa, conforme instrução de nunca alterar dado comercial
 sem decisão humana.
 **Sugestão:** `PPCI001` permanece com Placa Pet Cãozinho (produto 1) · `PPCAT001` para Placa Pet Cats (produto 2).
-**Decisão humana:** ☐ pendente
+**Decisão humana:** ✅ aprovada e aplicada (GO-LIVE 2026-08-06)
 
 ---
 

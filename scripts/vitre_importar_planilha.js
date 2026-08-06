@@ -39,10 +39,27 @@ function lerPlanilha(caminho) {
   return { nomeAba, totalLinhas: linhas.length, linhas };
 }
 
+// GO-LIVE 2026-08-06 — Etapa 1: decisões humanas aprovadas para os 4
+// conflitos de SKU da planilha real (ver
+// scripts/HOMOLOGACAO_P4_CONFLITOS_SKU_2026-08-06.md). Chave = SKU
+// original + nome EXATO do produto (assim só a linha certa é
+// renomeada, nunca a que deveria manter o SKU original). Nenhum outro
+// dado comercial da linha é alterado.
+const SKU_DECISOES_APROVADAS = {
+  'CPC001|Cubo Porta Cápsulas': 'CPCAP001',
+  'MLP001|Mesa Lateral Potenza': 'MLPT001',
+  'MLR001|Mesa Lateral Rennes': 'MLRE001',
+  'PPCI001|PLACA PET CATS': 'PPCAT001',
+};
+
 function normalizarLinha(raw) {
+  var skuOriginal = str(raw['SKU']);
+  var nome = str(raw['Nome dos Produtos']);
+  var chaveDecisao = skuOriginal + '|' + nome;
+  var sku = SKU_DECISOES_APROVADAS[chaveDecisao] || skuOriginal;
   return {
-    sku: str(raw['SKU']),
-    nome: str(raw['Nome dos Produtos']),
+    sku: sku,
+    nome: nome,
     espessuraMm: num(raw['Espessura (mm)']),
     comprimentoCm: num(raw['Comprimento (cm)']),
     larguraCm: num(raw['Largura (cm)']),
