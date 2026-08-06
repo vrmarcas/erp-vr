@@ -159,18 +159,39 @@ export const valeriaVitreConsultarProduto = functions.https.onRequest(async (req
 //    se qualquer item não for elegível, a simulação inteira falha
 //    (fail-closed, igual à Function real vitreCriarOrcamento).
 // ══════════════════════════════════════════════════════════════════════════
+// Resolve os "adicionais" (personalização) pedidos por nome contra a lista
+// de personalizações REALMENTE cadastradas no produto — o preço nunca vem
+// do que o agente/cliente informou, sempre do catálogo. Nome pedido que não
+// existir na lista do produto é devolvido em `rejeitados` (nunca aplicado
+// silenciosamente) — o agente precisa saber que aquela personalização não é
+// permitida para explicar ao cliente, em vez de calcular um total que
+// finge incluir algo que não foi de fato adicionado.
+function resolverAdicionais(p: VitreProdutoValeria, pedidos: Array<{ nome?: string }> | undefined) {
+  const permitidos = p.personalizacoes || [];
+  const aplicados: Array<{ nome: string; preco: number }> = [];
+  const rejeitados: string[] = [];
+  for (const pedido of Array.isArray(pedidos) ? pedidos : []) {
+    const nome = String(pedido?.nome || "").trim();
+    if (!nome) continue;
+    const match = permitidos.find((x) => x.nome === nome);
+    if (match) aplicados.push({ nome: match.nome, preco: match.preco });
+    else rejeitados.push(nome);
+  }
+  return { aplicados, rejeitados };
+}
+
 export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (!await checkAuth(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
-  const body = req.body as { itens?: Array<{ sku: string; qtd: number }>; descontoPct?: number; frete?: number };
+  const body = req.body as { itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>; descontoPct?: number; frete?: number };
   const itens = Array.isArray(body.itens) ? body.itens : [];
   if (!itens.length) { res.status(400).json({ ok: false, error: "itens obrigatório" }); return; }
 
   const db = admin.firestore();
-  const resolvidos: Array<{ sku: string; nome: string; precoVenda: number; qtd: number }> = [];
+  const resolvidos: Array<{ sku: string; nome: string; precoVenda: number; qtd: number; adicionais: Array<{ nome: string; preco: number }>; adicionaisRejeitados: string[] }> = [];
   for (const it of itens) {
     const sku = String(it.sku || "").trim();
     const qtd = Number(it.qtd) || 1;
@@ -179,11 +200,12 @@ export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req
     if (!snap.exists) { res.json({ ok: false, error: "PRODUTO_NAO_ENCONTRADO:" + sku }); return; }
     const p = snap.data() as VitreProdutoValeria;
     if (!produtoElegivelValeria(p)) { res.json({ ok: false, error: "PRODUTO_NAO_ELEGIVEL:" + sku }); return; }
-    resolvidos.push({ sku, nome: p.nome, precoVenda: p.precoVenda as number, qtd });
+    const { aplicados, rejeitados } = resolverAdicionais(p, it.adicionais);
+    resolvidos.push({ sku, nome: p.nome, precoVenda: p.precoVenda as number, qtd, adicionais: aplicados, adicionaisRejeitados: rejeitados });
   }
   const descontoPct = Math.max(0, Math.min(100, Number(body.descontoPct) || 0));
   const frete = Math.max(0, Number(body.frete) || 0);
-  const subtotal = resolvidos.reduce((s, it) => s + it.precoVenda * it.qtd, 0);
+  const subtotal = resolvidos.reduce((s, it) => s + (it.precoVenda + it.adicionais.reduce((a, ad) => a + ad.preco, 0)) * it.qtd, 0);
   const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
   const total = +(subtotal - valorDesconto + frete).toFixed(2);
   res.json({ ok: true, itens: resolvidos, subtotal, descontoPct, valorDesconto, frete, total });
@@ -203,7 +225,7 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as {
-    clienteNome?: string; itens?: Array<{ sku: string; qtd: number }>;
+    clienteNome?: string; itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>;
     descontoPct?: number; frete?: number; prazoValidadeDias?: number; requestId?: string;
   };
   const env = requireEnv(body as unknown as Record<string, unknown>);
@@ -223,7 +245,8 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
   }
 
   const db = admin.firestore();
-  const itensSnapshot: Array<{ sku: string; nomeSnapshot: string; precoSnapshot: number; qtd: number }> = [];
+  const itensSnapshot: Array<{ sku: string; nomeSnapshot: string; precoSnapshot: number; qtd: number; adicionais: Array<{ nome: string; preco: number }> }> = [];
+  const adicionaisRejeitadosGlobal: Array<{ sku: string; nome: string }> = [];
   for (const it of itensInput) {
     const sku = String(it.sku || "").trim();
     const qtd = Number(it.qtd) || 1;
@@ -231,12 +254,14 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
     if (!snap.exists) { res.json({ ok: false, error: "PRODUTO_NAO_ENCONTRADO:" + sku }); return; }
     const p = snap.data() as VitreProdutoValeria;
     if (!produtoElegivelValeria(p)) { res.json({ ok: false, error: "PRODUTO_NAO_ELEGIVEL:" + sku }); return; }
-    itensSnapshot.push({ sku, nomeSnapshot: p.nome, precoSnapshot: p.precoVenda as number, qtd });
+    const { aplicados, rejeitados } = resolverAdicionais(p, it.adicionais);
+    rejeitados.forEach((nome) => adicionaisRejeitadosGlobal.push({ sku, nome }));
+    itensSnapshot.push({ sku, nomeSnapshot: p.nome, precoSnapshot: p.precoVenda as number, qtd, adicionais: aplicados });
   }
   const descontoPct = Math.max(0, Math.min(100, Number(body.descontoPct) || 0));
   const frete = Math.max(0, Number(body.frete) || 0);
   const prazoValidadeDias = Number(body.prazoValidadeDias) || 7;
-  const subtotal = itensSnapshot.reduce((s, it) => s + it.precoSnapshot * it.qtd, 0);
+  const subtotal = itensSnapshot.reduce((s, it) => s + (it.precoSnapshot + it.adicionais.reduce((a, ad) => a + ad.preco, 0)) * it.qtd, 0);
   const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
   const total = +(subtotal - valorDesconto + frete).toFixed(2);
 
@@ -249,7 +274,7 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
     criadoEm: Date.now(),
   });
   await writeAudit(COL_AUDIT, "orcamento_criado_valeria", "valeria", "valeria_agent", { id: docRef.id, total, conversationId: env.conversationId });
-  res.json({ ok: true, jaProcessado: false, id: docRef.id, total });
+  res.json({ ok: true, jaProcessado: false, id: docRef.id, total, adicionaisRejeitados: adicionaisRejeitadosGlobal });
 });
 
 // ══════════════════════════════════════════════════════════════════════════

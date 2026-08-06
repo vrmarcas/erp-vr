@@ -193,8 +193,129 @@ console.log('\n=== FASE G Parte C — Valéria × Catálogo Vitre: Functions rea
     assertEq(doc.data().motivo, 'outro');
   });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // PARTE 10 da homologação guiada (2026-08-06) — os 17 cenários exigidos
+  // pela instrução. Vários já estão cobertos acima (5=produto exato,
+  // 4/6=produto incompleto, 8=desconto, 14=transferência humana) — os
+  // testes 16+ cobrem os que ainda não tinham um cenário isolado
+  // dedicado: PF/PJ×Vitre/VR (estrutural), produto semelhante, tamanho
+  // inexistente, personalização permitida/não permitida, produto
+  // desativado, preço ausente, prazo ausente, foto ausente, pedido misto.
+  // ══════════════════════════════════════════════════════════════════════
+
+  await test('16. PF×Vitre / PJ×Vitre / PF×VR / PJ×VR — nenhuma Function aceita ou usa CPF/CNPJ/pessoaTipo; enviar o campo não muda nada no resultado (C1 é estrutural, não uma checagem que possa ser esquecida)', async function () {
+    var semDado = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuElegivel, undefined, SECRET);
+    var comCpfForjado = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuElegivel + '&cpf=11122233344&pessoaTipo=fisica', undefined, SECRET);
+    var comCnpjForjado = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuElegivel + '&cnpj=11222333000144&pessoaTipo=juridica', undefined, SECRET);
+    assertEq(semDado.body, comCpfForjado.body, 'CPF não deve alterar a resposta');
+    assertEq(semDado.body, comCnpjForjado.body, 'CNPJ não deve alterar a resposta');
+    // Mesma lógica vale para "encaminhar para VR" — o motivo do handoff é sempre
+    // uma necessidade do catálogo (medida/material/alteração/arquivo), nunca
+    // "é pessoa física" ou "é pessoa jurídica" (ver lista `motivosValidos` em
+    // valeria_vitre.ts — nenhum deles é PF/PJ).
+  });
+
+  await test('17. Produto semelhante — busca por sinônimo/uso (não SKU exato, não nome exato) encontra o produto certo', async function () {
+    var r = await httpJson('GET', 'valeriaVitreBuscarCatalogo', '?q=presente', undefined, SECRET); // busca por "usos", não pelo nome
+    var achou = r.body.produtos.some(function (p) { return p.sku === skuElegivel; });
+    assertTruthy(achou, 'busca por uso/sinônimo (não nome/SKU exato) deve encontrar o produto elegível');
+  });
+
+  await test('18. Tamanho/variante inexistente — consulta por SKU que seria uma variante nunca cadastrada → nunca aproxima para outro produto', async function () {
+    var r = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuElegivel + '_VARIANTE_GIGANTE_INEXISTENTE', undefined, SECRET);
+    assertEq(r.body.elegivel, false);
+    assertEq(r.body.motivo, 'SKU_NAO_ENCONTRADO', 'nunca deve devolver um produto "parecido" no lugar do tamanho pedido');
+  });
+
+  var skuComPersonalizacao = 'E2E_VALERIA_PERSONALIZ_' + Date.now();
+  await db.collection('vitre_produtos').doc(skuComPersonalizacao).set({
+    sku: skuComPersonalizacao, nome: 'Produto Personalizável', marca: 'vitre', status: 'ativo', ativoValeria: true,
+    custo: 10, precoVenda: 100, categoria: 'Teste', prazoDias: 5, descricaoCurta: 'desc', embalagem: '10x10x10',
+    pesoKg: 1, fotos: ['x.jpg'], usos: ['presente'], beneficios: ['bonito'], palavrasChave: ['personalizavel'],
+    disponibilidade: 'pronta_entrega', origem: 'manual',
+    personalizacoes: [{ nome: 'Gravação a laser', preco: 25 }],
+  });
+
+  await test('19. Personalização permitida — adicional cadastrado no produto é aplicado, preço vem do catálogo (nunca do que o agente informar)', async function () {
+    var r = await httpJson('POST', 'valeriaVitreSimularOrcamento', '', { itens: [{ sku: skuComPersonalizacao, qtd: 1, adicionais: [{ nome: 'Gravação a laser', preco: 0.01 }] }] }, SECRET);
+    assertEq(r.status, 200);
+    assertEq(r.body.total, 125, 'total deve usar o preço REAL da personalização (25), não o preco:0.01 forjado no payload');
+    assertEq(r.body.itens[0].adicionaisRejeitados, [], 'personalização permitida não deve aparecer como rejeitada');
+  });
+
+  await test('20. Personalização NÃO permitida — adicional pedido mas não cadastrado no produto → rejeitado explicitamente, nunca aplicado silenciosamente', async function () {
+    var r = await httpJson('POST', 'valeriaVitreSimularOrcamento', '', { itens: [{ sku: skuComPersonalizacao, qtd: 1, adicionais: [{ nome: 'Pintura dourada inexistente', preco: 999 }] }] }, SECRET);
+    assertEq(r.status, 200);
+    assertEq(r.body.total, 100, 'total NÃO deve incluir a personalização não permitida');
+    assertEq(r.body.itens[0].adicionaisRejeitados, ['Pintura dourada inexistente'], 'agente precisa saber que foi rejeitada, para explicar ao cliente');
+  });
+
+  var skuDesativado = 'E2E_VALERIA_DESATIVADO_' + Date.now();
+  await db.collection('vitre_produtos').doc(skuDesativado).set({
+    sku: skuDesativado, nome: 'Produto Desativado', marca: 'vitre', status: 'inativo', ativoValeria: true,
+    custo: 10, precoVenda: 50, categoria: 'Teste', prazoDias: 5, descricaoCurta: 'desc', embalagem: '10x10x10',
+    pesoKg: 1, fotos: ['x.jpg'], usos: ['teste'], beneficios: ['x'], palavrasChave: ['desativado'],
+    disponibilidade: 'indisponivel', origem: 'manual',
+  });
+  await test('21. Produto desativado (status=inativo, mesmo com todos os outros campos completos) — nunca oferecido', async function () {
+    var busca = await httpJson('GET', 'valeriaVitreBuscarCatalogo', '?q=desativado', undefined, SECRET);
+    assertEq(busca.body.produtos.some(function (p) { return p.sku === skuDesativado; }), false);
+    var consulta = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuDesativado, undefined, SECRET);
+    assertEq(consulta.body.elegivel, false);
+  });
+
+  var skuSemPreco = 'E2E_VALERIA_SEMPRECO_' + Date.now();
+  await db.collection('vitre_produtos').doc(skuSemPreco).set({
+    sku: skuSemPreco, nome: 'Produto Sem Preço', marca: 'vitre', status: 'ativo', ativoValeria: true,
+    custo: 10, precoVenda: null, categoria: 'Teste', prazoDias: 5, descricaoCurta: 'desc', embalagem: '10x10x10',
+    pesoKg: 1, fotos: ['x.jpg'], usos: ['teste'], beneficios: ['x'], palavrasChave: ['sempreco'],
+    disponibilidade: 'pronta_entrega', origem: 'manual',
+  });
+  await test('22. Preço ausente (tudo mais completo) — nunca oferecido, nunca inventa um preço', async function () {
+    var r = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuSemPreco, undefined, SECRET);
+    assertEq(r.body.elegivel, false);
+  });
+
+  var skuSemPrazo = 'E2E_VALERIA_SEMPRAZO_' + Date.now();
+  await db.collection('vitre_produtos').doc(skuSemPrazo).set({
+    sku: skuSemPrazo, nome: 'Produto Sem Prazo', marca: 'vitre', status: 'ativo', ativoValeria: true,
+    custo: 10, precoVenda: 50, categoria: 'Teste', prazoDias: null, descricaoCurta: 'desc', embalagem: '10x10x10',
+    pesoKg: 1, fotos: ['x.jpg'], usos: ['teste'], beneficios: ['x'], palavrasChave: ['semprazo'],
+    disponibilidade: 'pronta_entrega', origem: 'manual',
+  });
+  await test('23. Prazo ausente (tudo mais completo) — nunca oferecido, nunca promete uma data que não existe', async function () {
+    var r = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuSemPrazo, undefined, SECRET);
+    assertEq(r.body.elegivel, false);
+  });
+
+  var skuSemFoto = 'E2E_VALERIA_SEMFOTO_' + Date.now();
+  await db.collection('vitre_produtos').doc(skuSemFoto).set({
+    sku: skuSemFoto, nome: 'Produto Sem Foto', marca: 'vitre', status: 'ativo', ativoValeria: true,
+    custo: 10, precoVenda: 50, categoria: 'Teste', prazoDias: 5, descricaoCurta: 'desc', embalagem: '10x10x10',
+    pesoKg: 1, fotos: [], usos: ['teste'], beneficios: ['x'], palavrasChave: ['semfoto'],
+    disponibilidade: 'pronta_entrega', origem: 'manual',
+  });
+  await test('24. Foto ausente (array vazio, tudo mais completo) — nunca oferecido (nível 2 exige ao menos 1 foto)', async function () {
+    var r = await httpJson('GET', 'valeriaVitreConsultarProduto', '?sku=' + skuSemFoto, undefined, SECRET);
+    assertEq(r.body.elegivel, false);
+  });
+
+  await test('25. Pedido misto — item de catálogo elegível vira rascunho normalmente; a parte que exige personalizado é encaminhada à VR separadamente, nunca misturada num único registro', async function () {
+    var reqRascunho = reqId(), reqHandoff = reqId();
+    var rRascunho = await httpJson('POST', 'valeriaVitreCriarRascunho', '', Object.assign({ clienteNome: 'Cliente Misto', itens: [{ sku: skuElegivel, qtd: 1 }], requestId: reqRascunho }, CONV), SECRET);
+    var rHandoff = await httpJson('POST', 'valeriaVitreEncaminharVR', '', Object.assign({ clienteNome: 'Cliente Misto', motivo: 'medida_fora_do_padrao', detalhe: 'Pedido também inclui uma peça sob medida, fora do catálogo', requestId: reqHandoff }, CONV), SECRET);
+    assertTruthy(rRascunho.body.id, 'a parte de catálogo deve ser registrada normalmente');
+    assertTruthy(rHandoff.body.id, 'a parte fora do catálogo deve virar um handoff próprio');
+    assertTruthy(rRascunho.body.id !== rHandoff.body.id, 'nunca devem ser o mesmo registro — são dois destinos diferentes (Vitre automático vs VR humano)');
+  });
+
   await db.collection('vitre_produtos').doc(skuElegivel).delete().catch(function () {});
   await db.collection('vitre_produtos').doc(skuInelegivel).delete().catch(function () {});
+  await db.collection('vitre_produtos').doc(skuComPersonalizacao).delete().catch(function () {});
+  await db.collection('vitre_produtos').doc(skuDesativado).delete().catch(function () {});
+  await db.collection('vitre_produtos').doc(skuSemPreco).delete().catch(function () {});
+  await db.collection('vitre_produtos').doc(skuSemPrazo).delete().catch(function () {});
+  await db.collection('vitre_produtos').doc(skuSemFoto).delete().catch(function () {});
 
   console.log('\n=== resultado ===');
   console.log('passed=' + passed + ' failed=' + failed);

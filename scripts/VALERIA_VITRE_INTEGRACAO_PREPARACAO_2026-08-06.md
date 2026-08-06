@@ -53,8 +53,8 @@ saída de dado de produto.
 |---|---|---|---|---|
 | `valeriaVitreBuscarCatalogo` | GET | `?q=&categoria=&precoMin=&precoMax=&limite=` | `{ok, total, produtos:[...]}` | 401 sem/token errado |
 | `valeriaVitreConsultarProduto` | GET | `?sku=` | `{ok, elegivel, produto?, motivo?}` | nunca 500 para SKU ausente — sempre `elegivel:false` |
-| `valeriaVitreSimularOrcamento` | POST | `{itens:[{sku,qtd}], descontoPct?, frete?}` | `{ok, itens, subtotal, total, ...}` ou `{ok:false, error}` | fail-closed no primeiro item inválido, nunca persiste |
-| `valeriaVitreCriarRascunho` | POST | `{clienteNome, itens, descontoPct?, frete?, prazoValidadeDias?, requestId, conversationId, organizationId}` | `{ok, id, total}` | 400 sem `conversationId`/`organizationId`/`requestId`; idempotente por `requestId` |
+| `valeriaVitreSimularOrcamento` | POST | `{itens:[{sku,qtd,adicionais?:[{nome}]}], descontoPct?, frete?}` | `{ok, itens:[{...,adicionais,adicionaisRejeitados}], subtotal, total, ...}` ou `{ok:false, error}` | fail-closed no primeiro item inválido, nunca persiste; personalização pedida que não existir no produto vai em `adicionaisRejeitados`, preço sempre do catálogo (nunca do que o agente informar) |
+| `valeriaVitreCriarRascunho` | POST | `{clienteNome, itens:[{sku,qtd,adicionais?:[{nome}]}], descontoPct?, frete?, prazoValidadeDias?, requestId, conversationId, organizationId}` | `{ok, id, total, adicionaisRejeitados}` | 400 sem `conversationId`/`organizationId`/`requestId`; idempotente por `requestId`; mesma regra de personalização de `valeriaVitreSimularOrcamento` |
 | `valeriaVitreEncaminharVR` | POST | `{clienteNome, clienteTel?, motivo, detalhe?, requestId, conversationId, organizationId}` | `{ok, id}` | motivo inválido normaliza para `"outro"`, nunca quebra |
 
 Idempotência: `acquireIdem` (mesmo helper de `vitre.ts`/`compras.ts`), chave
@@ -111,7 +111,12 @@ medida). Seu trabalho é entender o que o cliente precisa e:
    com buscar_catalogo_vitre ou consultar_produto_vitre, NUNCA inventando
    nome, preço, prazo ou disponibilidade.
 2. Antes de fechar qualquer valor, sempre chame simular_orcamento_vitre e
-   mostre o total real ao cliente.
+   mostre o total real ao cliente. Se o cliente pedir uma personalização,
+   envie-a em `adicionais` — a Function confirma se é permitida e informa
+   o preço real do catálogo (nunca invente o preço da personalização
+   você mesma); se vier em `adicionaisRejeitados`, diga claramente ao
+   cliente que aquela opção não está disponível para este produto, sem
+   fingir que foi aplicada.
 3. Se o cliente pedir algo que o catálogo não cobre — medida diferente,
    material não listado, alteração que o produto não permite, arquivo ou
    projeto exclusivo — não tente resolver sozinha: chame
@@ -141,18 +146,35 @@ medida). Seu trabalho é entender o que o cliente precisa e:
 - Qualquer sinal de urgência incomum (evento no mesmo dia, reclamação
   formal).
 
-## C5 — Cenários testados (`scripts/test_valeria_vitre_server.js`, 15/15 ✅)
+## C5 — Cenários testados (`scripts/test_valeria_vitre_server.js`, 25/25 ✅)
 
-PF comprando item Vitre elegível (3, 5, 8, 11); produto abaixo do nível
-mínimo nunca oferecido (4, 6, 9); SKU inexistente nunca inventado (7);
-autenticação ausente/errada negada (1, 2); isolamento por
-`conversationId`/`organizationId` obrigatório (10) e efetivo entre duas
-conversas simultâneas do mesmo cliente (13); idempotência por `requestId`
-sob retry (12); encaminhamento para humano com motivo válido e motivo
-inválido normalizado (14, 15). Cenários adicionais documentados como
-próximo passo (não implementados nesta rodada, pois dependem de decisões de
-produto ainda não tomadas): cliente enviando foto, cliente pedindo desconto
-acima do padrão, produto com múltiplas variantes de tamanho.
+Atualizado na Parte 10 da homologação guiada (2026-08-06) para cobrir
+explicitamente os 17 cenários exigidos pela instrução — os 15 originais
+desta preparação (autenticação, elegibilidade básica, simulação,
+isolamento, idempotência, encaminhamento) mais 10 novos testes
+isolando exatamente o que faltava:
+
+| # da instrução | Cenário | Teste(s) |
+|---|---|---|
+| 1-4 | PF×Vitre / PJ×Vitre / PF×VR / PJ×VR | 16 (estrutural: nenhuma Function lê CPF/CNPJ/pessoaTipo — enviar o campo não muda a resposta) |
+| 5 | Produto exato | 5 |
+| 6 | Produto semelhante | 17 (busca por sinônimo/uso, não SKU/nome exato) |
+| 7 | Tamanho/variante inexistente | 18 |
+| 8 | Personalização permitida | 19 (preço sempre do catálogo, nunca do payload) |
+| 9 | Personalização não permitida | 20 (rejeitada explicitamente em `adicionaisRejeitados`, nunca aplicada em silêncio) |
+| 10 | Produto incompleto | 4, 6, 22, 23, 24 (nível insuficiente; preço/prazo/foto ausentes isoladamente) |
+| 11 | Produto desativado | 21 |
+| 12 | Preço ausente | 22 |
+| 13 | Prazo ausente | 23 |
+| 14 | Desconto | 8 |
+| 15 | Foto | 24 |
+| 16 | Pedido misto | 25 (parte de catálogo vira rascunho, parte personalizada vira handoff — nunca no mesmo registro) |
+| 17 | Transferência humana | 14, 15 |
+
+Cenário fora do escopo desta rodada, ainda dependente de decisão de
+produto: cliente enviando foto/referência visual (a Valéria não
+processa imagem nesta preparação — listado em "Quando transferir para
+humano").
 
 ## Pendências explícitas para uma rodada futura
 
