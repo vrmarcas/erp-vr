@@ -5936,25 +5936,51 @@ function _authFirebaseError(code){
 
 <!-- MODAL: Catálogo Vitre — Info de Importação -->
 <div class="gen-overlay" id="vitreCatImportOverlay" onclick="if(event.target===this)vitreCatalogoFecharImportModal()">
-  <div class="gen-modal" style="width:520px">
+  <div class="gen-modal wide" style="width:760px;max-height:88vh;overflow-y:auto">
     <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#134E4A,#1E7A86);border-radius:16px 16px 0 0">
       <div class="gen-modal-title" style="color:#fff">📥 Importação de Planilha — Catálogo Vitre</div>
       <button class="gen-close" onclick="vitreCatalogoFecharImportModal()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
     </div>
     <div class="gen-modal-body">
-      <p style="font-size:12px;color:var(--text);line-height:1.6">
-        A importação em massa da planilha real de produtos Vitre é feita pelo script
-        auditado <code>scripts/vitre_importar_planilha.js</code> (Master-only, idempotente,
-        com relatório de dry-run antes de gravar). Rode no terminal, no ambiente de homologação:
-      </p>
-      <pre style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;overflow-x:auto">node scripts/vitre_importar_planilha.js "&lt;caminho da planilha.xlsx&gt;"        # dry-run
-node scripts/vitre_importar_planilha.js "&lt;caminho da planilha.xlsx&gt;" --apply # grava de verdade</pre>
-      <p style="font-size:12px;color:var(--muted);line-height:1.6">
-        Esta tela (Catálogo Vitre) é para cadastro manual, edição, ativação/desativação,
-        duplicação e evolução progressiva de nível de completude de produtos já
-        importados ou criados manualmente.
-      </p>
-      <button class="topbar-btn ghost" style="width:100%;padding:10px;margin-top:6px" onclick="vitreCatalogoFecharImportModal()">Entendi</button>
+      <div id="vitreImpStep1">
+        <p style="font-size:12px;color:var(--text);line-height:1.6;margin-bottom:10px">
+          Selecione a planilha (.xlsx) — o arquivo é lido no navegador, nada é
+          enviado a nenhum servidor externo. Primeiro passo é sempre um
+          <strong>dry-run</strong>: nada é gravado até você revisar e clicar em "Importar".
+        </p>
+        <input type="file" id="vitreImpFile" accept=".xlsx,.xls" onchange="vitreCatImportArquivoSelecionado(this)" style="font-size:12px">
+        <div id="vitreImpArquivoInfo" style="font-size:11px;color:var(--muted);margin-top:8px"></div>
+      </div>
+
+      <div id="vitreImpStep2" style="display:none;margin-top:16px">
+        <div id="vitreImpResumo" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>
+
+        <div id="vitreImpConflitosWrap" style="display:none;margin-bottom:14px">
+          <div style="font-weight:700;font-size:12px;color:#DC2626;margin-bottom:6px">🚫 SKUs em conflito (bloqueados — não serão importados até decisão humana)</div>
+          <div id="vitreImpConflitosList" style="display:flex;flex-direction:column;gap:4px;font-size:11px"></div>
+        </div>
+
+        <div id="vitreImpAvisosWrap" style="display:none;margin-bottom:14px">
+          <div style="font-weight:700;font-size:12px;color:#D97706;margin-bottom:6px">⚠️ Avisos não-bloqueantes (agrupados por tipo)</div>
+          <div id="vitreImpAvisosList" style="display:flex;flex-direction:column;gap:4px;font-size:11px"></div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="topbar-btn ghost" style="flex:1" onclick="vitreCatImportReiniciar()">← Escolher outro arquivo</button>
+          <button class="gen-submit" style="flex:2" id="vitreImpBtnAplicar" onclick="vitreCatImportAplicar()">✅ Importar apenas os produtos válidos</button>
+        </div>
+      </div>
+
+      <div id="vitreImpStep3" style="display:none;margin-top:16px;text-align:center;padding:20px">
+        <div style="font-size:40px">✅</div>
+        <div id="vitreImpResultadoFinal" style="font-size:13px;color:var(--text);margin-top:8px"></div>
+        <button class="topbar-btn ghost" style="margin-top:14px" onclick="vitreCatalogoFecharImportModal()">Fechar</button>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:12px">
+        <div style="font-weight:700;font-size:11px;color:var(--muted);margin-bottom:6px">📋 Histórico de importações</div>
+        <div id="vitreImpHistorico" style="font-size:11px;color:var(--muted)">Carregando…</div>
+      </div>
     </div>
   </div>
 </div>
@@ -16573,8 +16599,162 @@ function vitreCatalogoFecharModal() {
   document.getElementById('vitreCatOverlay').classList.remove('open');
 }
 
-function vitreCatalogoImportarModal() { document.getElementById('vitreCatImportOverlay').classList.add('open'); }
+function vitreCatalogoImportarModal() {
+  vitreCatImportReiniciar();
+  document.getElementById('vitreCatImportOverlay').classList.add('open');
+  vitreCatImportHistoricoRender();
+}
 function vitreCatalogoFecharImportModal() { document.getElementById('vitreCatImportOverlay').classList.remove('open'); }
+
+// ══════════════════════════════════════════════════════════════════════════
+// IMPORTAÇÃO VIA UI (Fase G, Parte 6 da homologação guiada, 2026-08-06) —
+// fluxo real: selecionar arquivo → dry-run → preview (válidos/conflitos/
+// avisos) → importar só os válidos → histórico. Lê o .xlsx no navegador
+// (xlsx.full.min.js, já carregado via CDN nesta página), nunca envia o
+// arquivo a nenhum servidor — só o payload normalizado vai para a Cloud
+// Function real vitreImportarProdutos (mesma Function, mesma validação e
+// mesmo bloqueio de SKU conflitante do script de terminal já auditado).
+// ══════════════════════════════════════════════════════════════════════════
+var VITRE_IMP_LINHAS = null;
+var VITRE_IMP_ULTIMO_RESULTADO = null;
+
+function vitreCatImportNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return v;
+  var direto = parseFloat(String(v).replace(',', '.'));
+  if (!isNaN(direto)) return direto;
+  var s = String(v).trim().replace(/\./g, '').replace(',', '.');
+  var n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+function vitreCatImportStr(v) { return (v === null || v === undefined) ? null : (String(v).trim() || null); }
+function vitreCatImportNormalizarLinha(raw) {
+  return {
+    sku: vitreCatImportStr(raw['SKU']),
+    nome: vitreCatImportStr(raw['Nome dos Produtos']),
+    espessuraMm: vitreCatImportNum(raw['Espessura (mm)']),
+    comprimentoCm: vitreCatImportNum(raw['Comprimento (cm)']),
+    larguraCm: vitreCatImportNum(raw['Largura (cm)']),
+    alturaCm: vitreCatImportNum(raw['Altura (cm)']),
+    custo: vitreCatImportNum(raw['Preço de Custo']),
+    precoVenda: vitreCatImportNum(raw['Preço de Venda']),
+    embalagem: vitreCatImportStr(raw['Tamanho da Caixa de Embalagem']),
+    pesoKg: vitreCatImportNum(raw['Peso (kg)']),
+    descricaoCurta: vitreCatImportStr(raw['Descrição']),
+  };
+}
+
+function vitreCatImportReiniciar() {
+  VITRE_IMP_LINHAS = null;
+  VITRE_IMP_ULTIMO_RESULTADO = null;
+  document.getElementById('vitreImpStep1').style.display = 'block';
+  document.getElementById('vitreImpStep2').style.display = 'none';
+  document.getElementById('vitreImpStep3').style.display = 'none';
+  document.getElementById('vitreImpArquivoInfo').textContent = '';
+  var f = document.getElementById('vitreImpFile'); if (f) f.value = '';
+}
+
+function vitreCatImportArquivoSelecionado(input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  document.getElementById('vitreImpArquivoInfo').textContent = 'Lendo ' + file.name + '…';
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      var nomeAba = wb.SheetNames[0];
+      var ws = wb.Sheets[nomeAba];
+      var linhasBrutas = XLSX.utils.sheet_to_json(ws, { defval: null });
+      var normalizadas = linhasBrutas.map(vitreCatImportNormalizarLinha).filter(function (l) { return l.sku || l.nome; });
+      document.getElementById('vitreImpArquivoInfo').textContent = file.name + ' — aba "' + nomeAba + '" — ' + linhasBrutas.length + ' linha(s) lida(s), ' + normalizadas.length + ' não-vazia(s).';
+      VITRE_IMP_LINHAS = normalizadas;
+      vitreCatImportRodar(true);
+    } catch (err) {
+      showToast('Erro ao ler a planilha: ' + (err && err.message || err), 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function vitreCatImportRodar(dryRun) {
+  if (!VITRE_IMP_LINHAS || !VITRE_IMP_LINHAS.length) { showToast('Nenhuma linha para importar.', 'err'); return; }
+  var payload = { linhas: VITRE_IMP_LINHAS, dryRun: dryRun, requestId: vitreCatReqId() };
+  firebase.functions().httpsCallable('vitreImportarProdutos')(payload).then(function (res) {
+    VITRE_IMP_ULTIMO_RESULTADO = res.data;
+    if (dryRun) vitreCatImportRenderPreview(res.data);
+    else vitreCatImportRenderResultadoFinal(res.data);
+  }).catch(function (e) {
+    showToast('Erro na importação: ' + (e && e.message || e), 'err');
+  });
+}
+
+function vitreCatImportRenderPreview(r) {
+  document.getElementById('vitreImpStep1').style.display = 'none';
+  document.getElementById('vitreImpStep2').style.display = 'block';
+  function card(label, valor, cor) {
+    return '<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center">'
+      + '<div style="font-size:20px;font-weight:900;color:' + cor + '">' + valor + '</div>'
+      + '<div style="font-size:10px;color:var(--muted);text-transform:uppercase">' + label + '</div></div>';
+  }
+  document.getElementById('vitreImpResumo').innerHTML =
+    card('Válidos', r.criados + r.atualizados + r.semAlteracao, '#16A34A')
+    + card('Novos', r.criados, '#134E4A')
+    + card('Conflitos', r.listaErros.filter(function (e) { return e.tipo === 'sku_duplicado_conflitante'; }).length, '#DC2626')
+    + card('Avisos', r.listaErros.filter(function (e) { return e.tipo !== 'sku_duplicado_conflitante'; }).length, '#D97706');
+
+  var conflitos = r.listaErros.filter(function (e) { return e.tipo === 'sku_duplicado_conflitante'; });
+  var wrapC = document.getElementById('vitreImpConflitosWrap');
+  if (conflitos.length) {
+    wrapC.style.display = 'block';
+    document.getElementById('vitreImpConflitosList').innerHTML = conflitos.map(function (e) {
+      return '<div style="background:#FEF2F2;border-radius:6px;padding:6px 10px">SKU <strong>' + cfgEsc(e.sku) + '</strong> — ' + cfgEsc(e.detalhe) + '</div>';
+    }).join('');
+  } else { wrapC.style.display = 'none'; }
+
+  var avisos = r.listaErros.filter(function (e) { return e.tipo !== 'sku_duplicado_conflitante'; });
+  var porTipo = {};
+  avisos.forEach(function (e) { (porTipo[e.tipo] = porTipo[e.tipo] || []).push(e.sku); });
+  var wrapA = document.getElementById('vitreImpAvisosWrap');
+  if (avisos.length) {
+    wrapA.style.display = 'block';
+    document.getElementById('vitreImpAvisosList').innerHTML = Object.keys(porTipo).map(function (tipo) {
+      var skus = porTipo[tipo];
+      return '<div style="background:#FFFBEB;border-radius:6px;padding:6px 10px"><strong>' + cfgEsc(tipo) + '</strong> (' + skus.length + ') — ' + cfgEsc(skus.slice(0, 8).join(', ')) + (skus.length > 8 ? ' …' : '') + '</div>';
+    }).join('');
+  } else { wrapA.style.display = 'none'; }
+
+  var btn = document.getElementById('vitreImpBtnAplicar');
+  btn.disabled = false;
+  btn.textContent = '✅ Importar ' + (r.criados + r.atualizados) + ' produto(s) válido(s)' + (r.semAlteracao ? ' (' + r.semAlteracao + ' já estão atualizados)' : '');
+}
+
+function vitreCatImportAplicar() {
+  if (!_e2eDlgConfirm('Confirmar importação? Produtos válidos serão gravados no catálogo real. Conflitos de SKU continuam bloqueados.')) return;
+  vitreCatImportRodar(false);
+}
+
+function vitreCatImportRenderResultadoFinal(r) {
+  document.getElementById('vitreImpStep2').style.display = 'none';
+  document.getElementById('vitreImpStep3').style.display = 'block';
+  var conflitos = r.listaErros.filter(function (e) { return e.tipo === 'sku_duplicado_conflitante'; }).length;
+  document.getElementById('vitreImpResultadoFinal').innerHTML =
+    '<strong>' + r.criados + '</strong> criado(s) · <strong>' + r.atualizados + '</strong> atualizado(s) · <strong>' + r.semAlteracao + '</strong> sem alteração'
+    + (conflitos ? '<br><span style="color:#DC2626">' + conflitos + ' conflito(s) de SKU continuam bloqueados — decisão humana pendente.</span>' : '');
+  showToast('Importação concluída: ' + r.criados + ' criado(s), ' + r.atualizados + ' atualizado(s).', 'ok');
+  vitreCatImportHistoricoRender();
+}
+
+function vitreCatImportHistoricoRender() {
+  var wrap = document.getElementById('vitreImpHistorico'); if (!wrap || typeof _db === 'undefined' || !_db) return;
+  _db.collection('vitre_importacoes').get().then(function (snap) {
+    var docs = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); }).slice(0, 5);
+    if (!docs.length) { wrap.textContent = 'Nenhuma importação registrada ainda.'; return; }
+    wrap.innerHTML = docs.map(function (d) {
+      var data = d.ts ? new Date(d.ts).toLocaleString('pt-BR') : '—';
+      return '<div style="padding:4px 0;border-bottom:1px solid var(--border)">' + data + ' — ' + d.criados + ' criado(s), ' + d.atualizados + ' atualizado(s), ' + d.semAlteracao + ' sem alteração, ' + d.erros + ' aviso(s)</div>';
+    }).join('');
+  }).catch(function (err) { wrap.textContent = 'Não foi possível carregar o histórico (' + (err && err.message || err) + ').'; });
+}
 
 function vitreCatalogoSalvar() {
   var editando = !!document.getElementById('vitreCatEditSku').value;
