@@ -68,6 +68,9 @@ export {
   vitreCriarOrcamento,
   vitreAtualizarOrcamento,
   vitreConverterOrcamentoParaOS,
+  vitreIniciarNovaVersao,
+  vitreRegistrarAprovacaoCliente,
+  vitreConfirmarVenda,
 } from "./vitre";
 
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
