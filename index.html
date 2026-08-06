@@ -2662,8 +2662,37 @@ function _authFirebaseError(code){
         <div class="orc-step"     id="ostp5" onclick="orcStep(5)"><div class="sn">5</div> Pgto → OS</div>
       </div>
 
+      <!-- ── STEP 0: ESCOLHA DE FLUXO (Fase G, 2026-08-06) — decide entre o
+           orçamento Personalizado (VR Marcas, planificação sob medida) e o
+           orçamento de Catálogo (Vitre, produto pronto/já cadastrado). A
+           escolha NÃO se baseia em CPF/CNPJ — é uma decisão de negócio
+           (produto sob medida vs. produto de catálogo compatível). ── -->
+      <div id="opg0" class="orc-pg">
+        <div class="card" style="max-width:720px;margin:20px auto">
+          <div class="card-h"><div class="card-h-left">💰 Novo Orçamento — qual fluxo?</div></div>
+          <p style="font-size:12px;color:var(--muted);margin:4px 0 16px">
+            A escolha não depende de CPF/CNPJ — depende do que o cliente precisa:
+            um produto sob medida/personalizado (planificação, medidas, material)
+            usa o fluxo VR; um produto já existente no catálogo Vitre (com SKU,
+            variante e personalizações permitidas) usa o fluxo Vitre.
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div onclick="orcStep(1)" style="cursor:pointer;border:2px solid var(--border);border-radius:14px;padding:20px;text-align:center;transition:border-color .15s" onmouseover="this.style.borderColor='var(--brand-mid)'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:36px;margin-bottom:8px">🟣</div>
+              <div style="font-weight:800;font-size:15px;color:var(--text)">Personalizado — VR Marcas</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:6px">Planificação, medidas, materiais, espessuras — produto sob medida</div>
+            </div>
+            <div onclick="vitreOrcAbrirFluxo()" style="cursor:pointer;border:2px solid var(--border);border-radius:14px;padding:20px;text-align:center;transition:border-color .15s" onmouseover="this.style.borderColor='#1E7A86'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:36px;margin-bottom:8px">🌸</div>
+              <div style="font-weight:800;font-size:15px;color:var(--text)">Catálogo — Vitre</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:6px">Produto já cadastrado, SKU, variante, opções e personalizações permitidas</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── STEP 1: CLIENTE ── -->
-      <div id="opg1" class="orc-pg">
+      <div id="opg1" class="orc-pg" style="display:none">
         <div class="card">
           <div class="card-h"><div class="card-h-left">👤 Identificação do Cliente</div><span class="badge bvr" id="orcBrandBadge">VR Marcas (PJ)</span></div>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -3187,6 +3216,59 @@ function _authFirebaseError(code){
             </button>
             <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px">Confirme após verificar o pagamento no app do banco</div>
           </div>
+        </div>
+      </div>
+
+      <!-- ── FLUXO VITRE — Orçamento de Catálogo (Fase G, B7-B9). Não faz
+           parte do grupo .orc-pg — orcStep() (fluxo VR) não o toca, e ele
+           não toca nos painéis VR. Snapshot do produto na criação, nunca
+           recalcula planificação/matéria-prima. ── -->
+      <div id="vitreOrcWrap" style="display:none">
+        <div class="card">
+          <div class="card-h"><div class="card-h-left">🌸 Orçamento de Catálogo — Vitre</div>
+            <button class="topbar-btn ghost" style="font-size:11px" onclick="vitreOrcVoltarEscolha()">← Voltar</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="fg-row">
+              <div class="fg"><label>Nome do Cliente *</label><input type="text" id="vitreOrcClienteNome" placeholder="Nome do cliente"></div>
+              <div class="fg"><label>WhatsApp / Telefone</label><input type="text" id="vitreOrcClienteTel" placeholder="(62) 99999-9999"></div>
+            </div>
+
+            <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+              <div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:8px">🔍 Adicionar produto do catálogo</div>
+              <div class="fg-row">
+                <div class="fg" style="position:relative">
+                  <label>Buscar por SKU ou nome</label>
+                  <input type="text" id="vitreOrcBusca" placeholder="Digite para buscar..." oninput="vitreOrcBuscarProduto()" autocomplete="off">
+                  <div id="vitreOrcBuscaResult" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:999;background:var(--surface);border:1.5px solid var(--brand-mid);border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:260px;overflow-y:auto"></div>
+                </div>
+                <div class="fg" style="max-width:110px"><label>Qtd</label><input type="number" id="vitreOrcQtd" value="1" min="1"></div>
+              </div>
+              <div id="vitreOrcSelecionado" style="font-size:11px;color:var(--muted);min-height:16px"></div>
+              <button class="topbar-btn" style="margin-top:6px" onclick="vitreOrcAdicionarItem()">＋ Adicionar item</button>
+            </div>
+
+            <div id="vitreOrcItensList" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>
+
+            <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px" class="fg-row">
+              <div class="fg"><label>Desconto (%)</label><input type="number" id="vitreOrcDesconto" value="0" min="0" max="100" oninput="vitreOrcRecalcular()"></div>
+              <div class="fg"><label>Frete (R$)</label><input type="number" id="vitreOrcFrete" value="0" min="0" step="0.01" oninput="vitreOrcRecalcular()"></div>
+              <div class="fg"><label>Validade</label><select id="vitreOrcValidade" onchange="vitreOrcRecalcular()"><option value="7" selected>7 dias</option><option value="10">10 dias</option><option value="15">15 dias</option><option value="30">30 dias</option></select></div>
+            </div>
+
+            <div id="vitreOrcResumo" style="background:var(--bg);border-radius:10px;padding:12px 16px;font-size:12px;line-height:1.8"></div>
+
+            <div style="display:flex;gap:10px">
+              <button class="topbar-btn" style="flex:1;background:#1E7A86;border:none;color:#fff" onclick="vitreOrcSalvar()">💾 Salvar Rascunho</button>
+              <button class="topbar-btn ghost ready-hide" id="vitreOrcBtnPdf" style="display:none" onclick="vitreOrcGerarPDF()">🖨️ PDF Vitre</button>
+              <button class="topbar-btn ghost" id="vitreOrcBtnWA" style="display:none;background:#25D366;color:#fff" onclick="vitreOrcEnviarWhatsApp()">📱 WhatsApp</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div class="card-h"><div class="card-h-left">📋 Orçamentos Vitre recentes</div></div>
+          <div id="vitreOrcHistorico" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
       </div>
 
@@ -7552,8 +7634,8 @@ function nav(page, el) {
     marketing: '📣 Marketing & Ads'
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
-  // Ao entrar no orçamento, sempre resetar para step 1
-  if (page === 'orcamento') { setTimeout(function(){ orcStep(1); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){} }, 0); }
+  // Ao entrar no orçamento, sempre resetar para a escolha de fluxo (Personalizado VR vs Catálogo Vitre)
+  if (page === 'orcamento') { setTimeout(function(){ if(typeof orcEscolhaFluxo==='function') orcEscolhaFluxo(); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){} }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); setTimeout(function(){ try{ if(_cfgDataLoaded) cfgRenderTables(); }catch(e){} }, 3500); }
   // Ao entrar no Financeiro, renderizar todos os painéis
@@ -16494,6 +16576,206 @@ function vitreCatalogoDuplicar(skuOrigem) {
     if (msg.indexOf('SKU_JA_EXISTE') >= 0) showToast('Já existe um produto com o SKU "' + skuNovo.trim() + '".', 'err');
     else showToast('Erro ao duplicar: ' + msg, 'err');
   });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ORÇAMENTO DE CATÁLOGO — VITRE (Fase G, B7-B9). Fluxo independente do
+// orçamento Personalizado VR — nunca recalcula planificação/matéria-prima,
+// usa snapshot do produto (nome/preço) no momento da criação via
+// vitreCriarOrcamento. Compartilha o cache/listener de vitre_produtos com
+// a tela Catálogo Vitre (vitreCatalogoInit), evitando um segundo listener
+// redundante na mesma coleção.
+// ══════════════════════════════════════════════════════════════════════════
+var VITRE_ORC_ITENS = [];
+var VITRE_ORC_SELECIONADO = null;
+var VITRE_ORC_ULTIMO = null; // último orçamento salvo nesta sessão — usado por PDF/WhatsApp
+var _vitreOrcUnsub = null;
+var VITRE_ORC_STATUS_LABEL = { rascunho: 'Rascunho', enviado: 'Enviado', convertido: 'Convertido', cancelado: 'Cancelado' };
+var VITRE_ORC_STATUS_COLOR = { rascunho: '#6B7280', enviado: '#3B82F6', convertido: '#16A34A', cancelado: '#DC2626' };
+
+// Mostra a tela de escolha de fluxo (opg0) — ponto de entrada único do
+// "Novo Orçamento", chamado pelo hook de navegação em vez de orcStep(1) direto.
+function orcEscolhaFluxo() {
+  document.querySelectorAll('.orc-pg').forEach(function (p) { p.style.display = 'none'; });
+  var wrap = document.getElementById('vitreOrcWrap'); if (wrap) wrap.style.display = 'none';
+  var opg0 = document.getElementById('opg0'); if (opg0) opg0.style.display = 'block';
+  for (var i = 1; i <= 5; i++) { var el = document.getElementById('ostp' + i); if (el) el.classList.remove('on', 'done'); }
+}
+
+function vitreOrcAbrirFluxo() {
+  document.querySelectorAll('.orc-pg').forEach(function (p) { p.style.display = 'none'; });
+  var wrap = document.getElementById('vitreOrcWrap'); if (wrap) wrap.style.display = 'block';
+  vitreCatalogoInit(); // reaproveita o mesmo listener/cache da tela Catálogo Vitre
+  vitreOrcListenerInit();
+  vitreOrcRecalcular();
+}
+function vitreOrcVoltarEscolha() {
+  var wrap = document.getElementById('vitreOrcWrap'); if (wrap) wrap.style.display = 'none';
+  orcEscolhaFluxo();
+}
+
+function vitreOrcBuscarProduto() {
+  var termo = (document.getElementById('vitreOrcBusca').value || '').trim().toLowerCase();
+  var box = document.getElementById('vitreOrcBuscaResult');
+  if (!termo) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var lista = VITRE_CATALOGO_CACHE.filter(function (p) {
+    return p.status === 'ativo' && ((p.sku || '').toLowerCase().indexOf(termo) >= 0 || (p.nome || '').toLowerCase().indexOf(termo) >= 0);
+  }).slice(0, 8);
+  if (!lista.length) { box.style.display = 'block'; box.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--muted)">Nenhum produto ativo encontrado.</div>'; return; }
+  box.style.display = 'block';
+  box.innerHTML = lista.map(function (p) {
+    return '<div onclick="vitreOrcSelecionarProduto(\'' + cfgEsc(p.sku) + '\')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'transparent\'">'
+      + '<strong>' + cfgEsc(p.nome || '') + '</strong> <span style="color:var(--muted)">— SKU ' + cfgEsc(p.sku) + ' — R$ ' + Number(p.precoVenda || 0).toFixed(2) + '</span></div>';
+  }).join('');
+}
+function vitreOrcSelecionarProduto(sku) {
+  var p = VITRE_CATALOGO_CACHE.find(function (x) { return x.sku === sku; });
+  if (!p) return;
+  VITRE_ORC_SELECIONADO = p;
+  document.getElementById('vitreOrcBusca').value = p.sku + ' — ' + p.nome;
+  document.getElementById('vitreOrcBuscaResult').style.display = 'none';
+  document.getElementById('vitreOrcSelecionado').textContent = 'Selecionado: ' + p.nome + ' (R$ ' + Number(p.precoVenda || 0).toFixed(2) + '/un)';
+}
+function vitreOrcAdicionarItem() {
+  if (!VITRE_ORC_SELECIONADO) { showToast('Busque e selecione um produto do catálogo primeiro.', 'err'); return; }
+  var qtd = parseInt(document.getElementById('vitreOrcQtd').value, 10) || 1;
+  VITRE_ORC_ITENS.push({ sku: VITRE_ORC_SELECIONADO.sku, nome: VITRE_ORC_SELECIONADO.nome, precoVenda: VITRE_ORC_SELECIONADO.precoVenda || 0, qtd: qtd });
+  VITRE_ORC_SELECIONADO = null;
+  document.getElementById('vitreOrcBusca').value = '';
+  document.getElementById('vitreOrcSelecionado').textContent = '';
+  document.getElementById('vitreOrcQtd').value = '1';
+  vitreOrcRenderItens();
+  vitreOrcRecalcular();
+}
+function vitreOrcRemoverItem(idx) {
+  VITRE_ORC_ITENS.splice(idx, 1);
+  vitreOrcRenderItens();
+  vitreOrcRecalcular();
+}
+function vitreOrcRenderItens() {
+  var wrap = document.getElementById('vitreOrcItensList'); if (!wrap) return;
+  if (!VITRE_ORC_ITENS.length) { wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Nenhum item adicionado ainda.</div>'; return; }
+  wrap.innerHTML = VITRE_ORC_ITENS.map(function (it, idx) {
+    return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:8px 12px;font-size:12px">'
+      + '<span>' + cfgEsc(it.nome) + ' <span style="color:var(--muted)">(SKU ' + cfgEsc(it.sku) + ')</span> — ' + it.qtd + 'x R$ ' + it.precoVenda.toFixed(2) + '</span>'
+      + '<button onclick="vitreOrcRemoverItem(' + idx + ')" style="border:none;background:transparent;color:#DC2626;cursor:pointer;font-size:14px">✕</button>'
+      + '</div>';
+  }).join('');
+}
+function vitreOrcRecalcular() {
+  var subtotal = VITRE_ORC_ITENS.reduce(function (s, it) { return s + it.precoVenda * it.qtd; }, 0);
+  var descontoPct = Number(document.getElementById('vitreOrcDesconto').value) || 0;
+  var frete = Number(document.getElementById('vitreOrcFrete').value) || 0;
+  var valorDesconto = subtotal * (descontoPct / 100);
+  var total = subtotal - valorDesconto + frete;
+  var el = document.getElementById('vitreOrcResumo'); if (!el) return;
+  el.innerHTML = 'Subtotal: <strong>' + orcFmt(subtotal) + '</strong><br>'
+    + 'Desconto (' + descontoPct + '%): -' + orcFmt(valorDesconto) + '<br>'
+    + 'Frete: +' + orcFmt(frete) + '<br>'
+    + '<span style="font-size:15px;font-weight:900;color:#1E7A86">Total: ' + orcFmt(total) + '</span>';
+  return { subtotal: subtotal, valorDesconto: valorDesconto, frete: frete, total: total };
+}
+
+function vitreOrcSalvar() {
+  var clienteNome = document.getElementById('vitreOrcClienteNome').value.trim();
+  if (!clienteNome) { showToast('Nome do cliente é obrigatório.', 'err'); return; }
+  if (!VITRE_ORC_ITENS.length) { showToast('Adicione ao menos um item.', 'err'); return; }
+  var payload = {
+    clienteNome: clienteNome,
+    itens: VITRE_ORC_ITENS.map(function (it) { return { sku: it.sku, qtd: it.qtd }; }),
+    descontoPct: Number(document.getElementById('vitreOrcDesconto').value) || 0,
+    frete: Number(document.getElementById('vitreOrcFrete').value) || 0,
+    prazoValidadeDias: Number(document.getElementById('vitreOrcValidade').value) || 7,
+    requestId: vitreCatReqId(),
+  };
+  firebase.functions().httpsCallable('vitreCriarOrcamento')(payload).then(function (res) {
+    showToast('Orçamento Vitre salvo — total ' + orcFmt(res.data.total || 0) + '.', 'ok');
+    VITRE_ORC_ULTIMO = { id: res.data.id, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: res.data.total || 0, descontoPct: payload.descontoPct, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias };
+    document.getElementById('vitreOrcBtnPdf').style.display = '';
+    document.getElementById('vitreOrcBtnWA').style.display = '';
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('PRODUTO_INATIVO') >= 0) showToast('Um dos produtos foi desativado — remova e tente novamente.', 'err');
+    else if (msg.indexOf('PRODUTO_ABAIXO_DO_NIVEL_MINIMO') >= 0) showToast('Um dos produtos está incompleto demais para orçamento (nível mínimo não atingido).', 'err');
+    else if (msg.indexOf('PRODUTO_NAO_ENCONTRADO') >= 0) showToast('Um dos produtos não foi encontrado — pode ter sido removido.', 'err');
+    else showToast('Erro ao salvar orçamento: ' + msg, 'err');
+  });
+}
+
+function vitreOrcListenerInit() {
+  if (_vitreOrcUnsub || typeof _db === 'undefined' || !_db) return;
+  _vitreOrcUnsub = _db.collection('vitre_orcamentos').onSnapshot(function (snap) {
+    var lista = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (b.criadoEm || 0) - (a.criadoEm || 0); }).slice(0, 15);
+    var wrap = document.getElementById('vitreOrcHistorico'); if (!wrap) return;
+    if (!lista.length) { wrap.innerHTML = '<div style="font-size:11px;color:var(--muted)">Nenhum orçamento Vitre ainda.</div>'; return; }
+    wrap.innerHTML = lista.map(function (o) {
+      var podeCancel = ['rascunho', 'enviado'].indexOf(o.status) >= 0;
+      return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:9px 12px;font-size:12px">'
+        + '<span>' + cfgEsc(o.clienteNome || '') + ' — ' + (o.itens || []).length + ' item(ns) — <strong>' + orcFmt(o.total || 0) + '</strong></span>'
+        + '<span style="display:flex;gap:8px;align-items:center">'
+        + '<span style="background:' + VITRE_ORC_STATUS_COLOR[o.status] + '22;color:' + VITRE_ORC_STATUS_COLOR[o.status] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">' + (VITRE_ORC_STATUS_LABEL[o.status] || o.status) + '</span>'
+        + (podeCancel ? '<button onclick="vitreOrcCancelar(\'' + o.id + '\')" style="border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:6px;font-size:10px;padding:3px 8px;cursor:pointer">Cancelar</button>' : '')
+        + '</span></div>';
+    }).join('');
+  }, function (err) { console.warn('[Vitre] listener vitre_orcamentos falhou:', err); });
+}
+function vitreOrcCancelar(id) {
+  if (!_e2eDlgConfirm('Cancelar este orçamento Vitre?')) return;
+  firebase.functions().httpsCallable('vitreAtualizarOrcamento')({ id: id, status: 'cancelado' }).then(function () {
+    showToast('Orçamento cancelado.', 'ok');
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('ORCAMENTO_EM_ESTADO_FINAL') >= 0) showToast('Este orçamento já está em estado final — não pode ser cancelado.', 'err');
+    else showToast('Erro: ' + msg, 'err');
+  });
+}
+
+// ── PDF/WhatsApp Vitre (B10) — parametrizados por BRAND_CONFIG.vitre,
+// nunca expõem custo/margem/markup (o snapshot do item só carrega
+// sku/nome/precoVenda/qtd, o dado sensível nunca chega ao cliente). ──
+function vitreOrcGerarPDF() {
+  if (!VITRE_ORC_ULTIMO) { showToast('Salve o orçamento antes de gerar o PDF.', 'err'); return; }
+  var brand = (typeof brandConfigGet === 'function') ? brandConfigGet('vitre') : null;
+  var o = VITRE_ORC_ULTIMO;
+  var win = window.open('', '_blank');
+  if (win) win.document.write('<p style="font-family:sans-serif;padding:40px">Gerando PDF...</p>');
+  var itensHtml = o.itens.map(function (it) {
+    return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">' + it.nome + ' (SKU ' + it.sku + ')</td>'
+      + '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">' + it.qtd + '</td>'
+      + '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">R$ ' + it.precoVenda.toFixed(2) + '</td>'
+      + '<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">R$ ' + (it.precoVenda * it.qtd).toFixed(2) + '</td></tr>';
+  }).join('');
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento Vitre — ' + o.clienteNome + '</title>'
+    + '<style>body{font-family:Arial,sans-serif;color:' + (brand ? brand.corTexto : '#134E4A') + ';margin:0;padding:40px}'
+    + '.hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid ' + (brand ? brand.corPrimaria : '#1E7A86') + ';padding-bottom:16px;margin-bottom:24px}'
+    + 'table{width:100%;border-collapse:collapse;margin:16px 0}th{background:' + (brand ? brand.corPrimaria : '#1E7A86') + ';color:#fff;padding:8px;text-align:left}'
+    + '.total{font-size:20px;font-weight:900;text-align:right;margin-top:12px}'
+    + '.footer{margin-top:40px;font-size:11px;color:#888;border-top:1px solid #eee;padding-top:12px}</style></head><body>'
+    + '<div class="hdr"><div><h1 style="margin:0">' + (brand ? brand.nome : 'Vitre') + '</h1><div style="font-size:12px">' + (brand ? brand.nomeCompleto : '') + '</div></div>'
+    + '<div style="text-align:right;font-size:12px">Orçamento<br><strong>' + (o.id || '').slice(0, 8) + '</strong></div></div>'
+    + '<p><strong>Cliente:</strong> ' + o.clienteNome + (o.clienteTel ? ' · ' + o.clienteTel : '') + '</p>'
+    + '<table><thead><tr><th>Produto</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + itensHtml + '</tbody></table>'
+    + '<div class="total">Desconto: ' + o.descontoPct + '% · Frete: R$ ' + o.frete.toFixed(2) + '<br>Total: R$ ' + o.total.toFixed(2) + '</div>'
+    + '<p style="font-size:11px;color:#888">Validade: ' + o.prazoValidadeDias + ' dias a partir da emissão.</p>'
+    + '<div class="footer">' + (brand ? brand.rodapePdf : 'Vitre') + '</div>'
+    + '</body></html>';
+  if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+}
+function vitreOrcEnviarWhatsApp() {
+  if (!VITRE_ORC_ULTIMO) { showToast('Salve o orçamento antes de enviar.', 'err'); return; }
+  var o = VITRE_ORC_ULTIMO;
+  var brand = (typeof brandConfigGet === 'function') ? brandConfigGet('vitre') : null;
+  var itensTxt = o.itens.map(function (it) { return '• ' + it.qtd + 'x ' + it.nome + ' — R$ ' + (it.precoVenda * it.qtd).toFixed(2); }).join('\n');
+  var msg = 'Olá, ' + o.clienteNome + '! Segue o orçamento *' + (brand ? brand.nome : 'Vitre') + '*:\n\n'
+    + itensTxt + '\n\n'
+    + 'Desconto: ' + o.descontoPct + '%\nFrete: R$ ' + o.frete.toFixed(2) + '\n'
+    + '*Total: R$ ' + o.total.toFixed(2) + '*\n\n'
+    + 'Válido por ' + o.prazoValidadeDias + ' dias.\n\n*' + (brand ? brand.nome : 'Vitre') + '*';
+  var telNorm = (o.clienteTel || '').replace(/\D/g, '');
+  if (telNorm && telNorm.length <= 11) telNorm = '55' + telNorm;
+  var url = 'https://wa.me/' + telNorm + '?text=' + encodeURIComponent(msg);
+  var win = window.open('', '_blank');
+  if (win) win.location.href = url;
 }
 
 // ============================================================
