@@ -82,3 +82,14 @@ export {
   valeriaConsultarOS,
   valeriaStatus,
 } from "./valeria";
+
+// ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO
+//    apenas: nenhum destes endpoints foi configurado no Chatvolt ou
+//    conectado a um agente real nesta rodada. Ver relatório final. ──────
+export {
+  valeriaVitreBuscarCatalogo,
+  valeriaVitreConsultarProduto,
+  valeriaVitreSimularOrcamento,
+  valeriaVitreCriarRascunho,
+  valeriaVitreEncaminharVR,
+} from "./valeria_vitre";

@@ -347,6 +347,23 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO.
+    // Estas Functions são onRequest (Bearer token da Valéria, não Firebase
+    // Auth de staff) — o cliente do ERP nunca chama nem lê estas coleções
+    // diretamente; só o Admin SDK (que ignora Rules) escreve. Master pode
+    // ler para auditoria/depuração do que a Valéria fez.
+    match /valeria_vitre_idem_keys/{key} {
+      allow read, write: if false; // uso interno exclusivo das Functions
+    }
+    match /valeria_vitre_audit_log/{entryId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+    match /valeria_handoffs/{id} {
+      allow read:  if isComercial() || isMaster(); // Comercial precisa ver o que a Valéria encaminhou
+      allow write: if false;
+    }
+
     // ── erp_vr_orcamentos: núcleo comercial do orçamento (sem custo/markup) ──
     // Ver subcoleção /interno abaixo para os dados sensíveis.
     match /erp_vr_orcamentos/{orcId} {

@@ -43,7 +43,7 @@ async function fsWrite(key: string, data: unknown): Promise<void> {
  * Firestore em erp_vr/valeria_config { data: JSON.stringify({ secret: "..." }) }
  * Para configurar: salve o token diretamente no Firebase Console ou pelo ERP.
  */
-async function checkAuth(req: functions.https.Request, res: functions.Response): Promise<boolean> {
+export async function checkAuth(req: functions.https.Request, res: functions.Response): Promise<boolean> {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (!token) {
