@@ -1235,6 +1235,49 @@ var _HOMOLOG_MODE = _homologComputeMode(location.hostname, new URLSearchParams(l
 // mais enquanto esta flag for true. Ver
 // scripts/AUDITORIA_FASE2_COMPRAS_V1_V2_PARIDADE_2026-08-06.md.
 var _COMPRAS_V2_OFICIAL = true;
+
+// ── Adaptador de diálogo exclusivo de teste (RODADA NOTURNA A3) ──────────
+// prompt()/confirm() nativos não são dirigíveis por automação de browser,
+// o que impedia testar pela UI de verdade os fluxos que os usam (Compras
+// v2). Este adaptador substitui prompt/confirm SOMENTE quando:
+//   (a) _HOMOLOG_MODE é true (que por sua vez já exige localhost E
+//       ?emulator=1 E projectId começando com "demo-" — _homologFatal
+//       trava a página se qualquer uma dessas condições falhar); E
+//   (b) existe uma fila de respostas pré-programada em
+//       window.__E2E_DIALOG_QUEUE (um array — ausência/vazio = usa o
+//       diálogo nativo normalmente, inclusive em homologação manual).
+// Fora dessas duas condições simultâneas, comportamento 100% idêntico ao
+// prompt()/confirm() nativos — impossível de ativar em produção mesmo que
+// alguém defina __E2E_DIALOG_QUEUE lá (checagem (a) já barra).
+function _e2eDlgPrompt(msg, def) {
+  if (_HOMOLOG_MODE && Array.isArray(window.__E2E_DIALOG_QUEUE) && window.__E2E_DIALOG_QUEUE.length) {
+    var v = window.__E2E_DIALOG_QUEUE.shift();
+    if (typeof window.__E2E_DIALOG_LOG === 'object' && window.__E2E_DIALOG_LOG) window.__E2E_DIALOG_LOG.push({ tipo: 'prompt', msg: msg, resposta: v });
+    return v === undefined ? null : v;
+  }
+  return prompt(msg, def);
+}
+function _e2eDlgConfirm(msg) {
+  if (_HOMOLOG_MODE && Array.isArray(window.__E2E_DIALOG_QUEUE) && window.__E2E_DIALOG_QUEUE.length) {
+    var v = window.__E2E_DIALOG_QUEUE.shift();
+    if (typeof window.__E2E_DIALOG_LOG === 'object' && window.__E2E_DIALOG_LOG) window.__E2E_DIALOG_LOG.push({ tipo: 'confirm', msg: msg, resposta: v });
+    return !!v;
+  }
+  return confirm(msg);
+}
+
+// Arquitetura oficial de Compras (RODADA FINAL, 2026-08-06) — independente
+// de _HOMOLOG_MODE (que só decide A QUAL projeto Firebase conectar,
+// nunca qual arquitetura de negócio usar). Antes desta rodada, Compras
+// v1 (array legado erp_vr/compras, escrita direta de stock) e v2 (Cloud
+// Functions, erp_vr_compras_*) coexistiam escondidos atrás de
+// _HOMOLOG_MODE — o que significava que PRODUÇÃO sempre rodava v1 (o
+// caminho inseguro), e só localhost+?emulator=1 via v2. Esta flag torna
+// v2 a única arquitetura candidata, em qualquer ambiente. O ramo v1
+// permanece no código (rollback), mas nenhum caminho ativo o alcança
+// mais enquanto esta flag for true. Ver
+// scripts/AUDITORIA_FASE2_COMPRAS_V1_V2_PARIDADE_2026-08-06.md.
+var _COMPRAS_V2_OFICIAL = true;
 var firebaseConfig = _HOMOLOG_MODE ? {
   apiKey: "demo-homolog-key",
   authDomain: "demo-erp-homolog.firebaseapp.com",
@@ -12278,7 +12321,7 @@ function comprasResolverMaterialPorNome(nome){
   if(candidatos.length===0) return null;
   if(candidatos.length===1) return candidatos[0];
   var lista = candidatos.map(function(k,i){ return (i+1)+'. '+STOCK[k].label+(STOCK[k].esp?' — '+STOCK[k].esp+'mm':''); }).join('\n');
-  var escolha = prompt('Mais de um material corresponde a "'+nome+'":\n'+lista+'\n\nDigite o número correto (ou cancele para usar só o texto):');
+  var escolha = _e2eDlgPrompt('Mais de um material corresponde a "'+nome+'":\n'+lista+'\n\nDigite o número correto (ou cancele para usar só o texto):');
   var idx = parseInt(escolha)-1;
   if(isNaN(idx) || !candidatos[idx]) return null; // ambíguo e não confirmado -> segue só com o texto (retrocompatível)
   return candidatos[idx];
@@ -12314,9 +12357,9 @@ function comprasGerarNecessidades(){
 }
 
 function comprasNovaSolicitacaoModal(){
-  var nomeItem = prompt('Descrição do item/material a comprar:');
+  var nomeItem = _e2eDlgPrompt('Descrição do item/material a comprar:');
   if(!nomeItem || !nomeItem.trim()) return;
-  var qtd = parseFloat(prompt('Quantidade necessária:', '1'))||1;
+  var qtd = parseFloat(_e2eDlgPrompt('Quantidade necessária:', '1'))||1;
   var marca = (typeof _finBrand!=='undefined' && _finBrand!=='todas') ? _finBrand : 'vr';
   var matKey = comprasResolverMaterialPorNome(nomeItem);
   if(_COMPRAS_V2_OFICIAL){
@@ -12333,7 +12376,7 @@ function comprasNovaSolicitacaoModal(){
     });
     return;
   }
-  var fornecedor = prompt('Fornecedor (opcional — pode deixar em branco e escolher depois na cotação):')||'';
+  var fornecedor = _e2eDlgPrompt('Fornecedor (opcional — pode deixar em branco e escolher depois na cotação):')||'';
   comprasProximoNumeroAtomico().then(function(numero){
     var s = matKey && STOCK[matKey];
     var pc = {
@@ -12375,7 +12418,7 @@ function comprasAvancarStatus(id){
   if(!proximo) return;
   if(proximo==='pedida'){
     if(!pc.fornecedorEscolhido || !pc.fornecedorEscolhido.trim()){
-      var f = prompt('Informe o fornecedor escolhido para emitir o pedido:');
+      var f = _e2eDlgPrompt('Informe o fornecedor escolhido para emitir o pedido:');
       if(!f || !f.trim()){ showToast('Fornecedor é obrigatório para emitir o pedido.','warn'); return; }
       pc.fornecedorEscolhido = f.trim();
     }
@@ -12395,7 +12438,7 @@ function comprasCancelar(id){
     var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
     if(pcV2.status==='cancelada'){ return; }
     if(pcV2.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
-    var motivoV2 = prompt('Motivo do cancelamento (obrigatório):');
+    var motivoV2 = _e2eDlgPrompt('Motivo do cancelamento (obrigatório):');
     if(!motivoV2 || !motivoV2.trim()) { showToast('Cancelamento requer justificativa.','warn'); return; }
     comprasV2Cancelar(id, motivoV2.trim()).then(function(){
       if(typeof secAuditLog==='function') secAuditLog('compra_cancelada','Compra #'+pcV2.numero+' cancelada (v2) — motivo: '+motivoV2.trim());
@@ -12409,7 +12452,7 @@ function comprasCancelar(id){
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status==='cancelada'){ return; }
   if(pc.status==='recebida'){ showToast('Pedido já recebido não pode ser cancelado.','warn'); return; }
-  var motivo = prompt('Motivo do cancelamento (obrigatório):');
+  var motivo = _e2eDlgPrompt('Motivo do cancelamento (obrigatório):');
   if(!motivo || !motivo.trim()){ showToast('Cancelamento requer justificativa.','warn'); return; }
   var statusAnterior = pc.status;
   pc.status = 'cancelada';
@@ -12511,10 +12554,10 @@ function comprasV2AvancarStatus(id){
   var pc = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pc) return;
   if(pc.status==='cancelada' || pc.status==='recebida'){ showToast('Este pedido já está em estado final.','info'); return; }
   if(pc.status==='solicitada' || pc.status==='cotacao'){
-    var fornecedor = prompt('Fornecedor escolhido para aprovar esta compra:', pc.fornecedorEscolhido||'');
+    var fornecedor = _e2eDlgPrompt('Fornecedor escolhido para aprovar esta compra:', pc.fornecedorEscolhido||'');
     if(!fornecedor || !fornecedor.trim()){ showToast('Fornecedor é obrigatório para aprovar.','warn'); return; }
     var item0 = (pc.itens||[])[0]||{};
-    var preco = parseFloat(prompt('Preço unitário ('+(item0.label||'item')+'):', String(item0.precoUnit||'0')));
+    var preco = parseFloat(_e2eDlgPrompt('Preço unitário ('+(item0.label||'item')+'):', String(item0.precoUnit||'0')));
     if(isNaN(preco) || preco<0){ showToast('Preço unitário inválido.','warn'); return; }
     comprasV2Aprovar(id, fornecedor.trim(), preco).then(function(res){
       if(typeof secAuditLog==='function') secAuditLog('compra_status','Compra #'+res.numero+' aprovada (v2) — fornecedor '+fornecedor.trim());
@@ -12530,7 +12573,7 @@ function comprasV2AvancarStatus(id){
 }
 
 function comprasV2RegistrarPagamentoUI(cpId, valorSugerido){
-  var valor = parseFloat(prompt('Valor a pagar (R$):', String(valorSugerido||0)));
+  var valor = parseFloat(_e2eDlgPrompt('Valor a pagar (R$):', String(valorSugerido||0)));
   if(isNaN(valor) || valor<=0){ showToast('Valor inválido.','warn'); return; }
   comprasV2RegistrarPagamento(cpId, valor).then(function(){
     if(typeof secAuditLog==='function') secAuditLog('compra_pagamento','Pagamento registrado (v2) — CP '+cpId+' — '+finFmt(valor));
@@ -12553,7 +12596,7 @@ function comprasReceberModal(id){
     if(['aprovada','pedida','recebida_parcial'].indexOf(pcV2.status)<0){ showToast('Só é possível receber pedidos aprovados/pedidos/parciais.','warn'); return; }
     var itemV2 = (pcV2.itens||[])[0]||{};
     var restanteV2 = (itemV2.qtyNecessaria||0) - (pcV2.qtyRecebidaTotal||0);
-    var qtyV2 = parseFloat(prompt('Recebendo agora — "'+(itemV2.label||'')+'"\nFalta: '+restanteV2+'\nQuantidade recebida agora:', String(restanteV2)));
+    var qtyV2 = parseFloat(_e2eDlgPrompt('Recebendo agora — "'+(itemV2.label||'')+'"\nFalta: '+restanteV2+'\nQuantidade recebida agora:', String(restanteV2)));
     if(isNaN(qtyV2) || qtyV2<=0){ showToast('Nenhuma quantidade registrada.','info'); return; }
     _comprasV2RecebendoIds[id] = true;
     comprasV2RegistrarRecebimento(id, qtyV2).then(function(res){
@@ -12578,7 +12621,7 @@ function comprasReceberModal(id){
     pc.itens.forEach(function(item, idx){
       var restante = (item.qtyNecessaria||0) - (item.qtyRecebida||0);
       if(restante<=0) return;
-      var recebidoAgora = parseFloat(prompt('Recebendo agora — "'+item.label+'"\nFalta: '+restante+'\nQuantidade recebida agora (0 para pular):', String(restante)));
+      var recebidoAgora = parseFloat(_e2eDlgPrompt('Recebendo agora — "'+item.label+'"\nFalta: '+restante+'\nQuantidade recebida agora (0 para pular):', String(restante)));
       if(isNaN(recebidoAgora) || recebidoAgora<=0) return;
       recebidoAgora = Math.min(recebidoAgora, restante);
       itensRecebidos.push({ itemIdx: idx, qty: recebidoAgora });
@@ -12665,11 +12708,11 @@ function comprasAdicionarDocumento(id){
   if(_COMPRAS_V2_OFICIAL){
     var pcV2 = COMPRAS_V2_CACHE.find(function(p){ return p.id===id; }); if(!pcV2) return;
     if(!(pcV2.qtyRecebidaTotal>0)){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
-    var numeroV2 = (prompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
+    var numeroV2 = (_e2eDlgPrompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
     if(!numeroV2){ showToast('Número do documento é obrigatório.','warn'); return; }
-    var valorTotalV2 = parseFloat(prompt('Valor total do documento (R$):'));
+    var valorTotalV2 = parseFloat(_e2eDlgPrompt('Valor total do documento (R$):'));
     if(isNaN(valorTotalV2) || valorTotalV2<=0){ showToast('Valor inválido.','warn'); return; }
-    var nParcV2 = parseInt(prompt('Quantas parcelas?','1'))||1;
+    var nParcV2 = parseInt(_e2eDlgPrompt('Quantas parcelas?','1'))||1;
     if(nParcV2<1) nParcV2=1;
     comprasV2AdicionarDocumento(id, numeroV2, valorTotalV2, nParcV2).then(function(){
       if(typeof secAuditLog==='function') secAuditLog('compra_documento','Compra #'+pcV2.numero+' — documento '+numeroV2+' (v2) — '+finFmt(valorTotalV2)+' em '+nParcV2+' parcela(s)');
@@ -12683,12 +12726,12 @@ function comprasAdicionarDocumento(id){
   var pc = COMPRAS.find(function(p){ return p.id===id; }); if(!pc) return;
   if(!pc.documentos) pc.documentos=[];
   if(!(pc.recebimentos||[]).length){ showToast('Registre ao menos um recebimento físico antes de adicionar o documento.','warn'); return; }
-  var numero = (prompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
+  var numero = (_e2eDlgPrompt('Número do documento/nota fiscal do fornecedor:')||'').trim();
   if(!numero){ showToast('Número do documento é obrigatório.','warn'); return; }
   if(pc.documentos.some(function(d){ return d.numero===numero; })){ showToast('Este documento já foi registrado para esta compra.','warn'); return; }
-  var valorTotal = parseFloat(prompt('Valor total do documento (R$):'));
+  var valorTotal = parseFloat(_e2eDlgPrompt('Valor total do documento (R$):'));
   if(isNaN(valorTotal) || valorTotal<=0){ showToast('Valor inválido.','warn'); return; }
-  var nParc = parseInt(prompt('Quantas parcelas?','1'))||1;
+  var nParc = parseInt(_e2eDlgPrompt('Quantas parcelas?','1'))||1;
   if(nParc<1) nParc=1;
   var documentoId = 'doc_'+pc.id+'_'+numero.replace(/[^a-zA-Z0-9]/g,'');
   var parcelas = [];
@@ -12696,7 +12739,7 @@ function comprasAdicionarDocumento(id){
   for(var i=1;i<=nParc;i++){
     var valorParcela = i===nParc ? +(valorTotal-acumulado).toFixed(2) : +(valorTotal/nParc).toFixed(2);
     acumulado += valorParcela;
-    var diasVenc = parseInt(prompt('Parcela '+i+'/'+nParc+' — dias até o vencimento:', '30'))||30;
+    var diasVenc = parseInt(_e2eDlgPrompt('Parcela '+i+'/'+nParc+' — dias até o vencimento:', '30'))||30;
     var venc = new Date(); venc.setDate(venc.getDate()+diasVenc);
     var parcelaId = documentoId+'_p'+i;
     var cpId = 'cppar_'+parcelaId;
