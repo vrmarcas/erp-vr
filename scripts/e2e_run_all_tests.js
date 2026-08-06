@@ -24,6 +24,13 @@ const SUITES = [
   { file: 'test_compras_v2_server.js', categoria: 'Functions — Compras v2' },
   { file: 'test_qa_fixture_guard.js', categoria: 'Ferramenta — QA fixture guard' },
   { file: 'test_estoque_rules.js', categoria: 'Rules — REST via Auth Emulator' },
+  // Fase G — Catálogo Vitre + Valéria (adicionado na HOMOLOGAÇÃO 2026-08-06, Parte 11)
+  { file: 'test_vitre_catalogo_server.js', categoria: 'Functions — Catálogo Vitre (CRUD/importação/orçamento)' },
+  { file: 'test_vitre_rules.js', categoria: 'Rules — bloco vitre_* via REST' },
+  { file: 'test_vitre_importador_unit.js', categoria: 'Unitário — parser da planilha Vitre' },
+  { file: 'test_vitre_sku_conflitos_fixture.js', categoria: 'Fixture — prova de resolução dos 4 conflitos de SKU' },
+  { file: 'test_vitre_os_server.js', categoria: 'Functions — conversão de orçamento Vitre em OS' },
+  { file: 'test_valeria_vitre_server.js', categoria: 'Functions — Valéria × Catálogo Vitre (onRequest)' },
 ];
 
 function runSuite(file) {

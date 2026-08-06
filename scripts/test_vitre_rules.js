@@ -65,6 +65,15 @@ var PASSWORD = SENHA_PADRAO;
 console.log('\n=== FASE G B11 — Rules do Catálogo Vitre (vitre_*): leitura por perfil, escrita sempre negada ao cliente ===\n');
 
 (async function main() {
+  // Auto-contido — nunca depende do catálogo real já importado (este
+  // arquivo é executado tanto isoladamente quanto dentro de
+  // e2e_run_all_tests.js, que só reseta+semeia os 8 usuários base, sem
+  // importar a planilha Vitre). Doc mínimo gravado via Admin SDK
+  // (bypassa Rules de propósito — é só fixture, não teste de escrita).
+  var admin = require(path.join(__dirname, '..', 'functions', 'node_modules', 'firebase-admin'));
+  if (!admin.apps.length) admin.initializeApp({ projectId: 'demo-erp-homolog' });
+  await admin.firestore().collection('vitre_produtos').doc('AA001').set({ sku: 'AA001', nome: 'Fixture Rules Test', status: 'ativo', precoVenda: 1 }, { merge: true });
+
   var tokMaster = await signIn(FIX.master.email, PASSWORD);
   var tokComercial = await signIn(FIX.comercial.email, PASSWORD);
   var tokProducao = await signIn(FIX.producao.email, PASSWORD);
