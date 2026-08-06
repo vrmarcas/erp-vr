@@ -5780,8 +5780,16 @@ function _authFirebaseError(code){
         </select>
         <span id="vitreCatTotal" style="font-size:11px;color:var(--muted)"></span>
         <div style="flex:1"></div>
+        <button class="topbar-btn ghost" onclick="vitreCatIncompletosToggle()" style="font-size:12px" id="vitreCatBtnIncompletos">📋 Cadastros incompletos</button>
         <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
         <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff">＋ Novo Produto</button>
+      </div>
+      <div id="vitreCatIncompletosPanel" style="display:none;margin-bottom:16px">
+        <div class="card" style="padding:14px">
+          <div class="card-h"><div class="card-h-left">📋 Cadastros incompletos (nível &lt; 2 — abaixo do mínimo exigido pela Valéria)</div></div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Produto no nível 1 ou 0 continua vendável manualmente pelo Comercial — só não é elegível para oferta automática da Valéria (que exige nível ≥ 2).</div>
+          <div id="vitreCatIncompletosList" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
       </div>
       <div id="vitreCatEmpty" style="display:none;text-align:center;padding:60px 20px">
         <div style="font-size:64px;margin-bottom:16px;opacity:.5">🌸</div>
@@ -16399,6 +16407,50 @@ function vitreCatNivel(p) {
   return 4;
 }
 
+// Parte 5 da homologação guiada (2026-08-06) — lista exatamente quais
+// campos faltam para o produto avançar de nível, não só o número do
+// nível. Espelha campo a campo a mesma checagem de vitreCatNivel()/
+// calcularNivelCompletude() (vitre.ts, valeria_vitre.ts).
+function vitreCatCamposFaltantes(p) {
+  var faltam = [];
+  if (!p) return faltam;
+  if (p.precoVenda == null) faltam.push('preço de venda');
+  if (p.custo == null) faltam.push('custo');
+  if (!p.status) faltam.push('status');
+  if (!p.categoria) faltam.push('categoria');
+  if (!p.fotos || !p.fotos.length) faltam.push('fotos');
+  if (!p.descricaoCurta) faltam.push('descrição curta');
+  if (p.prazoDias == null) faltam.push('prazo (dias)');
+  if (!p.embalagem) faltam.push('embalagem');
+  if (p.pesoKg == null) faltam.push('peso');
+  return faltam;
+}
+
+// Painel "Cadastros Incompletos" (Parte 5) — produtos abaixo do nível 2
+// (mínimo exigido pela Valéria — ver valeria_vitre.ts,
+// NIVEL_MINIMO_VALERIA), com a lista exata de campos faltantes.
+function vitreCatIncompletosToggle() {
+  var panel = document.getElementById('vitreCatIncompletosPanel');
+  var abrir = panel.style.display === 'none';
+  panel.style.display = abrir ? 'block' : 'none';
+  if (abrir) vitreCatIncompletosRender();
+}
+function vitreCatIncompletosRender() {
+  var incompletos = VITRE_CATALOGO_CACHE.filter(function (p) { return vitreCatNivel(p) < 2; });
+  var wrap = document.getElementById('vitreCatIncompletosList'); if (!wrap) return;
+  var btn = document.getElementById('vitreCatBtnIncompletos');
+  if (btn) btn.textContent = '📋 Cadastros incompletos (' + incompletos.length + ')';
+  if (!incompletos.length) { wrap.innerHTML = '<div style="font-size:12px;color:var(--muted)">Nenhum produto abaixo do nível mínimo — catálogo pronto para a Valéria (quanto a completude de cadastro).</div>'; return; }
+  wrap.innerHTML = incompletos.map(function (p) {
+    var faltam = vitreCatCamposFaltantes(p);
+    return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:8px 12px;font-size:12px;flex-wrap:wrap;gap:6px">'
+      + '<span><strong>' + cfgEsc(p.nome || '(sem nome)') + '</strong> <span style="color:var(--muted)">SKU ' + cfgEsc(p.sku) + ' — nível ' + vitreCatNivel(p) + '</span></span>'
+      + '<span style="color:#D97706;font-size:11px">Falta: ' + cfgEsc(faltam.join(', ')) + '</span>'
+      + '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.sku) + '\')" style="font-size:10px;padding:3px 8px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">Completar</button>'
+      + '</div>';
+  }).join('');
+}
+
 function vitreCatSouMaster() {
   var fn = _normalizeRole((typeof _currentSession !== 'undefined' && _currentSession && _currentSession.funcao) || '') || '';
   return fn === 'master';
@@ -16412,6 +16464,8 @@ function vitreCatalogoInit() {
   _vitreCatUnsub = _db.collection('vitre_produtos').onSnapshot(function (snap) {
     VITRE_CATALOGO_CACHE = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (a.sku || '').localeCompare(b.sku || ''); });
     if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
+    var _incPanel = document.getElementById('vitreCatIncompletosPanel');
+    if (_incPanel && _incPanel.style.display !== 'none') vitreCatIncompletosRender();
   }, function (err) { console.warn('[Vitre] listener vitre_produtos falhou:', err); });
 }
 
