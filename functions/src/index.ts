@@ -39,6 +39,37 @@ export {
   comprasCancelar,
 } from "./compras";
 
+// ── Produção (fronteira server-side de autorização de estoque) ──────────────
+export { producaoIniciarOuEditar } from "./producao";
+
+// ── Estoque (fronteira server-side para o restante da superfície de
+//    escrita de stock/retalhos/erp_stock_log — auditoria Fase F, FASE 2-8) ──
+export {
+  estoqueRegistrarEntrada,
+  estoqueRegistrarSaidaManual,
+  estoqueConsumoAutoOrcamento,
+  estoqueCriarOuEditarItem,
+  estoqueExcluirItem,
+  estoqueRestaurarItem,
+  estoqueExcluirItemDefinitivo,
+  estoqueLimparHistorico,
+  estoqueCriarRetalho,
+  estoqueEditarRetalho,
+  estoqueConsumirRetalho,
+  estoqueExcluirRetalho,
+} from "./estoque";
+
+// ── Catálogo Vitre + Orçamento de Catálogo (Fase G, 2026-08-06) ─────────────
+export {
+  vitreImportarProdutos,
+  vitreCriarOuEditarProduto,
+  vitreAtivarDesativarProduto,
+  vitreDuplicarProduto,
+  vitreCriarOrcamento,
+  vitreAtualizarOrcamento,
+  vitreConverterOrcamentoParaOS,
+} from "./vitre";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 export {
   valeriaGetCliente,
@@ -52,3 +83,14 @@ export {
   valeriaConsultarOS,
   valeriaStatus,
 } from "./valeria";
+
+// ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO
+//    apenas: nenhum destes endpoints foi configurado no Chatvolt ou
+//    conectado a um agente real nesta rodada. Ver relatório final. ──────
+export {
+  valeriaVitreBuscarCatalogo,
+  valeriaVitreConsultarProduto,
+  valeriaVitreSimularOrcamento,
+  valeriaVitreCriarRascunho,
+  valeriaVitreEncaminharVR,
+} from "./valeria_vitre";

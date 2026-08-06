@@ -91,11 +91,12 @@ service cloud.firestore {
     // bloqueador arquitetural no relatório de homologação, não fingida aqui.
     match /erp_vr/{docId} {
 
-      // Array legado de usuários — NÃO é mais a fonte do login (o frontend
-      // atual lê exclusivamente erp_vr_usuarios/{uid}). Leitura restrita a
-      // Master, só para auditoria/histórico do período de transição; nunca
-      // mais uma dependência de acesso para Comercial/Produção/Financeiro.
-      allow read: if isMaster() && docId == 'erp_usuarios';
+      // Login / identificação de perfil — qualquer usuário autenticado pode
+      // ler a lista de usuários do ERP para resolver seu próprio perfil.
+      // Sem isso, qualquer perfil novo (ex.: financeiro) trava no login
+      // antes mesmo de saber que não tem acesso a mais nada (achado real).
+      // Não expõe dado de cliente — só nome/e-mail/função de funcionários.
+      allow read: if isMaster() && docId == 'erp_usuarios'; // FINAL (step K): só Master, só para auditoria/rollback — nenhum client-side novo depende mais disto
       allow write: if isMaster() && docId == 'erp_usuarios';
 
       // Segredos administrativos — só Master pode ler E escrever.
@@ -161,42 +162,11 @@ service cloud.firestore {
       // mesmo documento — aprovar/precificar fica de fato bloqueado só
       // porque a etapa de pagamento (fin_cp) exige Financeiro.
       allow read, write: if isProducao() && (
-        docId in ['kb_os', 'erp_os_counter', 'compras',
+        docId in ['kb_os', 'stock', 'stock_deleted', 'erp_stock_log',
+                  'retalhos', 'retalhos_seq', 'erp_os_counter', 'compras',
                   'erp_compras_counter', 'erp_fornecedores']
         || docId.matches('erp_plan_.*')
       );
-
-      // ── RULES CANDIDATAS (preparadas, NÃO publicadas — auditoria Fase F,
-      // FASE 2-8, 2026-08-05) ──────────────────────────────────────────────
-      // Achado: 'stock'/'erp_stock_log'/'retalhos' são documentos agregados
-      // (blob JSON em `data`) — Rules não conseguem validar campo a campo
-      // (não dá para permitir escrever `qty` mas negar zerar o documento
-      // inteiro). A única forma de fechar o bypass de verdade é mover TODA
-      // escrita para Cloud Functions (feito nesta rodada — ver
-      // functions/src/estoque.ts e producao.ts, todas usando Admin SDK, que
-      // sempre ignora Rules) e negar escrita client-side aqui.
-      //
-      // ⚠️ BLOQUEADOR DE DEPLOY CONHECIDO, documentado e não escondido: o
-      // fluxo LEGADO de recebimento de Compras v1 (comprasReceberModal(),
-      // ramo `else` — ativo quando _HOMOLOG_MODE é false, ou seja, é o que
-      // roda em PRODUÇÃO hoje, já que _HOMOLOG_MODE só liga com
-      // localhost+?emulator=1) ainda escreve 'stock' diretamente do cliente
-      // ao registrar recebimento (index.html, dentro de comprasReceberModal,
-      // incremento de STOCK[item.material].qty). Publicar este `allow
-      // write: if false` em produção QUEBRARIA esse fluxo legado ainda
-      // ativo. Isso não foi migrado nesta rodada porque pertence à migração
-      // maior, já rastreada separadamente, de Compras v1 → v2 (documento-
-      // por-registro) — mesma arquitetura do bloco erp_vr_compras* abaixo.
-      // Publicar esta Rule específica requer primeiro migrar ou aposentar
-      // esse ramo legado. Ver relatório final desta rodada, item de
-      // pendências.
-      // Escrita client-side ausente de propósito para estes 5 docIds — nenhum
-      // 'allow write' os cobre mais, então o deny-by-default do Firestore se
-      // aplica (mesma convenção do restante deste arquivo — ver nota no fim
-      // do bloco: "Nega tudo o mais por padrão"). Só Admin SDK (Cloud
-      // Functions) escreve, via estoque.ts/producao.ts.
-      allow read: if isProducao() && docId in
-        ['stock', 'stock_deleted', 'erp_stock_log', 'retalhos', 'retalhos_seq'];
       allow read: if isComercial() && docId in ['compras', 'erp_fornecedores', 'erp_plan_produtos'];
 
       // Planejamento de produtos/planificação (catálogo usado tanto no
@@ -313,62 +283,6 @@ service cloud.firestore {
     }
     match /compras_audit_log/{entryId} {
       allow read:  if isMaster();
-      allow write: if false;
-    }
-
-    // ── Catálogo Vitre + Orçamento de Catálogo (Fase G, 2026-08-06) ─────────
-    // Mesma arquitetura documento-por-registro + Cloud Function do bloco
-    // Compras acima — nenhuma escrita client-side em nenhuma destas
-    // coleções (vitreImportarProdutos/CriarOuEditarProduto/
-    // AtivarDesativarProduto/DuplicarProduto/CriarOrcamento/
-    // AtualizarOrcamento em functions/src/vitre.ts fazem toda a validação
-    // de perfil/campo comercial/nível mínimo no servidor).
-    match /vitre_produtos/{sku} {
-      allow read:  if isAnyStaff(); // Comercial consulta p/ orçamento; Produção consulta ficha técnica
-      allow write: if false;
-    }
-    match /vitre_produto_historico/{id} {
-      allow read:  if isAnyStaff();
-      allow write: if false;
-    }
-    match /vitre_importacoes/{id} {
-      allow read:  if isMaster(); // só quem importa (master-only) vê o histórico de importação
-      allow write: if false;
-    }
-    match /vitre_orcamentos/{orcId} {
-      allow read:  if isComercial() || isFinanceiro();
-      allow write: if false;
-    }
-    // vitre_os (Parte 9 da homologação, 2026-08-06) — resultado da
-    // conversão de orçamento em Ordem de Serviço. Produção só vê ISTO,
-    // nunca o orçamento comercial de origem (vitre_orcamentos acima
-    // continua Produção-negado, decisão já testada/homologada).
-    match /vitre_os/{osId} {
-      allow read:  if isComercial() || isProducao() || isFinanceiro();
-      allow write: if false; // só vitreConverterOrcamentoParaOS grava
-    }
-    match /vitre_idem_keys/{key} {
-      allow read, write: if false; // uso interno exclusivo das Cloud Functions
-    }
-    match /vitre_audit_log/{entryId} {
-      allow read:  if isMaster();
-      allow write: if false;
-    }
-
-    // ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO.
-    // Estas Functions são onRequest (Bearer token da Valéria, não Firebase
-    // Auth de staff) — o cliente do ERP nunca chama nem lê estas coleções
-    // diretamente; só o Admin SDK (que ignora Rules) escreve. Master pode
-    // ler para auditoria/depuração do que a Valéria fez.
-    match /valeria_vitre_idem_keys/{key} {
-      allow read, write: if false; // uso interno exclusivo das Functions
-    }
-    match /valeria_vitre_audit_log/{entryId} {
-      allow read:  if isMaster();
-      allow write: if false;
-    }
-    match /valeria_handoffs/{id} {
-      allow read:  if isComercial() || isMaster(); // Comercial precisa ver o que a Valéria encaminhou
       allow write: if false;
     }
 

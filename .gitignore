@@ -48,3 +48,10 @@ Desktop.ini
 # ── Arquivos temporários ──────────────────────────────────────────────────────
 *.tmp
 *.temp
+
+# ── Artefatos de extração dos testes (scripts/test_*.js) ─────────────────────
+# Cada scripts/test_*.js extrai as funções reais de index.html (por contagem de
+# chaves) para um módulo temporário só para o require() do teste — 100%
+# reproduzível a cada execução, nunca deve ser commitado. Padrão específico
+# (não um *.js genérico) para não esconder arquivos reais de scripts/.
+scripts/_*_extracted.tmp.js
