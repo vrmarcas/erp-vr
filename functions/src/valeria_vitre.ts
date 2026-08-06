@@ -30,10 +30,32 @@
  * Só produtos elegíveis (ver produtoElegivelValeria) são retornados nas
  * buscas — produtos incompletos nunca são "inventados", apenas omitidos.
  */
+import * as crypto from "crypto";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import { checkAuth } from "./valeria";
 import { acquireIdem, writeAudit } from "./auth_helper";
+
+// Valida o bearer usando o mesmo secret do Secret Manager que as funções
+// functions-valeria/ (VALERIA_BEARER_SECRET), injetado via runWith.secrets.
+// Comparação timing-safe para evitar timing attacks.
+function checkAuthVitre(req: functions.Request, res: functions.Response): boolean {
+  const authHeader = (req.headers["authorization"] as string | undefined) ?? "";
+  if (!authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ ok: false, error: "UNAUTHORIZED" });
+    return false;
+  }
+  const token = authHeader.slice(7).trim();
+  const expected = process.env.VALERIA_BEARER_SECRET ?? "";
+  if (!expected) {
+    res.status(503).json({ ok: false, error: "SECRET_NOT_CONFIGURED" });
+    return false;
+  }
+  const bufA = Buffer.from(token, "utf8");
+  const bufB = Buffer.from(expected, "utf8");
+  if (bufA.length !== bufB.length) { crypto.timingSafeEqual(bufA, bufA); res.status(401).json({ ok: false, error: "UNAUTHORIZED" }); return false; }
+  if (!crypto.timingSafeEqual(bufA, bufB)) { res.status(401).json({ ok: false, error: "UNAUTHORIZED" }); return false; }
+  return true;
+}
 
 const COL_PRODUTOS = "vitre_produtos";
 const COL_ORC = "vitre_orcamentos";
@@ -103,10 +125,10 @@ function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", 
 // 1. valeriaVitreBuscarCatalogo — busca por nome/sinônimo/categoria/uso/
 //    faixa de preço. GET ?q=&categoria=&precoMin=&precoMax=&limite=
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreBuscarCatalogo = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreBuscarCatalogo = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const q = String(req.query.q || "").trim().toLowerCase();
@@ -137,10 +159,10 @@ export const valeriaVitreBuscarCatalogo = functions.https.onRequest(async (req, 
 //    não existir ou não for elegível, responde ok:true, elegivel:false,
 //    nunca aproxima/adivinha outro produto.
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreConsultarProduto = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreConsultarProduto = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const sku = String(req.query.sku || "").trim();
@@ -180,10 +202,10 @@ function resolverAdicionais(p: VitreProdutoValeria, pedidos: Array<{ nome?: stri
   return { aplicados, rejeitados };
 }
 
-export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreSimularOrcamento = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as { itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>; descontoPct?: number; frete?: number };
@@ -218,10 +240,10 @@ export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req
 //    idempotente por requestId (fail-closed, sem retry automático além do
 //    já garantido pela idempotência).
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreCriarRascunho = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as {
@@ -283,10 +305,10 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
 //    humano — nunca tenta "resolver" sozinha. Grava um registro de
 //    handoff auditável, isolado por conversationId/organizationId.
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreEncaminharVR = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreEncaminharVR = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as {
@@ -323,10 +345,10 @@ export const valeriaVitreEncaminharVR = functions.https.onRequest(async (req, re
 //    rascunho existente (status='rascunho') que pertença à mesma conversa.
 //    Idempotente por requestId — retry seguro.
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreAtualizarRascunho = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as {
@@ -384,10 +406,10 @@ export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (re
 //    organizationId=. Retorna dados não sensíveis do rascunho para que a
 //    Valéria possa confirmar o que foi salvo antes de apresentar ao cliente.
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreConsultarRascunho = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreConsultarRascunho = functions.runWith({ secrets: ["VALERIA_BEARER_SECRET"] }).https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  if (!checkAuthVitre(req, res)) return;
   if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const orcamentoId = String(req.query.orcamentoId || "").trim();
