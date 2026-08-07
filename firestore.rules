@@ -136,7 +136,15 @@ service cloud.firestore {
       // Financeiro: Contas a Pagar/Receber e transações de caixa — é aqui
       // (não em "compras") que aprovação de preço/pagamento/quitação
       // realmente acontece, então a restrição de perfil aqui É efetiva.
-      allow read, write: if isFinanceiro() && docId in ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant'];
+      // 'fin_cr' também aceita isComercial() (achado 2026-08-07): gerar OS
+      // a partir de um orçamento aprovado (orcEnvGerarOS()) grava a
+      // entrada/saldo em fin_cr na MESMA transação que atualiza o próprio
+      // orçamento — sem isso, a transação inteira falhava com permissão
+      // negada para qualquer conta que não fosse master/admin, quebrando
+      // por completo o botão "Gerar OS" para o perfil Comercial (o único
+      // que legitimamente aciona essa ação). Alargamento aditivo — não
+      // remove nada do que Financeiro já podia fazer.
+      allow read, write: if (isFinanceiro() || (isComercial() && docId=='fin_cr')) && docId in ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant'];
 
       // Orçamentos: Comercial cria/edita; Financeiro só lê (conciliação de
       // receita no DRE, contas a receber geradas a partir de orçamento
@@ -165,6 +173,16 @@ service cloud.firestore {
                   'erp_compras_counter', 'erp_fornecedores']
         || docId.matches('erp_plan_.*')
       );
+      // 'kb_os'/'erp_os_counter' também aceitam isComercial() (achado
+      // 2026-08-07, mesma causa do alargamento de fin_cr acima):
+      // orcEnvGerarOS() grava a nova OS + incrementa o contador dentro da
+      // mesma transação atômica que aprova o orçamento — sem isto, a
+      // transação inteira falhava com permissão negada para o perfil
+      // Comercial (o único que legitimamente gera OS a partir de um
+      // orçamento aprovado). Alargamento aditivo — Produção mantém acesso
+      // total e continua sendo o único a mexer nas demais chaves deste
+      // bloco (compras/erp_plan_*).
+      allow read, write: if isComercial() && docId in ['kb_os', 'erp_os_counter'];
 
       // ── RULES CANDIDATAS (preparadas, NÃO publicadas — auditoria Fase F,
       // FASE 2-8, 2026-08-05) ──────────────────────────────────────────────
