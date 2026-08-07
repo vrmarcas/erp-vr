@@ -106,7 +106,19 @@ VR já tinha essa proteção (confirmado, seção 3). O Vitre não tem — mas e
 
 ## 8. Deploy
 
-Ver seção correspondente após a execução (Rules + Hosting, cirúrgico — nenhuma Cloud Function foi alterada nesta rodada, então nenhuma Function foi redeployada).
+Cirúrgico, só os dois recursos alterados nesta rodada — nenhuma Cloud Function foi tocada, então nenhuma foi redeployada:
+1. `firebase deploy --only firestore:rules --project erp-vrmarcas` — regras compiladas sem erro, publicadas primeiro (aditivo/retrocompatível: só amplia acesso do Comercial, não restringe nada que já funcionava).
+2. `firebase deploy --only hosting --project erp-vrmarcas` — `index.html` publicado depois das Rules, para o novo frontend nunca rodar contra Rules antigas.
+
+Ordem escolhida deliberadamente para não haver uma janela em que o frontend novo (que depende do acesso ampliado do Comercial) rodasse contra Rules antigas.
+
+## 9. Smoke test em produção
+
+Sem clique-a-clique autenticado com senha real — mesma restrição de segurança já documentada em todas as rodadas anteriores deste repositório (proibido inserir credenciais). Não havia sessão de navegador já autenticada disponível nesta janela para reaproveitar. Verificação possível sem login:
+- `https://erp-vrmarcas.web.app/` responde 200 e a tela de login carrega sem erro de console.
+- O HTML publicado contém o código novo desta rodada (`orcConfirmarPagtoWizard`, `orcEnvFiltroMesPopular`, `checksProducao`) — confirma que o deploy de Hosting publicou o código certo, não uma versão em cache.
+- Os dois assets de logo referenciados nesta rodada (`/assets/brand/vr-marcas-logo.png`, `/assets/brand/vitre-logo.png`, usados no novo cabeçalho do recibo de entrada) respondem 200 em produção — a imagem não vai quebrar no recibo impresso.
+- Nenhum orçamento, OS, mensagem ou cobrança real foi criado.
 
 ## 9. Chatvolt/Valéria
 
