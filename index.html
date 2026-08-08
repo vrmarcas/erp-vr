@@ -3883,9 +3883,10 @@ function _authFirebaseError(code){
          ============================== -->
     <div id="pg-seguranca" style="display:none">
       <div class="g2">
-        <!-- Alterar Senha Master -->
+        <!-- Alterar minha senha -->
         <div class="card">
-          <div class="card-h"><div class="card-h-left">🔑 Alterar Senha Master</div></div>
+          <div class="card-h"><div class="card-h-left">🔑 Alterar minha senha</div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:2px">Altera apenas a senha de login da conta com que você está autenticado agora.</div>
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
             <div class="form-group">
               <label>Senha atual</label>
@@ -3900,7 +3901,7 @@ function _authFirebaseError(code){
               <input type="password" id="secPwdConf" placeholder="••••••••">
             </div>
             <div id="secPwdErr" style="color:#DC2626;font-size:11px;min-height:14px;font-weight:600"></div>
-            <button class="topbar-btn" onclick="secAlterarSenha()">🔑 Alterar Senha</button>
+            <button class="topbar-btn" id="secBtnAlterarSenha" onclick="secAlterarSenha()">🔑 Alterar minha senha</button>
           </div>
         </div>
         <!-- Config e Status -->
@@ -10557,19 +10558,7 @@ function kbOpen(id) {
     if(isMaster && osEhPronta) {
       avisarBox.style.display = 'block';
       if(msgEl) {
-        var pNome = (os.cliente||'Cliente').split(' ')[0];
-        var linhas = [
-          'Olá ' + pNome + '! 😊',
-          '',
-          'Passamos para informar que o seu pedido está *pronto para retirada*! 🎉',
-          '',
-          '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||''),
-          '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : ''),
-          (os.qty > 1 ? '🔢 Quantidade: ' + os.qty : ''),
-          '',
-          'Estaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏'
-        ].filter(function(l,i,a){ return !(l==='' && a[i-1]===''); }); // remove duplas linhas vazias
-        if(!msgEl.dataset.editado) msgEl.value = linhas.join('\n');
+        if(!msgEl.dataset.editado) msgEl.value = kbMsgOsPronta(os);
       }
     } else {
       avisarBox.style.display = 'none';
@@ -11709,6 +11698,21 @@ function kbReceberSaldo() {
   return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
 }
 
+// Corrigido 2026-08-07 (Rodada Mestre, seção 24) — a mensagem de "OS
+// pronta" tinha emojis (😊🎉📋📦🔢🙏) que prejudicam legibilidade e
+// compatibilidade em alguns dispositivos/leitores — pedido explícito para
+// usar texto simples. Função única, reaproveitada nos dois lugares que
+// antes duplicavam (e divergiam sutilmente) o mesmo texto.
+function kbMsgOsPronta(os) {
+  var pNome = (os.cliente||'Cliente').split(' ')[0];
+  var linhas = [
+    'Olá, ' + pNome + '.',
+    'Seu pedido OS #' + (os.num||os.id) + ' está pronto para retirada.',
+    'Produto: ' + (os.titulo||os.material||'—') + '.',
+    'Caso necessário, podemos combinar a retirada.'
+  ];
+  return linhas.join('\n');
+}
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
@@ -11754,10 +11758,7 @@ function kbMarcarPronto() {
     var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao !== 'producao';
     if(isMaster) {
       avisarBox.style.display = 'block';
-      if(msgEl && !msgEl.dataset.editado) {
-        var pNome = (os.cliente||'Cliente').split(' ')[0];
-        msgEl.value = 'Olá ' + pNome + '! 😊\n\nPassamos para informar que o seu pedido está *pronto para retirada*! 🎉\n\n' + '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||'') + '\n' + '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : '') + '\n' + (os.qty > 1 ? '🔢 Quantidade: ' + os.qty + '\n' : '') + '\nEstaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏';
-      }
+      if(msgEl && !msgEl.dataset.editado) msgEl.value = kbMsgOsPronta(os);
     }
   }
 
@@ -23938,19 +23939,49 @@ document.addEventListener('click',function(){
 });
 
 // ── Alterar senha master ──────────────────────────────────────────────────────
+// Corrigido 2026-08-07 (Rodada Mestre, seção 39) — "Alterar Senha Master"
+// nunca alterava a senha real de login (Firebase Auth) de ninguém: lia/
+// gravava um hash único e COMPARTILHADO (_SEC_MASTER/erp_master_pwd, um
+// único documento no Firestore) que nenhum outro lugar do sistema sequer
+// consultava (grep confirma: só esta função lia/escrevia essa chave) —
+// um resquício que não protegia nada e dava a falsa impressão de existir
+// "a senha do Master" compartilhada entre todas as contas com essa role;
+// qualquer conta master podia trocar a "senha" de todas as outras.
+// Substituído pela troca real via Firebase Auth, EXCLUSIVAMENTE da conta
+// autenticada agora — reautentica com a senha atual (o Firebase exige
+// login recente para trocar senha) e só então aplica a nova.
 function secAlterarSenha(){
   var atual=(document.getElementById('secPwdAtual')||{}).value||'';
   var nova =(document.getElementById('secPwdNova') ||{}).value||'';
   var conf =(document.getElementById('secPwdConf') ||{}).value||'';
   var errEl=document.getElementById('secPwdErr');
-  if(secHash(atual)!==secGetMasterHash()){ errEl.textContent='❌ Senha atual incorreta'; return; }
-  if(nova.length<6){ errEl.textContent='❌ Nova senha: mínimo 6 caracteres'; return; }
-  if(nova!==conf){ errEl.textContent='❌ Confirmação não confere'; return; }
-  _SEC_MASTER=secHash(nova); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_master_pwd',_SEC_MASTER);
+  var btn = document.getElementById('secBtnAlterarSenha');
+  if(!atual){ errEl.textContent='Informe a senha atual'; return; }
+  if(nova.length<6){ errEl.textContent='Nova senha: mínimo 6 caracteres'; return; }
+  if(nova!==conf){ errEl.textContent='Confirmação não confere'; return; }
+  var fbUser = (typeof firebase!=='undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+  var email = (fbUser && fbUser.email) || (typeof _currentSession!=='undefined' && _currentSession && _currentSession.email);
+  if(!fbUser || !email){ errEl.textContent='Sessão inválida — saia e entre novamente.'; return; }
   errEl.textContent='';
-  ['secPwdAtual','secPwdNova','secPwdConf'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
-  secAuditLog('pwd_change','Senha Master alterada');
-  showToast('✅ Senha Master alterada com sucesso!','ok');
+  var done = _btnBusy(btn, 'Alterando…', 10000);
+  var cred = firebase.auth.EmailAuthProvider.credential(email, atual);
+  fbUser.reauthenticateWithCredential(cred)
+    .then(function(){ return fbUser.updatePassword(nova); })
+    .then(function(){
+      ['secPwdAtual','secPwdNova','secPwdConf'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+      secAuditLog('pwd_change','Senha alterada pela própria conta ('+email+')');
+      showToast('Senha alterada com sucesso!','ok');
+      if(done) done();
+    })
+    .catch(function(e){
+      var code = e && e.code;
+      var msg = code==='auth/wrong-password' ? 'Senha atual incorreta'
+        : code==='auth/weak-password' ? 'Nova senha muito fraca para o Firebase'
+        : code==='auth/requires-recent-login' ? 'Sessão expirada — saia e entre novamente para trocar a senha'
+        : 'Não foi possível alterar a senha — tente novamente';
+      errEl.textContent = msg;
+      if(done) done();
+    });
 }
 
 // ── Auditoria ─────────────────────────────────────────────────────────────────
