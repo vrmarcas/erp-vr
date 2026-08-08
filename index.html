@@ -1728,7 +1728,14 @@ function _cloudLoadAll() {
       if(d&&Array.isArray(d)){ _FORN_DATA=d; try{ fornRender(); }catch(e){} }
     });
     _cloudWatch("erp_plan_produtos", function(d){
-      if(d&&Array.isArray(d)){ _PLAN_PROD_DATA=d; try{ cfgRenderProdutos(); }catch(e){} }
+      // RODADA 5, seções 5/6 — achado: este listener chamava
+      // cfgRenderProdutos() (a lista LEGADA de Config. Orçamento →
+      // Produtos, que não lê _PLAN_PROD_DATA) em vez de atualizar a
+      // própria tela de Produtos & Planificação ou o seletor do
+      // orçamento — um produto criado em outra aba/sessão nunca
+      // aparecia ao vivo em lugar nenhum. Corrigido para atualizar os
+      // dois lugares que realmente dependem de _PLAN_PROD_DATA.
+      if(d&&Array.isArray(d)){ _PLAN_PROD_DATA=d; try{ if(typeof planProdRender==='function') planProdRender(); }catch(e){} try{ if(typeof orcRefreshProdSelects==='function') orcRefreshProdSelects(); }catch(e){} }
     });
     _cloudWatch("erp_client_history", function(d){
       if(d&&typeof d==='object') _CLIENT_HIST=d;
@@ -8422,7 +8429,7 @@ function orcAddItem() {
   const tbody = document.getElementById('orcItemBody');
   const tr = document.createElement('tr');
   tr.id = 'oir_'+orcItemCount; tr.dataset.idx = orcItemCount;
-  const prodOpts = ORC_PRODUTOS.map(p=>`<option>${p}</option>`).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
+  const prodOpts = orcProdutosCanonicos(planProdLoad(), ORC_PRODUTOS).map(p=>`<option>${p}</option>`).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
   // Gerar opções de material APENAS da configuração do Firebase (nunca usar fallback padrão)
   var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
   var matOpts = _cfgMats.length
@@ -8501,8 +8508,9 @@ function orcRefreshMatSelects() {
 
 // Atualiza os selects de produto em linhas já existentes quando ORC_PRODUTOS chega do Firebase
 function orcRefreshProdSelects() {
-  if(!orcItemCount || !ORC_PRODUTOS.length) return;
-  var newOpts = ORC_PRODUTOS.map(function(p){ return '<option>'+p+'</option>'; }).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
+  var _prodCanon = orcProdutosCanonicos(planProdLoad(), ORC_PRODUTOS);
+  if(!orcItemCount || !_prodCanon.length) return;
+  var newOpts = _prodCanon.map(function(p){ return '<option>'+p+'</option>'; }).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
   for(var idx=1;idx<=orcItemCount;idx++){
     var sel=document.getElementById('oi_prod_'+idx);
     if(!sel) continue;
@@ -8651,19 +8659,69 @@ var PLAN_PROD_KEY = 'erp_plan_produtos';
 function planProdLoad(){ return _PLAN_PROD_DATA.length ? _PLAN_PROD_DATA.slice() : []; }
 function planProdSaveList(arr){ _PLAN_PROD_DATA=arr; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_plan_produtos', arr); }
 
+// RODADA 5, seções 5/6 — Produtos & Planificação (_PLAN_PROD_DATA) é a
+// FONTE CANÔNICA dos produtos personalizados VR. Esta função constrói o
+// seletor de "Novo Orçamento" a partir dela primeiro (nomes reais com
+// receita configurada), complementando com os nomes legados de
+// ORC_PRODUTOS que ainda não têm uma receita cadastrada — nunca ao
+// contrário, e nunca perde um nome já em uso (comparação case/trim-
+// insensível evita duplicar o mesmo produto com grafias diferentes).
+// Cadastrar um produto em Produtos & Planificação passa a bastar para
+// ele aparecer aqui — não é mais preciso cadastrá-lo de novo em
+// Config. Orçamento → Produtos.
+function orcProdutosCanonicos(planProdList, orcProdutosLegado) {
+  var vistos = {};
+  var lista = [];
+  (planProdList || []).forEach(function (p) {
+    var nome = String((p && p.nome) || '').trim();
+    if (!nome) return;
+    var chave = nome.toLowerCase();
+    if (vistos[chave]) return;
+    vistos[chave] = true;
+    lista.push(nome);
+  });
+  (orcProdutosLegado || []).forEach(function (nome) {
+    nome = String(nome || '').trim();
+    if (!nome) return;
+    var chave = nome.toLowerCase();
+    if (vistos[chave]) return;
+    vistos[chave] = true;
+    lista.push(nome);
+  });
+  return lista;
+}
+// Migração/reconciliação (seção 41) — dry-run, idempotente, não destrutiva:
+// identifica quais nomes de ORC_PRODUTOS ainda não têm um registro
+// correspondente em Produtos & Planificação (candidatos a ganhar uma
+// receita configurada) sem apagar ou alterar nada.
+function orcProdutosReconciliar(planProdList, orcProdutosLegado) {
+  var canonicos = {};
+  (planProdList || []).forEach(function (p) {
+    var nome = String((p && p.nome) || '').trim();
+    if (nome) canonicos[nome.toLowerCase()] = true;
+  });
+  var jaExistem = [], faltamReceita = [];
+  (orcProdutosLegado || []).forEach(function (nome) {
+    nome = String(nome || '').trim();
+    if (!nome) return;
+    if (canonicos[nome.toLowerCase()]) jaExistem.push(nome); else faltamReceita.push(nome);
+  });
+  return { jaExistem: jaExistem, faltamReceita: faltamReceita, totalLegado: (orcProdutosLegado || []).length };
+}
+
+// RODADA 5, seção 9 — achado de segurança: esta função usava Function()
+// (execução arbitrária de JS) protegida só por um regex de whitelist. Isso
+// é exatamente o padrão que o enunciado desta rodada proíbe explicitamente
+// ("não usar eval()/new Function()"). Substituído pelo parser/avaliador
+// restrito real (receitaFormulaAvaliar — tokeniza e faz descida recursiva
+// à mão, nunca invoca o motor JS sobre a string do usuário). Mesmo
+// contrato de retorno de antes (0 em qualquer erro, arredondado a 2 casas,
+// nunca negativo) — nenhuma receita existente muda de comportamento.
 function planEvalFormula(formula, L, A, P, e) {
   if(!formula || formula==='') return 0;
-  try {
-    var expr = String(formula)
-      .replace(/\bL\b/g, '('+L+')')
-      .replace(/\bA\b/g, '('+A+')')
-      .replace(/\bP\b/g, '('+P+')')
-      .replace(/\be\b/g, '('+e+')');
-    // Segurança: só permite dígitos, operadores, parênteses e ponto
-    if(!/^[\d\s\+\-\*\/\.\(\)]+$/.test(expr)) return 0;
-    var result = Function('"use strict";return ('+expr+')')();
-    return Math.round(Math.max(0, result) * 100) / 100;
-  } catch(err) { return 0; }
+  var r = receitaFormulaAvaliar(formula, {L:L, A:A, P:P, e:e});
+  if(!r.ok) return 0;
+  return Math.round(Math.max(0, r.valor) * 100) / 100;
 }
 
 function planGetRecipe(produto) {
@@ -22455,6 +22513,110 @@ var CFG_DEFAULT = {
   ]
 };
 
+// ============================================================
+// RECEITA — MOTOR DE FÓRMULAS SEGURO (RODADA 5, seção 9)
+// ============================================================
+// Parser/avaliador restrito para fórmulas de peça de receita de produto
+// (ex.: "largura - 2 * espessura"). NUNCA usa eval()/new Function() —
+// tokeniza e faz descida recursiva à mão. Permite apenas: parâmetros
+// declarados (números conhecidos no momento da avaliação), números
+// literais, + - * / e parênteses. Qualquer outro token (identificador não
+// declarado, ponto-e-vírgula, chaves, "=>", etc.) é rejeitado.
+function receitaFormulaTokenizar(expr) {
+  var tokens = [];
+  var i = 0, n = expr.length;
+  while (i < n) {
+    var c = expr[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { i++; continue; }
+    if (c >= '0' && c <= '9' || c === '.') {
+      var start = i;
+      while (i < n && ((expr[i] >= '0' && expr[i] <= '9') || expr[i] === '.')) i++;
+      var numStr = expr.slice(start, i);
+      if (!/^\d+(\.\d+)?$/.test(numStr)) throw { erro: 'NUMERO_INVALIDO', trecho: numStr };
+      tokens.push({ tipo: 'num', valor: parseFloat(numStr) });
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(c)) {
+      var start2 = i;
+      while (i < n && /[a-zA-Z0-9_]/.test(expr[i])) i++;
+      tokens.push({ tipo: 'ident', valor: expr.slice(start2, i) });
+      continue;
+    }
+    if ('+-*/()'.indexOf(c) >= 0) { tokens.push({ tipo: c }); i++; continue; }
+    throw { erro: 'CARACTERE_NAO_PERMITIDO', trecho: c };
+  }
+  return tokens;
+}
+// Descida recursiva: expr := term (('+'|'-') term)* ; term := factor (('*'|'/') factor)* ; factor := NUM | IDENT | '(' expr ')' | '-' factor
+function receitaFormulaParsear(tokens, params) {
+  var pos = 0;
+  function peek() { return tokens[pos]; }
+  function next() { return tokens[pos++]; }
+  function parseFactor() {
+    var t = peek();
+    if (!t) throw { erro: 'EXPRESSAO_INCOMPLETA' };
+    if (t.tipo === 'num') { next(); return t.valor; }
+    if (t.tipo === 'ident') {
+      next();
+      if (!Object.prototype.hasOwnProperty.call(params, t.valor)) throw { erro: 'PARAMETRO_DESCONHECIDO', trecho: t.valor };
+      var v = params[t.valor];
+      if (typeof v !== 'number' || isNaN(v)) throw { erro: 'PARAMETRO_INVALIDO', trecho: t.valor };
+      return v;
+    }
+    if (t.tipo === '(') { next(); var v2 = parseExpr(); if (!peek() || peek().tipo !== ')') throw { erro: 'PARENTESE_NAO_FECHADO' }; next(); return v2; }
+    if (t.tipo === '-') { next(); return -parseFactor(); }
+    if (t.tipo === '+') { next(); return parseFactor(); }
+    throw { erro: 'TOKEN_INESPERADO', trecho: JSON.stringify(t) };
+  }
+  function parseTerm() {
+    var v = parseFactor();
+    while (peek() && (peek().tipo === '*' || peek().tipo === '/')) {
+      var op = next().tipo;
+      var rhs = parseFactor();
+      v = op === '*' ? v * rhs : v / rhs;
+    }
+    return v;
+  }
+  function parseExpr() {
+    var v = parseTerm();
+    while (peek() && (peek().tipo === '+' || peek().tipo === '-')) {
+      var op = next().tipo;
+      var rhs = parseTerm();
+      v = op === '+' ? v + rhs : v - rhs;
+    }
+    return v;
+  }
+  if (!tokens.length) throw { erro: 'EXPRESSAO_VAZIA' };
+  var resultado = parseExpr();
+  if (pos < tokens.length) throw { erro: 'TOKEN_INESPERADO', trecho: JSON.stringify(tokens[pos]) };
+  return resultado;
+}
+// Avalia uma fórmula com valores reais de parâmetros. Nunca lança — sempre
+// retorna {ok, valor|erro, trecho}, para uso seguro tanto na planificação
+// em tempo real quanto na validação ao salvar a receita.
+function receitaFormulaAvaliar(expr, params) {
+  try {
+    var tokens = receitaFormulaTokenizar(String(expr || ''));
+    var valor = receitaFormulaParsear(tokens, params || {});
+    if (typeof valor !== 'number' || isNaN(valor) || !isFinite(valor)) return { ok: false, erro: 'RESULTADO_INVALIDO' };
+    return { ok: true, valor: valor };
+  } catch (e) {
+    return { ok: false, erro: (e && e.erro) || 'ERRO_DESCONHECIDO', trecho: e && e.trecho };
+  }
+}
+// Validação ao SALVAR a receita — nomeParams são os parâmetros DECLARADOS
+// no produto (não precisam de valores reais ainda, só precisam existir).
+// Usa valores fictícios (1) para cada parâmetro declarado só para provar
+// que a fórmula é sintaticamente válida e só referencia parâmetros
+// conhecidos — nunca persiste um resultado numérico dessa validação.
+function receitaFormulaValidar(expr, nomeParams) {
+  var paramsFicticios = {};
+  (nomeParams || []).forEach(function (p) { paramsFicticios[p] = 1; });
+  var r = receitaFormulaAvaliar(expr, paramsFicticios);
+  if (!r.ok) return { ok: false, erro: r.erro, trecho: r.trecho, expressao: expr };
+  return { ok: true };
+}
+
 function cfgLoad() {
   if(_cfgData){
     // Garantir que os arrays sempre existam para evitar erros de .push()
@@ -28274,6 +28436,7 @@ function planProdSalvar() {
 
   planProdFechar();
   planProdRender();
+  try { orcRefreshProdSelects(); } catch(e){}
   showToast('Produto "'+nome.trim()+'" salvo! Já disponível nos orçamentos.','ok');
 }
 
@@ -28284,14 +28447,15 @@ function planProdDel(id) {
   prods = prods.filter(function(x){ return x.id!==id; });
   planProdSaveList(prods);
   planProdRender();
-  // sincronizar com dropdown do orçamento
+  // sincronizar com dropdown do orçamento — sempre atualiza (o dropdown
+  // agora é a fonte canônica de _PLAN_PROD_DATA, não só ORC_PRODUTOS)
   var oidx = ORC_PRODUTOS.indexOf(p.nome);
   if(oidx >= 0) {
     ORC_PRODUTOS.splice(oidx, 1);
     _prodSave();
-    try { orcRefreshProdSelects(); } catch(e){}
     try { cfgRenderProdutos(); } catch(e){}
   }
+  try { orcRefreshProdSelects(); } catch(e){}
   showToast('Produto "'+p.nome+'" removido','warn');
 }
 
