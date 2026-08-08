@@ -110,14 +110,24 @@ console.log('\n── Sugestão 50/50 automática (P0.1) ───────�
 // ────────────────────────────────────────────────────────────────────────
 console.log('\n── Gate do recibo de entrada (P0.3) ───────────────────────────\n');
 {
-  function podeGerarRecibo(orcSalvo, entradaConfirmada) {
-    if (!orcSalvo || !orcSalvo.id) return { pode: false, motivo: 'orcamento_nao_salvo' };
-    if (!entradaConfirmada) return { pode: false, motivo: 'entrada_nao_confirmada' };
-    return { pode: true };
+  // Espelha orcObterConfirmacaoEntrada(): recibo só libera com OS gerada
+  // pela transação real de pagamento E valorEntrada>0 nela — nunca a
+  // partir do campo de texto livre orcEntradaValor.
+  function orcObterConfirmacaoEntradaMirror(orcId, lista, KB_OS) {
+    if (!orcId) return { pode: false, motivo: 'orcamento_nao_salvo' };
+    var orc = lista.find(function (x) { return x.id === orcId; });
+    if (!orc) return { pode: false, motivo: 'orcamento_nao_encontrado' };
+    if (!orc.osRef) return { pode: false, motivo: 'pagamento_nao_confirmado' };
+    var os = KB_OS[orc.osRef];
+    if (!os || !((os.valorEntrada || 0) > 0)) return { pode: false, motivo: 'entrada_nao_confirmada' };
+    return { pode: true, orc: orc, os: os };
   }
-  test('14. sem orçamento salvo, recibo bloqueado mesmo com campo preenchido', podeGerarRecibo(null, true).pode, false);
-  test('15. orçamento salvo mas entrada não confirmada — recibo bloqueado', podeGerarRecibo({ id: 'ORC-1' }, false).pode, false);
-  test('16. orçamento salvo + entrada confirmada — recibo liberado', podeGerarRecibo({ id: 'ORC-1' }, true).pode, true);
+  var listaOrc = [{ id: 'ORC-1', num: '1' }, { id: 'ORC-2', num: '2', osRef: 'os1' }, { id: 'ORC-3', num: '3', osRef: 'os2' }];
+  var kbOs = { os1: { num: '10', valorEntrada: 0, restante: 400 }, os2: { num: '11', valorEntrada: 200, restante: 200 } };
+  test('14. sem orçamento salvo (id nulo), recibo bloqueado mesmo com campo preenchido', orcObterConfirmacaoEntradaMirror(null, listaOrc, kbOs).pode, false);
+  test('15. orçamento salvo mas sem OS/pagamento confirmado — recibo bloqueado', orcObterConfirmacaoEntradaMirror('ORC-1', listaOrc, kbOs).pode, false);
+  test('15b. OS gerada mas com valorEntrada=0 ("a receber") — recibo bloqueado', orcObterConfirmacaoEntradaMirror('ORC-2', listaOrc, kbOs).pode, false);
+  test('16. orçamento salvo + OS com entrada confirmada — recibo liberado', orcObterConfirmacaoEntradaMirror('ORC-3', listaOrc, kbOs).pode, true);
 }
 
 // ────────────────────────────────────────────────────────────────────────

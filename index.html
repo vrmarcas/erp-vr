@@ -3263,7 +3263,7 @@ function _authFirebaseError(code){
               <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🧾 Recibo de Entrada / Sinal</div>
               <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
                 <div class="fg" style="margin:0;flex:1">
-                  <label style="font-size:11px">Valor recebido como entrada (R$)</label>
+                  <label style="font-size:11px">Simulação de entrada (R$)</label>
                   <input type="number" id="orcEntradaValor" step="0.01" min="0" placeholder="0,00" oninput="orcCalcEntradaResto()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)">
                 </div>
                 <div class="fg" style="margin:0;flex:1">
@@ -3271,9 +3271,15 @@ function _authFirebaseError(code){
                   <div id="orcEntradaResto" style="padding:8px 10px;background:var(--bg2);border-radius:7px;font-size:13px;font-weight:700;color:#D97706">R$ —</div>
                 </div>
               </div>
+              <!-- Corrigido 2026-08-07 (Rodada 2, P0.3) — este botão só gera
+                   o recibo de verdade se já existir um pagamento de entrada
+                   CONFIRMADO (OS gerada com valorEntrada>0 via "Confirmar
+                   Pagamento e Gerar OS"); o campo acima é só uma simulação
+                   para conferir o saldo antes de confirmar. -->
               <button class="topbar-btn" style="width:100%;background:#D97706;font-size:12px;padding:9px;justify-content:center" onclick="orcGerarReciboEntrada()">
                 🖨️ Gerar Recibo de Entrada
               </button>
+              <div style="font-size:10px;color:var(--muted);margin-top:6px">O recibo só é liberado depois que o pagamento de entrada for confirmado em "Confirmar Pagamento e Gerar OS" (Orçamentos Enviados).</div>
             </div>
 
             <button id="orcBtnConfirmar" class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcConfirmarPagtoWizard()">
@@ -9641,30 +9647,40 @@ function orcCalcEntradaResto() {
   // "Pagamento Total".
 }
 
-function orcGerarReciboEntrada() {
-  var c = window._orcCalc||{};
-  var total   = c.finalPrice||0;
-  var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
-  if(!total)  { showToast('Calcule o or\u00e7amento antes de gerar o recibo','warn'); return; }
-  if(!entrada){ showToast('Informe o valor pago como entrada','warn'); return; }
-  var resto   = Math.max(0, total - entrada);
-  var cliente = (document.getElementById('orcClientNome')||{}).value||'Cliente';
-  var isVt    = document.body.classList.contains('vitre');
+// Corrigido 2026-08-07 (Rodada 2, P0.3) — antes, "Gerar Recibo de Entrada"
+// só checava se o campo de texto livre orcEntradaValor estava preenchido
+// (qualquer número digitado, sem nenhum pagamento de verdade por trás).
+// Agora o recibo só é liberado quando existe uma OS gerada pela transação
+// real de pagamento (orcEnvGerarOS()) com valorEntrada>0 gravado no
+// próprio kb_os_fin — nunca a partir de um valor solto na tela.
+function orcObterConfirmacaoEntrada(orcId) {
+  if(!orcId) return { pode:false, motivo:'Salve o orçamento e confirme o pagamento antes de gerar o recibo.' };
+  var lista = orcGetEnviados();
+  var orc = lista.find(function(x){ return x.id===orcId; });
+  if(!orc) return { pode:false, motivo:'Orçamento não encontrado.' };
+  if(!orc.osRef) return { pode:false, motivo:'Nenhum pagamento confirmado ainda — use "Confirmar Pagamento e Gerar OS" antes de emitir o recibo.' };
+  var os = (typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[orc.osRef] : null;
+  if(!os || !((os.valorEntrada||0) > 0)) return { pode:false, motivo:'Nenhuma entrada confirmada para este orçamento — o pagamento registrado foi "a receber" (sem valor de entrada).' };
+  return { pode:true, orc:orc, os:os };
+}
+
+function orcGerarReciboEntrada(orcIdParam) {
+  var gate = orcObterConfirmacaoEntrada(orcIdParam||window._orcSessaoAtualId);
+  if(!gate.pode){ showToast(gate.motivo,'warn'); return; }
+  var orc = gate.orc, os = gate.os;
+  var total   = os.totalGeral||os.valor||orc.valorFinal||0;
+  var entrada = os.valorEntrada||0;
+  var resto   = Math.max(0, os.restante!=null ? os.restante : (total-entrada));
+  var cliente = orc.cliente||'Cliente';
+  var isVt    = orc.marca==='vitre';
   var empresa = isVt ? 'Vitre' : 'VR Marcas';
   var cor     = isVt ? '#1E7A86' : '#1EB8D8';
   var hoje    = new Date().toLocaleDateString('pt-BR');
-  var vend    = (document.getElementById('orcClientVendedor')||{}).value||'—';
+  var vend    = orc.vendedor||'—';
   var fmtBR   = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}); };
   var pct     = total>0 ? Math.round(entrada/total*100) : 0;
   var numRec  = 'REC-'+Date.now().toString().slice(-6);
-  var itensList = [];
-  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
-    var ri = row.dataset.idx; if(!ri) return;
-    var prod = (document.getElementById('oi_prod_'+ri)||{}).value||'Produto';
-    var qty  = (document.getElementById('oi_qty_'+ri)||{}).value||'1';
-    itensList.push(qty+'x '+prod);
-  });
-  var itensStr = itensList.join(', ')||'Servi\u00e7o conforme or\u00e7amento';
+  var itensStr = (os.itens||orc.itens||[]).map(function(it){ return (it.qty||1)+'x '+(it.prod||'Produto'); }).join(', ')||'Serviço conforme orçamento';
   var _brandBaseRec = location.origin + '/assets/brand/';
   var logoSrcRec = isVt ? (_brandBaseRec+'vitre-logo.png') : (_brandBaseRec+'vr-marcas-logo.png');
   var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo de Entrada</title>'
@@ -9689,16 +9705,18 @@ function orcGerarReciboEntrada() {
     +'@media print{.page{width:100%;min-height:267mm}}</style></head><body>'
     +'<div class="page">'
     +'<div class="hdr"><div><img src="'+logoSrcRec+'" alt="'+empresa+'"><small>COMPROVANTE DE ENTRADA / SINAL</small></div>'
-    +'<div style="text-align:right"><div style="font-size:18px;font-weight:900">N\u00ba '+numRec+'</div><small>'+hoje+'</small></div></div>'
+    +'<div style="text-align:right"><div style="font-size:18px;font-weight:900">Nº '+numRec+'</div><small>'+hoje+'</small></div></div>'
     +'<div class="body">'
     +'<div class="row"><span class="lbl">Cliente</span><span class="val">'+cliente+'</span></div>'
-    +'<div class="row"><span class="lbl">Produto / Servi\u00e7o</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
+    +'<div class="row"><span class="lbl">Produto / Serviço</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
     +'<div class="row"><span class="lbl">Vendedor</span><span class="val">'+vend+'</span></div>'
-    +'<div class="row"><span class="lbl">Valor total do or\u00e7amento</span><span class="val">'+fmtBR(total)+'</span></div>'
+    +'<div class="row"><span class="lbl">Orçamento</span><span class="val">#'+(orc.num||'—')+'</span></div>'
+    +(os.num?'<div class="row"><span class="lbl">Ordem de Serviço</span><span class="val">#'+os.num+'</span></div>':'')
+    +'<div class="row"><span class="lbl">Valor total do orçamento</span><span class="val">'+fmtBR(total)+'</span></div>'
     +'<div class="row"><span class="lbl">Entrada ('+pct+'% do total)</span><span class="val" style="color:#059669">'+fmtBR(entrada)+'</span></div>'
-    +'<div class="ok-box"><div class="t1">\u2714 Valor Recebido como Entrada</div><div class="t2">'+fmtBR(entrada)+'</div></div>'
-    +(resto>0?'<div class="warn-box"><div class="r1">\u23f3 Saldo Restante a Pagar na Retirada</div><div class="r2">'+fmtBR(resto)+'</div></div>':'')
-    +'<div class="obs">Este comprovante confirma o recebimento de <strong>'+fmtBR(entrada)+'</strong> como sinal pelo servi\u00e7o descrito acima.'+(resto>0?' O saldo de <strong>'+fmtBR(resto)+'</strong> dever\u00e1 ser quitado no momento da retirada / entrega.':' N\u00e3o h\u00e1 saldo restante.')+'</div>'
+    +'<div class="ok-box"><div class="t1">✔ Valor Recebido como Entrada</div><div class="t2">'+fmtBR(entrada)+'</div></div>'
+    +(resto>0?'<div class="warn-box"><div class="r1">⏳ Saldo Restante a Pagar na Retirada</div><div class="r2">'+fmtBR(resto)+'</div></div>':'')
+    +'<div class="obs">Este comprovante confirma o recebimento de <strong>'+fmtBR(entrada)+'</strong> como sinal pelo serviço descrito acima.'+(resto>0?' O saldo de <strong>'+fmtBR(resto)+'</strong> deverá ser quitado no momento da retirada / entrega.':' Não há saldo restante.')+'</div>'
     +'<div style="flex:1"></div>'
     +'<div class="sig"><div>'+empresa+'<br>Assinatura / Carimbo</div><div>'+cliente+'<br>Assinatura do Cliente</div></div>'
     +'</div></div></body></html>';
@@ -20150,6 +20168,10 @@ function orcEnvAbrir(id) {
        +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
       ) : '')
     +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
+    // Rodada 2, P0.3 — só aparece quando existe entrada realmente
+    // confirmada (OS gerada com valorEntrada>0), nunca a partir de um
+    // campo de texto solto.
+    +(orcObterConfirmacaoEntrada(o.id).pode ? '<button class="topbar-btn ghost" style="color:#D97706;border-color:#D97706" onclick="orcGerarReciboEntrada(\''+o.id+'\')" >🧾 Recibo de Entrada</button>' : '')
     +'</div></div>';
   modal.style.display='flex';
 }
