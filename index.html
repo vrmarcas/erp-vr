@@ -2243,6 +2243,31 @@ function _authFirebaseError(code){
           <div class="ekpi-trend" id="dkDespSub">vs mês anterior</div>
           <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkDespBar" style="width:0%;background:#DC2626"></div></div>
         </div>
+        <!-- RODADA 4, seção 7/8 — KPIs comerciais canônicos (orcGetEnviados()) -->
+        <div class="ekpi">
+          <div class="ekpi-ico">📝</div>
+          <div class="ekpi-lbl">Orçamentos do Mês</div>
+          <div class="ekpi-val" id="dkOrcMes">—</div>
+          <div class="ekpi-trend" id="dkOrcMesSub">valor orçado</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkOrcMesBar" style="width:0%;background:#7C3AED"></div></div>
+        </div>
+        <div class="ekpi">
+          <div class="ekpi-ico">✅</div>
+          <div class="ekpi-lbl">Aprovados / Aguardando</div>
+          <div class="ekpi-val" id="dkAprovAgu">—</div>
+          <div class="ekpi-trend" id="dkAprovAguSub">cancelados/recusados</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkAprovAguBar" style="width:0%;background:#059669"></div></div>
+        </div>
+        <!-- RODADA 4, seção 7/8 — Vendas × Recebimentos: fonte FIN_CR, mesma
+             semântica canônica já usada no Caixa Diário (nunca a mesma venda
+             conta 2x, recebimento nunca vira venda de novo). -->
+        <div class="ekpi">
+          <div class="ekpi-ico">🧾</div>
+          <div class="ekpi-lbl">Vendas × Recebimentos</div>
+          <div class="ekpi-val" id="dkVendas">—</div>
+          <div class="ekpi-trend" id="dkVendasSub">recebido</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkVendasBar" style="width:0%;background:#1D4ED8"></div></div>
+        </div>
       </div>
 
       <!-- Charts 2×2 -->
@@ -12290,6 +12315,60 @@ function dashSetBrand(b) {
   dashRender();
 }
 
+// RODADA 4, seção 7/8 — auditoria matemática do Dashboard: KPIs comerciais
+// lidos da FONTE CANÔNICA (orcGetEnviados()), nunca do schema legado.
+// Fórmula documentada de cada campo:
+//   orcamentosDoMes = COUNT(orçamentos) cujo mês de dataSalvo === mesFiltro (0 = todos)
+//   valorOrcado     = SUM(valorFinal||valorBase) dos orçamentos do filtro
+//   aprovados       = COUNT(status==='aprovado')
+//   aguardando      = COUNT(status==='aguardando' || sem status)
+//   cancelados      = COUNT(status==='recusado' || status==='cancelado')
+//     (este ERP usa 'recusado' como status real de orçamento rejeitado;
+//     'cancelado' é aceito como alias por compatibilidade de nomenclatura)
+function dashOrcMesDoFiltro(o, mesFiltro) {
+  if (!mesFiltro) return true;
+  var d = o.dataSalvo || '';
+  var p = d.split(' ')[0].split('/');
+  var m = p.length >= 2 ? parseInt(p[1], 10) : 0;
+  return m === mesFiltro;
+}
+function dashCalcularKPIsComerciais(orcamentos, mesFiltro, marcaFiltro) {
+  var list = (orcamentos || []).filter(function (o) {
+    var bOk = !marcaFiltro || marcaFiltro === 'all' || (o.marca || 'vr') === marcaFiltro;
+    return bOk && dashOrcMesDoFiltro(o, mesFiltro);
+  });
+  var val = function (o) { return o.valorFinal || o.valorBase || 0; };
+  var aprovados = list.filter(function (o) { return o.status === 'aprovado'; });
+  var cancelados = list.filter(function (o) { return o.status === 'recusado' || o.status === 'cancelado'; });
+  var aguardando = list.filter(function (o) { return o.status === 'aguardando' || !o.status; });
+  return {
+    orcamentosDoMes: list.length,
+    valorOrcado: list.reduce(function (s, o) { return s + val(o); }, 0),
+    aprovados: aprovados.length,
+    aguardando: aguardando.length,
+    cancelados: cancelados.length,
+    valorAprovado: aprovados.reduce(function (s, o) { return s + val(o); }, 0),
+  };
+}
+// Vendas × Recebimentos — MESMA semântica canônica já usada no Caixa Diário
+// (finCaixaTotaisDoDia): Vendas = FIN_CR criado NO período (dataCriacao),
+// independente de status; Recebimentos = FIN_CR efetivamente recebido NO
+// período (status='recebido' && dataRecebimento). A mesma venda nunca conta
+// duas vezes, e um recebimento nunca é contado como venda de novo.
+function dashCalcularVendasRecebimentos(finCR, mesFiltro, marcaFiltro) {
+  var mesOk = function (dataBR) {
+    if (!mesFiltro) return true;
+    var p = (dataBR || '').split('/');
+    return p.length >= 2 && parseInt(p[1], 10) === mesFiltro;
+  };
+  var marcaOk = function (r) { return !marcaFiltro || marcaFiltro === 'all' || (r.marca || 'vr') === marcaFiltro; };
+  var vendas = (finCR || []).filter(function (r) { return marcaOk(r) && mesOk(r.dataCriacao); })
+    .reduce(function (s, r) { return s + r.valor; }, 0);
+  var recebimentos = (finCR || []).filter(function (r) { return marcaOk(r) && r.status === 'recebido' && mesOk(r.dataRecebimento); })
+    .reduce(function (s, r) { return s + r.valor; }, 0);
+  return { vendas: vendas, recebimentos: recebimentos };
+}
+
 function dashRender() {
   var mesFiltro = parseInt((document.getElementById('dashMesFiltro')||{}).value)||0;
   var bf = _dashBrand;
@@ -12384,6 +12463,26 @@ function dashRender() {
   if(dkDesp){ dkDesp.textContent='R$ '+Math.round(dspMes).toLocaleString('pt-BR'); dkDesp.style.color=dspAlerta?'#DC2626':'var(--text)'; }
   if(dkDespSub){ dkDespSub.textContent=dspVarStr+(despPctCfg>0?' · '+dspPctReal.toFixed(1)+'% do fat.'+(dspAlerta?' ⚠️':''):''); dkDespSub.style.color=dspColor; }
   if(dkDespBar){ dkDespBar.style.width=Math.min(dspPctReal||Math.min(Math.abs(dspVar),100),100)+'%'; dkDespBar.style.background=dspAlerta?'#DC2626':'#D97706'; }
+
+  // ── KPI 6/7/8: Comerciais canônicos (orçamentos/aprovados/aguardando/
+  //     cancelados) e Vendas × Recebimentos (FIN_CR) — seção 7/8 ─────────
+  var envListDash = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
+  var comKpis = dashCalcularKPIsComerciais(envListDash, mesFiltro, bf);
+  var dkOrcMes=document.getElementById('dkOrcMes'), dkOrcMesSub=document.getElementById('dkOrcMesSub'), dkOrcMesBar=document.getElementById('dkOrcMesBar');
+  if(dkOrcMes) dkOrcMes.textContent = String(comKpis.orcamentosDoMes);
+  if(dkOrcMesSub) dkOrcMesSub.textContent = 'R$ '+comKpis.valorOrcado.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  if(dkOrcMesBar) dkOrcMesBar.style.width = Math.min(comKpis.orcamentosDoMes*10,100)+'%';
+
+  var dkAprovAgu=document.getElementById('dkAprovAgu'), dkAprovAguSub=document.getElementById('dkAprovAguSub'), dkAprovAguBar=document.getElementById('dkAprovAguBar');
+  if(dkAprovAgu) dkAprovAgu.textContent = comKpis.aprovados+' / '+comKpis.aguardando;
+  if(dkAprovAguSub) dkAprovAguSub.textContent = comKpis.cancelados+' cancelado'+(comKpis.cancelados!==1?'s':'')+'/recusado'+(comKpis.cancelados!==1?'s':'');
+  if(dkAprovAguBar) dkAprovAguBar.style.width = Math.min((comKpis.orcamentosDoMes?comKpis.aprovados/comKpis.orcamentosDoMes*100:0),100)+'%';
+
+  var vrKpis = dashCalcularVendasRecebimentos(FIN_CR, mesFiltro, bf);
+  var dkVendas=document.getElementById('dkVendas'), dkVendasSub=document.getElementById('dkVendasSub'), dkVendasBar=document.getElementById('dkVendasBar');
+  if(dkVendas) dkVendas.textContent = 'R$ '+vrKpis.vendas.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  if(dkVendasSub) dkVendasSub.textContent = 'Recebido: R$ '+vrKpis.recebimentos.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  if(dkVendasBar) dkVendasBar.style.width = Math.min((vrKpis.vendas?vrKpis.recebimentos/vrKpis.vendas*100:0),100)+'%';
 
   // ── Chart 1: Faturamento mês a mês ──────────────────────────────────────
   var fatMes = {};
