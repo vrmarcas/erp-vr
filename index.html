@@ -2798,7 +2798,7 @@ function _authFirebaseError(code){
               </div>
             </div>
             <div style="text-align:right;padding-top:4px">
-              <button class="topbar-btn" onclick="orcStep(2)">Próximo: Itens →</button>
+              <button class="topbar-btn" onclick="orcAvancarParaItens()">Próximo: Itens →</button>
             </div>
           </div>
         </div>
@@ -16997,6 +16997,11 @@ function orcResetFormularioVR(){
   var descTipo=document.getElementById('orcDescTipo'); if(descTipo) descTipo.value='pct';
   var acresTipo=document.getElementById('orcAcresTipo'); if(acresTipo) acresTipo.value='pct';
   var soCorte=document.getElementById('orcSoCorte'); if(soCorte) soCorte.checked=false;
+  // Corrigido 2026-08-07 (Rodada Mestre, seção 6.3/13) — "valor recebido
+  // como entrada" (usado pelo recibo) vazava do orçamento anterior para o
+  // próximo: novo orçamento sempre começa com esse campo zerado.
+  setV('orcEntradaValor','');
+  var entRestoEl=document.getElementById('orcEntradaResto'); if(entRestoEl) entRestoEl.textContent='R$ —';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
   window._orcSessaoAtualId = null;
@@ -19638,6 +19643,25 @@ function orcClienteSelecionar(idx) {
   if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
   showToast('Dados de ' + c.nome + ' preenchidos automaticamente!','ok');
 }
+// Corrigido 2026-08-07 (Rodada Mestre, seção 6.2) — o cliente só era
+// criado/deduplicado no Firestore no momento de salvar o orçamento
+// inteiro (etapa de Envio), obrigando o vendedor a terminar o orçamento
+// todo antes do cliente existir em Clientes. Agora, ao avançar de
+// Cliente para Itens, o cliente já é criado/casado (por nome, telefone
+// ou email — mesma dedup de orcAutoSalvarCliente()) em segundo plano;
+// não bloqueia a navegação, o vendedor segue direto para os itens.
+function orcAvancarParaItens() {
+  var nome = (document.getElementById('orcClientNome')||{}).value||'';
+  if(nome.trim()){
+    orcAutoSalvarCliente({
+      cliente: nome,
+      tel: (document.getElementById('orcClientTel')||{}).value||'',
+      email: (document.getElementById('orcClientEmail')||{}).value||'',
+      marca: document.body.classList.contains('vitre') ? 'vitre' : 'vr'
+    });
+  }
+  orcStep(2);
+}
 // ── Auto-salva cliente no cadastro ao enviar orçamento ─────────────────────
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
@@ -19811,11 +19835,14 @@ function orcEnviadosRender() {
     if(o.descPix>0)  extras.push('⚡ PIX '+o.descPix+'%');
     if(o.parcelas>1) extras.push('💳 '+o.parcelas+'x');
     var extraHtml = extras.length ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">'+extras.join(' · ')+'</div>' : '';
-    var statusSel = '<select onchange="orcEnvSetStatus(\''+o.id+'\',this.value)" style="font-size:10px;padding:3px 5px;border-radius:5px;border:1px solid var(--border);background:var(--surface)">'
-      + ['aguardando','aprovado','aguardando_pagamento','pago','recusado','expirado'].map(function(s){
-          return '<option value="'+s+'"'+(o.status===s?' selected':'')+'>'+statusLabel[s]+'</option>';
-        }).join('')
-      + '</select>';
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 8) — este <select> deixava
+    // trocar o status para QUALQUER valor direto na listagem densa, sem
+    // passar pelas ações reais (aprovar dispara CR, pagamento libera OS,
+    // etc.) — risco real de marcar "Aprovado" visualmente sem executar o
+    // que devia acontecer junto. A listagem agora só REFLETE o status
+    // canônico (badge somente leitura); a mudança de status acontece nas
+    // ações do detalhe (orcEnvAbrir → Aprovar/Recusar/Confirmar Pgt).
+    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+(statusColor[o.status]||'#9CA3AF')+'22;color:'+(statusColor[o.status]||'#9CA3AF')+'">'+(statusLabel[o.status]||o.status)+'</span>';
     return '<tr>'
       +'<td><strong>#'+o.num+'</strong></td>'
       +'<td>'+o.cliente+'</td>'
@@ -19962,6 +19989,14 @@ function orcEnvAbrir(id) {
     +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'">Fechar</button>'
     +'<button class="topbar-btn ghost" style="color:#983C8F;border-color:#983C8F" onclick="orcEnvEditar(\''+ o.id +'\')" >✏️ Editar</button>'
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 8) — aprovação/recusa
+    // agora só acontece aqui, no detalhe, executando orcEnvSetStatus() de
+    // verdade (que já cria a Conta a Receber ao aprovar) — nunca mais um
+    // dropdown solto na listagem que só mudava a aparência.
+    +(o.status==='aguardando' ? (
+        '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
+       +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
+      ) : '')
     +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
     +'</div></div>';
   modal.style.display='flex';
