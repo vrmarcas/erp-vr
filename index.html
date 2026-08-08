@@ -2990,8 +2990,14 @@ function _authFirebaseError(code){
               </div>
             </div>
 
-            <!-- DESCONTO CONDICIONAL POR PRAZO -->
-            <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+            <!-- DESCONTO CONDICIONAL POR PRAZO — removido da UI (Rodada
+                 Mestre, seção 10: "não faz sentido para o negócio").
+                 orcDescCondToggle nunca fica marcado (o bloco some antes
+                 do usuário conseguir ligá-lo), então os ~15 pontos do
+                 código que já leem esse campo com segurança (dcOn=false
+                 por padrão) continuam funcionando sem alteração — não há
+                 necessidade de tocar neles para "remover" a feature. -->
+            <div style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
               <!-- Toggle row -->
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0">
                 <div>
@@ -17543,22 +17549,37 @@ function vitreOrcPgtoInit() {
     }
   }
 }
+// Corrigido 2026-08-07 (Rodada Mestre, seção 13) — bug real reproduzido:
+// "usuário informa entrada, salva, valor volta para zero". Causa: esta
+// função SEMPRE reconstruía os campos com valores hardcoded (entrada=0,
+// integral/futuro=total cheio), nunca lendo de volta o que já tinha sido
+// salvo em VITRE_ORC_ATUAL.pagamento — e ela roda de novo logo depois de
+// salvar (vitreOrcSalvarPagamento → vitreOrcAtualizarEstadoAtual →
+// vitreOrcPgtoInit → aqui), então o campo aparecia "salvo" por um
+// instante e voltava a zero. Agora restaura o valor salvo quando o tipo
+// gravado bate com o tipo selecionado.
 function vitreOrcPgtoRenderParcelas() {
   var tipo = document.getElementById('vitreOrcPgtoTipo').value;
   var wrap = document.getElementById('vitreOrcPgtoParcelasWrap');
   var totalReais = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0;
   var vendaJaConfirmada = VITRE_ORC_ATUAL && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(VITRE_ORC_ATUAL.status);
   var dis = vendaJaConfirmada ? ' disabled' : '';
+  var pgtoSalvo = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.pagamento && VITRE_ORC_ATUAL.pagamento.tipo === tipo) ? VITRE_ORC_ATUAL.pagamento : null;
+  var parcelasSalvas = pgtoSalvo ? (pgtoSalvo.parcelas || []) : [];
   if (tipo === 'integral') {
     wrap.innerHTML = '<div class="fg"><label>Valor (integral)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>';
   } else if (tipo === 'entrada_saldo') {
-    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="0" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
-      + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div></div>';
+    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : 0;
+    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : totalReais;
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
+      + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + saldoSalvo.toFixed(2) + '" step="0.01" disabled></div></div>';
   } else if (tipo === 'futuro') {
+    var vencSalvo = parcelasSalvas[0] ? (parcelasSalvas[0].vencimento || '') : '';
     wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Valor total (a receber depois)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>'
-      + '<div class="fg"><label>Vencimento previsto</label><input type="date" id="vitreOrcPgtoVenc0"' + dis + '></div></div>';
+      + '<div class="fg"><label>Vencimento previsto</label><input type="date" id="vitreOrcPgtoVenc0" value="' + vencSalvo + '"' + dis + '></div></div>';
   } else {
-    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()"' + dis + '>' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '">' + n + 'x</option>'; }).join('') + '</select></div>'
+    var numSalvo = parcelasSalvas.length || 2;
+    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()"' + dis + '>' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '"' + (n === numSalvo ? ' selected' : '') + '>' + n + 'x</option>'; }).join('') + '</select></div>'
       + '<div id="vitreOrcPgtoParcelasList"></div>';
     vitreOrcPgtoGerarParcelas();
     return;
@@ -17577,13 +17598,18 @@ function vitreOrcPgtoGerarParcelas() {
   var dis = vendaJaConfirmada ? ' disabled' : '';
   var n = Number(document.getElementById('vitreOrcPgtoNumParcelas').value) || 2;
   var totalC = vitreOrcToCentavos((VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
+  // Corrigido 2026-08-07 (Rodada Mestre, seção 13) — restaura valores/
+  // vencimentos já salvos (mesmo tipo + mesmo número de parcelas), em vez
+  // de sempre recalcular a divisão igual e perder o que o vendedor digitou.
+  var pgtoSalvo = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.pagamento && VITRE_ORC_ATUAL.pagamento.tipo === 'parcelado' && (VITRE_ORC_ATUAL.pagamento.parcelas||[]).length === n) ? VITRE_ORC_ATUAL.pagamento.parcelas : null;
   var base = Math.floor(totalC / n);
   var resto = totalC - base * n; // resto sempre na última parcela — nenhum centavo perdido
   var html = '';
   for (var i = 0; i < n; i++) {
-    var valorC = base + (i === n - 1 ? resto : 0);
+    var valorC = pgtoSalvo ? pgtoSalvo[i].valorCentavos : (base + (i === n - 1 ? resto : 0));
+    var vencSalvo = pgtoSalvo ? (pgtoSalvo[i].vencimento||'') : '';
     html += '<div class="fg-row"><div class="fg"><label>Parcela ' + (i + 1) + ' (R$)</label><input type="number" id="vitreOrcPgtoParcela' + i + '" value="' + (valorC / 100).toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarAviso()"' + dis + '></div>'
-      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '"' + dis + '></div></div>';
+      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '" value="' + vencSalvo + '"' + dis + '></div></div>';
   }
   document.getElementById('vitreOrcPgtoParcelasList').innerHTML = html;
   vitreOrcPgtoAtualizarAviso();
