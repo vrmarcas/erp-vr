@@ -8710,6 +8710,85 @@ function orcProdutosReconciliar(planProdList, orcProdutosLegado) {
   return { jaExistem: jaExistem, faltamReceita: faltamReceita, totalLegado: (orcProdutosLegado || []).length };
 }
 
+// ============================================================
+// RECEITA — VERSIONAMENTO (RODADA 5, seções 12/13/14)
+// ============================================================
+// Cada produto de _PLAN_PROD_DATA carrega recipeVersion (inteiro, começa
+// em 1) e recipeHistory (snapshots das versões anteriores). Uma alteração
+// só é considerada "relevante" o bastante para gerar nova versão quando
+// muda o que efetivamente afeta o cálculo (peças/fórmulas/dim3d) — editar
+// só a descrição não cria versão nova.
+function receitaMudancaRelevante(produtoAtual, mudancas) {
+  if (!produtoAtual) return true; // produto novo — não há "mudança", é v1
+  var pecasAntes = JSON.stringify(produtoAtual.pecas || []);
+  var pecasDepois = JSON.stringify((mudancas && mudancas.pecas) || produtoAtual.pecas || []);
+  var dim3dAntes = !!produtoAtual.dim3d;
+  var dim3dDepois = mudancas && ('dim3d' in mudancas) ? !!mudancas.dim3d : dim3dAntes;
+  return pecasAntes !== pecasDepois || dim3dAntes !== dim3dDepois;
+}
+// Retorna o registro ATUALIZADO com nova versão, preservando a versão
+// anterior íntegra em recipeHistory — nunca perde o snapshot antigo.
+function receitaCriarNovaVersao(produtoAtual, mudancas) {
+  var versaoAtual = produtoAtual.recipeVersion || 1;
+  var historicoAntigo = produtoAtual.recipeHistory || [];
+  var snapshotAntigo = {
+    version: versaoAtual,
+    nome: produtoAtual.nome,
+    desc: produtoAtual.desc,
+    dim3d: produtoAtual.dim3d,
+    pecas: produtoAtual.pecas,
+    planificacoes: produtoAtual.planificacoes,
+  };
+  var novo = Object.assign({}, produtoAtual, mudancas, {
+    recipeVersion: versaoAtual + 1,
+    recipeHistory: historicoAntigo.concat([snapshotAntigo]),
+  });
+  return novo;
+}
+// Snapshot congelado para gravar no item do orçamento no momento da
+// escolha do produto — productId/recipeId/recipeVersion/recipeSnapshot,
+// conforme arquitetura pedida na seção 12.
+function receitaSnapshotParaItem(produto) {
+  return {
+    productId: produto.id,
+    recipeId: produto.id,
+    recipeVersion: produto.recipeVersion || 1,
+    recipeSnapshot: {
+      nome: produto.nome,
+      desc: produto.desc,
+      dim3d: !!produto.dim3d,
+      pecas: JSON.parse(JSON.stringify(produto.pecas || [])),
+      planificacoes: JSON.parse(JSON.stringify(produto.planificacoes || [])),
+    },
+  };
+}
+// Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
+// item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
+// atual) — é isto que garante que um orçamento antigo nunca muda de
+// preço/peças quando a receita evolui para v2, v3 etc. Sem snapshot
+// (item legado, anterior ao versionamento), cai para a receita vigente.
+function receitaResolverParaCalculo(item, produtoAtual) {
+  if (item && item.recipeSnapshot) {
+    return {
+      dim3d: !!item.recipeSnapshot.dim3d,
+      desc: item.recipeSnapshot.desc,
+      pecasFormulas: item.recipeSnapshot.pecas || [],
+      recipeVersion: item.recipeVersion || 1,
+      origem: 'snapshot',
+    };
+  }
+  if (produtoAtual) {
+    return {
+      dim3d: !!produtoAtual.dim3d,
+      desc: produtoAtual.desc,
+      pecasFormulas: produtoAtual.pecas || [],
+      recipeVersion: produtoAtual.recipeVersion || 1,
+      origem: 'atual',
+    };
+  }
+  return null;
+}
+
 // RODADA 5, seção 9 — achado de segurança: esta função usava Function()
 // (execução arbitrária de JS) protegida só por um regex de whitelist. Isso
 // é exatamente o padrão que o enunciado desta rodada proíbe explicitamente
@@ -28409,8 +28488,7 @@ function planProdSalvar() {
   for(var _pi=0; _pi<_planifs.length && !_firstSvg; _pi++) {
     if(_planifs[_pi].svgs && _planifs[_pi].svgs.length) _firstSvg = _planifs[_pi].svgs[0].svgData;
   }
-  var prod = {
-    id:    _planProdEditId || 'pp_'+Date.now(),
+  var _mudancas = {
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
@@ -28419,10 +28497,20 @@ function planProdSalvar() {
     svg: _firstSvg || undefined
   };
 
-  if(_planProdEditId) {
-    var idx = prods.findIndex(function(x){ return x.id===_planProdEditId; });
-    if(idx>=0) prods[idx]=prod; else prods.push(prod);
+  // RODADA 5, seção 12 — versionamento: uma edição que muda peças/fórmulas
+  // ou dim3d gera nova versão (com a versão anterior preservada em
+  // recipeHistory); um produto novo nasce em v1. Orçamentos já salvos com
+  // um recipeSnapshot da versão antiga nunca são afetados por isto.
+  var idx = _planProdEditId ? prods.findIndex(function(x){ return x.id===_planProdEditId; }) : -1;
+  var prod;
+  if (idx >= 0) {
+    var existente = prods[idx];
+    prod = receitaMudancaRelevante(existente, _mudancas)
+      ? receitaCriarNovaVersao(existente, _mudancas)
+      : Object.assign({}, existente, _mudancas);
+    prods[idx] = prod;
   } else {
+    prod = Object.assign({ id: _planProdEditId || 'pp_'+Date.now(), recipeVersion: 1, recipeHistory: [] }, _mudancas);
     prods.push(prod);
   }
   planProdSaveList(prods);
