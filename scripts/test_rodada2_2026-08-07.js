@@ -195,14 +195,70 @@ console.log('\n── OS detalhada — snapshot operacional completo (P0.5) ─�
   test('22c. dado financeiro (unit/total) existe no objeto de origem mas nunca é usado na extração', linhas.every(function(l){ return !('unit' in l) && !('total' in l); }), true);
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// P0.7 — Sugestão automática de material (chapa/retalho) a partir da
+// planificação. Espelha kbCalcAreaOS/kbParseDimsArea/kbSugerirMaterial().
+// ────────────────────────────────────────────────────────────────────────
+console.log('\n── Sugestão automática de chapa/retalho (P0.7) ────────────────\n');
+{
+  function kbCalcAreaOSMirror(os) {
+    var itens = os.itens || [];
+    var total = 0;
+    itens.forEach(function (it) {
+      if (it && it.planArea && parseFloat(it.planArea) > 0) { total += parseFloat(it.planArea); return; }
+      var l = it && parseFloat(it.larg) || 0, a = it && parseFloat(it.alt) || 0, q = it && parseInt(it.qty) || 1;
+      if (l > 0 && a > 0) total += (l * a / 10000) * q;
+    });
+    return total;
+  }
+  function kbParseDimsAreaMirror(dimsStr) {
+    var m = String(dimsStr || '').match(/(\d+(?:[.,]\d+)?)\s*[×xX]\s*(\d+(?:[.,]\d+)?)/);
+    if (!m) return 0;
+    var w = parseFloat(m[1].replace(',', '.')), h = parseFloat(m[2].replace(',', '.'));
+    return (w * h) / 10000;
+  }
+  function kbSugerirMaterialMirror(os, matKey, STOCK, RETALHOS) {
+    var areaNecessaria = kbCalcAreaOSMirror(os);
+    if (!areaNecessaria || !matKey || !STOCK[matKey]) return null;
+    var rCompativeis = RETALHOS.filter(function (r) {
+      return r.qty > 0 && r.mat === matKey && kbParseDimsAreaMirror(r.dims) >= areaNecessaria * 0.98;
+    }).sort(function (a, b) { return kbParseDimsAreaMirror(a.dims) - kbParseDimsAreaMirror(b.dims); });
+    if (rCompativeis.length) {
+      var r = rCompativeis[0];
+      return { tipo: 'retalho', retalho: r, texto: 'Usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm' };
+    }
+    var s = STOCK[matKey];
+    var areaChapa = (s.chapLarg && s.chapComp) ? (s.chapLarg * s.chapComp / 10000) : 0;
+    if (!areaChapa) return null;
+    var fracaoBruta = areaNecessaria / areaChapa;
+    var fracao = fracaoBruta <= 0.5 ? 0.5 : Math.ceil(fracaoBruta * 4) / 4;
+    return { tipo: 'chapa', fracaoChapa: fracao };
+  }
+
+  var STOCK_T = { acr3: { chapLarg: 200, chapComp: 100 } };
+  // OS com 1 peça de 100x50cm = 0,5 m² → cabe numa meia-chapa (200x100=2m²; metade=1m²... vamos calibrar valores abaixo)
+  var osPequena = { itens: [{ prod: 'Placa', qty: 1, larg: 70, alt: 70, mat: 'Acrílico 3mm' }] }; // 0,49 m²
+  var osGrande  = { itens: [{ prod: 'Painel', qty: 1, larg: 190, alt: 95, mat: 'Acrílico 3mm' }] }; // 1,805 m² (quase 1 chapa inteira de 2 m²)
+
+  test('26. sem retalho compatível, sugere fração de chapa (área pequena → 0,5 chapa)', kbSugerirMaterialMirror(osPequena, 'acr3', STOCK_T, []), { tipo: 'chapa', fracaoChapa: 0.5 });
+  test('27. área quase do tamanho de 1 chapa inteira → sugere 1 chapa (arredonda pra cima)', kbSugerirMaterialMirror(osGrande, 'acr3', STOCK_T, []).fracaoChapa, 1);
+
+  var retalhoCompativel = { mat: 'acr3', dims: '90×90', qty: 2, codigo: 'ACR-014' };
+  var retalhoPequenoDemais = { mat: 'acr3', dims: '50×50', qty: 3, codigo: 'ACR-003' };
+  var sugRetalho = kbSugerirMaterialMirror(osPequena, 'acr3', STOCK_T, [retalhoPequenoDemais, retalhoCompativel]);
+  test('28. quando existe retalho grande o bastante (encaixe), sugere o retalho — nunca chapa nova', sugRetalho.tipo, 'retalho');
+  test('29. sugestão de retalho traz o código exato', sugRetalho.texto, 'Usar retalho ACR-014 — 90×90 cm');
+  test('30. retalho pequeno demais (não encaixa a área necessária) nunca é sugerido', sugRetalho.retalho.codigo, 'ACR-014');
+}
+
 console.log('\n── Salvar antes de enviar (P0.2) ──────────────────────────────\n');
 {
   function estadoBotoesEnvio(sessaoAtualId) {
     var salvo = !!sessaoAtualId;
     return { salvar: true, whatsapp: salvo, pdf: salvo, email: salvo, linkPgto: salvo };
   }
-  test('23. antes do 1º save (sessao=null): só Salvar habilitado', estadoBotoesEnvio(null), { salvar: true, whatsapp: false, pdf: false, email: false, linkPgto: false });
-  test('24. depois do 1º save (sessao=ORC-1): todos os canais liberados', estadoBotoesEnvio('ORC-1'), { salvar: true, whatsapp: true, pdf: true, email: true, linkPgto: true });
+  test('31. antes do 1º save (sessao=null): só Salvar habilitado', estadoBotoesEnvio(null), { salvar: true, whatsapp: false, pdf: false, email: false, linkPgto: false });
+  test('32. depois do 1º save (sessao=ORC-1): todos os canais liberados', estadoBotoesEnvio('ORC-1'), { salvar: true, whatsapp: true, pdf: true, email: true, linkPgto: true });
 
   // Duplo clique em Salvar: orcSalvarOrcamento() reusa a MESMA promise em
   // voo (_orcSalvarEmVoo) — nunca dispara duas gravações/duas reservas de
@@ -218,7 +274,7 @@ console.log('\n── Salvar antes de enviar (P0.2) ─────────�
     return Promise.all([salvar(), salvar()]).then(function () { return chamadasReais; });
   }
   simularSalvarComDedup().then(function (chamadas) {
-    test('25. duplo clique em Salvar dispara só 1 gravação real (dedup por promise em voo)', chamadas, 1);
+    test('33. duplo clique em Salvar dispara só 1 gravação real (dedup por promise em voo)', chamadas, 1);
 
     console.log('\n' + '='.repeat(70));
     console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');

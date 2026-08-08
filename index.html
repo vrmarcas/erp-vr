@@ -6950,6 +6950,9 @@ function _authFirebaseError(code){
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;background:var(--bg2);padding:9px 11px;border-radius:8px;border-left:3px solid var(--brand-mid)">
         Selecione o material que será retirado do estoque para esta OS. A baixa será feita automaticamente ao confirmar.
       </div>
+      <!-- RODADA 2, P0.7 — sugestão automática calculada a partir da
+           planificação do orçamento; o operador sempre pode sobrescrever. -->
+      <div id="kbProdSugestaoBox" style="display:none;margin-bottom:12px;background:#E3F7FB;border:1px solid #7DD3E8;border-radius:8px;padding:9px 11px;font-size:12px;color:#983C8F"></div>
       <!-- Tipo: chapa ou retalho -->
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button id="kbProdBtnChapa" onclick="kbProdSetTipo('chapa')" style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--brand-mid);background:var(--brand-mid);color:#fff;font-size:12px;font-weight:700;cursor:pointer">📦 Usar Chapa</button>
@@ -6959,7 +6962,7 @@ function _authFirebaseError(code){
       <div id="kbProdChapaBox">
         <div class="fg">
           <label>Material / Cor</label>
-          <select id="kbProdMatSel" onchange="kbProdCheckStock()" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <select id="kbProdMatSel" onchange="kbProdOnMatChange()" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
             <option value="">— Selecionar —</option>
           </select>
         </div>
@@ -11466,6 +11469,71 @@ function kbEditarMatProd() {
   _kbOpenProdOverlay(os);
 }
 
+// RODADA 2, P0.7 (2026-08-07) — sugestão automática de material ao iniciar
+// produção, calculada a partir da área planificada do orçamento (nunca
+// inventa consumo: usa itens[].planArea quando existe, senão larg×alt×qty
+// dos próprios itens da OS). O operador sempre pode sobrescrever manual-
+// mente (tipo, quantidade, retalho) antes de confirmar — a baixa de
+// estoque só acontece em kbConfirmarProd(), nunca aqui.
+function kbCalcAreaOS(os) {
+  var itens = os.itens || [];
+  var total = 0;
+  itens.forEach(function (it) {
+    if (it && it.planArea && parseFloat(it.planArea) > 0) { total += parseFloat(it.planArea); return; }
+    var l = it && parseFloat(it.larg) || 0, a = it && parseFloat(it.alt) || 0, q = it && parseInt(it.qty) || 1;
+    if (l > 0 && a > 0) total += (l * a / 10000) * q;
+  });
+  return total; // m²
+}
+function kbParseDimsArea(dimsStr) {
+  var m = String(dimsStr || '').match(/(\d+(?:[.,]\d+)?)\s*[×xX]\s*(\d+(?:[.,]\d+)?)/);
+  if (!m) return 0;
+  var w = parseFloat(m[1].replace(',', '.')), h = parseFloat(m[2].replace(',', '.'));
+  return (w * h) / 10000; // cm → m²
+}
+function kbSugerirMaterial(os, matKey) {
+  var areaNecessaria = kbCalcAreaOS(os);
+  if (!areaNecessaria || !matKey || !STOCK[matKey]) return null;
+  // Retalhos compatíveis: mesmo material E área grande o bastante para a
+  // peça planificada (encaixe) — pequena tolerância de 2% para arredondamento.
+  var rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
+    return r.qty > 0 && r.mat === matKey && kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
+  }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); }); // menor retalho que ainda serve, primeiro
+  if (rCompativeis.length) {
+    var r = rCompativeis[0];
+    return { tipo: 'retalho', retalho: r, texto: '💡 Sugestão: usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm (cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²).' };
+  }
+  var s = STOCK[matKey];
+  var areaChapa = (s.chapLarg && s.chapComp) ? (s.chapLarg * s.chapComp / 10000) : 0;
+  if (!areaChapa) return null;
+  var fracaoBruta = areaNecessaria / areaChapa;
+  var fracao = fracaoBruta <= 0.5 ? 0.5 : Math.ceil(fracaoBruta * 4) / 4; // arredonda pra cima em passos de 1/4 chapa
+  var fracaoTxt = fracao === 1 ? '1 chapa' : (String(fracao).replace('.', ',') + ' chapa' + (fracao > 1 ? 's' : ''));
+  return { tipo: 'chapa', fracaoChapa: fracao, texto: '💡 Sugestão: usar ' + fracaoTxt + ' (área planificada ' + areaNecessaria.toFixed(2) + ' m² de ' + areaChapa.toFixed(2) + ' m²/chapa).' };
+}
+function kbProdOnMatChange() {
+  var os = KB_OS[_kbOsId];
+  var matKey = (document.getElementById('kbProdMatSel') || {}).value || '';
+  var sugBox = document.getElementById('kbProdSugestaoBox');
+  var sug = (os && matKey && !_kbProdEditMode) ? kbSugerirMaterial(os, matKey) : null;
+  if (sug) {
+    if (sugBox) { sugBox.style.display = ''; sugBox.textContent = sug.texto; }
+    if (sug.tipo === 'chapa') {
+      kbProdSetTipo('chapa');
+      var qtyEl = document.getElementById('kbProdQty'); if (qtyEl) qtyEl.value = sug.fracaoChapa;
+    } else {
+      kbProdSetTipo('retalho');
+      var retSel = document.getElementById('kbProdRetalhoSel');
+      if (retSel) {
+        var rList = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) { return r.qty > 0; });
+        var idx = rList.indexOf(sug.retalho);
+        if (idx >= 0) retSel.value = String(idx);
+      }
+    }
+  } else if (sugBox) { sugBox.style.display = 'none'; }
+  kbProdCheckStock();
+}
+
 function _kbOpenProdOverlay(os) {
   // Subtitle
   var sub = document.getElementById('kbProdSubtitle');
@@ -11507,9 +11575,12 @@ function _kbOpenProdOverlay(os) {
   if (obsEl) obsEl.value = (_kbProdEditMode && os.matProd) ? (os.matProd.obs||'') : '';
   // Set tipo buttons
   kbProdSetTipo(_kbProdTipo);
-  // Check stock / retalhos on open if material already selected
+  // Check stock / retalhos on open if material already selected — em modo
+  // edição só reconfere estoque (nunca sobrescreve o que já foi salvo); em
+  // abertura nova, também calcula a sugestão automática (P0.7).
   var si = document.getElementById('kbProdStockInfo'); if (si) si.style.display = 'none';
-  if (matSel && matSel.value) setTimeout(kbProdCheckStock, 50);
+  var sugBoxInit = document.getElementById('kbProdSugestaoBox'); if (sugBoxInit) sugBoxInit.style.display = 'none';
+  if (matSel && matSel.value) setTimeout(_kbProdEditMode ? kbProdCheckStock : kbProdOnMatChange, 50);
   document.getElementById('kbProdOverlay').classList.add('open');
 }
 
@@ -11555,7 +11626,7 @@ function kbProdCheckStock() {
   if (rList.length > 0) {
     html += '<div style="background:#E3F7FB;border:1px solid #7DD3E8;border-radius:6px;padding:7px 10px;margin-bottom:6px;cursor:pointer" onclick="kbProdSetTipo(&quot;retalho&quot;)">'
       + '<span style="font-weight:700;color:#983C8F">✂️ Atenção: você tem ' + rList.length + ' retalho(s) deste material disponível!</span>'
-      + '<div style="font-size:10px;color:#1EB8D8;margin-top:2px">' + rList.map(function(r){ return r.dims + ' cm'; }).join(' · ') + '</div>'
+      + '<div style="font-size:10px;color:#1EB8D8;margin-top:2px">' + rList.map(function(r){ return (r.codigo?r.codigo+' — ':'') + r.dims + ' cm'; }).join(' · ') + '</div>'
       + '<div style="font-size:10px;color:#1EB8D8;margin-top:1px">Clique aqui para usar um retalho em vez de abrir chapa nova.</div>'
       + '</div>';
   }
