@@ -6059,6 +6059,13 @@ function _authFirebaseError(code){
         </select>
         <span id="vitreCatTotal" style="font-size:11px;color:var(--muted)"></span>
         <div style="flex:1"></div>
+        <!-- Corrigido 2026-08-07 (Rodada 2, P2) — alternância Grade/Lista,
+             preferência persistida em localStorage (mesmo padrão simples
+             já usado por outras telas do arquivo). -->
+        <div style="display:flex;border:1.5px solid var(--border);border-radius:8px;overflow:hidden">
+          <button id="vitreCatBtnGrade" onclick="vitreCatSetView('grade')" style="padding:6px 10px;font-size:12px;border:none;cursor:pointer;background:var(--vt-teal,#1E7A86);color:#fff">▦ Grade</button>
+          <button id="vitreCatBtnLista" onclick="vitreCatSetView('lista')" style="padding:6px 10px;font-size:12px;border:none;cursor:pointer;background:transparent;color:var(--text)">☰ Lista</button>
+        </div>
         <button class="topbar-btn ghost" onclick="vitreCatIncompletosToggle()" style="font-size:12px" id="vitreCatBtnIncompletos">📋 Cadastros incompletos</button>
         <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
         <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff" id="vitreCatBtnNovo">＋ Novo Produto</button>
@@ -16835,8 +16842,28 @@ function vitreCatalogoInit() {
   }, function (err) { console.warn('[Vitre] listener vitre_produtos falhou:', err); });
 }
 
+// RODADA 2, P2 — alternância Grade | Lista do Catálogo Vitre. Preferência
+// persistida em localStorage (best-effort, nunca bloqueia a tela se
+// localStorage falhar — mesmo padrão try/catch já usado alhures no arquivo).
+function vitreCatGetView() {
+  try { return localStorage.getItem('vitre_cat_view') || 'grade'; } catch (e) { return 'grade'; }
+}
+function vitreCatSetView(modo) {
+  try { localStorage.setItem('vitre_cat_view', modo); } catch (e) { }
+  var btnG = document.getElementById('vitreCatBtnGrade'), btnL = document.getElementById('vitreCatBtnLista');
+  if (btnG) { btnG.style.background = modo === 'grade' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnG.style.color = modo === 'grade' ? '#fff' : 'var(--text)'; }
+  if (btnL) { btnL.style.background = modo === 'lista' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnL.style.color = modo === 'lista' ? '#fff' : 'var(--text)'; }
+  vitreCatalogoRender();
+}
+
 function vitreCatalogoRender() {
   var wrap = document.getElementById('vitreCatList'); if (!wrap) return;
+  var modoView = vitreCatGetView();
+  var btnG = document.getElementById('vitreCatBtnGrade'), btnL = document.getElementById('vitreCatBtnLista');
+  if (btnG && btnL) {
+    btnG.style.background = modoView === 'grade' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnG.style.color = modoView === 'grade' ? '#fff' : 'var(--text)';
+    btnL.style.background = modoView === 'lista' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnL.style.color = modoView === 'lista' ? '#fff' : 'var(--text)';
+  }
 
   // Parte 7 da homologação guiada (2026-08-06) — achado: os botões de
   // topo ("Novo Produto"/"Importar planilha") ficavam visíveis para
@@ -16884,15 +16911,47 @@ function vitreCatalogoRender() {
   var minhaFuncao = vitreCatMinhaFuncao();
   var podeEditar = souMaster || minhaFuncao === 'producao';
 
-  wrap.innerHTML = lista.map(function (p) {
-    var nivel = vitreCatNivel(p);
-    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+  function vitreCatAcoes(p) {
     var acoes = '';
     if (podeEditar) acoes += '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">✏️ Editar</button>';
     if (souMaster) {
       acoes += '<button onclick="vitreCatalogoAtivarDesativar(\'' + cfgEsc(p.sku) + '\',' + (p.status === 'ativo') + ')" style="font-size:11px;padding:5px 10px;border:1px solid ' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';background:transparent;color:' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';border-radius:6px;cursor:pointer;margin-left:6px">' + (p.status === 'ativo' ? '🚫 Desativar' : '✅ Ativar') + '</button>';
       acoes += '<button onclick="vitreCatalogoDuplicar(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer;margin-left:6px">📄 Duplicar</button>';
     }
+    return acoes;
+  }
+
+  // RODADA 2, P2 — Grade (cards, comportamento original) ou Lista (tabela
+  // compacta: Produto/SKU/Categoria/Venda/Custo/Nível/Status/Ações) — os
+  // mesmos filtros/busca e as mesmas ações por linha em ambos os modos.
+  if (modoView === 'lista') {
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg2)">'
+      + ['Produto', 'SKU', 'Categoria', 'Venda', 'Custo', 'Nível', 'Status', 'Ações'].map(function (h) { return '<th style="padding:7px 10px;text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap">' + h + '</th>'; }).join('')
+      + '</tr></thead><tbody>'
+      + lista.map(function (p) {
+          var nivel = vitreCatNivel(p);
+          var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+          return '<tr>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);font-weight:700">' + cfgEsc(p.nome || '(sem nome)') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + cfgEsc(p.sku) + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + cfgEsc(p.categoria || '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + (p.precoVenda != null ? 'R$ ' + Number(p.precoVenda).toFixed(2) : '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + (p.custo != null ? 'R$ ' + Number(p.custo).toFixed(2) : '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;white-space:nowrap">' + VITRE_NIVEL_LABEL[nivel] + '</span></td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + (p.status === 'ativo' ? 'ATIVO' : 'INATIVO') + '</span></td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><div style="display:flex;flex-wrap:wrap;gap:6px">' + vitreCatAcoes(p) + '</div></td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+    return;
+  }
+  wrap.style.display = 'grid'; wrap.style.gridTemplateColumns = 'repeat(auto-fill,minmax(280px,1fr))'; wrap.style.gap = '10px';
+  wrap.innerHTML = lista.map(function (p) {
+    var nivel = vitreCatNivel(p);
+    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+    var acoes = vitreCatAcoes(p);
     return '<div class="card" style="padding:14px">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
       + '<div><strong>' + cfgEsc(p.nome || '(sem nome)') + '</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">SKU ' + cfgEsc(p.sku) + (p.categoria ? ' · ' + cfgEsc(p.categoria) : '') + '</div></div>'
