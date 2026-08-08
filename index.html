@@ -2090,7 +2090,12 @@ function _authFirebaseError(code){
       <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
       <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
       <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
-      <div class="sb-item" id="sbFinDRE"  onclick="navFin('dre',this)"><span class="ico">📋</span> DRE</div>
+      <!-- Corrigido 2026-08-07 (Rodada Mestre, seção 33) — DRE existia
+           duplicado (aba própria dentro de Financeiro + Relatórios→DRE).
+           Fonte/rota canônica única: Relatórios→DRE. Este item da barra
+           lateral agora só atalha para lá (mesmo botão real da aba, para
+           garantir que o estado visual "ativo" fica correto). -->
+      <div class="sb-item" id="sbFinDRE"  onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)"><span class="ico">📋</span> DRE</div>
       <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
     </div>
 
@@ -4767,7 +4772,7 @@ function _authFirebaseError(code){
         <button class="fin-tab-btn" id="finTabBtnCR" onclick="finTab('cr')">📥 Contas a Receber</button>
         <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
         <button class="fin-tab-btn" id="finTabBtnCal" onclick="finTab('cal')">📅 Agenda de Pagamentos</button>
-        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="finTab('dre')">📋 DRE</button>
+        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)" title="Abre em Relatórios — fonte única do DRE">📋 DRE ↗</button>
       </div>
 
       <!-- ── ABA: DASHBOARD ── -->
@@ -27685,7 +27690,7 @@ async function mktForceSync() {
   <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelClose();setTimeout(function(){navFin('dash',null);},120)"><span class="mdrw-ico">💳</span> Dashboard Financeiro</div>
   <div class="mdrw-item" id="mspItem-fin-cr" onclick="mobilePanelClose();setTimeout(function(){navFin('cr',null);},120)"><span class="mdrw-ico">📥</span> Contas a Receber</div>
   <div class="mdrw-item" id="mspItem-fin-cp" onclick="mobilePanelClose();setTimeout(function(){navFin('cp',null);},120)"><span class="mdrw-ico">📤</span> Contas a Pagar</div>
-  <div class="mdrw-item" id="mspItem-fin-dre" onclick="mobilePanelClose();setTimeout(function(){navFin('dre',null);},120)"><span class="mdrw-ico">📋</span> DRE Gerencial</div>
+  <div class="mdrw-item" id="mspItem-fin-dre" onclick="mobilePanelClose();setTimeout(function(){ nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50); },120)"><span class="mdrw-ico">📋</span> DRE Gerencial</div>
   <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
   <!-- Nav: Admin -->
   <div class="mdrw-section" id="mspSec-config">Admin</div>
