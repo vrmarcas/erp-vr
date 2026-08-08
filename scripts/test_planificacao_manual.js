@@ -64,7 +64,18 @@ var FN_NAMES = [
   'planGetRecipe', '_matGetRsm2', 'planAbrir', 'planFechar', 'planCalc',
   'planAplicar', 'planLimpar', '_planDeleteAuto', '_planEditField',
   '_planRecompute', 'planAddManual', 'planRemoveManual', 'planRenderManual',
-  '_planCalcAndMerge'
+  '_planCalcAndMerge',
+  // Rodada 2.1 (2026-08-08) — teste desatualizado: planAplicar() chama
+  // orcAutoLaserSeNecessario() (index.html:8821, refresh de tempo de
+  // laser após aplicar a planificação — não participa do cálculo de
+  // área/material/custo, que fica inteiro em orcRecalc()/_matGetRsm2()).
+  // Faltava extrair essa função (e sua dependência orcAutoLaser) para o
+  // módulo isolado do teste; sem ela, planAplicar() lançava
+  // ReferenceError e nenhum dos 8 cenários rodava. Extraída aqui (nunca
+  // reimplementada), e é inerte neste harness porque document.
+  // querySelectorAll já é stub (retorna []), então orcAutoLaser() só
+  // itera uma lista vazia e retorna sem tocar em nenhum dado testado.
+  'orcAutoLaserSeNecessario', 'orcAutoLaser'
 ];
 var wrapBlock = extractBetween(
   '// Wrap planCalc to also merge manual pieces if any exist',

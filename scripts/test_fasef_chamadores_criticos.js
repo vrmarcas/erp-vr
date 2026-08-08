@@ -122,9 +122,38 @@ global._db = {
     return p;
   }
 };
+// Rodada 2.1 (2026-08-08) — stockExcluirItem() migrou de _cloudSave()/
+// _db.runTransaction() para uma Cloud Function atômica
+// (firebase.functions().httpsCallable('estoqueExcluirItem')), commit
+// 0ddd4b5 ("fix(estoque): frontend migra as 12 escritas de estoque para
+// as novas Cloud Functions"), já em master antes desta rodada. STK-3/
+// STK-3b/STK-4 mockavam _db.runTransaction (que a função nem chama mais)
+// — nunca resolviam/rejeitavam, o try/catch real engolia o TypeError e
+// nada acontecia. Mock de httpsCallable adicionado abaixo; contador de
+// chamadas exposto para o novo teste de guarda contra duplo clique.
+var _functionsMocks = {};
+var _functionsCallCounts = {};
+function resetFunctionsMocks() {
+  _functionsMocks = {
+    estoqueExcluirItem: function () { return Promise.resolve({ data: { ok: true } }); }
+  };
+  _functionsCallCounts = {};
+}
+resetFunctionsMocks();
 global.firebase = {
   auth: function () {
     return { currentUser: { getIdToken: function (force) { _getIdTokenCalls++; return Promise.resolve('fake-token'); } } };
+  },
+  functions: function () {
+    return {
+      httpsCallable: function (name) {
+        return function (payload) {
+          _functionsCallCounts[name] = (_functionsCallCounts[name] || 0) + 1;
+          var impl = _functionsMocks[name];
+          return impl ? impl(payload) : Promise.reject({ code: 'not-found', message: name + ' não mockada' });
+        };
+      }
+    };
   }
 };
 global._lastToast = null; global._lastToastKind = null;
@@ -156,6 +185,7 @@ function resetAll() {
   mod.setClientes([]); mod.setLixeira([]);
   global._renderCalls = { finCR: 0, finCP: 0, finDash: 0, finBar: 0, finDonut: 0, stock: 0, clientes: 0 };
   global._lastToast = null; global._lastToastKind = null;
+  resetFunctionsMocks(); // Rodada 2.1 — nunca deixar um mock de Cloud Function vazar entre testes
 }
 
 console.log('\n=== Regressão: chamadores críticos de _cloudSave aguardam e reconciliam (Fase F, PARTE 4-6) ===\n');
@@ -277,44 +307,46 @@ await test('STK-2. stockSaveData(): detecta conflito — outra aba alterou o est
   assertEq(fakeDoc('stock').ac3.qty, 39, 'a mudança externa (qty=39) não foi sobrescrita pela cópia obsoleta (qty=100)');
 });
 
-await test('STK-3. stockExcluirItem(): falha total (tombstone e estoque) restaura o item e a lápide localmente', async function () {
+// Rodada 2.1 — reescritos: stockExcluirItem() não usa mais _cloudSave()/
+// _db.runTransaction() em duas escritas separadas (stock + stock_deleted);
+// desde o commit 0ddd4b5 (já em master antes desta rodada) ela chama UMA
+// Cloud Function atômica (estoqueExcluirItem) e só muda STOCK/_STOCK_TOMB
+// dentro do .then() — nunca otimisticamente antes da confirmação. Isso
+// também torna "só um dos dois documentos falha" um cenário IMPOSSÍVEL
+// hoje (é uma transação server-side única) — STK-3b foi reaproveitado
+// para testar a guarda real que ainda existe e não tinha cobertura aqui:
+// bloqueio de clique duplo enquanto a exclusão está em andamento.
+await test('STK-3. stockExcluirItem(): falha na Cloud Function — nada é removido do estoque local (nunca muta antes da confirmação)', async function () {
   resetAll();
   mod.setStock({ ac3: { label: 'Acrílico Cristal 3mm', qty: 40 } });
-  // Simula queda total — as duas escritas (stock_deleted e stock) falham.
-  var origRunTransaction = global._db.runTransaction;
-  global._db.runTransaction = function () { return Promise.reject({ code: 'unavailable', message: 'boom' }); };
+  _functionsMocks.estoqueExcluirItem = function () { return Promise.reject({ code: 'unavailable', message: 'boom' }); };
   mod.stockExcluirItem('ac3');
   await sleep(20);
-  global._db.runTransaction = origRunTransaction;
-  assertTruthy(mod.getStock().ac3, 'item restaurado ao estoque local após falha total');
-  assertEq(mod.getStock().ac3.qty, 40, 'dado do item preservado na restauração');
-  assertEq(Object.keys(mod.getTomb()).length, 0, 'lápide revertida — item não fica marcado como excluído sem confirmação');
+  assertTruthy(mod.getStock().ac3, 'item nunca foi removido — a função só muta STOCK dentro do .then() de sucesso');
+  assertEq(mod.getStock().ac3.qty, 40, 'dado do item preservado');
+  assertEq(Object.keys(mod.getTomb()).length, 0, 'nenhuma lápide criada sem confirmação do servidor');
   assertEq(global._lastToastKind, 'err', 'toast de falha, não de sucesso');
 });
 
-await test('STK-3b. stockExcluirItem(): só o tombstone falha — item some do estoque (confirmado), lápide reverte (sem confirmação)', async function () {
+await test('STK-3b. stockExcluirItem(): clique duplo enquanto a exclusão está em andamento é bloqueado (guarda STOCK._excluindo)', async function () {
   resetAll();
   mod.setStock({ ac3: { label: 'Acrílico Cristal 3mm', qty: 40 } });
-  // _stockTombSave() ('stock_deleted') é chamado antes de stockSaveData() ('stock')
-  // dentro de stockExcluirItem — força só a PRIMEIRA transação a falhar.
-  _forceErrorOnce = { code: 'unavailable', message: 'boom' };
-  mod.stockExcluirItem('ac3');
-  await sleep(20);
-  assertEq(mod.getStock().ac3, undefined, 'estoque já confirmado no servidor — não é revertido só porque a lápide falhou');
-  assertEq(Object.keys(mod.getTomb()).length, 0, 'lápide revertida — sem confirmação do servidor');
-  assertEq(global._lastToastKind, 'err', 'ainda assim, falha parcial não deve mostrar sucesso pleno');
+  _functionsMocks.estoqueExcluirItem = function () { return sleep(30).then(function () { return { data: { ok: true } }; }); };
+  mod.stockExcluirItem('ac3'); // primeira chamada — fica "em voo" por 30ms
+  mod.stockExcluirItem('ac3'); // segunda chamada imediata — deve ser bloqueada localmente, sem nova invocação da Function
+  await sleep(60);
+  assertEq(_functionsCallCounts.estoqueExcluirItem, 1, 'a Cloud Function foi invocada exatamente uma vez — a guarda local bloqueou o segundo clique');
+  assertEq(mod.getStock().ac3, undefined, 'a exclusão real (única) ainda se completa normalmente');
 });
 
-await test('STK-4. stockExcluirItem(): sucesso — item some do estoque e ganha lápide, ambos confirmados no servidor', async function () {
+await test('STK-4. stockExcluirItem(): sucesso — item some do estoque local e ganha lápide após a Cloud Function confirmar', async function () {
   resetAll();
   mod.setStock({ ac3: { label: 'Acrílico Cristal 3mm', qty: 40 } });
   mod.stockExcluirItem('ac3');
   await sleep(20);
   assertEq(mod.getStock().ac3, undefined, 'item removido do estoque local');
-  assertTruthy(mod.getTomb().ac3, 'lápide criada localmente');
-  assertTruthy(fakeDoc('stock'), 'estoque sem o item persistido no servidor');
-  var tombServidor = fakeDoc('stock_deleted');
-  assertTruthy(tombServidor && tombServidor.ac3, 'lápide persistida no servidor — impede ressurreição por aba antiga');
+  assertTruthy(mod.getTomb().ac3, 'lápide criada localmente (item preservado para restauração)');
+  assertEq(_functionsCallCounts.estoqueExcluirItem, 1, 'Cloud Function invocada exatamente uma vez');
 });
 
 // ── Clientes ─────────────────────────────────────────────────────────────────

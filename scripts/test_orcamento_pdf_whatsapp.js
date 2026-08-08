@@ -179,6 +179,23 @@ function resetFixture() {
 
 var mod = require(modPath);
 
+// Rodada 2.1 (2026-08-08) — teste desatualizado: orcEnviarOrcamentoWA()
+// (index.html) passou a exigir "await orcSalvarOrcamento()" (autosave
+// obrigatório antes de qualquer envio — commit fba7ef5, já em master
+// antes desta rodada) e esta suíte nunca extraiu/stubou essa função,
+// então toda chamada real de WhatsApp falhava silenciosamente (try/catch
+// engolia o ReferenceError) e a suíte quebrava tentando ler a URL nunca
+// gerada. Não é um bug de produção — é a proteção real de autosave
+// funcionando como projetado (nunca envia WhatsApp de um orçamento não
+// persistido). Stub aqui reaproveita o número REAL já reservado por
+// orcObterNumeroOficial() (extraída e testada nos testes 20-26), em vez
+// de inventar um valor solto, para as asserções de número/mensagem
+// continuarem validando o comportamento de verdade.
+global.orcSalvarOrcamento = async function () {
+  var num = await mod.orcObterNumeroOficial();
+  return { num: num, id: 'ORC-' + num };
+};
+
 async function main() {
 console.log('\n' + '='.repeat(64));
 console.log(' test_orcamento_pdf_whatsapp.js');

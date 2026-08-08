@@ -181,9 +181,27 @@ class FixtureGuard {
       return { chavesDepois: chavesDepois.length };
     });
 
+    // Rodada 2.1 (2026-08-08) — achado real (falha intermitente reproduzida
+    // no teste 10, "duas fixtures concorrentes"): esta checagem comparava
+    // a CONTAGEM TOTAL de chaves do documento, lida DEPOIS da transação
+    // commitar, contra a contagem vista NO MOMENTO do commit desta mesma
+    // transação. Sob concorrência real (duas chamadas de mergeFixture no
+    // MESMO documento — exatamente o cenário que este método deve suportar
+    // corretamente), a transação do Firestore já mescla e serializa as
+    // escritas sem perda nenhuma, mas a leitura pós-commit desta chamada
+    // pode acontecer DEPOIS que a OUTRA chamada concorrente também já
+    // commitou — inflando a contagem total e disparando este "erro fatal"
+    // por uma causa que não é perda de dado nenhuma. Corrigido verificando
+    // só o que ESTA chamada era responsável por escrever (suas próprias
+    // chaves, com o valor mesclado esperado) — nunca a contagem total do
+    // documento, que outra escrita concorrente pode legitimamente mudar.
     var confirmado = await this._lerServidor(docKey);
-    if (Object.keys(confirmado.parsed || {}).length !== commitResult.chavesDepois) {
-      throw new Error('[qa_fixture_guard] ERRO FATAL: leitura pós-escrita não bate com o esperado (' + Object.keys(confirmado.parsed || {}).length + ' vs ' + commitResult.chavesDepois + ') — investigar antes de continuar.');
+    var confirmadoData = confirmado.parsed || {};
+    var chavesPerdidasNaConfirmacao = Object.keys(fixtureObj).filter(function (k) {
+      return JSON.stringify(confirmadoData[k]) !== JSON.stringify(fixtureObj[k]);
+    });
+    if (chavesPerdidasNaConfirmacao.length) {
+      throw new Error('[qa_fixture_guard] ERRO FATAL: leitura pós-escrita não confirma as chaves ' + chavesPerdidasNaConfirmacao.join(', ') + ' — investigar antes de continuar.');
     }
     Object.keys(fixtureObj).forEach(function (k) {
       self._criados[docKey] = self._criados[docKey] || new Set();
@@ -230,9 +248,18 @@ class FixtureGuard {
       return { itensDepois: resultado.length };
     });
 
+    // Rodada 2.1 (2026-08-08) — mesmo achado do mergeFixture() acima:
+    // contagem total do array é instável sob chamadas concorrentes no
+    // mesmo documento (outra chamada pode ter adicionado itens entre o
+    // commit desta e esta releitura). Verifica só que OS ITENS QUE ESTA
+    // CHAMADA acrescentou estão de fato presentes no array confirmado.
     var confirmado = await this._lerServidor(docKey);
-    if ((confirmado.parsed || []).length !== commitResult.itensDepois) {
-      throw new Error('[qa_fixture_guard] ERRO FATAL: leitura pós-escrita não bate com o esperado.');
+    var arrConfirmado = confirmado.parsed || [];
+    var itensPerdidos = itens.filter(function (it) {
+      return !arrConfirmado.some(function (c) { return JSON.stringify(c) === JSON.stringify(it); });
+    });
+    if (itensPerdidos.length) {
+      throw new Error('[qa_fixture_guard] ERRO FATAL: leitura pós-escrita não confirma ' + itensPerdidos.length + ' item(ns) — investigar antes de continuar.');
     }
     self._criados[docKey] = self._criados[docKey] || new Set();
     itens.forEach(function (it) { self._criados[docKey].add(sha256(it)); });

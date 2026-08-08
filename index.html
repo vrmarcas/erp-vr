@@ -10415,7 +10415,15 @@ function kbDrop(e) {
         var _yy=_tgt.getFullYear(), _mm=String(_tgt.getMonth()+1).padStart(2,'0'), _dd=String(_tgt.getDate()).padStart(2,'0');
         _dragOs.entrega = _yy+'-'+_mm+'-'+_dd;
         _dragOs.prazo   = _dragOs.entrega;
-        if(typeof _cloudSave==='function') _cloudSave('kb_os', KB_OS);
+        // Rodada 2.1 (2026-08-08) — achado real: este ponto gravava o
+        // KB_OS INTEIRO direto em 'kb_os' via _cloudSave(), ignorando o
+        // split kb_os/kb_os_fin do P0.6. Para sessões que tinham campos
+        // financeiros mesclados em memória (Master/Financeiro/Comercial,
+        // via _kbMergeFinCache()), isso reintroduzia valor/entrada/
+        // restante/etc no documento operacional que a Produção lê —
+        // exatamente o vazamento que P0.6 fechou. kbSaveKbos() faz o
+        // split correto (nunca escreve financeiro em 'kb_os').
+        if(typeof kbSaveKbos==='function') kbSaveKbos();
       }
     }
     _kbDrag = null;
@@ -10939,7 +10947,7 @@ function kbSalvarTempo() {
   if(!_kbOsId) return;
   var os=KB_OS[_kbOsId]; if(!os) return;
   os.tempoProd=(document.getElementById('kbTempoProd')||{}).value||'';
-  _cloudSave('kb_os', KB_OS);
+  if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — nunca gravar KB_OS bruto em kb_os (vazaria financeiro, ver kbDrop)
 }
 function kbSalvarPrazo() {
   if(!_kbOsId) return;
@@ -10958,8 +10966,10 @@ function kbSalvarPrazo() {
     // chegar, apenas confirma o mesmo estado.
     os.entrega=v; os.prazo=v;
     if(typeof kbRender==='function') kbRender();
-    // Persistir no Firebase
-    _cloudSave('kb_os', KB_OS);
+    // Persistir no Firebase — via kbSaveKbos() (split kb_os/kb_os_fin),
+    // nunca gravando KB_OS bruto no documento operacional (Rodada 2.1,
+    // mesmo achado de kbDrop()).
+    if(typeof kbSaveKbos==='function') kbSaveKbos();
     var dataBR2=v.split('-')[2]+'/'+v.split('-')[1]+'/'+v.split('-')[0];
     showToast('Prazo salvo: '+dataBR2,'ok');
     // Atualizar countdown no modal sem fechar
@@ -11436,7 +11446,7 @@ function kbPausarProd() {
   var btn = ib ? ib.querySelector('button') : null;
   if(ib) ib.style.display='';
   if(btn){ btn.innerHTML='🔧 Iniciar Produção'; btn.style.background='linear-gradient(90deg,#D97706,#B45309)'; btn.onclick=function(){kbIniciarProd();}; }
-  _cloudSave('kb_os', KB_OS);
+  if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
   if(typeof kbSyncCounts==='function') kbSyncCounts();
   showToast('Produção pausada — OS retornou para Iniciada','warn');
 }
@@ -11461,7 +11471,7 @@ function kbNormalizarDatas() {
       }
     });
   });
-  if(dirty) _cloudSave('kb_os', KB_OS);
+  if(dirty && typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
 }
 
 // ── Toggle etapa no card ──────────────────────────────────────────────────────
@@ -11474,7 +11484,7 @@ function kbToggleEtapa(osId, key, el) {
   el.style.borderColor=done?'#059669':'var(--border)';
   el.style.color=done?'#fff':'var(--muted)';
   el.textContent=(done?'✓ ':'')+{corte:'Corte',gravacao:'Gravar',acabamento:'Acab.',embalagem:'Embal.'}[key];
-  _cloudSave('kb_os',KB_OS);
+  if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
 }
 
 function kbEditarMatProd() {
