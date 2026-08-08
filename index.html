@@ -5757,18 +5757,19 @@ function _authFirebaseError(code){
         <div id="cfgPg8" class="cfg-pg" style="display:none">
           <div class="card">
             <div class="card-h"><div class="card-h-left">🗂️ Produtos do Orçamento</div></div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Estes produtos aparecem no dropdown do Step 1 do orçamento. Adicione, renomeie ou remova conforme necessário.</div>
+            <!-- RODADA 5, seção 6 — Produtos & Planificação é a fonte
+                 canônica; esta tela deixa de ser um segundo lugar para
+                 CRIAR produtos (opção A do enunciado — atalho, menor
+                 risco). Nomes já existentes continuam visíveis/editáveis
+                 abaixo (nenhum dado apagado); novos produtos passam a
+                 ser cadastrados só em Produtos & Planificação, onde já
+                 nascem com receita configurável. -->
+            <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Estes produtos aparecem no dropdown do Step 1 do orçamento (junto com os cadastrados em Produtos &amp; Planificação — nunca duplicado). Para adicionar um produto novo, cadastre-o em <strong>Produtos &amp; Planificação</strong>, onde ele já nasce com receita configurável.</div>
 
-            <!-- Formulário de novo produto -->
-            <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-              <input type="text" id="cfgNovoProdInput" placeholder="Nome do novo produto..."
-                style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--bg);color:var(--text)"
-                onkeydown="if(event.key==='Enter') cfgAddProduto()">
-              <button onclick="cfgAddProduto()"
-                style="padding:8px 16px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">
-                ＋ Adicionar
-              </button>
-            </div>
+            <button onclick="nav('config-plan',null)"
+              style="padding:8px 16px;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:16px">
+              ↗ Ir para Produtos &amp; Planificação
+            </button>
 
             <!-- Lista de produtos -->
             <div id="cfgProdList" style="max-height:420px;overflow-y:auto"></div>
@@ -27725,15 +27726,13 @@ function cfgRenderProdutos() {
   }).join('');
 }
 
+// RODADA 5, seção 6 — cadastro de produto NOVO deixou de acontecer aqui
+// (evita recriar a base duplicada que este bloco existe para eliminar).
+// Mantida só como redirecionamento defensivo para qualquer chamador
+// remanescente (ex.: onkeydown legado em cache do navegador do usuário).
 function cfgAddProduto() {
-  var inp = document.getElementById('cfgNovoProdInput'); if(!inp) return;
-  var nome = inp.value.trim(); if(!nome) return;
-  if(ORC_PRODUTOS.indexOf(nome)>=0){ showToast('Produto já existe','info'); return; }
-  ORC_PRODUTOS.push(nome);
-  _prodSave();
-  inp.value='';
-  cfgRenderProdutos();
-  showToast('"'+nome+'" adicionado','ok');
+  showToast('Cadastre produtos novos em Produtos & Planificação — eles já aparecem aqui automaticamente.', 'info');
+  nav('config-plan', null);
 }
 
 function cfgDeleteProduto(i) {
