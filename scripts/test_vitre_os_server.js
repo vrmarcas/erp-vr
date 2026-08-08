@@ -97,30 +97,37 @@ console.log('\n=== FASE G — Parte 9: conversão de orçamento Vitre em OS ===\
     await limparProduto(sku);
   });
 
-  await test('3. Item sem estoque e sem ficha técnica completa → ficha_incompleta, conversão bloqueada, nenhuma OS criada', async function () {
+  await test('3. Item sem estoque e sem ficha técnica completa → NÃO bloqueia (Rodada 2, P0.4); ficha_tecnica_pendente, OS gerada com aviso operacional', async function () {
     var sku = 'E2E_OS_INCOMPLETA_' + Date.now();
     await vitreCriarOuEditarProduto.run({ sku: sku, nome: 'Teste Incompleto', status: 'ativo', custo: 10, precoVenda: 50, requestId: reqId() }, ctx(UID.master, 'master'));
     var orcId = await criarOrcamento(sku, 1);
     var r = await vitreConverterOrcamentoParaOS.run({ orcamentoId: orcId, requestId: reqId() }, ctx(UID.comercial, 'comercial'));
-    assertEq(r.bloqueado, true);
-    assertEq(r.itens[0].tipo, 'ficha_incompleta');
-    assertTruthy(r.itens[0].motivoBloqueio, 'deve explicar o motivo, nunca inventar dado');
+    assertEq(r.bloqueado, false, 'Vitre é majoritariamente sob encomenda — ficha incompleta nunca bloqueia a OS');
+    assertEq(r.itens[0].tipo, 'ficha_tecnica_pendente');
+    assertEq(r.itens[0].avisoOperacional, true, 'deve carregar aviso operacional explícito');
+    assertTruthy(r.itens[0].motivoBloqueio, 'deve explicar o que falta, nunca inventar dado');
     var orc = (await db.collection('vitre_orcamentos').doc(orcId).get()).data();
-    assertEq(orc.status, 'venda_confirmada', 'venda já confirmada antes da tentativa — bloqueio na conversão não deve alterar esse status');
-    assertEq(orc.osId, undefined, 'nenhuma OS deve ser vinculada');
+    assertEq(orc.status, 'convertido', 'a OS é gerada normalmente, mesmo com item pendente');
+    assertEq(orc.osId, r.id, 'OS deve ficar vinculada ao orçamento');
+    var os = (await db.collection('vitre_os').doc(r.id).get()).data();
+    assertEq(os.status, 'aguardando_producao');
+    assertEq(os.fichaTecnicaPendente, true, 'OS deve carregar o flag para o Kanban/detalhe sinalizarem a pendência');
     await limparProduto(sku);
   });
 
-  await test('4. Fail-closed misto — um item pronta_entrega + um item ficha_incompleta → conversão BLOQUEADA inteira, estoque do item bom NÃO é baixado', async function () {
+  await test('4. Misto — um item pronta_entrega + um item ficha_tecnica_pendente → OS única gerada (mista_aguardando_producao), estoque do item bom É baixado normalmente', async function () {
     var skuBom = 'E2E_OS_MISTO_BOM_' + Date.now();
     var skuRuim = 'E2E_OS_MISTO_RUIM_' + Date.now();
     await vitreCriarOuEditarProduto.run({ sku: skuBom, nome: 'Bom', status: 'ativo', custo: 10, precoVenda: 50, estoqueProntoUnidades: 5, requestId: reqId() }, ctx(UID.master, 'master'));
     await vitreCriarOuEditarProduto.run({ sku: skuRuim, nome: 'Ruim', status: 'ativo', custo: 10, precoVenda: 50, requestId: reqId() }, ctx(UID.master, 'master'));
     var orcId = await criarOrcamentoMultiItem([{ sku: skuBom, qtd: 1 }, { sku: skuRuim, qtd: 1 }]);
     var r = await vitreConverterOrcamentoParaOS.run({ orcamentoId: orcId, requestId: reqId() }, ctx(UID.comercial, 'comercial'));
-    assertEq(r.bloqueado, true, 'um item ruim deve bloquear TUDO — nunca conversão parcial');
+    assertEq(r.bloqueado, false, 'ficha pendente de um item nunca deve impedir a OS dos demais itens');
     var prodBom = (await db.collection('vitre_produtos').doc(skuBom).get()).data();
-    assertEq(prodBom.estoqueProntoUnidades, 5, 'estoque do item bom não pode ser tocado se a conversão como um todo foi bloqueada');
+    assertEq(prodBom.estoqueProntoUnidades, 4, 'item pronta_entrega baixa estoque normalmente, mesmo com outro item pendente na mesma OS');
+    var os = (await db.collection('vitre_os').doc(r.id).get()).data();
+    assertEq(os.status, 'mista_aguardando_producao');
+    assertEq(os.fichaTecnicaPendente, true);
     await limparProduto(skuBom); await limparProduto(skuRuim);
   });
 

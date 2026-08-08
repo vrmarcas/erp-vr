@@ -172,10 +172,25 @@ function makeOrc(id, num, valorFinal) {
 function seedFirestore(orcamentos) {
   _fakeStore['orcamentos'] = { data: JSON.stringify(orcamentos) };
   _fakeStore['kb_os'] = { data: JSON.stringify({}) };
+  // Rodada 2, P0.6 (2026-08-07) — orcEnvGerarOS() passou a gravar
+  // valorEntrada/restante/formaPgto/pagtoTipo em kb_os_fin (documento
+  // separado, fora do alcance de leitura da Produção), não mais em
+  // kb_os. Semear os dois documentos juntos, como o Firestore real
+  // teria depois da mudança.
+  _fakeStore['kb_os_fin'] = { data: JSON.stringify({}) };
   _fakeStore['fin_cr'] = { data: JSON.stringify([]) };
   _fakeStore['erp_os_counter'] = { data: JSON.stringify(0) };
 }
 function fakeStoreOS() { var raw = _fakeStore['kb_os']; return raw ? JSON.parse(raw.data) : {}; }
+function fakeStoreOSFin() { var raw = _fakeStore['kb_os_fin']; return raw ? JSON.parse(raw.data) : {}; }
+// Rodada 2, P0.6 — junta kb_os (operacional) + kb_os_fin (financeiro) por
+// id, exatamente como _kbMergeFinCache() faz no app real, para os testes
+// que checam valorEntrada/restante continuarem lendo do lugar certo.
+function fakeStoreOSMerged() {
+  var ops = fakeStoreOS(), fin = fakeStoreOSFin(), out = {};
+  Object.keys(ops).forEach(function (id) { out[id] = Object.assign({}, ops[id], fin[id] || {}); });
+  return out;
+}
 function fakeStoreCR() { var raw = _fakeStore['fin_cr']; return raw ? JSON.parse(raw.data) : []; }
 function fakeStoreOrc() { var raw = _fakeStore['orcamentos']; return raw ? JSON.parse(raw.data) : []; }
 
@@ -192,10 +207,11 @@ await test('1. geração normal cria exatamente uma OS e um recebimento', async 
   mod.orcPagtoTipoSel(_tipoButtons['integral']);
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOS());
+  var osFin = Object.values(fakeStoreOSMerged());
   var cr = fakeStoreCR();
   assertEq(os.length, 1, 'exatamente uma OS');
   assertEq(cr.length, 1, 'exatamente um recebimento');
-  assertApprox(os[0].valorEntrada, 1000, 'entrada integral');
+  assertApprox(osFin[0].valorEntrada, 1000, 'entrada integral');
 });
 
 await test('2. reabrir o modal do mesmo orçamento e tentar de novo não duplica', async function () {
@@ -360,7 +376,7 @@ await test('11. Integral — uma OS, um recebimento, entrada=total, restante=0, 
   mod.orcEnvConfirmarPgto('ORC-11');
   mod.orcPagtoTipoSel(_tipoButtons['integral']);
   await mod.orcEnvGerarOS();
-  var os = Object.values(fakeStoreOS())[0];
+  var os = Object.values(fakeStoreOSMerged())[0];
   var o = fakeStoreOrc().find(function (x) { return x.id === 'ORC-11'; });
   assertApprox(os.valorEntrada, 1000); assertApprox(os.restante, 0); assertEq(o.status, 'pago');
 });
@@ -387,7 +403,7 @@ await test('13. Parcial — uma OS, um recebimento no valor informado, saldo cor
   mod.orcPagtoTipoSel(_tipoButtons['parcial']);
   _elements['pgtoEntradaVal'].value = '120.55';
   await mod.orcEnvGerarOS();
-  var os = Object.values(fakeStoreOS())[0];
+  var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.valorEntrada, 120.55); assertApprox(os.restante, 879.45);
 });
 
@@ -400,7 +416,7 @@ await test('14. Futuro — uma OS, nenhum recebimento inicial, saldo integral pe
   mod.orcPagtoTipoSel(_tipoButtons['futuro']);
   await mod.orcEnvGerarOS();
   assertEq(fakeStoreCR().length, 0);
-  var os = Object.values(fakeStoreOS())[0];
+  var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.restante, 640);
 });
 
@@ -413,7 +429,7 @@ await test('15. centavos preservados mesmo com a transação', async function ()
   mod.orcPagtoTipoSel(_tipoButtons['parcial']);
   _elements['pgtoEntradaVal'].value = '33.33';
   await mod.orcEnvGerarOS();
-  var os = Object.values(fakeStoreOS())[0];
+  var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.valorEntrada + os.restante, 100.10);
 });
 

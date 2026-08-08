@@ -509,6 +509,15 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .kb-os-field{background:var(--bg);border-radius:7px;padding:9px 11px}
 .kb-os-field-lbl{font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:3px}
 .kb-os-field-val{font-size:12px;font-weight:700;color:var(--text)}
+/* RODADA 2, P0.5 — snapshot operacional completo (itens do pedido) */
+.kb-itens-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.kb-item-card{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px}
+.kb-item-hdr{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}
+.kb-item-qty{background:var(--bg2);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted)}
+.kb-item-body{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:11px;color:var(--text)}
+.kb-item-body>div{line-height:1.5}
+.kb-item-body .kb-os-field-lbl{display:block;margin-bottom:1px}
+.kb-item-pendente{margin-top:6px;font-size:10px;font-weight:700;color:#D97706;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:5px 8px}
 .kb-checklist{display:flex;flex-direction:column;gap:6px}
 .kb-check-item{display:flex;align-items:center;gap:9px;padding:8px 10px;background:var(--bg);border-radius:7px;cursor:pointer;transition:.1s;user-select:none}
 .kb-check-item:hover{background:#EDEBF8}
@@ -1592,7 +1601,7 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 10; // +1 (compras) — manter sincronizado com o número de _cloudLoad(...) abaixo
+  var loaded = 0, total = 11; // +1 (kb_os_fin, Rodada 2 P0.6) — manter sincronizado com o número de _cloudLoad(...) abaixo
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1627,7 +1636,19 @@ function _cloudLoadAll() {
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    // Corrigido 2026-08-07 (Rodada 2, item P0.6) — privacidade financeira
+    // real da Produção: campos financeiros da OS (valor/totalGeral/
+    // parcelas/formaPgto/pagtoTipo/valorEntrada/restante/itens[].unit/
+    // itens[].total) vivem num documento SEPARADO (kb_os_fin), cujas Rules
+    // nunca liberam leitura para o papel Produção — só Master/Financeiro/
+    // Comercial. Este listener nunca dispara para Produção (permissão
+    // negada no servidor, _cloudWatch já trata isso sem lançar erro — só
+    // um console.warn) — os campos financeiros de KB_OS[*] simplesmente
+    // nunca são populados para esse papel, que é exatamente o resultado
+    // desejado (a UI já trata esses campos como opcionais/-- quando
+    // ausentes). kbSaveKbos() faz o merge inverso na escrita.
+    _cloudWatch("kb_os_fin", function(d){ _KB_OS_FIN_CACHE = (d&&typeof d==='object'&&!Array.isArray(d)) ? d : {}; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbRender==='function') try{kbRender();}catch(e){} });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
@@ -1719,7 +1740,12 @@ function _cloudLoadAll() {
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
   _cloudLoad("compras", function(d){ if(d&&d.length){ COMPRAS=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
-  _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
+  _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); done(); });
+  // Rodada 2, P0.6 — nunca resolve para o papel Produção (permissão negada
+  // no servidor; _cloudLoad já trata isso chamando o callback com null,
+  // sem lançar erro), então _KB_OS_FIN_CACHE fica {} e os campos
+  // financeiros de KB_OS[*] nunca são populados para esse papel.
+  _cloudLoad("kb_os_fin", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ _KB_OS_FIN_CACHE=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); } done(); });
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
@@ -2509,6 +2535,11 @@ function _authFirebaseError(code){
         </div>
         <div class="kb-os-body">
           <div class="kb-os-grid" id="kbGrid"></div>
+          <!-- RODADA 2, P0.5 — snapshot operacional completo: todo item do
+               pedido (produto/qtd/material/medidas/observações), não só um
+               resumo genérico. O operário deve conseguir produzir sem abrir
+               o orçamento comercial. -->
+          <div id="kbItensDetalhe"></div>
           <!-- Tabs -->
           <div class="kb-os-tabs">
             <button class="kb-os-tab active" id="kbTabBtnProd" onclick="kbSwitchTab('prod')">📋 Produção</button>
@@ -3083,13 +3114,14 @@ function _authFirebaseError(code){
             <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
               <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">📤 Enviar Orçamento ao Cliente</div>
               <div style="display:flex;gap:7px;flex-wrap:wrap">
-                <button class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
-                <button class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
-                <button class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
-                <button id="orcBtnSalvar" class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
-                <button class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="orcGerarLinkPagamento()">🔗 Link Pgto</button>
+                <button id="orcBtnSalvar" class="topbar-btn" style="font-size:11px;color:#fff;background:var(--brand-mid);border-color:var(--brand-mid);font-weight:700" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
+                <button id="orcBtnWA" class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
+                <button id="orcBtnPDF" class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
+                <button id="orcBtnEmail" class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
+                <button id="orcBtnLinkPgto" class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="_btnBusy(this,'Gerando…',6000); orcGerarLinkPagamento()">🔗 Link Pgto</button>
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:7px">Envie o orçamento antes de confirmar o pagamento</div>
+              <div id="orcEnvioAvisoSalvar" style="font-size:10px;color:#B45309;margin-top:7px;font-weight:700">Salve o orçamento para liberar WhatsApp, PDF, E-mail e Link de Pagamento.</div>
+              <div id="orcEnvioAvisoOk" style="font-size:10px;color:var(--muted);margin-top:7px;display:none">Orçamento salvo — envie ao cliente antes de confirmar o pagamento.</div>
             </div>
 
             <!-- Prazo de Produção -->
@@ -3245,7 +3277,7 @@ function _authFirebaseError(code){
               <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🧾 Recibo de Entrada / Sinal</div>
               <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
                 <div class="fg" style="margin:0;flex:1">
-                  <label style="font-size:11px">Valor recebido como entrada (R$)</label>
+                  <label style="font-size:11px">Simulação de entrada (R$)</label>
                   <input type="number" id="orcEntradaValor" step="0.01" min="0" placeholder="0,00" oninput="orcCalcEntradaResto()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)">
                 </div>
                 <div class="fg" style="margin:0;flex:1">
@@ -3253,9 +3285,15 @@ function _authFirebaseError(code){
                   <div id="orcEntradaResto" style="padding:8px 10px;background:var(--bg2);border-radius:7px;font-size:13px;font-weight:700;color:#D97706">R$ —</div>
                 </div>
               </div>
+              <!-- Corrigido 2026-08-07 (Rodada 2, P0.3) — este botão só gera
+                   o recibo de verdade se já existir um pagamento de entrada
+                   CONFIRMADO (OS gerada com valorEntrada>0 via "Confirmar
+                   Pagamento e Gerar OS"); o campo acima é só uma simulação
+                   para conferir o saldo antes de confirmar. -->
               <button class="topbar-btn" style="width:100%;background:#D97706;font-size:12px;padding:9px;justify-content:center" onclick="orcGerarReciboEntrada()">
                 🖨️ Gerar Recibo de Entrada
               </button>
+              <div style="font-size:10px;color:var(--muted);margin-top:6px">O recibo só é liberado depois que o pagamento de entrada for confirmado em "Confirmar Pagamento e Gerar OS" (Orçamentos Enviados).</div>
             </div>
 
             <button id="orcBtnConfirmar" class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcConfirmarPagtoWizard()">
@@ -3448,9 +3486,13 @@ function _authFirebaseError(code){
             <div id="vitreOrcPgtoBox" style="display:none;flex-direction:column;gap:10px">
               <div class="fg-row">
                 <div class="fg"><label>Condição</label>
+                  <!-- Corrigido 2026-08-07 (Rodada 2, P0.1) — condição padrão
+                       da empresa é 50% entrada / 50% saldo; o select
+                       começava em "Integral", contrariando a regra
+                       operacional. "entrada_saldo" agora é o default. -->
                   <select id="vitreOrcPgtoTipo" onchange="vitreOrcPgtoRenderParcelas()">
                     <option value="integral">Integral (à vista)</option>
-                    <option value="entrada_saldo">Entrada + Saldo</option>
+                    <option value="entrada_saldo" selected>Entrada + Saldo (50/50 padrão)</option>
                     <option value="parcelado">Parcelado</option>
                     <option value="futuro">Pagamento futuro (nada agora)</option>
                   </select>
@@ -5281,7 +5323,16 @@ function _authFirebaseError(code){
           <button class="cfg-tab" id="cfgTab7" onclick="cfgTab(7)">🏦 Dados Bancários</button>
           <button class="cfg-tab" id="cfgTab8" onclick="cfgTab(8)">🗂️ Produtos</button>
           <button class="cfg-tab" id="cfgTab9" onclick="cfgTab(9)">🔌 Integrações</button>
-          <button class="topbar-btn" onclick="erpBackupExportar()" style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Backup JSON</button>
+          <!-- Corrigido 2026-08-07 (Rodada 2, P3) — auditoria real do que
+               erpBackupExportar() exporta (_BACKUP_KEYS): config, estoque,
+               orçamentos, clientes, CRM, financeiro (CR/CP/transações),
+               fornecedores, retalhos, dados bancários e preços de
+               materiais. Isso é mais do que só "Config. Orçamento", mas
+               NÃO é um backup total do sistema (não inclui, por exemplo,
+               Kanban/OS, compras, auditoria/log de segurança) e não existe
+               nenhuma função de restauração — o rótulo antigo "Backup
+               JSON" prometia mais do que o botão de fato entrega. -->
+          <button class="topbar-btn" onclick="erpBackupExportar()" title="Exporta config, estoque, orçamentos, clientes, CRM, financeiro (CR/CP/transações), fornecedores, retalhos, dados bancários e preços de materiais. NÃO inclui Kanban/OS, compras nem logs — não é um backup completo do sistema, e não há função de restauração." style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Exportar Dados (.JSON)</button>
         </div>
 
         <!-- ── ABA 1: MATERIAIS ── -->
@@ -6008,6 +6059,13 @@ function _authFirebaseError(code){
         </select>
         <span id="vitreCatTotal" style="font-size:11px;color:var(--muted)"></span>
         <div style="flex:1"></div>
+        <!-- Corrigido 2026-08-07 (Rodada 2, P2) — alternância Grade/Lista,
+             preferência persistida em localStorage (mesmo padrão simples
+             já usado por outras telas do arquivo). -->
+        <div style="display:flex;border:1.5px solid var(--border);border-radius:8px;overflow:hidden">
+          <button id="vitreCatBtnGrade" onclick="vitreCatSetView('grade')" style="padding:6px 10px;font-size:12px;border:none;cursor:pointer;background:var(--vt-teal,#1E7A86);color:#fff">▦ Grade</button>
+          <button id="vitreCatBtnLista" onclick="vitreCatSetView('lista')" style="padding:6px 10px;font-size:12px;border:none;cursor:pointer;background:transparent;color:var(--text)">☰ Lista</button>
+        </div>
         <button class="topbar-btn ghost" onclick="vitreCatIncompletosToggle()" style="font-size:12px" id="vitreCatBtnIncompletos">📋 Cadastros incompletos</button>
         <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
         <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff" id="vitreCatBtnNovo">＋ Novo Produto</button>
@@ -6908,6 +6966,9 @@ function _authFirebaseError(code){
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;background:var(--bg2);padding:9px 11px;border-radius:8px;border-left:3px solid var(--brand-mid)">
         Selecione o material que será retirado do estoque para esta OS. A baixa será feita automaticamente ao confirmar.
       </div>
+      <!-- RODADA 2, P0.7 — sugestão automática calculada a partir da
+           planificação do orçamento; o operador sempre pode sobrescrever. -->
+      <div id="kbProdSugestaoBox" style="display:none;margin-bottom:12px;background:#E3F7FB;border:1px solid #7DD3E8;border-radius:8px;padding:9px 11px;font-size:12px;color:#983C8F"></div>
       <!-- Tipo: chapa ou retalho -->
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button id="kbProdBtnChapa" onclick="kbProdSetTipo('chapa')" style="flex:1;padding:8px;border-radius:8px;border:2px solid var(--brand-mid);background:var(--brand-mid);color:#fff;font-size:12px;font-weight:700;cursor:pointer">📦 Usar Chapa</button>
@@ -6917,7 +6978,7 @@ function _authFirebaseError(code){
       <div id="kbProdChapaBox">
         <div class="fg">
           <label>Material / Cor</label>
-          <select id="kbProdMatSel" onchange="kbProdCheckStock()" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+          <select id="kbProdMatSel" onchange="kbProdOnMatChange()" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
             <option value="">— Selecionar —</option>
           </select>
         </div>
@@ -8008,6 +8069,29 @@ function orcStep(n) {
     var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
     if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);
   }
+  if(n===4 && typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
+}
+
+// RODADA 2, P0.2 — antes do 1º salvamento o único botão ativo na etapa
+// "Envio ao Cliente" é Salvar Orçamento; WhatsApp/PDF/E-mail/Link de
+// Pagamento ficam desabilitados (nunca disparam envio de um orçamento
+// que não existe ainda no Firestore). Depois que window._orcSessaoAtualId
+// é atribuído (1º save bem-sucedido, ver _orcSalvarOrcamentoImpl), os
+// canais são liberados e continuam liberados nas edições seguintes.
+function _orcAtualizarVisibilidadeEnvio() {
+  var salvo = !!window._orcSessaoAtualId;
+  ['orcBtnWA','orcBtnPDF','orcBtnEmail','orcBtnLinkPgto'].forEach(function(id){
+    var btn = document.getElementById(id);
+    if(!btn) return;
+    btn.disabled = !salvo;
+    btn.style.opacity = salvo ? '1' : '.4';
+    btn.style.cursor = salvo ? 'pointer' : 'not-allowed';
+    btn.title = salvo ? '' : 'Salve o orçamento primeiro para liberar este envio.';
+  });
+  var avisoSalvar = document.getElementById('orcEnvioAvisoSalvar');
+  var avisoOk = document.getElementById('orcEnvioAvisoOk');
+  if(avisoSalvar) avisoSalvar.style.display = salvo ? 'none' : '';
+  if(avisoOk) avisoOk.style.display = salvo ? '' : 'none';
 }
 
 // Custos Avançados inline toggle no Step 2
@@ -9596,30 +9680,40 @@ function orcCalcEntradaResto() {
   // "Pagamento Total".
 }
 
-function orcGerarReciboEntrada() {
-  var c = window._orcCalc||{};
-  var total   = c.finalPrice||0;
-  var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
-  if(!total)  { showToast('Calcule o or\u00e7amento antes de gerar o recibo','warn'); return; }
-  if(!entrada){ showToast('Informe o valor pago como entrada','warn'); return; }
-  var resto   = Math.max(0, total - entrada);
-  var cliente = (document.getElementById('orcClientNome')||{}).value||'Cliente';
-  var isVt    = document.body.classList.contains('vitre');
+// Corrigido 2026-08-07 (Rodada 2, P0.3) — antes, "Gerar Recibo de Entrada"
+// só checava se o campo de texto livre orcEntradaValor estava preenchido
+// (qualquer número digitado, sem nenhum pagamento de verdade por trás).
+// Agora o recibo só é liberado quando existe uma OS gerada pela transação
+// real de pagamento (orcEnvGerarOS()) com valorEntrada>0 gravado no
+// próprio kb_os_fin — nunca a partir de um valor solto na tela.
+function orcObterConfirmacaoEntrada(orcId) {
+  if(!orcId) return { pode:false, motivo:'Salve o orçamento e confirme o pagamento antes de gerar o recibo.' };
+  var lista = orcGetEnviados();
+  var orc = lista.find(function(x){ return x.id===orcId; });
+  if(!orc) return { pode:false, motivo:'Orçamento não encontrado.' };
+  if(!orc.osRef) return { pode:false, motivo:'Nenhum pagamento confirmado ainda — use "Confirmar Pagamento e Gerar OS" antes de emitir o recibo.' };
+  var os = (typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[orc.osRef] : null;
+  if(!os || !((os.valorEntrada||0) > 0)) return { pode:false, motivo:'Nenhuma entrada confirmada para este orçamento — o pagamento registrado foi "a receber" (sem valor de entrada).' };
+  return { pode:true, orc:orc, os:os };
+}
+
+function orcGerarReciboEntrada(orcIdParam) {
+  var gate = orcObterConfirmacaoEntrada(orcIdParam||window._orcSessaoAtualId);
+  if(!gate.pode){ showToast(gate.motivo,'warn'); return; }
+  var orc = gate.orc, os = gate.os;
+  var total   = os.totalGeral||os.valor||orc.valorFinal||0;
+  var entrada = os.valorEntrada||0;
+  var resto   = Math.max(0, os.restante!=null ? os.restante : (total-entrada));
+  var cliente = orc.cliente||'Cliente';
+  var isVt    = orc.marca==='vitre';
   var empresa = isVt ? 'Vitre' : 'VR Marcas';
   var cor     = isVt ? '#1E7A86' : '#1EB8D8';
   var hoje    = new Date().toLocaleDateString('pt-BR');
-  var vend    = (document.getElementById('orcClientVendedor')||{}).value||'—';
+  var vend    = orc.vendedor||'—';
   var fmtBR   = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}); };
   var pct     = total>0 ? Math.round(entrada/total*100) : 0;
   var numRec  = 'REC-'+Date.now().toString().slice(-6);
-  var itensList = [];
-  document.querySelectorAll('#orcItemBody tr').forEach(function(row){
-    var ri = row.dataset.idx; if(!ri) return;
-    var prod = (document.getElementById('oi_prod_'+ri)||{}).value||'Produto';
-    var qty  = (document.getElementById('oi_qty_'+ri)||{}).value||'1';
-    itensList.push(qty+'x '+prod);
-  });
-  var itensStr = itensList.join(', ')||'Servi\u00e7o conforme or\u00e7amento';
+  var itensStr = (os.itens||orc.itens||[]).map(function(it){ return (it.qty||1)+'x '+(it.prod||'Produto'); }).join(', ')||'Serviço conforme orçamento';
   var _brandBaseRec = location.origin + '/assets/brand/';
   var logoSrcRec = isVt ? (_brandBaseRec+'vitre-logo.png') : (_brandBaseRec+'vr-marcas-logo.png');
   var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Recibo de Entrada</title>'
@@ -9644,16 +9738,18 @@ function orcGerarReciboEntrada() {
     +'@media print{.page{width:100%;min-height:267mm}}</style></head><body>'
     +'<div class="page">'
     +'<div class="hdr"><div><img src="'+logoSrcRec+'" alt="'+empresa+'"><small>COMPROVANTE DE ENTRADA / SINAL</small></div>'
-    +'<div style="text-align:right"><div style="font-size:18px;font-weight:900">N\u00ba '+numRec+'</div><small>'+hoje+'</small></div></div>'
+    +'<div style="text-align:right"><div style="font-size:18px;font-weight:900">Nº '+numRec+'</div><small>'+hoje+'</small></div></div>'
     +'<div class="body">'
     +'<div class="row"><span class="lbl">Cliente</span><span class="val">'+cliente+'</span></div>'
-    +'<div class="row"><span class="lbl">Produto / Servi\u00e7o</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
+    +'<div class="row"><span class="lbl">Produto / Serviço</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
     +'<div class="row"><span class="lbl">Vendedor</span><span class="val">'+vend+'</span></div>'
-    +'<div class="row"><span class="lbl">Valor total do or\u00e7amento</span><span class="val">'+fmtBR(total)+'</span></div>'
+    +'<div class="row"><span class="lbl">Orçamento</span><span class="val">#'+(orc.num||'—')+'</span></div>'
+    +(os.num?'<div class="row"><span class="lbl">Ordem de Serviço</span><span class="val">#'+os.num+'</span></div>':'')
+    +'<div class="row"><span class="lbl">Valor total do orçamento</span><span class="val">'+fmtBR(total)+'</span></div>'
     +'<div class="row"><span class="lbl">Entrada ('+pct+'% do total)</span><span class="val" style="color:#059669">'+fmtBR(entrada)+'</span></div>'
-    +'<div class="ok-box"><div class="t1">\u2714 Valor Recebido como Entrada</div><div class="t2">'+fmtBR(entrada)+'</div></div>'
-    +(resto>0?'<div class="warn-box"><div class="r1">\u23f3 Saldo Restante a Pagar na Retirada</div><div class="r2">'+fmtBR(resto)+'</div></div>':'')
-    +'<div class="obs">Este comprovante confirma o recebimento de <strong>'+fmtBR(entrada)+'</strong> como sinal pelo servi\u00e7o descrito acima.'+(resto>0?' O saldo de <strong>'+fmtBR(resto)+'</strong> dever\u00e1 ser quitado no momento da retirada / entrega.':' N\u00e3o h\u00e1 saldo restante.')+'</div>'
+    +'<div class="ok-box"><div class="t1">✔ Valor Recebido como Entrada</div><div class="t2">'+fmtBR(entrada)+'</div></div>'
+    +(resto>0?'<div class="warn-box"><div class="r1">⏳ Saldo Restante a Pagar na Retirada</div><div class="r2">'+fmtBR(resto)+'</div></div>':'')
+    +'<div class="obs">Este comprovante confirma o recebimento de <strong>'+fmtBR(entrada)+'</strong> como sinal pelo serviço descrito acima.'+(resto>0?' O saldo de <strong>'+fmtBR(resto)+'</strong> deverá ser quitado no momento da retirada / entrega.':' Não há saldo restante.')+'</div>'
     +'<div style="flex:1"></div>'
     +'<div class="sig"><div>'+empresa+'<br>Assinatura / Carimbo</div><div>'+cliente+'<br>Assinatura do Cliente</div></div>'
     +'</div></div></body></html>';
@@ -10359,6 +10455,26 @@ function kbSyncCounts() {
 // KANBAN — OS Data & Modal
 // ============================================================
 var KB_OS = {}; // populado pelo Firebase via _cloudLoad/_cloudWatch
+// Corrigido 2026-08-07 (Rodada 2, P0.6) — cache do documento separado
+// erp_vr/kb_os_fin (campos financeiros da OS). Nunca populado para o
+// papel Produção (Rules negam leitura). Ver _kbMergeFinCache() e
+// kbSaveKbos().
+var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];
+var _KB_OS_FIN_CACHE = {};
+function _kbMergeFinCache() {
+  Object.keys(_KB_OS_FIN_CACHE).forEach(function(id){
+    var os = KB_OS[id]; if(!os) return;
+    var fin = _KB_OS_FIN_CACHE[id]; if(!fin) return;
+    _KB_OS_FIN_FIELDS.forEach(function(f){ if(fin[f]!==undefined) os[f]=fin[f]; });
+    if(fin.itensValores && Array.isArray(os.itens)){
+      os.itens.forEach(function(it, i){
+        if(!it || !fin.itensValores[i]) return;
+        if(fin.itensValores[i].unit!==undefined)  it.unit  = fin.itensValores[i].unit;
+        if(fin.itensValores[i].total!==undefined) it.total = fin.itensValores[i].total;
+      });
+    }
+  });
+}
 
 let _kbOsId = null;
 const _kbStatusMap = {
@@ -10373,6 +10489,37 @@ const _kbStatusMap = {
   orcamento:        { cls:'si',  txt:'Orçamento'         },
   aguardando_saldo: { cls:'sas', txt:'💰 Aguard. Saldo'  }
 };
+
+// RODADA 2, P0.5 (2026-08-07) — antes, a OS só mostrava um resumo genérico
+// (título + 1 material + 1 medida, sempre tirados de itens[0]), então um
+// pedido com vários produtos diferentes aparecia como se fosse só "Caixa".
+// Corrigido listando CADA item do pedido com produto/qtd/material/medidas/
+// observações — o suficiente para produzir sem abrir o orçamento comercial.
+// Nunca mostra valor unitário/total por item (dado financeiro — kb_os_fin
+// já garante via Rules que Produção nem recebe esses campos, ver P0.6).
+function kbRenderItensDetalhe(os) {
+  var wrap = document.getElementById('kbItensDetalhe');
+  if (!wrap) return;
+  var itens = (os.itens || []).filter(function (it) { return it && it.prod; });
+  if (!itens.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div class="section-lbl">📦 Itens do Pedido ('+itens.length+')</div>'
+    + '<div class="kb-itens-list">'
+    + itens.map(function (it, i) {
+        var medidas = (it.larg && it.alt) ? (it.larg+'×'+it.alt+' cm') : '—';
+        var extrasDesc = (it.extras && it.extras.descricao) ? String(it.extras.descricao) : '';
+        var obsPartes = [it.det, extrasDesc].filter(Boolean);
+        var obsHtml = obsPartes.length ? '<div style="grid-column:1/-1"><span class="kb-os-field-lbl">Observações / Acabamento</span>'+cfgEsc(obsPartes.join(' · '))+'</div>' : '';
+        var planHtml = (it.planArea && parseFloat(it.planArea) > 0) ? '<div><span class="kb-os-field-lbl">Área planificada</span>'+parseFloat(it.planArea).toFixed(2)+' m²</div>' : '';
+        return '<div class="kb-item-card">'
+          + '<div class="kb-item-hdr"><strong>'+(i+1)+'. '+cfgEsc(it.prod)+'</strong><span class="kb-item-qty">'+(it.qty||1)+'un</span></div>'
+          + '<div class="kb-item-body">'
+          + '<div><span class="kb-os-field-lbl">Material</span>'+cfgEsc(it.mat||'—')+'</div>'
+          + '<div><span class="kb-os-field-lbl">Medidas</span>'+medidas+'</div>'
+          + planHtml + obsHtml
+          + '</div></div>';
+      }).join('')
+    + '</div>';
+}
 
 function kbOpen(id) {
   const os = KB_OS[id]; if (!os) return;
@@ -10426,6 +10573,7 @@ function kbOpen(id) {
     <div class="kb-os-field"><div class="kb-os-field-lbl">Entrega</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Valor Total</div><div class="kb-os-field-val" style="color:#059669;font-size:14px;font-weight:700">${_valorFmt}</div></div>
   `;
+  kbRenderItensDetalhe(os);
 
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
   kbRenderChecklist(os);
@@ -10947,11 +11095,36 @@ function kbExcluirSelecionados() {
 }
 
 // ── KB_OS cloud save helper ───────────────────────────────────────────────────
+// Corrigido 2026-08-07 (Rodada 2, P0.6) — privacidade financeira real da
+// Produção: campos financeiros nunca vão para o documento erp_vr/kb_os
+// (que a Produção precisa ler/escrever para trabalhar no Kanban) — vão
+// para erp_vr/kb_os_fin, cujas Rules nunca liberam leitura/escrita para
+// Produção. A Produção NUNCA escreve kb_os_fin (guard ehProducao abaixo);
+// mesmo sem esse guard, o finCopy dela sempre sairia vazio (ela nunca
+// conseguiu ler o financeiro de ninguém para poder reescrevê-lo), então
+// isto é defesa em profundidade, não a única proteção.
 function kbSaveKbos() {
   if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
-  var kbCopy={};
-  Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
-  return _cloudSave('kb_os', kbCopy);
+  var kbCopy={}, finCopy={};
+  Object.keys(KB_OS).forEach(function(k){
+    var o=Object.assign({},KB_OS[k]);
+    delete o.planImg;
+    var fin={};
+    _KB_OS_FIN_FIELDS.forEach(function(f){ if(o[f]!==undefined){ fin[f]=o[f]; delete o[f]; } });
+    if(Array.isArray(o.itens)){
+      var temValores = o.itens.some(function(it){ return it && (it.unit!==undefined || it.total!==undefined); });
+      if(temValores) fin.itensValores = o.itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; });
+      o.itens = o.itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; });
+    }
+    kbCopy[k]=o;
+    if(Object.keys(fin).length) finCopy[k]=fin;
+  });
+  var ehProducao = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='producao';
+  var p1 = _cloudSave('kb_os', kbCopy);
+  var p2 = (ehProducao || !Object.keys(finCopy).length) ? Promise.resolve({ok:true}) : _cloudSave('kb_os_fin', finCopy);
+  return Promise.all([p1,p2]).then(function(results){
+    return {ok: !!(results[0]&&results[0].ok), kbOk: !!(results[0]&&results[0].ok), finOk: !!(results[1]&&results[1].ok)};
+  });
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────
 function kbInitWeekHeaders() {
@@ -11312,6 +11485,71 @@ function kbEditarMatProd() {
   _kbOpenProdOverlay(os);
 }
 
+// RODADA 2, P0.7 (2026-08-07) — sugestão automática de material ao iniciar
+// produção, calculada a partir da área planificada do orçamento (nunca
+// inventa consumo: usa itens[].planArea quando existe, senão larg×alt×qty
+// dos próprios itens da OS). O operador sempre pode sobrescrever manual-
+// mente (tipo, quantidade, retalho) antes de confirmar — a baixa de
+// estoque só acontece em kbConfirmarProd(), nunca aqui.
+function kbCalcAreaOS(os) {
+  var itens = os.itens || [];
+  var total = 0;
+  itens.forEach(function (it) {
+    if (it && it.planArea && parseFloat(it.planArea) > 0) { total += parseFloat(it.planArea); return; }
+    var l = it && parseFloat(it.larg) || 0, a = it && parseFloat(it.alt) || 0, q = it && parseInt(it.qty) || 1;
+    if (l > 0 && a > 0) total += (l * a / 10000) * q;
+  });
+  return total; // m²
+}
+function kbParseDimsArea(dimsStr) {
+  var m = String(dimsStr || '').match(/(\d+(?:[.,]\d+)?)\s*[×xX]\s*(\d+(?:[.,]\d+)?)/);
+  if (!m) return 0;
+  var w = parseFloat(m[1].replace(',', '.')), h = parseFloat(m[2].replace(',', '.'));
+  return (w * h) / 10000; // cm → m²
+}
+function kbSugerirMaterial(os, matKey) {
+  var areaNecessaria = kbCalcAreaOS(os);
+  if (!areaNecessaria || !matKey || !STOCK[matKey]) return null;
+  // Retalhos compatíveis: mesmo material E área grande o bastante para a
+  // peça planificada (encaixe) — pequena tolerância de 2% para arredondamento.
+  var rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
+    return r.qty > 0 && r.mat === matKey && kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
+  }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); }); // menor retalho que ainda serve, primeiro
+  if (rCompativeis.length) {
+    var r = rCompativeis[0];
+    return { tipo: 'retalho', retalho: r, texto: '💡 Sugestão: usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm (cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²).' };
+  }
+  var s = STOCK[matKey];
+  var areaChapa = (s.chapLarg && s.chapComp) ? (s.chapLarg * s.chapComp / 10000) : 0;
+  if (!areaChapa) return null;
+  var fracaoBruta = areaNecessaria / areaChapa;
+  var fracao = fracaoBruta <= 0.5 ? 0.5 : Math.ceil(fracaoBruta * 4) / 4; // arredonda pra cima em passos de 1/4 chapa
+  var fracaoTxt = fracao === 1 ? '1 chapa' : (String(fracao).replace('.', ',') + ' chapa' + (fracao > 1 ? 's' : ''));
+  return { tipo: 'chapa', fracaoChapa: fracao, texto: '💡 Sugestão: usar ' + fracaoTxt + ' (área planificada ' + areaNecessaria.toFixed(2) + ' m² de ' + areaChapa.toFixed(2) + ' m²/chapa).' };
+}
+function kbProdOnMatChange() {
+  var os = KB_OS[_kbOsId];
+  var matKey = (document.getElementById('kbProdMatSel') || {}).value || '';
+  var sugBox = document.getElementById('kbProdSugestaoBox');
+  var sug = (os && matKey && !_kbProdEditMode) ? kbSugerirMaterial(os, matKey) : null;
+  if (sug) {
+    if (sugBox) { sugBox.style.display = ''; sugBox.textContent = sug.texto; }
+    if (sug.tipo === 'chapa') {
+      kbProdSetTipo('chapa');
+      var qtyEl = document.getElementById('kbProdQty'); if (qtyEl) qtyEl.value = sug.fracaoChapa;
+    } else {
+      kbProdSetTipo('retalho');
+      var retSel = document.getElementById('kbProdRetalhoSel');
+      if (retSel) {
+        var rList = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) { return r.qty > 0; });
+        var idx = rList.indexOf(sug.retalho);
+        if (idx >= 0) retSel.value = String(idx);
+      }
+    }
+  } else if (sugBox) { sugBox.style.display = 'none'; }
+  kbProdCheckStock();
+}
+
 function _kbOpenProdOverlay(os) {
   // Subtitle
   var sub = document.getElementById('kbProdSubtitle');
@@ -11353,9 +11591,12 @@ function _kbOpenProdOverlay(os) {
   if (obsEl) obsEl.value = (_kbProdEditMode && os.matProd) ? (os.matProd.obs||'') : '';
   // Set tipo buttons
   kbProdSetTipo(_kbProdTipo);
-  // Check stock / retalhos on open if material already selected
+  // Check stock / retalhos on open if material already selected — em modo
+  // edição só reconfere estoque (nunca sobrescreve o que já foi salvo); em
+  // abertura nova, também calcula a sugestão automática (P0.7).
   var si = document.getElementById('kbProdStockInfo'); if (si) si.style.display = 'none';
-  if (matSel && matSel.value) setTimeout(kbProdCheckStock, 50);
+  var sugBoxInit = document.getElementById('kbProdSugestaoBox'); if (sugBoxInit) sugBoxInit.style.display = 'none';
+  if (matSel && matSel.value) setTimeout(_kbProdEditMode ? kbProdCheckStock : kbProdOnMatChange, 50);
   document.getElementById('kbProdOverlay').classList.add('open');
 }
 
@@ -11401,7 +11642,7 @@ function kbProdCheckStock() {
   if (rList.length > 0) {
     html += '<div style="background:#E3F7FB;border:1px solid #7DD3E8;border-radius:6px;padding:7px 10px;margin-bottom:6px;cursor:pointer" onclick="kbProdSetTipo(&quot;retalho&quot;)">'
       + '<span style="font-weight:700;color:#983C8F">✂️ Atenção: você tem ' + rList.length + ' retalho(s) deste material disponível!</span>'
-      + '<div style="font-size:10px;color:#1EB8D8;margin-top:2px">' + rList.map(function(r){ return r.dims + ' cm'; }).join(' · ') + '</div>'
+      + '<div style="font-size:10px;color:#1EB8D8;margin-top:2px">' + rList.map(function(r){ return (r.codigo?r.codigo+' — ':'') + r.dims + ' cm'; }).join(' · ') + '</div>'
       + '<div style="font-size:10px;color:#1EB8D8;margin-top:1px">Clique aqui para usar um retalho em vez de abrir chapa nova.</div>'
       + '</div>';
   }
@@ -11616,31 +11857,38 @@ function kbReceberSaldo() {
 
   function _tentar() {
     var refKb = _db.collection(_COL).doc('kb_os');
+    // Rodada 2, P0.6 — restante/valorEntrada/formaPgto agora vivem em
+    // kb_os_fin (fora do alcance de leitura da Produção); esta transação
+    // precisa reler e regravar os dois documentos juntos.
+    var refKbFin = _db.collection(_COL).doc('kb_os_fin');
     var refCr = _db.collection(_COL).doc('fin_cr');
     var refTx = _db.collection(_COL).doc('fin_tx');
     var refOrc = _db.collection(_COL).doc('orcamentos');
     return _db.runTransaction(function (txn) {
-      return Promise.all([txn.get(refKb), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
+      return Promise.all([txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
         var kbData = _parsedDoc(snaps[0]) || {};
-        var crArr = _parsedDoc(snaps[1]) || [];
-        var txArr = _parsedDoc(snaps[2]) || [];
-        var orcArr = _parsedDoc(snaps[3]);
+        var kbFinData = _parsedDoc(snaps[1]) || {};
+        var crArr = _parsedDoc(snaps[2]) || [];
+        var txArr = _parsedDoc(snaps[3]) || [];
+        var orcArr = _parsedDoc(snaps[4]);
 
         var osServidor = kbData[_osIdSnap];
+        var finServidor = kbFinData[_osIdSnap] || {};
         if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
-        if ((osServidor.restante || 0) <= 0) {
-          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = osServidor; throw eJa;
+        if ((finServidor.restante || 0) <= 0) {
+          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = Object.assign({}, osServidor, finServidor); throw eJa;
         }
 
-        var valorRecebido = osServidor.restante || 0;
+        var valorRecebido = finServidor.restante || 0;
         osServidor.status = 'iniciada';
-        osServidor.restante = 0;
+        finServidor.restante = 0;
         kbData[_osIdSnap] = osServidor;
+        kbFinData[_osIdSnap] = finServidor;
 
         var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
         if (crEntry) { crEntry.status = 'recebido'; crEntry.dataRecebimento = dia; }
 
-        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: osServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
+        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: finServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
         txArr = [novaTx].concat(txArr);
 
         var orcMutado = false;
@@ -11649,16 +11897,17 @@ function kbReceberSaldo() {
           if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
         }
 
-        var kbPayload = JSON.stringify(kbData), txPayload = JSON.stringify(txArr);
+        var kbPayload = JSON.stringify(kbData), kbFinPayload = JSON.stringify(kbFinData), txPayload = JSON.stringify(txArr);
         var crPayload = crEntry ? JSON.stringify(crArr) : null;
         var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
 
         txn.set(refKb, { data: kbPayload, ts: Date.now() });
+        txn.set(refKbFin, { data: kbFinPayload, ts: Date.now() });
         txn.set(refTx, { data: txPayload, ts: Date.now() });
         if (crEntry) txn.set(refCr, { data: crPayload, ts: Date.now() });
         if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
 
-        return { osServidor: osServidor, valorRecebido: valorRecebido, kbPayload: kbPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
+        return { osServidor: Object.assign({}, osServidor, finServidor), valorRecebido: valorRecebido, kbPayload: kbPayload, kbFinPayload: kbFinPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
       });
     });
   }
@@ -11674,9 +11923,13 @@ function kbReceberSaldo() {
   function _finalizarSucesso(r) {
     os._recebendoSaldo = false;
     _cloudLastPayload['kb_os'] = r.kbPayload;
+    _cloudLastPayload['kb_os_fin'] = r.kbFinPayload;
     _cloudLastPayload['fin_tx'] = r.txPayload;
     if (r.crPayload) _cloudLastPayload['fin_cr'] = r.crPayload;
     if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
+    // r.osServidor já vem com kb_os + kb_os_fin mesclados (ver _tentar) —
+    // KB_OS[id] continua com os campos financeiros para quem tem permissão
+    // de tê-los (esta ação só é alcançável por Financeiro/Comercial/Master).
     KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
     if (r.crPayload) FIN_CR = r.crArr;
     FIN_TX = r.txArr;
@@ -16589,8 +16842,28 @@ function vitreCatalogoInit() {
   }, function (err) { console.warn('[Vitre] listener vitre_produtos falhou:', err); });
 }
 
+// RODADA 2, P2 — alternância Grade | Lista do Catálogo Vitre. Preferência
+// persistida em localStorage (best-effort, nunca bloqueia a tela se
+// localStorage falhar — mesmo padrão try/catch já usado alhures no arquivo).
+function vitreCatGetView() {
+  try { return localStorage.getItem('vitre_cat_view') || 'grade'; } catch (e) { return 'grade'; }
+}
+function vitreCatSetView(modo) {
+  try { localStorage.setItem('vitre_cat_view', modo); } catch (e) { }
+  var btnG = document.getElementById('vitreCatBtnGrade'), btnL = document.getElementById('vitreCatBtnLista');
+  if (btnG) { btnG.style.background = modo === 'grade' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnG.style.color = modo === 'grade' ? '#fff' : 'var(--text)'; }
+  if (btnL) { btnL.style.background = modo === 'lista' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnL.style.color = modo === 'lista' ? '#fff' : 'var(--text)'; }
+  vitreCatalogoRender();
+}
+
 function vitreCatalogoRender() {
   var wrap = document.getElementById('vitreCatList'); if (!wrap) return;
+  var modoView = vitreCatGetView();
+  var btnG = document.getElementById('vitreCatBtnGrade'), btnL = document.getElementById('vitreCatBtnLista');
+  if (btnG && btnL) {
+    btnG.style.background = modoView === 'grade' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnG.style.color = modoView === 'grade' ? '#fff' : 'var(--text)';
+    btnL.style.background = modoView === 'lista' ? 'var(--vt-teal,#1E7A86)' : 'transparent'; btnL.style.color = modoView === 'lista' ? '#fff' : 'var(--text)';
+  }
 
   // Parte 7 da homologação guiada (2026-08-06) — achado: os botões de
   // topo ("Novo Produto"/"Importar planilha") ficavam visíveis para
@@ -16638,15 +16911,47 @@ function vitreCatalogoRender() {
   var minhaFuncao = vitreCatMinhaFuncao();
   var podeEditar = souMaster || minhaFuncao === 'producao';
 
-  wrap.innerHTML = lista.map(function (p) {
-    var nivel = vitreCatNivel(p);
-    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+  function vitreCatAcoes(p) {
     var acoes = '';
     if (podeEditar) acoes += '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">✏️ Editar</button>';
     if (souMaster) {
       acoes += '<button onclick="vitreCatalogoAtivarDesativar(\'' + cfgEsc(p.sku) + '\',' + (p.status === 'ativo') + ')" style="font-size:11px;padding:5px 10px;border:1px solid ' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';background:transparent;color:' + (p.status === 'ativo' ? '#DC2626' : '#16A34A') + ';border-radius:6px;cursor:pointer;margin-left:6px">' + (p.status === 'ativo' ? '🚫 Desativar' : '✅ Ativar') + '</button>';
       acoes += '<button onclick="vitreCatalogoDuplicar(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer;margin-left:6px">📄 Duplicar</button>';
     }
+    return acoes;
+  }
+
+  // RODADA 2, P2 — Grade (cards, comportamento original) ou Lista (tabela
+  // compacta: Produto/SKU/Categoria/Venda/Custo/Nível/Status/Ações) — os
+  // mesmos filtros/busca e as mesmas ações por linha em ambos os modos.
+  if (modoView === 'lista') {
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg2)">'
+      + ['Produto', 'SKU', 'Categoria', 'Venda', 'Custo', 'Nível', 'Status', 'Ações'].map(function (h) { return '<th style="padding:7px 10px;text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap">' + h + '</th>'; }).join('')
+      + '</tr></thead><tbody>'
+      + lista.map(function (p) {
+          var nivel = vitreCatNivel(p);
+          var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+          return '<tr>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);font-weight:700">' + cfgEsc(p.nome || '(sem nome)') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + cfgEsc(p.sku) + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + cfgEsc(p.categoria || '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + (p.precoVenda != null ? 'R$ ' + Number(p.precoVenda).toFixed(2) : '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + (p.custo != null ? 'R$ ' + Number(p.custo).toFixed(2) : '—') + '</td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;white-space:nowrap">' + VITRE_NIVEL_LABEL[nivel] + '</span></td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + (p.status === 'ativo' ? 'ATIVO' : 'INATIVO') + '</span></td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><div style="display:flex;flex-wrap:wrap;gap:6px">' + vitreCatAcoes(p) + '</div></td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+    return;
+  }
+  wrap.style.display = 'grid'; wrap.style.gridTemplateColumns = 'repeat(auto-fill,minmax(280px,1fr))'; wrap.style.gap = '10px';
+  wrap.innerHTML = lista.map(function (p) {
+    var nivel = vitreCatNivel(p);
+    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+    var acoes = vitreCatAcoes(p);
     return '<div class="card" style="padding:14px">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
       + '<div><strong>' + cfgEsc(p.nome || '(sem nome)') + '</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">SKU ' + cfgEsc(p.sku) + (p.categoria ? ' · ' + cfgEsc(p.categoria) : '') + '</div></div>'
@@ -17035,6 +17340,7 @@ function orcResetFormularioVR(){
   window._orcCalc = {};
   _orcClienteAprovado = false;
   if(typeof orcRecalc==='function') orcRecalc();
+  if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
 }
 function orcIniciarFluxoVR() {
   if(orcVRTemDadosPendentes() && !_e2eDlgConfirm('Os dados deste orçamento ainda não foram salvos. Iniciar um novo orçamento agora vai descartá-los. Continuar?')) return;
@@ -17589,9 +17895,10 @@ function vitreOrcPgtoRenderParcelas() {
   if (tipo === 'integral') {
     wrap.innerHTML = '<div class="fg"><label>Valor (integral)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>';
   } else if (tipo === 'entrada_saldo') {
-    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : 0;
-    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : totalReais;
-    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
+    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : Math.round((totalReais / 2) * 100) / 100;
+    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : Math.round((totalReais - entradaSalva) * 100) / 100;
+    var sugestao5050Txt = '= 50% do total — corresponde a R$ ' + entradaSalva.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '><small style="color:#888;display:block;margin-top:2px">' + sugestao5050Txt + '</small></div>'
       + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + saldoSalvo.toFixed(2) + '" step="0.01" disabled></div></div>';
   } else if (tipo === 'futuro') {
     var vencSalvo = parcelasSalvas[0] ? (parcelasSalvas[0].vencimento || '') : '';
@@ -17772,18 +18079,23 @@ function vitreOrcCancelar(id) {
     else showToast('Erro: ' + msg, 'err');
   });
 }
-var VITRE_OS_TIPO_LABEL = { pronta_entrega: '📦 Pronta entrega', produzido_apos_pedido: '🏭 Produzido após o pedido', ficha_incompleta: '⚠️ Ficha incompleta — revisão humana', produto_removido: '⚠️ Produto removido do catálogo' };
+// Corrigido 2026-08-07 (Rodada 2, P0.4) — "ficha_incompleta" não bloqueia
+// mais a conversão (Vitre é majoritariamente sob encomenda); o rótulo e o
+// fluxo abaixo refletem isso — a OS é gerada com aviso operacional, nunca
+// travada por falta de estoque pronto ou ficha técnica.
+var VITRE_OS_TIPO_LABEL = { pronta_entrega: '📦 Pronta entrega', produzido_apos_pedido: '🏭 Produzido após o pedido', ficha_tecnica_pendente: '⚠️ Ficha técnica pendente — completar antes de cortar', produto_removido: '🚫 Produto removido do catálogo' };
 function vitreOrcConverterEmOS(id) {
-  if (!_e2eDlgConfirm('Converter este orçamento em Ordem de Serviço? Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha incompleta).')) return;
+  if (!_e2eDlgConfirm('Converter este orçamento em Ordem de Serviço? Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha técnica pendente).')) return;
   firebase.functions().httpsCallable('vitreConverterOrcamentoParaOS')({ orcamentoId: id, requestId: vitreCatReqId() }).then(function (res) {
     var r = res.data;
     var linhas = (r.itens || []).map(function (it) { return '• ' + it.qtd + 'x ' + it.nomeSnapshot + ' — ' + (VITRE_OS_TIPO_LABEL[it.tipo] || it.tipo) + (it.motivoBloqueio ? ' (' + it.motivoBloqueio + ')' : ''); }).join('\n');
     if (r.bloqueado) {
-      showToast('Conversão bloqueada — ao menos um item precisa de revisão humana antes de gerar OS.', 'err');
+      showToast('Conversão bloqueada — produto removido do catálogo, requer revisão humana.', 'err');
       alert('Conversão BLOQUEADA — nenhuma OS foi gerada, nenhum estoque foi baixado.\n\n' + linhas);
     } else {
-      showToast('OS Vitre gerada com sucesso.', 'ok');
-      alert('OS gerada com sucesso!\n\n' + linhas);
+      var temPendente = (r.itens || []).some(function (it) { return it.avisoOperacional; });
+      showToast(temPendente ? 'OS Vitre gerada — 1 ou mais itens com ficha técnica pendente (ver aviso).' : 'OS Vitre gerada com sucesso.', temPendente ? 'warn' : 'ok');
+      alert((temPendente ? 'OS gerada com aviso operacional!\n\nItens com ficha técnica pendente precisam de cadastro (material/arquivo de corte) antes de cortar — a OS já existe, produção pode iniciar os demais itens.\n\n' : 'OS gerada com sucesso!\n\n') + linhas);
       if (id === VITRE_ORC_ATUAL_ID) vitreOrcAtualizarEstadoAtual();
     }
   }).catch(function (e) {
@@ -19570,6 +19882,7 @@ async function _orcSalvarOrcamentoImpl() {
     lista.unshift(orc);
   }
   window._orcSessaoAtualId = orc.id;
+  if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
   orcSetEnviados(lista);
   // Dual-write: além do array legado (erp_vr/orcamentos, ainda a fonte de
   // verdade lida pela UI existente), grava também o núcleo comercial deste
@@ -20045,6 +20358,10 @@ function orcEnvAbrir(id) {
        +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
       ) : '')
     +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
+    // Rodada 2, P0.3 — só aparece quando existe entrada realmente
+    // confirmada (OS gerada com valorEntrada>0), nunca a partir de um
+    // campo de texto solto.
+    +(orcObterConfirmacaoEntrada(o.id).pode ? '<button class="topbar-btn ghost" style="color:#D97706;border-color:#D97706" onclick="orcGerarReciboEntrada(\''+o.id+'\')" >🧾 Recibo de Entrada</button>' : '')
     +'</div></div>';
   modal.style.display='flex';
 }
@@ -20184,6 +20501,7 @@ function orcEnvEditar(id) {
     // Idempotência: liga esta sessão do wizard ao orçamento existente —
     // orcSalvarOrcamento() vai atualizar o mesmo registro, nunca duplicar.
     window._orcSessaoAtualId = o.id;
+    if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
     showToast('Orçamento #'+o.num+' carregado para edição','ok');
     orcRecalc();
   }, 200);
@@ -20319,8 +20637,12 @@ function orcPagtoTipoSel(btn){
   if(tipo==='50-50'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal');
-    if(entEl) entEl.value=(valorTotal/2).toFixed(2);
-    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='= 50% do total';
+    var metade=(valorTotal/2);
+    if(entEl) entEl.value=metade.toFixed(2);
+    // Corrigido 2026-08-07 (Rodada 2, P0.1) — só mostrava "= 50% do
+    // total", sem o valor em reais explícito, que era o pedido: "50%
+    // corresponde a R$ X".
+    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='= 50% do total — corresponde a R$ '+metade.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   } else if(tipo==='parcial'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal'); if(entEl) entEl.value='';
@@ -20444,6 +20766,11 @@ function orcEnvGerarOS(){
       orcRef:o.id, orcNum:o.num,
       pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
     };
+    // Rodada 2, P0.6 — mesmo no fallback local (sem Firestore), separa os
+    // campos financeiros para o mesmo formato usado por kbSaveKbos()/
+    // _kbMergeFinCache(), mantendo o comportamento em memória consistente
+    // com o caminho transacional real logo abaixo.
+    if(typeof kbSaveKbos==='function') kbSaveKbos();
     o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
     o.osRef=newIdLocal; orcSetEnviados(lista);
     if(valorEntrada>0){
@@ -20456,15 +20783,21 @@ function orcEnvGerarOS(){
 
   var refOrc=_db.collection(_COL).doc('orcamentos');
   var refOS =_db.collection(_COL).doc('kb_os');
+  // Rodada 2, P0.6 — campos financeiros da OS vão para um documento
+  // separado (kb_os_fin), cujas Rules nunca liberam leitura/escrita para
+  // Produção. Gravado dentro da MESMA transação que kb_os — nunca fica
+  // um sem o outro.
+  var refOSFin=_db.collection(_COL).doc('kb_os_fin');
   var refCR =_db.collection(_COL).doc('fin_cr');
   var refCnt=_db.collection(_COL).doc('erp_os_counter');
 
   return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refCR), txn.get(refCnt)])
+    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refCnt)])
       .then(function(snaps){
-        var docOrc=snaps[0], docOS=snaps[1], docCR=snaps[2], docCnt=snaps[3];
+        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCR=snaps[3], docCnt=snaps[4];
         var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
         var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
+        var objOSFin = (docOSFin.exists && docOSFin.data() && docOSFin.data().data) ? JSON.parse(docOSFin.data().data) : {};
         var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
         var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
 
@@ -20492,13 +20825,18 @@ function orcEnvGerarOS(){
           // direto em "iniciada", inconsistente com o próprio valor de
           // `restante` calculado logo acima.
           status:restante>0?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
-          valor:valorTotal,prog:0,pronto:false,
+          prog:0,pronto:false,
           checks:checksProducao,_ck:_ckProducao,
-          parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
-          clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
-          itens:itens,totalGeral:valorTotal,obs:obs,
-          orcRef:o.id, orcNum:o.num,
-          pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
+          clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+          clientCidade:'—',vendedor:'',dataOS:dia,
+          itens:itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; }),
+          obs:obs,
+          orcRef:o.id, orcNum:o.num
+        };
+        objOSFin[newId] = {
+          valor:valorTotal, totalGeral:valorTotal, parcelas:o.parcelas||1,
+          formaPgto:forma, pagtoTipo:tipo, valorEntrada:valorEntrada, restante:restante,
+          itensValores: itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; })
         };
         arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
         arrOrc[idxOrc].osRef = newId;
@@ -20510,20 +20848,28 @@ function orcEnvGerarOS(){
 
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
         txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
+        txn.set(refOSFin, {data:JSON.stringify(objOSFin), ts:Date.now()});
         txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
         txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
 
-        return {num:n, arrOrc:arrOrc, objOS:objOS, arrCR:arrCR};
+        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin, arrCR:arrCR};
       });
   }).then(function(resultado){
     // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
-    // memória com exatamente o que a transação gravou.
+    // memória com exatamente o que a transação gravou. KB_OS recebe o
+    // financeiro de volta via _kbMergeFinCache() — quem chama
+    // orcEnvGerarOS() é sempre Comercial/Master, que tem permissão real
+    // de ler kb_os_fin, então este merge local não vaza nada que o papel
+    // atual já não pudesse ler do próprio Firestore.
     _ORC_ENVIADOS_DATA = resultado.arrOrc;
     KB_OS = resultado.objOS;
+    _KB_OS_FIN_CACHE = resultado.objOSFin;
+    if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
     FIN_CR = resultado.arrCR;
     _OS_COUNTER = resultado.num;
     _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
     _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
+    _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
     _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
     finalizar(true, resultado);
