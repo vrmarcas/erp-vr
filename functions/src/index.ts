@@ -97,3 +97,9 @@ export {
   valeriaVitreCriarRascunho,
   valeriaVitreEncaminharVR,
 } from "./valeria_vitre";
+
+// ── Admin ops (Rodada 3.1, 2026-08-08) — caminho administrativo temporário
+//    e auditável para aplicar o seed de contas bancárias e o histórico
+//    2018-2026 em produção sem GOOGLE_APPLICATION_CREDENTIALS local. Ver
+//    admin_ops.ts para o racional completo. Remover após o uso desta rodada. ──
+export { adminOneTimeOps } from "./admin_ops";
