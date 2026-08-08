@@ -15178,8 +15178,18 @@ function relCaixaDiario() {
   }
   var cxAnt=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
 
-  // ENTRADAS: FIN_CR recebidos na data
+  // VENDAS DO DIA (Rodada 3, seção 13) — distinto de ENTRADAS: fin_cr é criado
+  // no momento da venda (orcEnvGerarOS()), com dataCriacao = dia da venda,
+  // independente de status (recebido OU pendente). Ex.: venda 50/50 de
+  // R$200 no dia X gera 2 registros (R$100 recebido + R$100 pendente),
+  // ambos com dataCriacao=X — Vendas do dia X = R$200, mesmo que o restante
+  // só seja recebido em outro dia (aí SÓ entra em Entradas daquele outro
+  // dia, nunca em Vendas de novo — nunca duplica).
   var allCR=FIN_CR;
+  var vendasDia=allCR.filter(function(r){return r.dataCriacao===dtBR;});
+  var totVendas=vendasDia.reduce(function(s,r){return s+r.valor;},0);
+
+  // ENTRADAS: FIN_CR recebidos na data (dinheiro que efetivamente entrou hoje)
   var entradas=allCR.filter(function(r){return r.status==='recebido'&&r.dataRecebimento===dtBR;});
 
   // SAÍDAS: FIN_CP pagos na data
@@ -15200,6 +15210,7 @@ function relCaixaDiario() {
   var gridEl=document.getElementById('relCaixaGrid'); if(!gridEl) return;
   gridEl.innerHTML=
     '<div class="caixa-card"><div class="caixa-card-lbl">Caixa Anterior</div><div class="caixa-card-val">'+f(cxAnt)+'</div></div>'+
+    '<div class="caixa-card"><div class="caixa-card-lbl">Vendas do Dia</div><div class="caixa-card-val">'+f(totVendas)+'</div></div>'+
     '<div class="caixa-card"><div class="caixa-card-lbl">Total Entradas</div><div class="caixa-card-val caixa-saldo-pos">'+f(totEnt)+'</div></div>'+
     '<div class="caixa-card"><div class="caixa-card-lbl">Total Saídas</div><div class="caixa-card-val caixa-saldo-neg">'+f(totSai)+'</div></div>'+
     '<div class="caixa-card"><div class="caixa-card-lbl">Ent. + Cx. Anterior</div><div class="caixa-card-val">'+f(cxAnt+totEnt)+'</div></div>'+
