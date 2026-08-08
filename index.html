@@ -2268,12 +2268,29 @@ function _authFirebaseError(code){
           <div class="ekpi-trend" id="dkVendasSub">recebido</div>
           <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkVendasBar" style="width:0%;background:#1D4ED8"></div></div>
         </div>
+        <!-- RODADA 5, seção 1 — CR × CP: fonte FIN_CR/FIN_CP, mesma usada em
+             finDashKPIs() e no Caixa Diário. -->
+        <div class="ekpi" style="cursor:pointer" onclick="nav('financeiro',null);setTimeout(function(){finTab('cr');},50)">
+          <div class="ekpi-ico">💳</div>
+          <div class="ekpi-lbl">CR × CP (pendente)</div>
+          <div class="ekpi-val" id="dkCrCp" style="font-size:15px">—</div>
+          <div class="ekpi-trend" id="dkCrCpSub">nenhuma vencida</div>
+          <div class="ekpi-bar"><div class="ekpi-bar-fill" id="dkCrCpBar" style="width:0%;background:#059669"></div></div>
+        </div>
       </div>
 
       <!-- Charts 2×2 -->
       <div class="echart-grid">
         <div class="echart">
-          <div class="echart-h">📅 Faturamento por Mês <span class="echart-sub" id="dFatSub"></span></div>
+          <!-- RODADA 5, seção 1 — achado de auditoria: este gráfico é sourced
+               de FIN_TX, que só recebe registros no momento em que um CR é
+               confirmado como recebido (_finCRBaixaConfirmar) + baixas
+               manuais avulsas (finBaixaManual) — ou seja, é dinheiro que
+               ENTROU no caixa, não o valor VENDIDO. O rótulo antigo
+               "Faturamento" estava semanticamente errado (Vendas é uma
+               fonte distinta, ver dashCalcularVendasRecebimentos); corrigido
+               para "Recebimentos", que é o que os dados realmente são. -->
+          <div class="echart-h">📅 Recebimentos por Mês <span class="echart-sub" id="dFatSub"></span></div>
           <div class="bar-area" id="dFatBars"></div>
           <div class="bleg">
             <div class="bleg-item"><div class="bleg-dot" style="background:#1EB8D8"></div>VR Marcas</div>
@@ -2290,6 +2307,13 @@ function _authFirebaseError(code){
         <div class="echart">
           <div class="echart-h">🏭 Status de Produção <span class="echart-sub">OS em andamento</span></div>
           <div id="dProdStatus" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+          <!-- RODADA 5, seção 1 — breakdown operacional canônico
+               (abertas/em produção/prontas/entregues/atrasadas), clicável
+               para abrir o Kanban filtrado (seção 4, drill-down). -->
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:6px">OS por status operacional</div>
+            <div id="dOSBreakdown" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+          </div>
           <div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border)">
             <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Eficiência de Prazos</div>
             <div style="display:flex;align-items:center;gap:8px">
@@ -12315,6 +12339,14 @@ function dashSetBrand(b) {
   dashRender();
 }
 
+// RODADA 5, seção 4 — drill-down do breakdown de OS: abre o Kanban (as
+// colunas do board já SÃO os status abertas/produção/prontas/entregues —
+// reaproveita a estrutura existente em vez de duplicar um filtro paralelo).
+function dashAbrirKanbanFiltrado(lbl) {
+  nav('kanban', null);
+  setTimeout(function(){ if(typeof showToast==='function') showToast('Kanban — '+lbl, 'info'); }, 80);
+}
+
 // RODADA 4, seção 7/8 — auditoria matemática do Dashboard: KPIs comerciais
 // lidos da FONTE CANÔNICA (orcGetEnviados()), nunca do schema legado.
 // Fórmula documentada de cada campo:
@@ -12367,6 +12399,76 @@ function dashCalcularVendasRecebimentos(finCR, mesFiltro, marcaFiltro) {
   var recebimentos = (finCR || []).filter(function (r) { return marcaOk(r) && r.status === 'recebido' && mesOk(r.dataRecebimento); })
     .reduce(function (s, r) { return s + r.valor; }, 0);
   return { vendas: vendas, recebimentos: recebimentos };
+}
+
+// RODADA 5, seção 1 — Contas a Receber / Contas a Pagar do Dashboard
+// Executivo. Fonte canônica: FIN_CR/FIN_CP (mesma usada em finDashKPIs e
+// no Caixa Diário). Vencido = pendente/agendado com vencimento < hoje.
+function dashCalcularCRCP(finCR, finCP, marcaFiltro, hojeISO) {
+  var marcaOk = function (r) { return !marcaFiltro || marcaFiltro === 'all' || (r.marca || 'vr') === marcaFiltro; };
+  var hoje = hojeISO ? new Date(hojeISO + 'T12:00:00') : new Date();
+  var parseBR = function (dBR) {
+    var p = (dBR || '').split('/');
+    return p.length === 3 ? new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10)) : null;
+  };
+  var crList = (finCR || []).filter(marcaOk);
+  var crPendente = crList.filter(function (r) { return r.status === 'pendente'; });
+  var crVencido = crPendente.filter(function (r) { var d = parseBR(r.vencimento); return d && d < hoje; });
+  var cpList = (finCP || []).filter(marcaOk);
+  var cpPendente = cpList.filter(function (c) { return c.status === 'agendado' || c.status === 'pendente'; });
+  var cpVencido = cpList.filter(function (c) { if (c.status === 'pago') return false; var d = parseBR(c.vencimento); return d && d < hoje; });
+  return {
+    crTotal: crPendente.reduce(function (s, r) { return s + r.valor; }, 0),
+    crCount: crPendente.length,
+    crVencidoTotal: crVencido.reduce(function (s, r) { return s + r.valor; }, 0),
+    crVencidoCount: crVencido.length,
+    cpTotal: cpPendente.reduce(function (s, c) { return s + c.valor; }, 0),
+    cpCount: cpPendente.length,
+    cpVencidoTotal: cpVencido.reduce(function (s, c) { return s + c.valor; }, 0),
+    cpVencidoCount: cpVencido.length,
+  };
+}
+
+// OS abertas/em produção/prontas/entregues/atrasadas — fonte canônica
+// KB_OS, mesmo mapeamento de status já usado no gráfico "Status de
+// Produção" (sLabels/sColors em dashRender). Atrasada = não entregue/
+// cancelada, com prazo de entrega no passado.
+function dashCalcularOSBreakdown(kbOS, marcaFiltro, hojeISO) {
+  var hoje = hojeISO ? new Date(hojeISO + 'T12:00:00') : new Date();
+  var matchBrandOS = function (o) {
+    if (!marcaFiltro || marcaFiltro === 'all') return true;
+    var m = (o.mk || o.marca || '').toLowerCase();
+    if (marcaFiltro === 'vr') return m === 'vr' || m === 'vr marcas';
+    if (marcaFiltro === 'vitre') return m === 'vit' || m === 'vitre';
+    return true;
+  };
+  var list = Object.values(kbOS || {}).filter(matchBrandOS);
+  var abertas = list.filter(function (o) { return o.status === 'iniciada' || o.status === 'aguardando_saldo'; });
+  var emProducao = list.filter(function (o) { return o.status === 'producao'; });
+  var prontas = list.filter(function (o) { return o.status === 'pronta'; });
+  var entregues = list.filter(function (o) { return o.status === 'entregue'; });
+  var atrasadas = list.filter(function (o) {
+    if (o.status === 'entregue' || o.status === 'cancelado') return false;
+    var d = (o.entrega || '').split('/');
+    if (d.length < 2) return false;
+    var dt = new Date(parseInt(d[2] || hoje.getFullYear(), 10), parseInt(d[1], 10) - 1, parseInt(d[0], 10));
+    return dt < hoje;
+  });
+  return {
+    abertas: abertas.length,
+    emProducao: emProducao.length,
+    prontas: prontas.length,
+    entregues: entregues.length,
+    atrasadas: atrasadas.length,
+    total: list.length,
+  };
+}
+
+// Estoque crítico — mesma regra já usada em dashRender() (qty < min),
+// extraída para função pura testável (nenhuma mudança de comportamento).
+function dashCalcularEstoqueCritico(stock) {
+  var criticos = Object.values(stock || {}).filter(function (s) { return s.qty < s.min; });
+  return { count: criticos.length, itens: criticos };
 }
 
 function dashRender() {
@@ -12435,7 +12537,7 @@ function dashRender() {
   if(dkGargBar) { dkGargBar.style.width = Math.min(gargalos.length*25,100)+'%'; dkGargBar.style.background = gargalos.length>0?'#D97706':'#059669'; }
 
   // ── KPI 4: Estoque crítico ───────────────────────────────────────────────
-  var criticos = Object.values(STOCK).filter(function(s){ return s.qty < s.min; });
+  var criticos = dashCalcularEstoqueCritico(STOCK).itens;
   var dkEstq = document.getElementById('dkEstq');
   var dkEstqSub = document.getElementById('dkEstqSub');
   var dkEstqBar = document.getElementById('dkEstqBar');
@@ -12483,6 +12585,38 @@ function dashRender() {
   if(dkVendas) dkVendas.textContent = 'R$ '+vrKpis.vendas.toLocaleString('pt-BR',{minimumFractionDigits:2});
   if(dkVendasSub) dkVendasSub.textContent = 'Recebido: R$ '+vrKpis.recebimentos.toLocaleString('pt-BR',{minimumFractionDigits:2});
   if(dkVendasBar) dkVendasBar.style.width = Math.min((vrKpis.vendas?vrKpis.recebimentos/vrKpis.vendas*100:0),100)+'%';
+
+  // ── KPI 9: CR × CP (RODADA 5, seção 1) ────────────────────────────────
+  var crcp = dashCalcularCRCP(FIN_CR, FIN_CP, bf);
+  var dkCrCp=document.getElementById('dkCrCp'), dkCrCpSub=document.getElementById('dkCrCpSub'), dkCrCpBar=document.getElementById('dkCrCpBar');
+  if(dkCrCp) dkCrCp.textContent = 'R$ '+crcp.crTotal.toLocaleString('pt-BR',{minimumFractionDigits:2})+' / R$ '+crcp.cpTotal.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  if(dkCrCpSub){
+    var _vencTxt=[];
+    if(crcp.crVencidoCount) _vencTxt.push(crcp.crVencidoCount+' CR vencida'+(crcp.crVencidoCount!==1?'s':''));
+    if(crcp.cpVencidoCount) _vencTxt.push(crcp.cpVencidoCount+' CP vencida'+(crcp.cpVencidoCount!==1?'s':''));
+    dkCrCpSub.textContent = _vencTxt.length ? '⚠️ '+_vencTxt.join(' · ') : 'nenhuma vencida';
+    dkCrCpSub.style.color = _vencTxt.length ? '#DC2626' : 'var(--muted)';
+  }
+  if(dkCrCpBar){ var _vencTotal=crcp.crVencidoCount+crcp.cpVencidoCount; dkCrCpBar.style.width=Math.min(_vencTotal*20,100)+'%'; dkCrCpBar.style.background=_vencTotal>0?'#DC2626':'#059669'; }
+
+  // ── OS por status operacional (RODADA 5, seção 1) ─────────────────────
+  var osBreak = dashCalcularOSBreakdown(KB_OS, bf);
+  var dOSBreak = document.getElementById('dOSBreakdown');
+  if(dOSBreak){
+    var _osB=[
+      {lbl:'Abertas',v:osBreak.abertas,c:'#6B7280'},
+      {lbl:'Em Produção',v:osBreak.emProducao,c:'#D97706'},
+      {lbl:'Prontas',v:osBreak.prontas,c:'#059669'},
+      {lbl:'Entregues',v:osBreak.entregues,c:'#10B981'},
+      {lbl:'Atrasadas',v:osBreak.atrasadas,c:'#DC2626'},
+    ];
+    dOSBreak.innerHTML = _osB.map(function(b){
+      return '<div style="background:var(--bg2);border:1.5px solid '+b.c+';border-radius:8px;padding:8px 14px;min-width:76px;text-align:center;cursor:pointer" onclick="dashAbrirKanbanFiltrado(\''+b.lbl+'\')">'
+        +'<div style="font-size:22px;font-weight:800;color:'+b.c+'">'+b.v+'</div>'
+        +'<div style="font-size:9px;color:var(--muted);margin-top:2px;font-weight:600">'+b.lbl+'</div>'
+        +'</div>';
+    }).join('');
+  }
 
   // ── Chart 1: Faturamento mês a mês ──────────────────────────────────────
   var fatMes = {};
