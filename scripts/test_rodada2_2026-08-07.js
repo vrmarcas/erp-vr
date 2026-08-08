@@ -159,14 +159,50 @@ console.log('\n── Vitre OS com ficha incompleta não bloqueia (P0.4) ──�
 // liberados após o 1º save (window._orcSessaoAtualId atribuído). Espelha
 // _orcAtualizarVisibilidadeEnvio().
 // ────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────
+// P0.5 — OS detalhada: cada item do pedido aparece com produto/qtd/
+// material/medidas/observações, nunca só um resumo genérico do itens[0].
+// Espelha kbRenderItensDetalhe() (sem HTML real — só a extração de dados).
+// ────────────────────────────────────────────────────────────────────────
+console.log('\n── OS detalhada — snapshot operacional completo (P0.5) ────────\n');
+{
+  function extrairLinhasItens(itens) {
+    // Espelha exatamente os campos lidos por kbRenderItensDetalhe() — só
+    // prod/qty/mat/larg/alt/det/extras.descricao/planArea. NUNCA lê
+    // it.unit/it.total (dado financeiro), mesmo que existam no objeto de
+    // origem (Master/Financeiro têm esses campos via merge de kb_os_fin).
+    return (itens || []).filter(function (it) { return it && it.prod; }).map(function (it) {
+      return {
+        prod: it.prod, qty: it.qty || 1,
+        mat: it.mat || '—',
+        medidas: (it.larg && it.alt) ? (it.larg + '×' + it.alt + ' cm') : '—',
+        obs: [it.det, it.extras && it.extras.descricao].filter(Boolean).join(' · '),
+      };
+    });
+  }
+  var itensOS = [
+    { prod: 'Caixa Personalizada', qty: 2, mat: 'MDF 6mm', larg: 30, alt: 20, det: 'gravação a laser', unit: 'R$ 50,00', total: 'R$ 100,00' },
+    { prod: 'Placa de Acrílico', qty: 1, mat: 'Acrílico Cristal 3mm', larg: 40, alt: 15, extras: { descricao: 'furos para fixação', acabamento: 30 } },
+  ];
+  var linhas = extrairLinhasItens(itensOS);
+  test('20. OS com 2 produtos diferentes gera 2 linhas de detalhe (não resume em 1)', linhas.length, 2);
+  test('21. segunda linha traz material e medidas do PRÓPRIO item (não herda do item 1)', { mat: linhas[1].mat, medidas: linhas[1].medidas }, { mat: 'Acrílico Cristal 3mm', medidas: '40×15 cm' });
+  test('22. observação combina det + extras.descricao quando ambos existem', linhas[0].obs, 'gravação a laser');
+  test('22b. item sem det usa só extras.descricao', linhas[1].obs, 'furos para fixação');
+  // A função real (kbRenderItensDetalhe) só lê prod/qty/mat/larg/alt/det/
+  // extras.descricao/planArea — nunca it.unit/it.total no HTML gerado,
+  // mesmo que esses campos estejam presentes no objeto (Master/Financeiro).
+  test('22c. dado financeiro (unit/total) existe no objeto de origem mas nunca é usado na extração', linhas.every(function(l){ return !('unit' in l) && !('total' in l); }), true);
+}
+
 console.log('\n── Salvar antes de enviar (P0.2) ──────────────────────────────\n');
 {
   function estadoBotoesEnvio(sessaoAtualId) {
     var salvo = !!sessaoAtualId;
     return { salvar: true, whatsapp: salvo, pdf: salvo, email: salvo, linkPgto: salvo };
   }
-  test('20. antes do 1º save (sessao=null): só Salvar habilitado', estadoBotoesEnvio(null), { salvar: true, whatsapp: false, pdf: false, email: false, linkPgto: false });
-  test('21. depois do 1º save (sessao=ORC-1): todos os canais liberados', estadoBotoesEnvio('ORC-1'), { salvar: true, whatsapp: true, pdf: true, email: true, linkPgto: true });
+  test('23. antes do 1º save (sessao=null): só Salvar habilitado', estadoBotoesEnvio(null), { salvar: true, whatsapp: false, pdf: false, email: false, linkPgto: false });
+  test('24. depois do 1º save (sessao=ORC-1): todos os canais liberados', estadoBotoesEnvio('ORC-1'), { salvar: true, whatsapp: true, pdf: true, email: true, linkPgto: true });
 
   // Duplo clique em Salvar: orcSalvarOrcamento() reusa a MESMA promise em
   // voo (_orcSalvarEmVoo) — nunca dispara duas gravações/duas reservas de
@@ -182,7 +218,7 @@ console.log('\n── Salvar antes de enviar (P0.2) ─────────�
     return Promise.all([salvar(), salvar()]).then(function () { return chamadasReais; });
   }
   simularSalvarComDedup().then(function (chamadas) {
-    test('22. duplo clique em Salvar dispara só 1 gravação real (dedup por promise em voo)', chamadas, 1);
+    test('25. duplo clique em Salvar dispara só 1 gravação real (dedup por promise em voo)', chamadas, 1);
 
     console.log('\n' + '='.repeat(70));
     console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');

@@ -509,6 +509,15 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .kb-os-field{background:var(--bg);border-radius:7px;padding:9px 11px}
 .kb-os-field-lbl{font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:3px}
 .kb-os-field-val{font-size:12px;font-weight:700;color:var(--text)}
+/* RODADA 2, P0.5 — snapshot operacional completo (itens do pedido) */
+.kb-itens-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.kb-item-card{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px 12px}
+.kb-item-hdr{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}
+.kb-item-qty{background:var(--bg2);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;color:var(--muted)}
+.kb-item-body{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-size:11px;color:var(--text)}
+.kb-item-body>div{line-height:1.5}
+.kb-item-body .kb-os-field-lbl{display:block;margin-bottom:1px}
+.kb-item-pendente{margin-top:6px;font-size:10px;font-weight:700;color:#D97706;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:5px 8px}
 .kb-checklist{display:flex;flex-direction:column;gap:6px}
 .kb-check-item{display:flex;align-items:center;gap:9px;padding:8px 10px;background:var(--bg);border-radius:7px;cursor:pointer;transition:.1s;user-select:none}
 .kb-check-item:hover{background:#EDEBF8}
@@ -2526,6 +2535,11 @@ function _authFirebaseError(code){
         </div>
         <div class="kb-os-body">
           <div class="kb-os-grid" id="kbGrid"></div>
+          <!-- RODADA 2, P0.5 — snapshot operacional completo: todo item do
+               pedido (produto/qtd/material/medidas/observações), não só um
+               resumo genérico. O operário deve conseguir produzir sem abrir
+               o orçamento comercial. -->
+          <div id="kbItensDetalhe"></div>
           <!-- Tabs -->
           <div class="kb-os-tabs">
             <button class="kb-os-tab active" id="kbTabBtnProd" onclick="kbSwitchTab('prod')">📋 Produção</button>
@@ -10457,6 +10471,37 @@ const _kbStatusMap = {
   aguardando_saldo: { cls:'sas', txt:'💰 Aguard. Saldo'  }
 };
 
+// RODADA 2, P0.5 (2026-08-07) — antes, a OS só mostrava um resumo genérico
+// (título + 1 material + 1 medida, sempre tirados de itens[0]), então um
+// pedido com vários produtos diferentes aparecia como se fosse só "Caixa".
+// Corrigido listando CADA item do pedido com produto/qtd/material/medidas/
+// observações — o suficiente para produzir sem abrir o orçamento comercial.
+// Nunca mostra valor unitário/total por item (dado financeiro — kb_os_fin
+// já garante via Rules que Produção nem recebe esses campos, ver P0.6).
+function kbRenderItensDetalhe(os) {
+  var wrap = document.getElementById('kbItensDetalhe');
+  if (!wrap) return;
+  var itens = (os.itens || []).filter(function (it) { return it && it.prod; });
+  if (!itens.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div class="section-lbl">📦 Itens do Pedido ('+itens.length+')</div>'
+    + '<div class="kb-itens-list">'
+    + itens.map(function (it, i) {
+        var medidas = (it.larg && it.alt) ? (it.larg+'×'+it.alt+' cm') : '—';
+        var extrasDesc = (it.extras && it.extras.descricao) ? String(it.extras.descricao) : '';
+        var obsPartes = [it.det, extrasDesc].filter(Boolean);
+        var obsHtml = obsPartes.length ? '<div style="grid-column:1/-1"><span class="kb-os-field-lbl">Observações / Acabamento</span>'+cfgEsc(obsPartes.join(' · '))+'</div>' : '';
+        var planHtml = (it.planArea && parseFloat(it.planArea) > 0) ? '<div><span class="kb-os-field-lbl">Área planificada</span>'+parseFloat(it.planArea).toFixed(2)+' m²</div>' : '';
+        return '<div class="kb-item-card">'
+          + '<div class="kb-item-hdr"><strong>'+(i+1)+'. '+cfgEsc(it.prod)+'</strong><span class="kb-item-qty">'+(it.qty||1)+'un</span></div>'
+          + '<div class="kb-item-body">'
+          + '<div><span class="kb-os-field-lbl">Material</span>'+cfgEsc(it.mat||'—')+'</div>'
+          + '<div><span class="kb-os-field-lbl">Medidas</span>'+medidas+'</div>'
+          + planHtml + obsHtml
+          + '</div></div>';
+      }).join('')
+    + '</div>';
+}
+
 function kbOpen(id) {
   const os = KB_OS[id]; if (!os) return;
   _kbOsId = id;
@@ -10509,6 +10554,7 @@ function kbOpen(id) {
     <div class="kb-os-field"><div class="kb-os-field-lbl">Entrega</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Valor Total</div><div class="kb-os-field-val" style="color:#059669;font-size:14px;font-weight:700">${_valorFmt}</div></div>
   `;
+  kbRenderItensDetalhe(os);
 
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
   kbRenderChecklist(os);
