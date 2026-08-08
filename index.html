@@ -1611,7 +1611,7 @@ function _cloudLoadAll() {
   // realmente chegado. Recontado programaticamente contra o corpo real
   // desta função — ver scripts/test_cloud_load_all_counter_2026-08-08.js,
   // que falha se este número voltar a divergir da contagem real.
-  var loaded = 0, total = 42;
+  var loaded = 0, total = 43;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1792,6 +1792,7 @@ function _cloudLoadAll() {
   _cloudLoad("erp_os_counter", function(d){ if(d) _OS_COUNTER=parseInt(d)||0; done(); });
   _cloudLoad("clientes_lixeira", function(d){ if(d&&Array.isArray(d)) CLIENTES_LIXEIRA=d; done(); });
   _cloudLoad("erp_caixa_ant", function(d){ if(d&&typeof d=='object') _CX_ALL=d; done(); });
+  _cloudLoad("fin_caixa_ajustes", function(d){ if(d&&Array.isArray(d)) FIN_CAIXA_AJUSTES=d; done(); });
   _cloudLoad("erp_fornecedores", function(d){ if(d&&Array.isArray(d)&&d.length) _FORN_DATA=d; done(); });
   _cloudLoad("erp_plan_produtos", function(d){ if(d&&Array.isArray(d)&&d.length) _PLAN_PROD_DATA=d; done(); });
   _cloudLoad("erp_client_history", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length) _CLIENT_HIST=d; done(); });
@@ -5274,10 +5275,10 @@ function _authFirebaseError(code){
             <input type="date" id="relCaixaData" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)" onchange="relCaixaDiario()">
           </div>
           <div class="fg" style="margin:0">
-            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Caixa Anterior (R$)</label>
-            <input type="number" id="relCaixaAnt" step="0.01" placeholder="0,00" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);width:140px" oninput="relCaixaDiario()">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Caixa Anterior (auto — Saldo Final de D-1)</label>
+            <input type="text" id="relCaixaAnt" readonly style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg2);color:var(--text);width:170px;font-weight:700" title="Calculado automaticamente a partir do Saldo Final do dia anterior — não é digitado.">
           </div>
-          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="relSalvarCaixaAnt()">💾 Salvar Caixa</button>
+          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="finCaixaAjusteModal()">⚙ Ajuste extraordinário</button>
         </div>
         <!-- Cards resumo -->
         <div class="caixa-grid" id="relCaixaGrid"></div>
@@ -6934,6 +6935,28 @@ function _authFirebaseError(code){
       <div style="display:flex;gap:10px;margin-top:4px">
         <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="document.getElementById('finCartaoCompraOverlay').classList.remove('open')">Cancelar</button>
         <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#7C3AED,#A78BFA)" onclick="finCartaoCompraSalvar(this)">💾 Registrar Compra</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Ajuste Extraordinário do Caixa (RODADA 4, seção 5) — auditado, nunca sobrescreve Caixa Anterior -->
+<div class="gen-overlay" id="finCaixaAjusteOverlay" onclick="if(event.target===this)document.getElementById('finCaixaAjusteOverlay').classList.remove('open')">
+  <div class="gen-modal" style="width:440px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#DC2626,#F87171);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">⚙ Ajuste Extraordinário do Caixa</div>
+      <button class="gen-close" onclick="document.getElementById('finCaixaAjusteOverlay').classList.remove('open')" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div style="font-size:11px;color:var(--muted);background:var(--bg2);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+        Isto NÃO sobrescreve o Caixa Anterior — cria um lançamento auditado (data, motivo e usuário ficam registrados) que entra na soma do Saldo Final do dia informado e se propaga automaticamente para os dias seguintes.
+      </div>
+      <div class="fg"><label>Data do ajuste</label><input type="date" id="finCaixaAjusteData"></div>
+      <div class="fg"><label>Valor (R$) — use negativo para retirar do caixa</label><input type="number" id="finCaixaAjusteValor" step="0.01" placeholder="Ex: 150 ou -80"></div>
+      <div class="fg"><label>Motivo (obrigatório)</label><textarea id="finCaixaAjusteMotivo" rows="3" placeholder="Ex: diferença de troco identificada na conferência do dia"></textarea></div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="document.getElementById('finCaixaAjusteOverlay').classList.remove('open')">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#DC2626,#F87171)" onclick="finCaixaAjusteSalvar(this)">💾 Registrar Ajuste</button>
       </div>
     </div>
   </div>
@@ -13144,12 +13167,21 @@ var FIN_CARTOES = [];
 var FIN_CARTAO_COMPRAS = [];
 var FIN_FATURAS = [];
 
+// Rodada 4, seção 5 — Caixa Diário: ajustes extraordinários auditados.
+// Cada ajuste é um lançamento (nunca uma sobrescrita silenciosa do saldo)
+// com valor assinado (+/-), motivo obrigatório, usuário e data. Entra na
+// soma de finCaixaSaldoFinal() do dia a que pertence, junto de entradas/
+// saídas normais — nunca substitui "Caixa Anterior", que passa a ser
+// SEMPRE = Saldo Final calculado do dia anterior.
+var FIN_CAIXA_AJUSTES = [];
+
 function _finSaveCR(){ return _cloudSave('fin_cr', FIN_CR); }
 function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }
 function _finSaveCPRecorrencias(){ return _cloudSave('fin_cp_recorrencias', FIN_CP_RECORRENCIAS); }
 function _finSaveCartoes(){ return _cloudSave('fin_cartoes', FIN_CARTOES); }
 function _finSaveCartaoCompras(){ return _cloudSave('fin_cartao_compras', FIN_CARTAO_COMPRAS); }
 function _finSaveFaturas(){ return _cloudSave('fin_faturas', FIN_FATURAS); }
+function _finSaveCaixaAjustes(){ return _cloudSave('fin_caixa_ajustes', FIN_CAIXA_AJUSTES); }
 
 // ============================================================
 // COMPRAS — Necessidade → Solicitação → Cotação → Aprovação → Pedido →
@@ -15784,6 +15816,104 @@ function relMetodoBadge(m) {
   return '<span class="rel-metodo-badge '+(cls[m]||'rel-met-avista')+'">'+m+'</span>';
 }
 
+// ── CAIXA DIÁRIO — MOTOR (RODADA 4, seção 5) ───────────────────────────────────
+// Fecha o modelo: "Caixa Anterior" de um dia D deixa de ser um campo digitado
+// manualmente (fluxo normal) e passa a ser SEMPRE o Saldo Final calculado do
+// dia D-1, encadeado retroativamente até o primeiro dia com atividade
+// financeira real (genesis). Qualquer correção manual vira um "ajuste
+// extraordinário" — um LANÇAMENTO auditado (motivo/usuário/data), nunca uma
+// sobrescrita silenciosa do valor.
+function finCaixaBRtoISO(dtBR) {
+  var p = String(dtBR || '').split('/');
+  if (p.length !== 3) return '';
+  return p[2] + '-' + p[1] + '-' + p[0];
+}
+function finCaixaISOtoBR(iso) {
+  var p = String(iso || '').split('-');
+  if (p.length !== 3) return '';
+  return p[2] + '/' + p[1] + '/' + p[0];
+}
+function finCaixaAddDiaISO(iso, n) {
+  var p = iso.split('-').map(function (x) { return parseInt(x, 10); });
+  var d = new Date(p[0], p[1] - 1, p[2] + n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// Totais BRUTOS do dia (sem Caixa Anterior) — mesma regra já usada na tela:
+// Entradas = FIN_CR recebido NAQUELE dia; Saídas = FIN_CP pago NAQUELE dia.
+function finCaixaTotaisDoDia(dtBR) {
+  var vendasDia = FIN_CR.filter(function (r) { return r.dataCriacao === dtBR; });
+  var totVendas = vendasDia.reduce(function (s, r) { return s + r.valor; }, 0);
+  var entradas = FIN_CR.filter(function (r) { return r.status === 'recebido' && r.dataRecebimento === dtBR; });
+  var totEnt = entradas.reduce(function (s, r) { return s + r.valor; }, 0);
+  var saidas = FIN_CP.filter(function (c) { return c.status === 'pago' && c.dataPagamento === dtBR; });
+  var totSai = saidas.reduce(function (s, c) { return s + c.valor; }, 0);
+  return { totVendas: totVendas, totEnt: totEnt, totSai: totSai };
+}
+function finCaixaAjustesDoDia(dtBR) {
+  return FIN_CAIXA_AJUSTES.filter(function (a) { return a.data === dtBR; });
+}
+function finCaixaAjusteTotalDoDia(dtBR) {
+  return finCaixaAjustesDoDia(dtBR).reduce(function (s, a) { return s + a.valor; }, 0);
+}
+// Primeiro dia com QUALQUER atividade financeira real (venda/entrada/saída/
+// ajuste) — antes dele o Saldo Final é considerado 0 (não há dado).
+function finCaixaGenesisISO() {
+  var isos = [];
+  FIN_CR.forEach(function (r) {
+    if (r.dataCriacao) isos.push(finCaixaBRtoISO(r.dataCriacao));
+    if (r.dataRecebimento) isos.push(finCaixaBRtoISO(r.dataRecebimento));
+  });
+  FIN_CP.forEach(function (c) { if (c.dataPagamento) isos.push(finCaixaBRtoISO(c.dataPagamento)); });
+  FIN_CAIXA_AJUSTES.forEach(function (a) { if (a.data) isos.push(finCaixaBRtoISO(a.data)); });
+  isos = isos.filter(Boolean);
+  if (!isos.length) return null;
+  isos.sort();
+  return isos[0];
+}
+// Saldo Final de um dia = soma encadeada (entradas − saídas + ajustes) de
+// TODOS os dias desde o genesis até `dtBR`, inclusive. Iterativo (não
+// recursivo) para nunca estourar pilha em históricos longos.
+function finCaixaSaldoFinal(dtBR) {
+  var genesisISO = finCaixaGenesisISO();
+  if (!genesisISO) return 0;
+  var alvoISO = finCaixaBRtoISO(dtBR);
+  if (!alvoISO || alvoISO < genesisISO) return 0;
+  var saldo = 0;
+  var cursorISO = genesisISO;
+  var guard = 0;
+  while (cursorISO <= alvoISO && guard < 20000) {
+    var cursorBR = finCaixaISOtoBR(cursorISO);
+    var dia = finCaixaTotaisDoDia(cursorBR);
+    saldo += dia.totEnt - dia.totSai + finCaixaAjusteTotalDoDia(cursorBR);
+    cursorISO = finCaixaAddDiaISO(cursorISO, 1);
+    guard++;
+  }
+  return saldo;
+}
+// Caixa Anterior de `dtBR` = Saldo Final do dia anterior — nunca digitado.
+function finCaixaAnteriorAuto(dtBR) {
+  var iso = finCaixaBRtoISO(dtBR);
+  if (!iso) return 0;
+  return finCaixaSaldoFinal(finCaixaISOtoBR(finCaixaAddDiaISO(iso, -1)));
+}
+// Ajuste extraordinário — SEMPRE auditado (motivo+usuário obrigatórios).
+// Nunca sobrescreve o Caixa Anterior: soma-se ao dia informado e propaga
+// automaticamente pela cadeia de Saldo Final dos dias seguintes.
+function finCaixaRegistrarAjuste(input) {
+  input = input || {};
+  var valor = parseFloat(input.valor);
+  var motivo = String(input.motivo || '').trim();
+  var usuario = String(input.usuario || '').trim();
+  var data = input.data || '';
+  if (!data || !finCaixaBRtoISO(data)) return { ok: false, erro: 'DATA_INVALIDA' };
+  if (!valor || isNaN(valor)) return { ok: false, erro: 'VALOR_INVALIDO' };
+  if (!motivo) return { ok: false, erro: 'MOTIVO_OBRIGATORIO' };
+  if (!usuario) return { ok: false, erro: 'USUARIO_OBRIGATORIO' };
+  var ajuste = { id: 'cxadj' + Date.now(), data: data, valor: valor, motivo: motivo, usuario: usuario, ts: Date.now() };
+  FIN_CAIXA_AJUSTES.unshift(ajuste);
+  return { ok: true, ajuste: ajuste };
+}
+
 // ── CAIXA DIÁRIO ──────────────────────────────────────────────────────────────
 function relCaixaDiario() {
   // Garantir que o elemento existe (proteção contra timing)
@@ -15801,14 +15931,12 @@ function relCaixaDiario() {
     dtBR=p[2]+'/'+p[1]+'/'+p[0];
   }
 
-  // Carregar caixa anterior salvo
+  // RODADA 4, seção 5 — Caixa Anterior deixou de ser digitado: é sempre o
+  // Saldo Final calculado do dia anterior (finCaixaAnteriorAuto), encadeado
+  // automaticamente. O campo na tela é só leitura (mostra o valor calculado).
+  var cxAnt = (typeof finCaixaAnteriorAuto==='function') ? finCaixaAnteriorAuto(dtBR) : 0;
   var cxAntEl=document.getElementById('relCaixaAnt');
-  var cxAntKey='erp_caixa_ant_'+dtBR;
-  if(cxAntEl&&cxAntEl.value===''){
-    var saved=_CX_ALL && _CX_ALL[dtBR] ? _CX_ALL[dtBR] : null;
-    if(saved) cxAntEl.value=parseFloat(saved).toFixed(2);
-  }
-  var cxAnt=parseFloat((cxAntEl&&cxAntEl.value)||'0')||0;
+  if(cxAntEl) cxAntEl.value = finFmt(cxAnt);
 
   // VENDAS DO DIA (Rodada 3, seção 13) — distinto de ENTRADAS: fin_cr é criado
   // no momento da venda (orcEnvGerarOS()), com dataCriacao = dia da venda,
@@ -15830,7 +15958,11 @@ function relCaixaDiario() {
 
   var totEnt=entradas.reduce(function(s,r){return s+r.valor;},0);
   var totSai=saidas.reduce(function(s,c){return s+c.valor;},0);
-  var segCaixa=cxAnt+totEnt-totSai;
+  // Ajustes extraordinários auditados lançados NESTE dia (seção 5) — somam/
+  // subtraem do Saldo Final, nunca sobrescrevem o Caixa Anterior.
+  var ajustesDia = (typeof finCaixaAjustesDoDia==='function') ? finCaixaAjustesDoDia(dtBR) : [];
+  var totAjustes = ajustesDia.reduce(function(s,a){return s+a.valor;},0);
+  var segCaixa=cxAnt+totEnt-totSai+totAjustes;
 
   // Breakdown por método de pagamento
   var metTot={Banco:0,Cartão:0,Boleto:0,'À Vista':0,Crediário:0};
@@ -15887,16 +16019,28 @@ function relCaixaDiario() {
 
   // Fechamento
   var fecEl=document.getElementById('relCaixaFechamento'); if(!fecEl) return;
+  var ajustesHtml = '';
+  if(ajustesDia.length){
+    ajustesHtml = '<div style="font-size:10px;font-weight:700;color:var(--muted);margin:8px 0 4px">⚙ Ajustes extraordinários auditados neste dia</div>'
+      + ajustesDia.map(function(a){
+          return '<div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--bg2);border-radius:6px;font-size:10px;margin-bottom:3px">'
+            +'<span style="color:var(--muted)">'+(a.motivo||'—')+' — '+(a.usuario||'—')+'</span>'
+            +'<span style="font-weight:700;color:'+(a.valor>=0?'#059669':'#DC2626')+'">'+f(a.valor)+'</span>'
+            +'</div>';
+        }).join('');
+  }
   fecEl.innerHTML=
     '<div class="rel-block" style="margin-top:4px;padding:16px 20px">'
     +'<div style="font-size:12px;font-weight:800;margin-bottom:12px;color:var(--text)">📋 Fechamento do Caixa — '+( dtBR||'—')+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:6px;max-width:360px">'
-    +_relFecRow('Caixa Anterior', f(cxAnt), '#64748B', false)
+    +_relFecRow('Caixa Anterior (auto — Saldo Final D-1)', f(cxAnt), '#64748B', false)
     +_relFecRow('(+) Total de Entradas', f(totEnt), '#059669', false)
     +_relFecRow('(=) Total Entradas + Caixa Ant.', f(cxAnt+totEnt), '#1D4ED8', false)
     +_relFecRow('(−) Total de Saídas', f(totSai), '#DC2626', false)
+    +(totAjustes!==0?_relFecRow('(+/−) Ajustes extraordinários', f(totAjustes), totAjustes>=0?'#059669':'#DC2626', false):'')
     +'<div style="height:1px;background:var(--border);margin:4px 0"></div>'
     +_relFecRow('SEGUE NO CAIXA', f(segCaixa), segCaixa>=0?'#059669':'#DC2626', true)
+    +ajustesHtml
     +'</div></div>';
 }
 function _relFecRow(lbl,val,clr,bold){
@@ -15921,6 +16065,45 @@ function relSalvarCaixaAnt() {
     null,
     'Caixa anterior salvo para '+dtBR,
     'Não foi possível salvar o caixa anterior de '+dtBR
+  );
+}
+
+// RODADA 4, seção 5 — abre o modal de ajuste extraordinário pré-preenchido
+// com a data hoje selecionada no Caixa Diário.
+function finCaixaAjusteModal() {
+  var dtIn=document.getElementById('relCaixaData');
+  var dEl=document.getElementById('finCaixaAjusteData');
+  if(dEl) dEl.value = (dtIn&&dtIn.value) ? dtIn.value : '';
+  var vEl=document.getElementById('finCaixaAjusteValor'); if(vEl) vEl.value='';
+  var mEl=document.getElementById('finCaixaAjusteMotivo'); if(mEl) mEl.value='';
+  document.getElementById('finCaixaAjusteOverlay').classList.add('open');
+}
+function finCaixaAjusteSalvar(btnEl) {
+  var dEl=document.getElementById('finCaixaAjusteData');
+  var vEl=document.getElementById('finCaixaAjusteValor');
+  var mEl=document.getElementById('finCaixaAjusteMotivo');
+  if(!dEl||!dEl.value){ showToast('Selecione a data do ajuste','warn'); return; }
+  var p=dEl.value.split('-'); var dataBR=p[2]+'/'+p[1]+'/'+p[0];
+  var usuario = (typeof firebase!=='undefined' && firebase.auth && firebase.auth().currentUser)
+    ? (firebase.auth().currentUser.email||firebase.auth().currentUser.uid||'—') : '—';
+  var release = (typeof _btnBusy==='function') ? _btnBusy(btnEl,'Salvando...') : null;
+  var r = finCaixaRegistrarAjuste({ data: dataBR, valor: (vEl&&vEl.value), motivo: (mEl&&mEl.value), usuario: usuario });
+  if(!r.ok){
+    if(release) release();
+    var msgs={DATA_INVALIDA:'Data inválida',VALOR_INVALIDO:'Informe um valor diferente de zero',MOTIVO_OBRIGATORIO:'O motivo é obrigatório para auditoria',USUARIO_OBRIGATORIO:'Usuário não identificado — faça login novamente'};
+    showToast(msgs[r.erro]||'Não foi possível registrar o ajuste','warn');
+    return;
+  }
+  _confirmarAposSalvar(
+    _finSaveCaixaAjustes(),
+    function(){ var ix=FIN_CAIXA_AJUSTES.findIndex(function(a){return a.id===r.ajuste.id;}); if(ix>=0) FIN_CAIXA_AJUSTES.splice(ix,1); },
+    function(){
+      if(release) release();
+      document.getElementById('finCaixaAjusteOverlay').classList.remove('open');
+      relCaixaDiario();
+    },
+    'Ajuste extraordinário registrado para '+dataBR,
+    'Não foi possível registrar o ajuste — nada foi salvo'
   );
 }
 

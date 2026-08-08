@@ -53,7 +53,7 @@ const { USUARIOS, SENHA_PADRAO } = require('./e2e_clean_env');
 var FIX = {};
 USUARIOS.forEach((u) => { FIX[u.name] = { email: u.email, role: u.role }; });
 
-var DOCS = ['fin_cp_recorrencias', 'fin_cartoes', 'fin_cartao_compras', 'fin_faturas'];
+var DOCS = ['fin_cp_recorrencias', 'fin_cartoes', 'fin_cartao_compras', 'fin_faturas', 'fin_caixa_ajustes'];
 
 console.log('\n=== RODADA 4 — novas coleções financeiras: Rules reais (Produção negado, Master/Financeiro permitidos) ===\n');
 
