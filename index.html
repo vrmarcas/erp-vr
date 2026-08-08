@@ -1592,7 +1592,7 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 10; // +1 (compras) — manter sincronizado com o número de _cloudLoad(...) abaixo
+  var loaded = 0, total = 11; // +1 (kb_os_fin, Rodada 2 P0.6) — manter sincronizado com o número de _cloudLoad(...) abaixo
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1627,7 +1627,19 @@ function _cloudLoadAll() {
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    // Corrigido 2026-08-07 (Rodada 2, item P0.6) — privacidade financeira
+    // real da Produção: campos financeiros da OS (valor/totalGeral/
+    // parcelas/formaPgto/pagtoTipo/valorEntrada/restante/itens[].unit/
+    // itens[].total) vivem num documento SEPARADO (kb_os_fin), cujas Rules
+    // nunca liberam leitura para o papel Produção — só Master/Financeiro/
+    // Comercial. Este listener nunca dispara para Produção (permissão
+    // negada no servidor, _cloudWatch já trata isso sem lançar erro — só
+    // um console.warn) — os campos financeiros de KB_OS[*] simplesmente
+    // nunca são populados para esse papel, que é exatamente o resultado
+    // desejado (a UI já trata esses campos como opcionais/-- quando
+    // ausentes). kbSaveKbos() faz o merge inverso na escrita.
+    _cloudWatch("kb_os_fin", function(d){ _KB_OS_FIN_CACHE = (d&&typeof d==='object'&&!Array.isArray(d)) ? d : {}; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbRender==='function') try{kbRender();}catch(e){} });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
     _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
@@ -1719,7 +1731,12 @@ function _cloudLoadAll() {
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
   _cloudLoad("compras", function(d){ if(d&&d.length){ COMPRAS=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
-  _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } done(); });
+  _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); done(); });
+  // Rodada 2, P0.6 — nunca resolve para o papel Produção (permissão negada
+  // no servidor; _cloudLoad já trata isso chamando o callback com null,
+  // sem lançar erro), então _KB_OS_FIN_CACHE fica {} e os campos
+  // financeiros de KB_OS[*] nunca são populados para esse papel.
+  _cloudLoad("kb_os_fin", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ _KB_OS_FIN_CACHE=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); } done(); });
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
@@ -10359,6 +10376,26 @@ function kbSyncCounts() {
 // KANBAN — OS Data & Modal
 // ============================================================
 var KB_OS = {}; // populado pelo Firebase via _cloudLoad/_cloudWatch
+// Corrigido 2026-08-07 (Rodada 2, P0.6) — cache do documento separado
+// erp_vr/kb_os_fin (campos financeiros da OS). Nunca populado para o
+// papel Produção (Rules negam leitura). Ver _kbMergeFinCache() e
+// kbSaveKbos().
+var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];
+var _KB_OS_FIN_CACHE = {};
+function _kbMergeFinCache() {
+  Object.keys(_KB_OS_FIN_CACHE).forEach(function(id){
+    var os = KB_OS[id]; if(!os) return;
+    var fin = _KB_OS_FIN_CACHE[id]; if(!fin) return;
+    _KB_OS_FIN_FIELDS.forEach(function(f){ if(fin[f]!==undefined) os[f]=fin[f]; });
+    if(fin.itensValores && Array.isArray(os.itens)){
+      os.itens.forEach(function(it, i){
+        if(!it || !fin.itensValores[i]) return;
+        if(fin.itensValores[i].unit!==undefined)  it.unit  = fin.itensValores[i].unit;
+        if(fin.itensValores[i].total!==undefined) it.total = fin.itensValores[i].total;
+      });
+    }
+  });
+}
 
 let _kbOsId = null;
 const _kbStatusMap = {
@@ -10947,11 +10984,36 @@ function kbExcluirSelecionados() {
 }
 
 // ── KB_OS cloud save helper ───────────────────────────────────────────────────
+// Corrigido 2026-08-07 (Rodada 2, P0.6) — privacidade financeira real da
+// Produção: campos financeiros nunca vão para o documento erp_vr/kb_os
+// (que a Produção precisa ler/escrever para trabalhar no Kanban) — vão
+// para erp_vr/kb_os_fin, cujas Rules nunca liberam leitura/escrita para
+// Produção. A Produção NUNCA escreve kb_os_fin (guard ehProducao abaixo);
+// mesmo sem esse guard, o finCopy dela sempre sairia vazio (ela nunca
+// conseguiu ler o financeiro de ninguém para poder reescrevê-lo), então
+// isto é defesa em profundidade, não a única proteção.
 function kbSaveKbos() {
   if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
-  var kbCopy={};
-  Object.keys(KB_OS).forEach(function(k){ var o=Object.assign({},KB_OS[k]); delete o.planImg; kbCopy[k]=o; });
-  return _cloudSave('kb_os', kbCopy);
+  var kbCopy={}, finCopy={};
+  Object.keys(KB_OS).forEach(function(k){
+    var o=Object.assign({},KB_OS[k]);
+    delete o.planImg;
+    var fin={};
+    _KB_OS_FIN_FIELDS.forEach(function(f){ if(o[f]!==undefined){ fin[f]=o[f]; delete o[f]; } });
+    if(Array.isArray(o.itens)){
+      var temValores = o.itens.some(function(it){ return it && (it.unit!==undefined || it.total!==undefined); });
+      if(temValores) fin.itensValores = o.itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; });
+      o.itens = o.itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; });
+    }
+    kbCopy[k]=o;
+    if(Object.keys(fin).length) finCopy[k]=fin;
+  });
+  var ehProducao = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='producao';
+  var p1 = _cloudSave('kb_os', kbCopy);
+  var p2 = (ehProducao || !Object.keys(finCopy).length) ? Promise.resolve({ok:true}) : _cloudSave('kb_os_fin', finCopy);
+  return Promise.all([p1,p2]).then(function(results){
+    return {ok: !!(results[0]&&results[0].ok), kbOk: !!(results[0]&&results[0].ok), finOk: !!(results[1]&&results[1].ok)};
+  });
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────
 function kbInitWeekHeaders() {
@@ -11616,31 +11678,38 @@ function kbReceberSaldo() {
 
   function _tentar() {
     var refKb = _db.collection(_COL).doc('kb_os');
+    // Rodada 2, P0.6 — restante/valorEntrada/formaPgto agora vivem em
+    // kb_os_fin (fora do alcance de leitura da Produção); esta transação
+    // precisa reler e regravar os dois documentos juntos.
+    var refKbFin = _db.collection(_COL).doc('kb_os_fin');
     var refCr = _db.collection(_COL).doc('fin_cr');
     var refTx = _db.collection(_COL).doc('fin_tx');
     var refOrc = _db.collection(_COL).doc('orcamentos');
     return _db.runTransaction(function (txn) {
-      return Promise.all([txn.get(refKb), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
+      return Promise.all([txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
         var kbData = _parsedDoc(snaps[0]) || {};
-        var crArr = _parsedDoc(snaps[1]) || [];
-        var txArr = _parsedDoc(snaps[2]) || [];
-        var orcArr = _parsedDoc(snaps[3]);
+        var kbFinData = _parsedDoc(snaps[1]) || {};
+        var crArr = _parsedDoc(snaps[2]) || [];
+        var txArr = _parsedDoc(snaps[3]) || [];
+        var orcArr = _parsedDoc(snaps[4]);
 
         var osServidor = kbData[_osIdSnap];
+        var finServidor = kbFinData[_osIdSnap] || {};
         if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
-        if ((osServidor.restante || 0) <= 0) {
-          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = osServidor; throw eJa;
+        if ((finServidor.restante || 0) <= 0) {
+          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = Object.assign({}, osServidor, finServidor); throw eJa;
         }
 
-        var valorRecebido = osServidor.restante || 0;
+        var valorRecebido = finServidor.restante || 0;
         osServidor.status = 'iniciada';
-        osServidor.restante = 0;
+        finServidor.restante = 0;
         kbData[_osIdSnap] = osServidor;
+        kbFinData[_osIdSnap] = finServidor;
 
         var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
         if (crEntry) { crEntry.status = 'recebido'; crEntry.dataRecebimento = dia; }
 
-        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: osServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
+        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: finServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
         txArr = [novaTx].concat(txArr);
 
         var orcMutado = false;
@@ -11649,16 +11718,17 @@ function kbReceberSaldo() {
           if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
         }
 
-        var kbPayload = JSON.stringify(kbData), txPayload = JSON.stringify(txArr);
+        var kbPayload = JSON.stringify(kbData), kbFinPayload = JSON.stringify(kbFinData), txPayload = JSON.stringify(txArr);
         var crPayload = crEntry ? JSON.stringify(crArr) : null;
         var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
 
         txn.set(refKb, { data: kbPayload, ts: Date.now() });
+        txn.set(refKbFin, { data: kbFinPayload, ts: Date.now() });
         txn.set(refTx, { data: txPayload, ts: Date.now() });
         if (crEntry) txn.set(refCr, { data: crPayload, ts: Date.now() });
         if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
 
-        return { osServidor: osServidor, valorRecebido: valorRecebido, kbPayload: kbPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
+        return { osServidor: Object.assign({}, osServidor, finServidor), valorRecebido: valorRecebido, kbPayload: kbPayload, kbFinPayload: kbFinPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
       });
     });
   }
@@ -11674,9 +11744,13 @@ function kbReceberSaldo() {
   function _finalizarSucesso(r) {
     os._recebendoSaldo = false;
     _cloudLastPayload['kb_os'] = r.kbPayload;
+    _cloudLastPayload['kb_os_fin'] = r.kbFinPayload;
     _cloudLastPayload['fin_tx'] = r.txPayload;
     if (r.crPayload) _cloudLastPayload['fin_cr'] = r.crPayload;
     if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
+    // r.osServidor já vem com kb_os + kb_os_fin mesclados (ver _tentar) —
+    // KB_OS[id] continua com os campos financeiros para quem tem permissão
+    // de tê-los (esta ação só é alcançável por Financeiro/Comercial/Master).
     KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
     if (r.crPayload) FIN_CR = r.crArr;
     FIN_TX = r.txArr;
@@ -20444,6 +20518,11 @@ function orcEnvGerarOS(){
       orcRef:o.id, orcNum:o.num,
       pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
     };
+    // Rodada 2, P0.6 — mesmo no fallback local (sem Firestore), separa os
+    // campos financeiros para o mesmo formato usado por kbSaveKbos()/
+    // _kbMergeFinCache(), mantendo o comportamento em memória consistente
+    // com o caminho transacional real logo abaixo.
+    if(typeof kbSaveKbos==='function') kbSaveKbos();
     o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
     o.osRef=newIdLocal; orcSetEnviados(lista);
     if(valorEntrada>0){
@@ -20456,15 +20535,21 @@ function orcEnvGerarOS(){
 
   var refOrc=_db.collection(_COL).doc('orcamentos');
   var refOS =_db.collection(_COL).doc('kb_os');
+  // Rodada 2, P0.6 — campos financeiros da OS vão para um documento
+  // separado (kb_os_fin), cujas Rules nunca liberam leitura/escrita para
+  // Produção. Gravado dentro da MESMA transação que kb_os — nunca fica
+  // um sem o outro.
+  var refOSFin=_db.collection(_COL).doc('kb_os_fin');
   var refCR =_db.collection(_COL).doc('fin_cr');
   var refCnt=_db.collection(_COL).doc('erp_os_counter');
 
   return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refCR), txn.get(refCnt)])
+    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refCnt)])
       .then(function(snaps){
-        var docOrc=snaps[0], docOS=snaps[1], docCR=snaps[2], docCnt=snaps[3];
+        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCR=snaps[3], docCnt=snaps[4];
         var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
         var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
+        var objOSFin = (docOSFin.exists && docOSFin.data() && docOSFin.data().data) ? JSON.parse(docOSFin.data().data) : {};
         var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
         var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
 
@@ -20492,13 +20577,18 @@ function orcEnvGerarOS(){
           // direto em "iniciada", inconsistente com o próprio valor de
           // `restante` calculado logo acima.
           status:restante>0?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
-          valor:valorTotal,prog:0,pronto:false,
+          prog:0,pronto:false,
           checks:checksProducao,_ck:_ckProducao,
-          parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
-          clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
-          itens:itens,totalGeral:valorTotal,obs:obs,
-          orcRef:o.id, orcNum:o.num,
-          pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
+          clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+          clientCidade:'—',vendedor:'',dataOS:dia,
+          itens:itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; }),
+          obs:obs,
+          orcRef:o.id, orcNum:o.num
+        };
+        objOSFin[newId] = {
+          valor:valorTotal, totalGeral:valorTotal, parcelas:o.parcelas||1,
+          formaPgto:forma, pagtoTipo:tipo, valorEntrada:valorEntrada, restante:restante,
+          itensValores: itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; })
         };
         arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
         arrOrc[idxOrc].osRef = newId;
@@ -20510,20 +20600,28 @@ function orcEnvGerarOS(){
 
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
         txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
+        txn.set(refOSFin, {data:JSON.stringify(objOSFin), ts:Date.now()});
         txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
         txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
 
-        return {num:n, arrOrc:arrOrc, objOS:objOS, arrCR:arrCR};
+        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin, arrCR:arrCR};
       });
   }).then(function(resultado){
     // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
-    // memória com exatamente o que a transação gravou.
+    // memória com exatamente o que a transação gravou. KB_OS recebe o
+    // financeiro de volta via _kbMergeFinCache() — quem chama
+    // orcEnvGerarOS() é sempre Comercial/Master, que tem permissão real
+    // de ler kb_os_fin, então este merge local não vaza nada que o papel
+    // atual já não pudesse ler do próprio Firestore.
     _ORC_ENVIADOS_DATA = resultado.arrOrc;
     KB_OS = resultado.objOS;
+    _KB_OS_FIN_CACHE = resultado.objOSFin;
+    if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
     FIN_CR = resultado.arrCR;
     _OS_COUNTER = resultado.num;
     _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
     _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
+    _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
     _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
     finalizar(true, resultado);
