@@ -2206,6 +2206,24 @@ function _authFirebaseError(code){
         <div class="exec-ts-lbl"><span class="dot-live"></span>&nbsp;ao vivo · <span id="dashTs">--:--:--</span></div>
       </div>
 
+      <!-- RODADA 5, seção 3 — Central de Ação: HOJE / PRÓXIMOS / COMERCIAL,
+           fonte canônica documentada em dashCentralDeAcao(). Prioriza ação
+           sobre volume de cards. -->
+      <div class="echart-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+        <div class="echart">
+          <div class="echart-h">📌 Hoje</div>
+          <div id="dCentralHoje" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:12px"></div>
+        </div>
+        <div class="echart">
+          <div class="echart-h">⏭ Próximos</div>
+          <div id="dCentralProximos" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:12px"></div>
+        </div>
+        <div class="echart">
+          <div class="echart-h">💼 Comercial</div>
+          <div id="dCentralComercial" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;font-size:12px"></div>
+        </div>
+      </div>
+
       <!-- KPIs -->
       <div class="ekpi-grid">
         <div class="ekpi">
@@ -12406,7 +12424,8 @@ function dashCalcularVendasRecebimentos(finCR, mesFiltro, marcaFiltro) {
 // no Caixa Diário). Vencido = pendente/agendado com vencimento < hoje.
 function dashCalcularCRCP(finCR, finCP, marcaFiltro, hojeISO) {
   var marcaOk = function (r) { return !marcaFiltro || marcaFiltro === 'all' || (r.marca || 'vr') === marcaFiltro; };
-  var hoje = hojeISO ? new Date(hojeISO + 'T12:00:00') : new Date();
+  var hoje = hojeISO ? new Date(hojeISO + 'T00:00:00') : new Date();
+  hoje.setHours(0, 0, 0, 0); // achado de auditoria: comparar por DIA, não por instante — "vence hoje" nunca deve contar como vencida
   var parseBR = function (dBR) {
     var p = (dBR || '').split('/');
     return p.length === 3 ? new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10)) : null;
@@ -12434,7 +12453,8 @@ function dashCalcularCRCP(finCR, finCP, marcaFiltro, hojeISO) {
 // Produção" (sLabels/sColors em dashRender). Atrasada = não entregue/
 // cancelada, com prazo de entrega no passado.
 function dashCalcularOSBreakdown(kbOS, marcaFiltro, hojeISO) {
-  var hoje = hojeISO ? new Date(hojeISO + 'T12:00:00') : new Date();
+  var hoje = hojeISO ? new Date(hojeISO + 'T00:00:00') : new Date();
+  hoje.setHours(0, 0, 0, 0); // achado de auditoria: comparar por DIA, não por instante — "vence hoje" nunca deve contar como vencida
   var matchBrandOS = function (o) {
     if (!marcaFiltro || marcaFiltro === 'all') return true;
     var m = (o.mk || o.marca || '').toLowerCase();
@@ -12469,6 +12489,83 @@ function dashCalcularOSBreakdown(kbOS, marcaFiltro, hojeISO) {
 function dashCalcularEstoqueCritico(stock) {
   var criticos = Object.values(stock || {}).filter(function (s) { return s.qty < s.min; });
   return { count: criticos.length, itens: criticos };
+}
+
+// RODADA 5, seção 3 — Central de Ação: cada bucket documenta sua fonte
+// canônica (a mesma já usada pelos KPIs acima, nunca um cálculo paralelo):
+//   HOJE       → KB_OS (entregas/atrasadas/prontas) + FIN_CR/FIN_CP (vencidas/hoje) + STOCK (crítico)
+//   PRÓXIMOS   → KB_OS (próxima entrega futura) + FIN_CR/FIN_CP (próximos vencimentos) + KB_OS produção (gargalos)
+//   COMERCIAL  → dashCalcularKPIsComerciais/dashCalcularVendasRecebimentos/dashCalcularOSBreakdown (mesmas já auditadas)
+function dashCentralDeAcao(kbOS, finCR, finCP, stock, orcamentos, marcaFiltro, hojeISO) {
+  var hoje = hojeISO ? new Date(hojeISO + 'T00:00:00') : new Date();
+  hoje.setHours(0, 0, 0, 0); // achado de auditoria: comparar por DIA, não por instante — "vence hoje" nunca deve contar como vencida
+  var hojeBR = String(hoje.getDate()).padStart(2, '0') + '/' + String(hoje.getMonth() + 1).padStart(2, '0') + '/' + hoje.getFullYear();
+  var matchBrandOS = function (o) {
+    if (!marcaFiltro || marcaFiltro === 'all') return true;
+    var m = (o.mk || o.marca || '').toLowerCase();
+    if (marcaFiltro === 'vr') return m === 'vr' || m === 'vr marcas';
+    if (marcaFiltro === 'vitre') return m === 'vit' || m === 'vitre';
+    return true;
+  };
+  var osList = Object.values(kbOS || {}).filter(matchBrandOS);
+  var parseBR = function (dBR) {
+    var p = (dBR || '').split('/');
+    return p.length === 3 ? new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10)) : null;
+  };
+
+  var entregasHoje = osList.filter(function (o) { return o.status !== 'entregue' && o.status !== 'cancelado' && o.entrega === hojeBR; });
+  var osAtrasadas = osList.filter(function (o) {
+    if (o.status === 'entregue' || o.status === 'cancelado') return false;
+    var d = parseBR(o.entrega); return d && d < hoje;
+  });
+  var osProntas = osList.filter(function (o) { return o.status === 'pronta'; });
+
+  var marcaOkFin = function (r) { return !marcaFiltro || marcaFiltro === 'all' || (r.marca || 'vr') === marcaFiltro; };
+  var crPendente = (finCR || []).filter(marcaOkFin).filter(function (r) { return r.status === 'pendente'; });
+  var crVencidas = crPendente.filter(function (r) { var d = parseBR(r.vencimento); return d && d < hoje; });
+  var crHoje = crPendente.filter(function (r) { return r.vencimento === hojeBR; });
+  var cpPendente = (finCP || []).filter(marcaOkFin).filter(function (c) { return c.status === 'agendado' || c.status === 'pendente'; });
+  var cpHoje = cpPendente.filter(function (c) { return c.vencimento === hojeBR; });
+
+  var materiaisCriticos = dashCalcularEstoqueCritico(stock).itens;
+
+  var futuras = osList.filter(function (o) { return o.status !== 'entregue' && o.status !== 'cancelado'; })
+    .map(function (o) { return { o: o, d: parseBR(o.entrega) }; })
+    .filter(function (x) { return x.d && x.d >= hoje; })
+    .sort(function (a, b) { return a.d - b.d; });
+  var proximaEntrega = futuras.length ? futuras[0].o : null;
+  var proximasContas = crPendente.concat(cpPendente)
+    .map(function (x) { return { x: x, d: parseBR(x.vencimento) }; })
+    .filter(function (y) { return y.d && y.d >= hoje; })
+    .sort(function (a, b) { return a.d - b.d; })
+    .slice(0, 5)
+    .map(function (y) { return y.x; });
+  // Gargalos: mesma noção já usada no gráfico "Status de Produção" — OS
+  // efetivamente em produção (nenhum cálculo paralelo).
+  var gargalos = osList.filter(function (o) { return o.status === 'producao'; });
+
+  var comKpis = dashCalcularKPIsComerciais(orcamentos, 0, marcaFiltro);
+  var vrKpis = dashCalcularVendasRecebimentos(finCR, 0, marcaFiltro);
+  var osBreak = dashCalcularOSBreakdown(kbOS, marcaFiltro, hojeISO);
+  var conversao = osBreak.total ? Math.round(osBreak.entregues / osBreak.total * 100) : 0;
+
+  return {
+    hoje: {
+      entregasHoje: entregasHoje.length, osAtrasadas: osAtrasadas.length, osProntas: osProntas.length,
+      crVencidas: crVencidas.length, crHoje: crHoje.length, cpHoje: cpHoje.length,
+      materiaisCriticos: materiaisCriticos.length,
+    },
+    proximos: {
+      proximaEntrega: proximaEntrega ? { num: proximaEntrega.num, cliente: proximaEntrega.cliente, entrega: proximaEntrega.entrega } : null,
+      proximasContas: proximasContas.length,
+      gargalos: gargalos.length,
+    },
+    comercial: {
+      orcamentosAguardando: comKpis.aguardando,
+      vendas: vrKpis.vendas,
+      conversao: conversao,
+    },
+  };
 }
 
 function dashRender() {
@@ -12569,6 +12666,50 @@ function dashRender() {
   // ── KPI 6/7/8: Comerciais canônicos (orçamentos/aprovados/aguardando/
   //     cancelados) e Vendas × Recebimentos (FIN_CR) — seção 7/8 ─────────
   var envListDash = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
+
+  // ── Central de Ação (RODADA 5, seção 3) ────────────────────────────────
+  var central = dashCentralDeAcao(KB_OS, FIN_CR, FIN_CP, STOCK, envListDash, bf);
+  var dCH = document.getElementById('dCentralHoje');
+  if(dCH){
+    var _rowsH=[
+      {lbl:'📦 Entregas hoje', v:central.hoje.entregasHoje, act:function(){nav('kanban',null);}},
+      {lbl:'⏰ OS atrasadas', v:central.hoje.osAtrasadas, warn:true, act:function(){nav('kanban',null);}},
+      {lbl:'✅ OS prontas', v:central.hoje.osProntas, act:function(){nav('kanban',null);}},
+      {lbl:'💸 CR vencidas', v:central.hoje.crVencidas, warn:true, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cr');},50);}},
+      {lbl:'📅 CR vencendo hoje', v:central.hoje.crHoje, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cr');},50);}},
+      {lbl:'📤 CP vencendo hoje', v:central.hoje.cpHoje, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cp');},50);}},
+      {lbl:'🧱 Materiais críticos', v:central.hoje.materiaisCriticos, warn:true, act:function(){nav('estoque',null);}},
+    ];
+    window._dashCentralHojeActs = _rowsH.map(function(r){return r.act;});
+    dCH.innerHTML = _rowsH.map(function(r,i){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="window._dashCentralHojeActs['+i+']()">'
+        +'<span>'+r.lbl+'</span><span style="font-weight:800;color:'+(r.warn&&r.v>0?'#DC2626':'var(--text)')+'">'+r.v+'</span></div>';
+    }).join('');
+  }
+  var dCP = document.getElementById('dCentralProximos');
+  if(dCP){
+    var pe=central.proximos.proximaEntrega;
+    dCP.innerHTML =
+      '<div style="padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="nav(\'kanban\',null)">'
+        +'<div style="color:var(--muted);font-size:10px">Próxima entrega</div>'
+        +'<div style="font-weight:700">'+(pe?('OS #'+pe.num+' — '+(pe.cliente||'')+' ('+pe.entrega+')'):'Nenhuma pendente')+'</div>'
+      +'</div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="nav(\'financeiro\',null)">'
+        +'<span>💳 Próximas contas</span><span style="font-weight:800">'+central.proximos.proximasContas+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="nav(\'kanban\',null)">'
+        +'<span>🚧 Gargalos de produção</span><span style="font-weight:800">'+central.proximos.gargalos+'</span></div>';
+  }
+  var dCC = document.getElementById('dCentralComercial');
+  if(dCC){
+    dCC.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="nav(\'orcamentos-enviados\',null)">'
+        +'<span>📝 Orçamentos aguardando</span><span style="font-weight:800">'+central.comercial.orcamentosAguardando+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px">'
+        +'<span>💰 Vendas (mês)</span><span style="font-weight:800">R$ '+central.comercial.vendas.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px">'
+        +'<span>📊 Conversão</span><span style="font-weight:800">'+central.comercial.conversao+'%</span></div>';
+  }
+
   var comKpis = dashCalcularKPIsComerciais(envListDash, mesFiltro, bf);
   var dkOrcMes=document.getElementById('dkOrcMes'), dkOrcMesSub=document.getElementById('dkOrcMesSub'), dkOrcMesBar=document.getElementById('dkOrcMesBar');
   if(dkOrcMes) dkOrcMes.textContent = String(comKpis.orcamentosDoMes);
