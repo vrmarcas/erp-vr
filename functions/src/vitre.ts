@@ -803,34 +803,43 @@ export const vitreConfirmarVenda = functions.https.onCall(async (data, context) 
 // a ficha técnica ou o estoque depois do orçamento — o snapshot
 // comercial de preço/nome nunca é usado aqui):
 //
-//   pronta_entrega       — há unidade(s) já prontas em
+//   pronta_entrega        — há unidade(s) já prontas em
 //                           estoqueProntoUnidades >= qtd pedida. Baixa
 //                           de estoque, sem gerar nenhuma ficha de
 //                           produção nova (não é replanificado).
-//   produzido_apos_pedido— sem estoque pronto suficiente, mas a ficha
+//   produzido_apos_pedido — sem estoque pronto suficiente, mas a ficha
 //                           técnica está completa (componentes +
 //                           arquivo de corte cadastrados). Gera OS com
 //                           SNAPSHOT da ficha técnica/arquivo de corte
 //                           — o arquivo nunca é aberto/executado aqui,
 //                           só referenciado (caminho+versão+checksum)
 //                           para quem for cortar depois, manualmente.
-//   ficha_incompleta      — nem estoque pronto nem ficha técnica
-//                           completa. NUNCA inventamos material,
-//                           tempo ou arquivo de corte.
+//   ficha_tecnica_pendente— nem estoque pronto nem ficha técnica
+//                           completa. Corrigido 2026-08-07 (Rodada 2,
+//                           P0.4) — Vitre trabalha majoritariamente sob
+//                           encomenda; a ausência de produto pronto ou
+//                           de ficha técnica cadastrada NUNCA deve
+//                           impedir a geração da OS. A OS é criada
+//                           mesmo assim, com este item marcado como
+//                           pendente + aviso operacional visível — sem
+//                           inventar material, tempo ou arquivo de
+//                           corte, e sem dar baixa de estoque nenhuma
+//                           para ele (a baixa só existe para itens
+//                           pronta_entrega). Quem completa a ficha
+//                           técnica depois resolve a pendência.
 //
-// Fail-closed por design (mesmo padrão do teste 23 do catálogo): se
-// QUALQUER item cair em ficha_incompleta (ou o produto tiver sido
-// removido do catálogo depois do orçamento), a conversão inteira é
-// bloqueada — nenhuma baixa de estoque parcial, nenhuma OS parcial.
-// A resposta sempre traz a classificação completa, para a tela
-// mostrar exatamente o que falta e para quem decidir.
+// Só bloqueia a conversão inteira quando o produto foi REMOVIDO do
+// catálogo depois do orçamento (produto_removido) — aí não há sequer um
+// item para referenciar na OS. A resposta sempre traz a classificação
+// completa, para a tela mostrar exatamente o que ficou pendente.
 // ══════════════════════════════════════════════════════════════════════════
 const COL_OS = "vitre_os";
 
 interface ItemClassificado {
   sku: string; nomeSnapshot: string; qtd: number;
-  tipo: "pronta_entrega" | "produzido_apos_pedido" | "ficha_incompleta" | "produto_removido";
+  tipo: "pronta_entrega" | "produzido_apos_pedido" | "ficha_tecnica_pendente" | "produto_removido";
   motivoBloqueio?: string;
+  avisoOperacional?: boolean;
   fichaTecnicaSnapshot?: VitreProduto["fichaTecnica"];
   arquivoCorteRef?: VitreProduto["arquivoCorte"];
   prazoProducaoDiasEstimado?: number | null;
@@ -887,16 +896,22 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
         fichaTecnicaSnapshot: prod.fichaTecnica, arquivoCorteRef: prod.arquivoCorte, prazoProducaoDiasEstimado: prod.prazoDias ?? null,
       });
     } else {
+      // Rodada 2, P0.4 — não bloqueia mais a OS; marca o item como
+      // pendente e segue (Vitre é majoritariamente sob encomenda).
       itens.push({
-        sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "ficha_incompleta",
+        sku: it.sku, nomeSnapshot: it.nomeSnapshot, qtd: it.qtd, tipo: "ficha_tecnica_pendente",
+        avisoOperacional: true,
         motivoBloqueio: estoquePronto > 0
-          ? `Estoque pronto insuficiente (${estoquePronto}/${it.qtd}) e ficha técnica incompleta — não é possível decidir automaticamente.`
-          : "Sem estoque pronto e sem ficha técnica completa (componentes/arquivo de corte) — requer cadastro humano antes de gerar OS.",
+          ? `Estoque pronto insuficiente (${estoquePronto}/${it.qtd}) e ficha técnica incompleta — produção deve completar a ficha técnica antes de cortar.`
+          : "Sem estoque pronto e sem ficha técnica completa (componentes/arquivo de corte) — produção deve completar o cadastro antes de cortar.",
       });
     }
   }
 
-  const bloqueado = itens.some((i) => i.tipo === "ficha_incompleta" || i.tipo === "produto_removido");
+  // Só o produto removido do catálogo bloqueia a conversão inteira — não
+  // há item nenhum para referenciar na OS. ficha_tecnica_pendente NUNCA
+  // bloqueia (ver comentário acima da função).
+  const bloqueado = itens.some((i) => i.tipo === "produto_removido");
   if (bloqueado) {
     await writeAudit("conversao_os_bloqueada", caller.uid, caller.role, { orcamentoId, itens });
     return { ok: false, bloqueado: true, itens };
@@ -937,11 +952,16 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
     }
     const temProduzido = itens.some((i) => i.tipo === "produzido_apos_pedido");
     const temProntaEntrega = itens.some((i) => i.tipo === "pronta_entrega");
-    const statusOS = temProduzido && temProntaEntrega ? "mista_aguardando_producao" : temProduzido ? "aguardando_producao" : "pronta_expedicao";
+    // Rodada 2, P0.4 — item com ficha pendente também exige produção
+    // (não é expedição imediata), então conta como "aguardando_producao"
+    // para fins de status da OS, além de carregar o aviso operacional
+    // explícito (fichaTecnicaPendente) para o Kanban/detalhe sinalizarem.
+    const temFichaPendente = itens.some((i) => i.tipo === "ficha_tecnica_pendente");
+    const statusOS = (temProduzido || temFichaPendente) && temProntaEntrega ? "mista_aguardando_producao" : (temProduzido || temFichaPendente) ? "aguardando_producao" : "pronta_expedicao";
     tx.set(osRef, {
       id: osRef.id, orcamentoId, requestId, marca: "vitre",
       clienteNome: orc.clienteNome, clienteTel: orc.clienteTel ?? null, clienteDocumento: orc.clienteDocumento ?? null,
-      itens, status: statusOS,
+      itens, status: statusOS, fichaTecnicaPendente: temFichaPendente,
       // Coerência Pagamento ↔ OS (FASE 12 do hotfix) — copia a condição já
       // validada no orçamento; a OS nunca recalcula nem inventa valores.
       pagamento: orc.pagamento ?? null,

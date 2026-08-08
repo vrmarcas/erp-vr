@@ -17894,18 +17894,23 @@ function vitreOrcCancelar(id) {
     else showToast('Erro: ' + msg, 'err');
   });
 }
-var VITRE_OS_TIPO_LABEL = { pronta_entrega: '📦 Pronta entrega', produzido_apos_pedido: '🏭 Produzido após o pedido', ficha_incompleta: '⚠️ Ficha incompleta — revisão humana', produto_removido: '⚠️ Produto removido do catálogo' };
+// Corrigido 2026-08-07 (Rodada 2, P0.4) — "ficha_incompleta" não bloqueia
+// mais a conversão (Vitre é majoritariamente sob encomenda); o rótulo e o
+// fluxo abaixo refletem isso — a OS é gerada com aviso operacional, nunca
+// travada por falta de estoque pronto ou ficha técnica.
+var VITRE_OS_TIPO_LABEL = { pronta_entrega: '📦 Pronta entrega', produzido_apos_pedido: '🏭 Produzido após o pedido', ficha_tecnica_pendente: '⚠️ Ficha técnica pendente — completar antes de cortar', produto_removido: '🚫 Produto removido do catálogo' };
 function vitreOrcConverterEmOS(id) {
-  if (!_e2eDlgConfirm('Converter este orçamento em Ordem de Serviço? Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha incompleta).')) return;
+  if (!_e2eDlgConfirm('Converter este orçamento em Ordem de Serviço? Cada item será classificado automaticamente (pronta entrega / produzido sob pedido / ficha técnica pendente).')) return;
   firebase.functions().httpsCallable('vitreConverterOrcamentoParaOS')({ orcamentoId: id, requestId: vitreCatReqId() }).then(function (res) {
     var r = res.data;
     var linhas = (r.itens || []).map(function (it) { return '• ' + it.qtd + 'x ' + it.nomeSnapshot + ' — ' + (VITRE_OS_TIPO_LABEL[it.tipo] || it.tipo) + (it.motivoBloqueio ? ' (' + it.motivoBloqueio + ')' : ''); }).join('\n');
     if (r.bloqueado) {
-      showToast('Conversão bloqueada — ao menos um item precisa de revisão humana antes de gerar OS.', 'err');
+      showToast('Conversão bloqueada — produto removido do catálogo, requer revisão humana.', 'err');
       alert('Conversão BLOQUEADA — nenhuma OS foi gerada, nenhum estoque foi baixado.\n\n' + linhas);
     } else {
-      showToast('OS Vitre gerada com sucesso.', 'ok');
-      alert('OS gerada com sucesso!\n\n' + linhas);
+      var temPendente = (r.itens || []).some(function (it) { return it.avisoOperacional; });
+      showToast(temPendente ? 'OS Vitre gerada — 1 ou mais itens com ficha técnica pendente (ver aviso).' : 'OS Vitre gerada com sucesso.', temPendente ? 'warn' : 'ok');
+      alert((temPendente ? 'OS gerada com aviso operacional!\n\nItens com ficha técnica pendente precisam de cadastro (material/arquivo de corte) antes de cortar — a OS já existe, produção pode iniciar os demais itens.\n\n' : 'OS gerada com sucesso!\n\n') + linhas);
       if (id === VITRE_ORC_ATUAL_ID) vitreOrcAtualizarEstadoAtual();
     }
   }).catch(function (e) {
