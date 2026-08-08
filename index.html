@@ -1611,7 +1611,7 @@ function _cloudLoadAll() {
   // realmente chegado. Recontado programaticamente contra o corpo real
   // desta função — ver scripts/test_cloud_load_all_counter_2026-08-08.js,
   // que falha se este número voltar a divergir da contagem real.
-  var loaded = 0, total = 43;
+  var loaded = 0, total = 41;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1770,7 +1770,20 @@ function _cloudLoadAll() {
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
   _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
-  if(typeof crmBaseLoadIdx==='function'){ crmBaseLoadIdx(function(){
+  // RODADA 6 — achado real: crmBaseLoadIdx é uma função top-level deste
+  // mesmo arquivo (hoisted), portanto SEMPRE está definida quando
+  // _cloudLoadAll roda (setTimeout 800ms após o parse). O ramo `else`
+  // que existia aqui (_cloudLoad direto em "crm_base_idx") nunca era
+  // alcançável em nenhum ambiente — mas o contador de finalização desse
+  // ramo morto era somado pelo teste de regressão do total
+  // (test_cloud_load_all_counter), que faz contagem textual e não
+  // distingue código morto de código alcançável. Resultado: o total
+  // declarado exigia uma finalização a mais do que era fisicamente
+  // possível em tempo de execução — _cloudReady NUNCA ficava true
+  // (nenhum listener em tempo real era registrado, nenhum orçamento/OS
+  // era salvo na nuvem, mesmo em produção). Removido o guard morto —
+  // crmBaseLoadIdx chamado incondicionalmente.
+  crmBaseLoadIdx(function(){
     try{
       var _rb=document.getElementById('crmReativCount');
       if(_rb) _rb.textContent=(_CRM_BASE_IDX.filter(function(c){return c.tipo==='cliente';}).length);
@@ -1778,7 +1791,7 @@ function _cloudLoadAll() {
       if(_pb) _pb.textContent=(_CRM_BASE_IDX.filter(function(c){return c.tipo==='prospect';}).length);
     }catch(e){}
     done();
-  }); } else { _cloudLoad("crm_base_idx", function(d){ if(d&&Array.isArray(d)){ _CRM_BASE_IDX=d; } done(); }); }
+  });
   _cloudLoad("erp_vendedores", function(d){ if(d&&Array.isArray(d)){ _VENDEDORES_EXTRA=d; try{orcPopulateVendedores();}catch(e){} try{vendedoresRender();}catch(e){} } done(); });
   _cloudLoad("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; } done(); });
   _cloudLoad("crm_leads", function(d){

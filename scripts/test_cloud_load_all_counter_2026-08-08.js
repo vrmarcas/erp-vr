@@ -37,7 +37,12 @@ var body = html.slice(start, i + 1);
 var mTotal = body.match(/var loaded = 0, total = (\d+);/);
 if (!mTotal) throw new Error('declaração de `total` não encontrada no formato esperado — teste desatualizado?');
 var totalDeclarado = parseInt(mTotal[1], 10);
-var chamadasReaisDeDone = (body.match(/done\(\)/g) || []).length;
+// RODADA 6 — achado real: `/done\(\)/g` também batia na PRÓPRIA declaração
+// `function done() {`, inflando a contagem em +1 sempre — mascarando
+// exatamente o tipo de off-by-one que este teste existe para pegar (ver
+// achado do total=43 nesta mesma rodada). Chamadas reais sempre terminam
+// em `done();` (ponto e vírgula logo após); a declaração termina em `{`.
+var chamadasReaisDeDone = (body.match(/done\(\);/g) || []).length;
 
 console.log('\n=== RODADA 4 — _cloudLoadAll(): total declarado deve bater com as chamadas reais de done() ===\n');
 
