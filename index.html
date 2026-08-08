@@ -11178,13 +11178,28 @@ function kbSalvarObs() {
   if (lbl) { lbl.textContent = '✓ Salvo'; clearTimeout(_kbObsTimer); _kbObsTimer = setTimeout(function(){ lbl.textContent=''; }, 2000); }
 }
 
+// Corrigido 2026-08-07 (Rodada Mestre, seção 22) — dois problemas reais:
+// (1) marcar um item do checklist nunca persistia (kbSaveKbos() nunca era
+// chamado aqui, diferente de kbCheckAddItem/kbCheckDeleteItem) — um
+// refresh ou outra aba perdia o progresso; (2) o checklist não "dirigia"
+// nada — marcar a última etapa (Embalagem) não levava a OS para Pronta
+// sozinha, o operador precisava marcar o checklist E DEPOIS clicar
+// "Marcar como Pronta" separadamente. Agora persiste sempre, e marcar o
+// ÚLTIMO item pendente aciona kbMarcarPronto() automaticamente — sem
+// duplicar a ação se a OS já estava pronta/entregue.
 function kbToggle(i) {
   const os = KB_OS[_kbOsId]; if (!os) return;
   os._ck[i] = !os._ck[i];
   const item = document.getElementById('kbci-' + i);
-  if (!item) return;
-  item.classList.toggle('done', os._ck[i]);
-  item.querySelector('input').checked = os._ck[i];
+  if (item) {
+    item.classList.toggle('done', os._ck[i]);
+    item.querySelector('input').checked = os._ck[i];
+  }
+  kbSaveKbos();
+  var todasFeitas = os._ck && os._ck.length>0 && os._ck.every(function(c){ return !!c; });
+  if (todasFeitas && os.status!=='pronta' && os.status!=='master' && os.status!=='entregue') {
+    if (typeof kbMarcarPronto === 'function') kbMarcarPronto();
+  }
 }
 
 // ============================================================
