@@ -540,8 +540,15 @@ export const valeriaConsultarOS = functions
 
     if (!cliente) { res.json({ ok: true, cliente: null, os: [] }); return; }
 
-    // Busca OS no KB_OS
+    // Busca OS no KB_OS (operacional) + kb_os_fin (financeiro, separado desde o
+    // split P0.6). "valor" só existia em kb_os antes do split; hoje o campo
+    // financeiro mora em kb_os_fin e precisa ser mesclado aqui — ver contrato
+    // documentado na Rodada 3 (seção 36). Isto não reabre a brecha de
+    // privacidade da Produção: valeriaConsultarOS roda com Admin SDK (ignora
+    // Rules por natureza) e devolve ao PRÓPRIO CLIENTE apenas o valor do seu
+    // próprio pedido — nunca custo/margem/markup internos.
     const kbOs = await fsRead<Record<string, KbOs>>("kb_os");
+    const kbOsFin = await fsRead<Record<string, { valor?: number; totalGeral?: number }>>("kb_os_fin");
     const osCliente: KbOs[] = [];
 
     if (kbOs && cliente.os && Array.isArray(cliente.os)) {
@@ -570,13 +577,16 @@ export const valeriaConsultarOS = functions
       master: "Aguardando Master",
     };
 
-    const osSummary = osCliente.map((os) => ({
-      id: os.id,
-      descricao: os.descricao || os.cliente || "OS sem descrição",
-      status: STATUS_MAP[os.status || ""] || os.status || "desconhecido",
-      valor: os.valor,
-      data: os.data,
-    }));
+    const osSummary = osCliente.map((os) => {
+      const fin = kbOsFin?.[String(os.id)];
+      return {
+        id: os.id,
+        descricao: os.descricao || os.cliente || "OS sem descrição",
+        status: STATUS_MAP[os.status || ""] || os.status || "desconhecido",
+        valor: fin?.totalGeral ?? fin?.valor ?? os.valor,
+        data: os.data,
+      };
+    });
 
     res.json({ ok: true, cliente: { nome: cliente.nome, tel: cliente.tel }, os: osSummary });
   });

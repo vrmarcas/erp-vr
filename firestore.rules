@@ -238,6 +238,20 @@ service cloud.firestore {
       allow read: if isAnyStaff() && docId == 'erp_plan_produtos';
       allow write: if isProducao() && docId == 'erp_plan_produtos';
 
+      // Rodada 3 (2026-08-08) — camada histórica financeira (2018-2026),
+      // importada de PDFs de fechamento antigos via
+      // scripts/import_historico_financeiro.js. Mesmo grupo de acesso que
+      // fin_cr/fin_cp/fin_tx (Master+Financeiro) — é dado financeiro
+      // gerencial (vendas/entradas/despesas/lucro por competência), nunca
+      // exposto à Produção. Comercial não recebe por padrão nesta rodada
+      // (decisão a rever se um relatório comercial histórico for pedido
+      // depois — não presumido aqui). Nenhuma escrita client-side direta:
+      // todo o hist_* é gravado só pelo importador (Admin SDK) ou por
+      // Master/Financeiro corrigindo staging manualmente.
+      allow read, write: if (isMaster() || isFinanceiro()) && docId in
+        ['hist_mensal', 'hist_nf', 'hist_caixa_diario', 'hist_movimentacoes',
+         'hist_despesas', 'hist_import_runs'];
+
       // Nega tudo o mais por padrão — nenhum catch-all amplo.
     }
 

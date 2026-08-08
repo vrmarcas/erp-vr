@@ -5156,6 +5156,14 @@ function _authFirebaseError(code){
         <div id="relNFBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Clique em Relatório Fiscal para carregar.</div></div>
       </div>
 
+      <!-- ── Histórico 2018-2026 (Rodada 3) ─────────────────────────── -->
+      <div id="relPgHistorico" style="display:none">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;background:var(--bg2);border-radius:8px;padding:10px 12px">
+          Fonte: importação histórica de relatórios de fechamento (2018–2026). <strong>2026 é parcial — só janeiro a julho</strong> neste pacote; não compare com anos completos sem considerar isso. Vendas ≠ Entradas/Recebimentos (não são somadas).
+        </div>
+        <div id="histBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Carregando…</div></div>
+      </div>
+
     </div>
 
 
@@ -5217,6 +5225,7 @@ function _authFirebaseError(code){
         <button class="rel-tab-btn" id="relTabBtnDRE" onclick="relTab('dre',this)">📋 DRE</button>
         <button class="rel-tab-btn" id="relTabBtnContas" onclick="relTab('contas',this)">📌 Contas Pagas</button>
         <button class="rel-tab-btn" id="relTabBtnNF" onclick="relTab('nf',this)">🧾 Relatório Fiscal</button>
+        <button class="rel-tab-btn" id="relTabBtnHistorico" onclick="relTab('historico',this)">📈 Histórico 2018-2026</button>
         <div class="rel-tab-spacer"></div>
         <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="window.print()">🖨️ Imprimir</button>
       </div>
@@ -8141,7 +8150,11 @@ function orcSyncStep3Result() {
 // ── Helper: banco principal da empresa selecionada no orçamento ───────────────
 function orcGetBancoPrincipal(empresa) {
   if(typeof bankListFor !== 'function') return null;
-  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  // Rodada 3 (2026-08-08) — achado real: a chave usada aqui era 'vit', mas a
+  // fonte canônica única (bankRenderLista/finPopularContas) sempre gravou/leu
+  // Vitre sob 'vt'. Contas cadastradas em Config→Banco para Vitre nunca
+  // apareciam aqui — corrigido para usar a MESMA chave em todo o app.
+  var marcaKey = empresa === 'vitre' ? 'vt' : 'vr';
   var bancos = bankListFor(marcaKey);
   if(!bancos || !bancos.length) bancos = bankListFor(empresa);
   if(!bancos || !bancos.length) return null;
@@ -8152,7 +8165,7 @@ function orcGetBancoPrincipal(empresa) {
 function orcPopularBancos(empresa) {
   var sel = document.getElementById('orcSimGtw');
   if(!sel) return;
-  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  var marcaKey = empresa === 'vitre' ? 'vt' : 'vr'; // Rodada 3 — ver orcGetBancoPrincipal acima
   var bancos = (typeof bankListFor==='function') ? bankListFor(marcaKey) : [];
   if(!bancos || !bancos.length) bancos = (typeof bankListFor==='function') ? bankListFor(empresa) : [];
   sel.innerHTML = '';
@@ -14922,7 +14935,7 @@ function finBaixaManual(marca) {
 var _relActiveTab = 'caixa';
 function relTab(t, el) {
   _relActiveTab = t;
-  ['Caixa','Mensal','DRE','Contas','NF'].forEach(function(k){
+  ['Caixa','Mensal','DRE','Contas','NF','Historico'].forEach(function(k){
     var btn=document.getElementById('relTabBtn'+k);
     var pg =document.getElementById('relPg'+k);
     if(btn) btn.classList.toggle('on', k.toLowerCase()===t);
@@ -14931,12 +14944,63 @@ function relTab(t, el) {
   // pequeno delay para garantir que o DOM esteja pronto antes de popular
   var _rt=t;
   setTimeout(function(){
-    if(_rt==='caixa')  relCaixaDiario();
-    if(_rt==='mensal') relMensal();
-    if(_rt==='dre')    relatoriosRender();
-    if(_rt==='contas') relContasPagas();
-    if(_rt==='nf')     relFiscalRender();
+    if(_rt==='caixa')     relCaixaDiario();
+    if(_rt==='mensal')    relMensal();
+    if(_rt==='dre')       relatoriosRender();
+    if(_rt==='contas')    relContasPagas();
+    if(_rt==='nf')        relFiscalRender();
+    if(_rt==='historico') histRender();
   }, 30);
+}
+
+// ── Histórico 2018-2026 (Rodada 3, seção 26) — lê hist_mensal (fonte
+// canônica dos agregados importados, ver import_historico_financeiro.js).
+// Leitura direta e pontual (não precisa de listener em tempo real — dado
+// histórico não muda sozinho); Rules restringem a Master/Financeiro.
+function histAgruparPorAno(registros) {
+  var porAno = {};
+  registros.forEach(function(r){
+    if(r.status !== 'confirmado') return; // nunca mistura auxiliar/revisão no total canônico
+    var ano = r.ano;
+    if(!porAno[ano]) porAno[ano] = { ano:ano, meses:0, vendas:0, entradas:0, gasto:0, lucro:0, temLucro:false };
+    porAno[ano].meses++;
+    porAno[ano].vendas   += r.vendas_total||0;
+    porAno[ano].entradas += r.entradas_total||0;
+    porAno[ano].gasto    += r.total_gasto_consolidado||0;
+    if(r.lucro!=null){ porAno[ano].lucro += r.lucro; porAno[ano].temLucro = true; }
+  });
+  return Object.keys(porAno).map(function(a){ return porAno[a]; }).sort(function(a,b){ return a.ano-b.ano; });
+}
+function histFmt(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
+function histRender() {
+  var el = document.getElementById('histBody');
+  if(!el || typeof _db==='undefined') return;
+  el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Carregando…</div>';
+  _db.collection('erp_vr').doc('hist_mensal').get().then(function(snap){
+    var dados = (snap.exists && snap.data() && snap.data().data) ? JSON.parse(snap.data().data) : {};
+    var registros = Object.values(dados);
+    if(!registros.length){
+      el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhum dado histórico importado ainda.</div>';
+      return;
+    }
+    var porAno = histAgruparPorAno(registros);
+    var rows = porAno.map(function(a, i){
+      var anterior = porAno[i-1];
+      var cresc = (anterior && anterior.vendas>0) ? ((a.vendas-anterior.vendas)/anterior.vendas*100) : null;
+      var parcial = a.meses<12 ? ' <span style="font-size:9px;background:#FEF3C7;color:#92400E;border-radius:4px;padding:1px 5px">PARCIAL — '+a.meses+' meses</span>' : '';
+      return '<tr>'
+        +'<td><strong>'+a.ano+'</strong>'+parcial+'</td>'
+        +'<td style="text-align:right">'+histFmt(a.vendas)+'</td>'
+        +'<td style="text-align:right">'+histFmt(a.entradas)+'</td>'
+        +'<td style="text-align:right">'+histFmt(a.gasto)+'</td>'
+        +'<td style="text-align:right">'+(a.temLucro?histFmt(a.lucro):'—')+'</td>'
+        +'<td style="text-align:right">'+(cresc==null?'—':(cresc>=0?'📈 +':'📉 ')+cresc.toFixed(1)+'%')+'</td>'
+        +'</tr>';
+    }).join('');
+    el.innerHTML = '<table class="table"><tr><th>Ano</th><th style="text-align:right">Vendas</th><th style="text-align:right">Entradas</th><th style="text-align:right">Gasto Total</th><th style="text-align:right">Lucro</th><th style="text-align:right">Cresc. Vendas YoY</th></tr>'+rows+'</table>';
+  }).catch(function(e){
+    el.innerHTML = '<div style="text-align:center;color:#DC2626;font-size:12px;padding:24px">Erro ao carregar histórico — '+(e&&e.message||e)+'</div>';
+  });
 }
 
 // Reexecuta a aba de relatório atualmente aberta — chamado pelos listeners do
