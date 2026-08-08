@@ -15711,6 +15711,57 @@ function relFiscalGetFiltrados() {
 
 var FISCAL_STATUS_LABEL = {pendente:'⏳ Pendente',emitida:'✅ Emitida',dispensada:'🚫 Dispensada',cancelada:'❌ Cancelada'};
 
+// RODADA 4, seção 6 — a emissão de NF nunca "decide fiscalmente sozinha":
+// todo campo vem de ação humana explícita. Se o valor emitido diverge do
+// valor da venda, EXIGE justificativa e grava auditoria (quem/quando) —
+// nunca altera o valor da venda por causa da NF, e nunca sobrescreve a
+// divergência em silêncio.
+function relFiscalDivergeValor(vendaValor, valorEmitido) {
+  if (typeof valorEmitido !== 'number' || isNaN(valorEmitido)) return false;
+  return Math.abs((vendaValor || 0) - valorEmitido) > 0.005;
+}
+function relFiscalRegistrarEmissao(orc, input) {
+  input = input || {};
+  var numero = String(input.numero || '').trim();
+  if (!numero) return { ok: false, erro: 'NUMERO_OBRIGATORIO' };
+  var vendaValor = orc.valorFinal || orc.valorBase || 0;
+  var valorEmitido = (input.valorEmitido === '' || input.valorEmitido === undefined || input.valorEmitido === null)
+    ? vendaValor : parseFloat(input.valorEmitido);
+  if (isNaN(valorEmitido)) return { ok: false, erro: 'VALOR_INVALIDO' };
+  var diverge = relFiscalDivergeValor(vendaValor, valorEmitido);
+  var justificativa = String(input.justificativaDivergencia || '').trim();
+  if (diverge && !justificativa) return { ok: false, erro: 'JUSTIFICATIVA_DIVERGENCIA_OBRIGATORIA' };
+  orc.numeroNF = numero;
+  orc.valorSolicitadoNF = vendaValor;
+  orc.valorEmitidoNF = valorEmitido;
+  orc.chaveNF = String(input.chave || '').trim();
+  orc.observacaoNF = String(input.observacao || '').trim();
+  orc.dataEmissaoNF = input.dataEmissao || new Date().toLocaleDateString('pt-BR');
+  orc.divergenciaNF = diverge;
+  if (diverge) {
+    orc.divergenciaNFJustificativa = justificativa;
+    orc.divergenciaNFAuditoria = { usuario: input.usuario || '—', ts: input.ts || Date.now() };
+  } else {
+    delete orc.divergenciaNFJustificativa;
+    delete orc.divergenciaNFAuditoria;
+  }
+  return { ok: true, diverge: diverge };
+}
+// Valor efetivamente RECEBIDO deste orçamento (fonte: FIN_CR) — mostrado
+// lado a lado com Venda e NF como TRÊS valores distintos (seção 6), nunca
+// misturados nem usados para alterar um ao outro.
+function relFiscalRecebidoDoOrc(o) {
+  if (!o) return 0;
+  var osNum = (o.osRef && typeof KB_OS !== 'undefined' && KB_OS[o.osRef]) ? KB_OS[o.osRef].num : null;
+  return (typeof FIN_CR !== 'undefined' ? FIN_CR : []).filter(function (r) {
+    if (r.status !== 'recebido') return false;
+    if (r.orcamentoId === o.id) return true;
+    if (r.osRef === 'ORC-' + o.num) return true;
+    if (osNum && r.osRef === 'OS #' + osNum) return true;
+    return false;
+  }).reduce(function (s, r) { return s + r.valor; }, 0);
+}
+
 function relFiscalSetStatus(id, status){
   var lista = orcGetEnviados();
   var orc = lista.find(function(o){ return o.id===id; });
@@ -15718,8 +15769,21 @@ function relFiscalSetStatus(id, status){
   if(status==='emitida'){
     var numero = prompt('Numero da nota fiscal emitida:', orc.numeroNF||'');
     if(!numero || !numero.trim()){ showToast('Numero da NF e obrigatorio para marcar como emitida.','warn'); return; }
-    orc.numeroNF = numero.trim();
-    orc.dataEmissaoNF = new Date().toLocaleDateString('pt-BR');
+    var vendaValor = orc.valorFinal||orc.valorBase||0;
+    var valorEmitidoStr = prompt('Valor emitido na NF (R$) — deixe igual ao valor da venda se não houver divergência:', vendaValor.toFixed(2));
+    if(valorEmitidoStr===null) return;
+    var valorEmitidoNum = parseFloat(String(valorEmitidoStr).replace(',','.'));
+    if(isNaN(valorEmitidoNum)){ showToast('Valor emitido inválido.','warn'); return; }
+    var justificativaDiv = '';
+    if(relFiscalDivergeValor(vendaValor, valorEmitidoNum)){
+      justificativaDiv = prompt('O valor emitido diverge do valor da venda (R$ '+vendaValor.toFixed(2)+'). Justifique a divergência (obrigatório para auditoria):','');
+      if(!justificativaDiv || !justificativaDiv.trim()){ showToast('Divergência entre venda e NF exige justificativa.','warn'); return; }
+    }
+    var chaveNF = prompt('Chave de acesso da NF-e (opcional):', orc.chaveNF||'') || '';
+    var observacaoNF = prompt('Observação (opcional):', orc.observacaoNF||'') || '';
+    var usuarioNF = (typeof firebase!=='undefined' && firebase.auth && firebase.auth().currentUser) ? (firebase.auth().currentUser.email||'—') : '—';
+    var rNF = relFiscalRegistrarEmissao(orc, { numero:numero, valorEmitido:valorEmitidoNum, justificativaDivergencia:justificativaDiv, chave:chaveNF, observacao:observacaoNF, usuario:usuarioNF });
+    if(!rNF.ok){ showToast('Não foi possível registrar a emissão da NF.','err'); return; }
   } else if(status==='dispensada'){
     var motivo = prompt('Justificativa da dispensa de nota fiscal (obrigatoria):', orc.justificativaDispensa||'');
     if(!motivo || !motivo.trim()){ showToast('Dispensa de NF exige justificativa.','warn'); return; }
@@ -15751,19 +15815,30 @@ function relFiscalRender() {
     var statusSel = '<select onchange="relFiscalSetStatus(\''+o.id+'\',this.value)" style="font-size:10px;padding:2px 4px;border-radius:5px;border:1px solid var(--border);background:var(--surface)">'
       + Object.keys(FISCAL_STATUS_LABEL).map(function(s){ return '<option value="'+s+'"'+(statusAtual===s?' selected':'')+'>'+FISCAL_STATUS_LABEL[s]+'</option>'; }).join('')
       + '</select>';
+    // RODADA 4, seção 6 — venda × recebido × NF são TRÊS valores
+    // distintos, exibidos lado a lado; a NF nunca altera o valor da venda.
+    var vendaValor = o.valorFinal||o.valorBase||0;
+    var recebidoValor = relFiscalRecebidoDoOrc(o);
+    var nfValor = (typeof o.valorEmitidoNF==='number') ? o.valorEmitidoNF : null;
+    var nfCell = nfValor===null
+      ? '<span style="color:var(--muted)">—</span>'
+      : 'R$ '+nfValor.toLocaleString('pt-BR',{minimumFractionDigits:2})
+        + (o.divergenciaNF ? '<div title="'+cfgEsc(o.divergenciaNFJustificativa||'')+'" style="font-size:9px;font-weight:700;color:#DC2626;margin-top:1px">⚠ diverge da venda</div>' : '');
     return '<tr style="border-bottom:1px solid var(--border)">'
-      +'<td style="padding:6px 8px">'+cfgEsc(o.id)+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+cfgEsc(o.numeroNF)+'</div>':'')+'</td>'
+      +'<td style="padding:6px 8px">'+cfgEsc(o.id)+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+cfgEsc(o.numeroNF)+(o.chaveNF?' · '+cfgEsc(o.chaveNF):'')+'</div>':'')+(o.observacaoNF?'<div style="font-size:9px;color:var(--muted)">'+cfgEsc(o.observacaoNF)+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+cfgEsc(o.dataSalvo)+'</td>'
       +'<td style="padding:6px 8px"><strong>'+cfgEsc(o.cliente)+'</strong>'
         +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+cfgEsc(o.nf.doc)+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+marca+'</td>'
-      +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+(o.valorFinal||o.valorBase||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#1D4ED8">R$ '+vendaValor.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+recebidoValor.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#7C3AED">'+nfCell+'</td>'
       +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+cfgEsc(o.email||'—')+'</td>'
       +'<td style="padding:6px 8px">'+statusSel+'</td>'
       +'</tr>';
   }).join('');
   el.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">'
-    +orcs.length+' NF(s) solicitada(s) &mdash; Total: <strong style="color:#059669">R$ '
+    +orcs.length+' NF(s) solicitada(s) &mdash; Total (venda): <strong style="color:#1D4ED8">R$ '
     +totalNF.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></div>'
     +'<div style="font-size:11px;margin-bottom:10px">'+resumoHtml+'</div>'
     +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
@@ -15772,7 +15847,9 @@ function relFiscalRender() {
     +'<th style="text-align:left;padding:6px 8px">Data</th>'
     +'<th style="text-align:left;padding:6px 8px">Cliente</th>'
     +'<th style="text-align:left;padding:6px 8px">Empresa</th>'
-    +'<th style="text-align:left;padding:6px 8px">Valor NF</th>'
+    +'<th style="text-align:left;padding:6px 8px">Venda</th>'
+    +'<th style="text-align:left;padding:6px 8px">Recebido</th>'
+    +'<th style="text-align:left;padding:6px 8px">NF Emitida</th>'
     +'<th style="text-align:left;padding:6px 8px">E-mail</th>'
     +'<th style="text-align:left;padding:6px 8px">Situacao</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table>';
