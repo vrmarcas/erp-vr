@@ -8789,6 +8789,99 @@ function receitaResolverParaCalculo(item, produtoAtual) {
   return null;
 }
 
+// ============================================================
+// ITEM DE ORÇAMENTO VR — MODELO DE DOMÍNIO (RODADA 6, seções 8/9/10/11)
+// ============================================================
+// Constrói o objeto COMPLETO de um item personalizado VR a partir dos
+// dados brutos da linha do wizard + o produto/receita resolvido. Pura —
+// não toca DOM. É esta função (não mais o objeto solto montado direto no
+// DOM) que decide o que é persistido, incluindo os campos de
+// versionamento (productId/recipeId/recipeVersion/recipeSnapshot) que
+// ficaram sem uso na Rodada 5. Sempre que `produto` é fornecido, grava um
+// snapshot NOVO da receita vigente — chame isto só no momento em que o
+// vendedor efetivamente planifica/confirma o item, nunca ao reabrir um
+// item já salvo (para isso, ver orcItemVRRestaurarDados).
+function orcItemVRConstruir(dadosLinha, produto) {
+  var item = {
+    tipoItem: 'personalizado_vr',
+    prod: dadosLinha.prod || '',
+    qty: dadosLinha.qty || '1',
+    larg: dadosLinha.larg || '',
+    alt: dadosLinha.alt || '',
+    matKey: dadosLinha.matKey || '',
+    mat: dadosLinha.mat || '',
+    det: dadosLinha.det || '',
+    unit: dadosLinha.unit || '',
+    total: dadosLinha.total || '',
+    planArea: dadosLinha.planArea || 0,
+    planManualMatCost: dadosLinha.planManualMatCost || 0,
+    planManualAreaM2: dadosLinha.planManualAreaM2 || 0,
+    pieces: dadosLinha.planPecas || [],
+    extras: dadosLinha.extras || null,
+  };
+  if (produto) {
+    var snap = receitaSnapshotParaItem(produto);
+    item.productId = snap.productId;
+    item.recipeId = snap.recipeId;
+    item.recipeVersion = snap.recipeVersion;
+    item.recipeSnapshot = snap.recipeSnapshot;
+  }
+  return item;
+}
+// Reabertura fiel (seção 11): dado um item JÁ SALVO, devolve exatamente
+// os valores que devem ser restaurados na linha do wizard — nunca
+// re-deriva da receita atual. Isto fecha DUAS lacunas reais encontradas
+// nesta rodada: (1) recipeSnapshot nunca era restaurado (a receita atual
+// silenciosamente "vencia" o histórico); (2) mesmo sem receita
+// versionada, reabrir um item planificado hoje perde planArea/pieces por
+// completo e o custo recalcula como retângulo plano — bug pré-existente,
+// corrigido aqui como efeito colateral necessário.
+function orcItemVRRestaurarDados(itemSalvo) {
+  itemSalvo = itemSalvo || {};
+  var temPlano = !!(itemSalvo.planArea && itemSalvo.pieces && itemSalvo.pieces.length);
+  return {
+    prod: itemSalvo.prod || '',
+    qty: itemSalvo.qty || '1',
+    larg: itemSalvo.larg || '',
+    alt: itemSalvo.alt || '',
+    matKey: itemSalvo.matKey || '',
+    mat: itemSalvo.mat || '',
+    det: itemSalvo.det || '',
+    planArea: itemSalvo.planArea || 0,
+    planManualMatCost: itemSalvo.planManualMatCost || 0,
+    planManualAreaM2: itemSalvo.planManualAreaM2 || 0,
+    planPecas: itemSalvo.pieces || [],
+    temPlanificacao: temPlano,
+    recipeSnapshot: itemSalvo.recipeSnapshot || null,
+    recipeVersion: itemSalvo.recipeVersion || null,
+    productId: itemSalvo.productId || null,
+    extras: itemSalvo.extras || null,
+  };
+}
+// Projeção operacional segura do item para a OS (seção 13): Produção
+// nunca recebe custo/preço/margem/markup/desconto/pagamento — mesmo que
+// o item ou o recipeSnapshot carreguem esses dados em algum campo futuro,
+// esta função só copia os campos operacionais explicitamente listados.
+function osProjecaoOperacionalItem(item) {
+  if (!item) return item;
+  var seguro = {
+    tipoItem: item.tipoItem,
+    prod: item.prod, qty: item.qty, larg: item.larg, alt: item.alt,
+    mat: item.mat, det: item.det,
+    planArea: item.planArea, pieces: item.pieces,
+    productId: item.productId || null,
+    recipeVersion: item.recipeVersion || null,
+  };
+  if (item.recipeSnapshot) {
+    seguro.recipeSnapshot = {
+      nome: item.recipeSnapshot.nome,
+      dim3d: item.recipeSnapshot.dim3d,
+      pecas: item.recipeSnapshot.pecas,
+    };
+  }
+  return seguro;
+}
+
 // RODADA 5, seção 9 — achado de segurança: esta função usava Function()
 // (execução arbitrária de JS) protegida só por um regex de whitelist. Isso
 // é exatamente o padrão que o enunciado desta rodada proíbe explicitamente
@@ -9138,6 +9231,21 @@ function planAplicar() {
     var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
       .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
     row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+    // RODADA 6, seção 8/10 — no momento em que o vendedor confirma a
+    // planificação, congela a receita vigente (productId/recipeVersion/
+    // recipeSnapshot) no item. É este o único ponto em que um NOVO
+    // snapshot é gravado — reabrir um item já salvo nunca passa por aqui
+    // de novo (ver orcEnvEditar), garantindo a imutabilidade histórica.
+    var _prodNomeAtual = (document.getElementById('oi_prod_'+_planIdx)||{}).value||'';
+    var _produtoReceita = (typeof planProdLoad==='function' ? planProdLoad() : []).find(function(p){ return p.nome===_prodNomeAtual; });
+    if(_produtoReceita && typeof receitaSnapshotParaItem==='function'){
+      var _snap = receitaSnapshotParaItem(_produtoReceita);
+      row.dataset.recipeProductId = _snap.productId;
+      row.dataset.recipeVersion = String(_snap.recipeVersion);
+      row.dataset.recipeSnapshot = JSON.stringify(_snap.recipeSnapshot);
+    } else {
+      delete row.dataset.recipeProductId; delete row.dataset.recipeVersion; delete row.dataset.recipeSnapshot;
+    }
     // planPecasManual = só as extras manuais — restaurado ao reabrir (evita duplicação do catálogo)
     var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
     row.dataset.planPecasManual = JSON.stringify(_onlyManual);
@@ -21254,7 +21362,17 @@ async function _orcSalvarOrcamentoImpl() {
     var ri = row.dataset.idx; if(!ri) return;
     var matEl = document.getElementById('oi_mat_'+ri);
     var matOpt = matEl ? matEl.options[matEl.selectedIndex] : null;
+    // RODADA 6, seção 8/9/10 — o item agora carrega o modelo de domínio
+    // completo (pieces/productId/recipeVersion/recipeSnapshot), gravado em
+    // planAplicar() no momento em que o vendedor confirma a planificação.
+    // Fecha a lacuna real encontrada: receitaSnapshotParaItem() já existia
+    // desde a Rodada 5 mas nunca era chamada pelo pipeline de salvamento.
+    var _pecasSalvas = null;
+    try { _pecasSalvas = row.dataset.planPecas ? JSON.parse(row.dataset.planPecas) : null; } catch(e){ _pecasSalvas = null; }
+    var _recipeSnapshotSalvo = null;
+    try { _recipeSnapshotSalvo = row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(e){ _recipeSnapshotSalvo = null; }
     _itens.push({
+      tipoItem: 'personalizado_vr',
       prod:  (document.getElementById('oi_prod_'+ri)||{}).value||'',
       qty:   (document.getElementById('oi_qty_'+ri)||{}).value||'1',
       larg:  (document.getElementById('oi_larg_'+ri)||{}).value||'',
@@ -21267,6 +21385,10 @@ async function _orcSalvarOrcamentoImpl() {
       planArea: parseFloat(row.dataset.planArea)||0,
       planManualMatCost: parseFloat(row.dataset.planManualMatCost)||0,
       planManualAreaM2: parseFloat(row.dataset.planManualAreaM2)||0,
+      pieces: _pecasSalvas || [],
+      productId: row.dataset.recipeProductId || null,
+      recipeVersion: row.dataset.recipeVersion ? parseInt(row.dataset.recipeVersion,10) : null,
+      recipeSnapshot: _recipeSnapshotSalvo,
       extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null
     });
   });
@@ -21951,6 +22073,41 @@ function orcEnvEditar(id) {
           if(typeof orcMatChanged==='function') orcMatChanged(ri);
         }
         if(it.extras && typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS[ri]=JSON.parse(JSON.stringify(it.extras));
+        // RODADA 6, seção 11/12 — reabertura fiel: restaura planArea/peças/
+        // recipeSnapshot EXATAMENTE como foram salvos (nunca busca a receita
+        // vigente de novo aqui — ver orcItemVRRestaurarDados). Fecha o bug
+        // pré-existente de perda de planificação ao reabrir um orçamento.
+        var _rd = (typeof orcItemVRRestaurarDados==='function') ? orcItemVRRestaurarDados(it) : null;
+        if(_rd && _rd.temPlanificacao){
+          var row = document.getElementById('oir_'+ri);
+          if(row){
+            row.dataset.planArea = _rd.planArea;
+            row.dataset.planPecas = JSON.stringify(_rd.planPecas||[]);
+            row.dataset.planManualMatCost = _rd.planManualMatCost||0;
+            row.dataset.planManualAreaM2 = _rd.planManualAreaM2||0;
+            if(_rd.productId) row.dataset.recipeProductId = _rd.productId;
+            if(_rd.recipeVersion) row.dataset.recipeVersion = String(_rd.recipeVersion);
+            if(_rd.recipeSnapshot) row.dataset.recipeSnapshot = JSON.stringify(_rd.recipeSnapshot);
+          }
+          // Espelha o feedback visual de planAplicar(): esconde larg/alt,
+          // mostra o badge 📐 e a tag de planificação — sem isso o operador
+          // achava que a planificação tinha sumido ao reabrir.
+          var lInput = document.getElementById('oi_larg_'+ri), aInput = document.getElementById('oi_alt_'+ri);
+          if(lInput) lInput.style.display='none';
+          if(aInput) aInput.style.display='none';
+          var lCell = lInput ? lInput.closest('td') : null, aCell = aInput ? aInput.closest('td') : null;
+          if(lCell && !lCell.querySelector('.plan-badge')) { var _b1=document.createElement('span'); _b1.className='plan-badge'; _b1.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; _b1.textContent='📐'; lCell.appendChild(_b1); }
+          if(aCell && !aCell.querySelector('.plan-badge')) { var _b2=document.createElement('span'); _b2.className='plan-badge'; _b2.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; _b2.textContent='📐'; aCell.appendChild(_b2); }
+          var _tag = document.getElementById('oi_planTag_'+ri);
+          if(_tag){
+            var _infoEl = document.getElementById('oi_planInfo_'+ri);
+            var _qty = (_rd.planPecas||[]).reduce(function(s,p){ return s+(parseInt(p.qty)||0); },0);
+            if(_infoEl) _infoEl.textContent = _qty + ' peças · ' + ((_rd.planArea||0)/10000).toFixed(4) + ' m²';
+            _tag.classList.add('show');
+          }
+          var _pbtn = document.getElementById('oi_planBtn_'+ri);
+          if(_pbtn) _pbtn.classList.add('active');
+        }
       });
     }
     if(snap && snap.parametros){
@@ -22253,7 +22410,9 @@ function orcEnvGerarOS(){
       checks:checksProducao,_ck:_ckProducao,
       parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
       clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
-      itens:itens,totalGeral:valorTotal,obs:obs,
+      // RODADA 6, seção 13 — Produção nunca recebe custo/preço/margem: cada
+      // item vira uma projeção operacional segura (ver osProjecaoOperacionalItem).
+      itens:itens.map(function(it){ return (typeof osProjecaoOperacionalItem==='function') ? osProjecaoOperacionalItem(it) : it; }),totalGeral:valorTotal,obs:obs,
       orcRef:o.id, orcNum:o.num,
       pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
     };
@@ -22321,7 +22480,11 @@ function orcEnvGerarOS(){
           checks:checksProducao,_ck:_ckProducao,
           clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
           clientCidade:'—',vendedor:'',dataOS:dia,
-          itens:itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; }),
+          // RODADA 6, seção 13 — troca a lista negra (delete unit/total) por
+          // uma lista branca explícita (osProjecaoOperacionalItem): garante
+          // que nenhum dado financeiro novo (custo técnico, planManualMatCost,
+          // recipeSnapshot financeiro) vaze para kb_os por engano no futuro.
+          itens:itens.map(function(it){ return (typeof osProjecaoOperacionalItem==='function') ? osProjecaoOperacionalItem(it) : it; }),
           obs:obs,
           orcRef:o.id, orcNum:o.num
         };
