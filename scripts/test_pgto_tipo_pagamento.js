@@ -150,11 +150,19 @@ function makeOrc(id, num, valorFinal, extra) {
 
 console.log('\n=== Regressão: tipo de pagamento ignorado ao gerar OS (Fase F) ===\n');
 
-test('1. padrão inicial do modal é Integral (mesmo botão que a UI ativa por padrão)', function () {
+// Rodada 2.1 (2026-08-08) — teste desatualizado: o default do modal deixou
+// de ser Integral em favor de 50/50 (regra operacional "50% de entrada
+// para iniciar produção, 50% na retirada/entrega" — ver comentário em
+// orcEnvConfirmarPgto() logo antes de orcPagtoTipoSel(pm.querySelector(
+// '[data-tipo="50-50"]')), e o botão 50-50 é o único com class="...active"
+// na UI). Vitre segue a mesma regra (vitreOrcPgtoTipo tem "entrada_saldo"
+// como option selected). Não é um bug — é a mudança de regra de negócio
+// já documentada e testada em P0.1/P1 "Condição padrão 50/50".
+test('1. padrão inicial do modal é 50/50 (regra operacional atual — 50% para iniciar produção)', function () {
   resetModalDom();
   mod.setEnviados([makeOrc('ORC-1', '000001', 1000)]);
   mod.orcEnvConfirmarPgto('ORC-1');
-  assertEq(mod.getPgtoTipoAtual(), 'integral', 'estado canônico deve iniciar como integral, igual ao destaque visual padrão');
+  assertEq(mod.getPgtoTipoAtual(), '50-50', 'estado canônico deve iniciar como 50-50, igual ao destaque visual padrão');
 });
 
 test('2. Integral — entrada = total, restante = 0, status pago, um recebimento', function () {
@@ -227,15 +235,15 @@ test('6. alternar Integral → Parcial → 50/50 → Futuro mantém só a últim
   assertEq(mod.getPgtoTipoAtual(), 'futuro', 'apenas a última seleção deve valer');
 });
 
-test('7. fechar e reabrir o modal reseta para Integral (não reaproveita seleção anterior)', function () {
+test('7. fechar e reabrir o modal reseta para 50/50 (não reaproveita seleção anterior)', function () {
   resetModalDom();
   mod.setEnviados([makeOrc('ORC-7a', '000007', 1000), makeOrc('ORC-7b', '000008', 2000)]);
   mod.orcEnvConfirmarPgto('ORC-7a');
   mod.orcPagtoTipoSel(_tipoButtons['futuro']);
   assertEq(mod.getPgtoTipoAtual(), 'futuro');
-  // reabrir para outro orçamento — deve voltar ao padrão Integral
+  // reabrir para outro orçamento — deve voltar ao padrão 50/50
   mod.orcEnvConfirmarPgto('ORC-7b');
-  assertEq(mod.getPgtoTipoAtual(), 'integral', 'reabrir o modal deve resetar para o padrão, não herdar seleção anterior');
+  assertEq(mod.getPgtoTipoAtual(), '50-50', 'reabrir o modal deve resetar para o padrão 50/50, não herdar seleção anterior');
 });
 
 test('8. dois orçamentos consecutivos com escolhas diferentes não se cruzam', function () {
