@@ -14286,11 +14286,29 @@ function finCRRender() {
     var mLabel=r.marca==='vr'
       ?'<span class="fin-marca-badge fin-marca-vr">VR — MP</span>'
       :'<span class="fin-marca-badge fin-marca-vit">Vitre — Nu</span>';
-    var origem=r.osRef
-      ?'<span class="fin-origem-badge fin-origem-os">📋 '+r.osRef+'</span>'
-      :'<span class="fin-origem-badge fin-origem-manual">✏️ Manual</span>';
+    // RODADA 4, seção 3 — drilldown: Cliente/Orçamento/OS clicáveis quando
+    // o vínculo existir (gravado no lançamento novo, ou resolvido por
+    // nome/OS-Ref para lançamentos antigos que nunca guardaram o id real).
+    var linkedOS = finCRLinkedOS(r);
+    var linkedOrc = finCRLinkedOrc(r);
+    var clienteId = r.clienteId || (typeof finResolveClienteId==='function' ? finResolveClienteId(r.cliente, r.tel||r.clienteTel) : '');
+    var clienteCell = clienteId
+      ? '<a href="javascript:void(0)" onclick="event.stopPropagation();cliOpenDetalhe(\''+clienteId+'\')" style="color:var(--brand-mid);text-decoration:underline;cursor:pointer">'+r.cliente+'</a>'
+      : r.cliente;
+    var origem;
+    if(linkedOS){
+      origem='<span class="fin-origem-badge fin-origem-os" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();kbOpen(\''+linkedOS.id+'\')">📋 '+r.osRef+'</span>';
+    } else if(linkedOrc){
+      origem='<span class="fin-origem-badge fin-origem-os" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();orcEnvAbrir(\''+linkedOrc.id+'\')">📋 '+r.osRef+'</span>';
+    } else if(r.osRef){
+      origem='<span class="fin-origem-badge fin-origem-os">📋 '+r.osRef+'</span>';
+    } else {
+      origem='<span class="fin-origem-badge fin-origem-manual">✏️ Manual</span>';
+    }
     var statusMap={pendente:'pendente',recebido:'recebido',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMap[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
+    var osPronta = !!(linkedOS && linkedOS.status==='pronta');
+    if(osPronta) badge += '<div style="margin-top:2px"><span class="fin-badge" style="background:#DCFCE7;color:#166534;font-size:9px">📦 OS pronta</span></div>';
     // Cor do valor: verde=recebido, vermelho=vencido, padrão=pendente
     var valColor=r.status==='recebido'?'#059669':r.status==='vencido'?'#DC2626':'var(--text)';
     // 3-dot menu
@@ -14298,20 +14316,23 @@ function finCRRender() {
     var menuItems='';
     if(r.status==='pendente'||r.status==='vencido'){
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCRBaixa(\''+r.id+'\')">✓ Baixar recebimento</button>';
-      if(r.status==='vencido'){
-        var tel=(r.tel||r.clienteTel||'').replace(/\D/g,'');
-        var msgWa=encodeURIComponent('Olá '+r.cliente.split(' ')[0]+'! Verificamos que sua conta '+finFmt(r.valor)+' (venc. '+r.vencimento+') está em aberto. Podemos regularizar? 😊');
-        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');window.open(\'https://wa.me/'+(tel?'55'+tel:'')+'?text='+msgWa+'\',\'_blank\')">📱 Cobrar via WhatsApp</button>';
-      }
+      var tel=(r.tel||r.clienteTel||(linkedOS&&linkedOS.clientTel)||'').replace(/\D/g,'');
+      var msgWa=encodeURIComponent('Olá '+r.cliente.split(' ')[0]+'! Verificamos que sua conta '+finFmt(r.valor)+' (venc. '+r.vencimento+') está em aberto. Podemos regularizar? 😊');
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');window.open(\'https://wa.me/'+(tel?'55'+tel:'')+'?text='+msgWa+'\',\'_blank\')">📱 Cobrar via WhatsApp</button>';
     } else if(r.status==='recebido'){
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCREstornar(\''+r.id+'\')">↩ Estornar recebimento</button>';
+    }
+    if(osPronta){
+      var telPronto=(linkedOS.clientTel||r.tel||r.clienteTel||'').replace(/\D/g,'');
+      var msgPronto=encodeURIComponent(kbMsgOsPronta(linkedOS));
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');window.open(\'https://wa.me/'+(telPronto?'55'+telPronto:'')+'?text='+msgPronto+'\',\'_blank\')" style="font-weight:700;color:#166534">🔔 Avisar pedido pronto</button>';
     }
     menuItems+='<button class="danger" onclick="_finDotToggle(\''+menuId+'\');if(confirm(\'Excluir conta a receber?\'))finCRDel(\''+r.id+'\')">🗑️ Excluir</button>';
     var dotMenu='<div class="fin-dot-wrap"><button class="fin-dot-btn" onclick="event.stopPropagation();_finDotToggle(\''+menuId+'\')">⋯</button><div class="fin-dot-menu" id="'+menuId+'">'+menuItems+'</div></div>';
     var chk='<input type="checkbox" '+(_finCRSel[r.id]?'checked':'')+' onchange="finCRToggleSel(\''+r.id+'\')" onclick="event.stopPropagation()">';
-    return '<tr>'
+    return '<tr'+(osPronta?' style="background:#F0FDF4"':'')+'>'
       +'<td>'+chk+'</td>'
-      +'<td><strong>'+r.cliente+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
+      +'<td><strong>'+clienteCell+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+r.descricao+'</div></td>'
       +'<td>'+origem+'</td>'
       +'<td>'+mLabel+'</td>'
       +'<td style="font-weight:800;color:'+valColor+';font-size:13px">'+finFmt(r.valor)+'</td>'
@@ -14374,6 +14395,49 @@ function finCRDel(id) {
   finCRRender(); finDashKPIs();
 }
 
+// RODADA 4, seção 3 — resolve o clienteId real (CLIENTES_DATA) a partir do
+// nome/telefone gravados no lançamento. Usado tanto ao CRIAR um novo CR
+// (grava o vínculo real) quanto ao RENDERIZAR lançamentos antigos que nunca
+// tiveram clienteId gravado (fallback só para exibição, nunca persistido
+// silenciosamente por cima de um dado existente).
+function finResolveClienteId(nome, tel) {
+  if (typeof CLIENTES_DATA === 'undefined' || !CLIENTES_DATA) return '';
+  var t = String(tel || '').replace(/\D/g, '');
+  var n = String(nome || '').toLowerCase().trim();
+  if (!t && !n) return '';
+  var c = CLIENTES_DATA.find(function (x) {
+    return (t && t.length >= 8 && String(x.tel || '').replace(/\D/g, '') === t) ||
+           (n && String(x.nome || '').toLowerCase().trim() === n);
+  });
+  return c ? c.id : '';
+}
+// Localiza a OS vinculada a um lançamento de CR, tentando primeiro o
+// osId gravado (novos lançamentos) e, para lançamentos antigos sem osId,
+// o padrão textual "OS #N" já usado em r.osRef.
+function finCRLinkedOS(r) {
+  if (!r) return null;
+  if (r.osId && KB_OS[r.osId]) return KB_OS[r.osId];
+  var m = /OS #(\S+)/.exec(r.osRef || '');
+  if (!m) return null;
+  var num = m[1];
+  var found = null;
+  Object.keys(KB_OS).forEach(function (k) { if (String(KB_OS[k].num) === String(num)) found = KB_OS[k]; });
+  return found;
+}
+// Localiza o orçamento vinculado, tentando orcamentoId gravado e, como
+// fallback, o padrão textual "ORC-N" (lançamentos antigos) ou o orcRef
+// da própria OS vinculada.
+function finCRLinkedOrc(r) {
+  if (!r || typeof orcGetEnviados !== 'function') return null;
+  var lista = orcGetEnviados();
+  if (r.orcamentoId) { var byId = lista.find(function (o) { return o.id === r.orcamentoId; }); if (byId) return byId; }
+  var os = finCRLinkedOS(r);
+  if (os && os.orcRef) { var byOrcRef = lista.find(function (o) { return o.id === os.orcRef; }); if (byOrcRef) return byOrcRef; }
+  var m = /ORC-(\S+)/.exec(r.osRef || '');
+  if (m) { var byNum = lista.find(function (o) { return String(o.num) === String(m[1]); }); if (byNum) return byNum; }
+  return null;
+}
+
 function finPopularContas(selectId) {
   var sel = document.getElementById(selectId);
   if(!sel) return;
@@ -14419,7 +14483,7 @@ function finCRSalvar(){
   var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
   var hoje=new Date();
   var id='cr'+Date.now();
-  FIN_CR.unshift({id:id,cliente:cliente,descricao:desc,valor:valor,vencimento:venc,status:status,marca:marca,metodo:metodo,osRef:'',dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataRecebimento:status==='recebido'?venc:null});
+  FIN_CR.unshift({id:id,cliente:cliente,clienteId:(typeof finResolveClienteId==='function'?finResolveClienteId(cliente,''):''),descricao:desc,valor:valor,vencimento:venc,status:status,marca:marca,metodo:metodo,osRef:'',dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataRecebimento:status==='recebido'?venc:null});
   finCROverlayClose(); finCRRender(); finDashKPIs();
   _finSaveCR();
   showToast('Conta a receber registrada!','ok');
@@ -20895,6 +20959,8 @@ function orcEnvSetStatus(id, status) {
       FIN_CR.unshift({
         id: crId,
         cliente: orc.cliente||'(não informado)',
+        clienteId: (typeof finResolveClienteId==='function' ? finResolveClienteId(orc.cliente, orc.tel) : ''),
+        orcamentoId: orc.id,
         descricao: 'ORC #'+orc.num+' — '+(orc.produto||'Produto'),
         valor: orc.valorFinal||0,
         vencimento: venc,
@@ -21427,8 +21493,9 @@ function orcEnvGerarOS(){
     o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
     o.osRef=newIdLocal; orcSetEnviados(lista);
     if(valorEntrada>0){
-      FIN_CR.unshift({id:'cr'+Date.now(),cliente:o.cliente||'Cliente',descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:dia});
-      if(restante>0) FIN_CR.unshift({id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:null});
+      var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
+      FIN_CR.unshift({id:'cr'+Date.now(),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newIdLocal,descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:dia});
+      if(restante>0) FIN_CR.unshift({id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newIdLocal,descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:null});
     }
     finalizar(true, {num:nLocal});
     return;
@@ -21495,8 +21562,9 @@ function orcEnvGerarOS(){
         arrOrc[idxOrc].osRef = newId;
 
         if(valorEntrada>0){
-          arrCR.unshift({id:'cr'+Date.now()+'_'+n,cliente:o.cliente||'Cliente',descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:dia});
-          if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1)+'_'+n,cliente:o.cliente||'Cliente',descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:null});
+          var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
+          arrCR.unshift({id:'cr'+Date.now()+'_'+n,cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newId,descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:dia});
+          if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1)+'_'+n,cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newId,descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:null});
         }
 
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
