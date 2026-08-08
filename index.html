@@ -1527,6 +1527,34 @@ function _confirmarAposSalvar(savePromise, reverter, render, msgSucesso, msgFalh
   });
 }
 
+// Corrigido 2026-08-07 (Rodada Mestre, seção 5) — vários botões de ação
+// crítica (salvar orçamento, confirmar pagamento, gerar OS/recibo/PDF,
+// registrar despesa, baixar CR/CP, etc.) não entravam em estado de loading
+// no instante do clique; a latência real de rede + o hábito de clicar
+// várias vezes já produziu orçamentos e lançamentos duplicados. Helper
+// único, reaproveitado em todas essas ações — é só a camada de UX (o botão
+// fica desabilitado enquanto a ação está em voo); a proteção real contra
+// duplicidade continua sendo sempre no dado (guard síncrono em memória,
+// transação Firestore ou chave de negócio determinística), nunca só isto.
+function _btnBusy(btn, textoCarregando, maxMs) {
+  if(!btn || btn.disabled) return null;
+  var originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  if(textoCarregando) btn.innerHTML = textoCarregando;
+  var restaurado = false;
+  var restore = function(){
+    if(restaurado) return; restaurado = true;
+    clearTimeout(_t);
+    btn.disabled = false; btn.innerHTML = originalHtml;
+  };
+  // Trava de segurança: algumas ações (ex.: funções Vitre com corrente de
+  // Promise interna que nunca é devolvida para o chamador) não têm como
+  // o chamador saber quando reabilitar via restore(). maxMs garante que o
+  // botão nunca fica preso desabilitado para sempre por causa disso.
+  var _t = setTimeout(restore, maxMs || 15000);
+  return restore;
+}
+
 // Carregar documento do Firestore
 function _cloudLoad(key, cb) {
   if(!_db) { cb(null); return; }
@@ -2062,7 +2090,12 @@ function _authFirebaseError(code){
       <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
       <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
       <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
-      <div class="sb-item" id="sbFinDRE"  onclick="navFin('dre',this)"><span class="ico">📋</span> DRE</div>
+      <!-- Corrigido 2026-08-07 (Rodada Mestre, seção 33) — DRE existia
+           duplicado (aba própria dentro de Financeiro + Relatórios→DRE).
+           Fonte/rota canônica única: Relatórios→DRE. Este item da barra
+           lateral agora só atalha para lá (mesmo botão real da aba, para
+           garantir que o estado visual "ativo" fica correto). -->
+      <div class="sb-item" id="sbFinDRE"  onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)"><span class="ico">📋</span> DRE</div>
       <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
     </div>
 
@@ -2573,8 +2606,8 @@ function _authFirebaseError(code){
           <!-- RODAPÉ FIXO — Ações principais -->
           <div style="position:sticky;bottom:0;z-index:5;background:var(--surface);border-top:1.5px solid var(--border);padding:10px 0 4px;margin-top:10px;display:flex;flex-direction:column;gap:6px">
             <button id="kbReverterBtn" onclick="kbReverterProducao()" style="display:none;width:100%;padding:10px;border:1.5px solid #D97706;background:transparent;color:#D97706;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">↩ Reverter para Produção</button>
-            <button class="kb-pronto-btn" id="kbProntoBtn" onclick="kbMarcarPronto()">✓ Marcar como Pronta</button>
-            <button id="kbEntregarBtn" onclick="osLiberar(_kbOsId)" style="display:none;width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📦 Entregar ao Cliente</button>
+            <button class="kb-pronto-btn" id="kbProntoBtn" onclick="_btnBusy(this,'Marcando…',6000); kbMarcarPronto()">✓ Marcar como Pronta</button>
+            <button id="kbEntregarBtn" onclick="_btnBusy(this,'Entregando…',6000); osLiberar(_kbOsId)" style="display:none;width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">📦 Entregar ao Cliente</button>
             <button onclick="osImprimirPDF(_kbOsId)" style="width:100%;padding:10px;border:none;background:linear-gradient(90deg,#059669,#047857);color:#fff;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">📄 Gerar PDF da OS</button>
             <button onclick="osExcluir(_kbOsId)" style="width:100%;padding:9px;border:1.5px solid #DC2626;background:transparent;color:#DC2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Excluir OS</button>
           </div>
@@ -2654,12 +2687,16 @@ function _authFirebaseError(code){
         <div class="orc-step on"  id="ostp1" onclick="orcStep(1)"><div class="sn">1</div> Cliente</div>
         <div class="orc-step-arrow">›</div>
         <div class="orc-step"     id="ostp2" onclick="orcStep(2)"><div class="sn">2</div> Itens</div>
-        <div class="orc-step-arrow">›</div>
         <div class="orc-step"     id="ostp3" onclick="orcStep(3)" style="display:none"><div class="sn">3</div> Custos Avançados</div>
         <div class="orc-step-arrow">›</div>
-        <div class="orc-step"     id="ostp4" onclick="orcStep(4)"><div class="sn">4</div> Envio ao Cliente</div>
+        <!-- Numeração visível 1-4 (Cliente/Itens/Envio/Pgto→OS) — ostp3
+             "Custos Avançados" é permanentemente oculto (dobrado dentro do
+             Step 2 via orcCustosToggle()), então os rótulos aqui já vêm
+             renumerados; onclick continua chamando orcStep(4)/orcStep(5),
+             os números internos de página, que não mudam. -->
+        <div class="orc-step"     id="ostp4" onclick="orcStep(4)"><div class="sn">3</div> Envio ao Cliente</div>
         <div class="orc-step-arrow">›</div>
-        <div class="orc-step"     id="ostp5" onclick="orcStep(5)"><div class="sn">5</div> Pgto → OS</div>
+        <div class="orc-step"     id="ostp5" onclick="orcStep(5)"><div class="sn">4</div> Pgto → OS</div>
       </div>
 
       <!-- ── STEP 0: ESCOLHA DE FLUXO (Fase G, 2026-08-06) — decide entre o
@@ -2766,7 +2803,7 @@ function _authFirebaseError(code){
               </div>
             </div>
             <div style="text-align:right;padding-top:4px">
-              <button class="topbar-btn" onclick="orcStep(2)">Próximo: Itens →</button>
+              <button class="topbar-btn" onclick="orcAvancarParaItens()">Próximo: Itens →</button>
             </div>
           </div>
         </div>
@@ -2958,8 +2995,14 @@ function _authFirebaseError(code){
               </div>
             </div>
 
-            <!-- DESCONTO CONDICIONAL POR PRAZO -->
-            <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+            <!-- DESCONTO CONDICIONAL POR PRAZO — removido da UI (Rodada
+                 Mestre, seção 10: "não faz sentido para o negócio").
+                 orcDescCondToggle nunca fica marcado (o bloco some antes
+                 do usuário conseguir ligá-lo), então os ~15 pontos do
+                 código que já leem esse campo com segurança (dcOn=false
+                 por padrão) continuam funcionando sem alteração — não há
+                 necessidade de tocar neles para "remover" a feature. -->
+            <div style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
               <!-- Toggle row -->
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0">
                 <div>
@@ -3040,10 +3083,10 @@ function _authFirebaseError(code){
             <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
               <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">📤 Enviar Orçamento ao Cliente</div>
               <div style="display:flex;gap:7px;flex-wrap:wrap">
-                <button class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="orcEnviarOrcamentoWA()">📱 WhatsApp</button>
-                <button class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
+                <button class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
+                <button class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
                 <button class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
-                <button class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="orcSalvarOrcamento()">💾 Salvar Orçamento</button>
+                <button id="orcBtnSalvar" class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
                 <button class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="orcGerarLinkPagamento()">🔗 Link Pgto</button>
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:7px">Envie o orçamento antes de confirmar o pagamento</div>
@@ -3359,10 +3402,10 @@ function _authFirebaseError(code){
             <div style="display:flex;justify-content:space-between;margin-top:14px;flex-wrap:wrap;gap:8px">
               <button class="topbar-btn ghost" onclick="vitreOrcStep(2)">← Itens</button>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="topbar-btn" id="vitreOrcBtnSalvar" style="background:#1E7A86;border:none;color:#fff" onclick="vitreOrcSalvar()">💾 Salvar Rascunho</button>
-                <button class="topbar-btn ghost ready-hide" id="vitreOrcBtnPdf" style="display:none" onclick="vitreOrcGerarPDF()">🖨️ PDF Vitre</button>
-                <button class="topbar-btn ghost" id="vitreOrcBtnWA" style="display:none;background:#25D366;color:#fff" onclick="vitreOrcEnviarWhatsApp()">📱 Preview WhatsApp</button>
-                <button class="topbar-btn ghost" id="vitreOrcBtnMarcarEnviado" style="display:none" onclick="vitreOrcMarcarEnviado()">✓ Marcar como enviado</button>
+                <button class="topbar-btn" id="vitreOrcBtnSalvar" style="background:#1E7A86;border:none;color:#fff" onclick="_btnBusy(this,'Salvando…',6000); vitreOrcSalvar()">💾 Salvar Rascunho</button>
+                <button class="topbar-btn ghost ready-hide" id="vitreOrcBtnPdf" style="display:none" onclick="_btnBusy(this,'Gerando…',6000); vitreOrcGerarPDF()">🖨️ PDF Vitre</button>
+                <button class="topbar-btn ghost" id="vitreOrcBtnWA" style="display:none;background:#25D366;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); vitreOrcEnviarWhatsApp()">📱 Preview WhatsApp</button>
+                <button class="topbar-btn ghost" id="vitreOrcBtnMarcarEnviado" style="display:none" onclick="_btnBusy(this,'Enviando…',6000); vitreOrcMarcarEnviado()">✓ Marcar como enviado</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnNovaVersao" style="display:none;border-color:#D97706;color:#D97706" onclick="vitreOrcNovaVersao()">✎ Revisar / Nova versão</button>
                 <button class="topbar-btn" id="vitreOrcBtnIrPagamento" style="display:none;background:#059669;border:none;color:#fff" onclick="vitreOrcStep(4)">Avançar → Pagamento</button>
               </div>
@@ -3426,7 +3469,7 @@ function _authFirebaseError(code){
               <div id="vitreOrcVendaBox" style="display:none;border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
                 <div style="font-weight:700;font-size:12px;color:var(--text);margin-bottom:8px">Resumo final antes de confirmar</div>
                 <div id="vitreOrcVendaResumo" style="background:var(--bg);border-radius:10px;padding:12px 16px;font-size:12px;line-height:1.8;margin-bottom:10px"></div>
-                <button class="topbar-btn" id="vitreOrcBtnConfirmarVenda" style="width:100%;background:#7A2F73;border:none;color:#fff;justify-content:center;font-weight:800" onclick="vitreOrcConfirmarVendaAtual()">✓ Confirmar Venda</button>
+                <button class="topbar-btn" id="vitreOrcBtnConfirmarVenda" style="width:100%;background:#7A2F73;border:none;color:#fff;justify-content:center;font-weight:800" onclick="_btnBusy(this,'Confirmando…',8000); vitreOrcConfirmarVendaAtual()">✓ Confirmar Venda</button>
               </div>
 
               <div id="vitreOrcOSBox" style="display:none;border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
@@ -3851,9 +3894,10 @@ function _authFirebaseError(code){
          ============================== -->
     <div id="pg-seguranca" style="display:none">
       <div class="g2">
-        <!-- Alterar Senha Master -->
+        <!-- Alterar minha senha -->
         <div class="card">
-          <div class="card-h"><div class="card-h-left">🔑 Alterar Senha Master</div></div>
+          <div class="card-h"><div class="card-h-left">🔑 Alterar minha senha</div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:-4px;margin-bottom:2px">Altera apenas a senha de login da conta com que você está autenticado agora.</div>
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
             <div class="form-group">
               <label>Senha atual</label>
@@ -3868,7 +3912,7 @@ function _authFirebaseError(code){
               <input type="password" id="secPwdConf" placeholder="••••••••">
             </div>
             <div id="secPwdErr" style="color:#DC2626;font-size:11px;min-height:14px;font-weight:600"></div>
-            <button class="topbar-btn" onclick="secAlterarSenha()">🔑 Alterar Senha</button>
+            <button class="topbar-btn" id="secBtnAlterarSenha" onclick="secAlterarSenha()">🔑 Alterar minha senha</button>
           </div>
         </div>
         <!-- Config e Status -->
@@ -4728,7 +4772,7 @@ function _authFirebaseError(code){
         <button class="fin-tab-btn" id="finTabBtnCR" onclick="finTab('cr')">📥 Contas a Receber</button>
         <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
         <button class="fin-tab-btn" id="finTabBtnCal" onclick="finTab('cal')">📅 Agenda de Pagamentos</button>
-        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="finTab('dre')">📋 DRE</button>
+        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)" title="Abre em Relatórios — fonte única do DRE">📋 DRE ↗</button>
       </div>
 
       <!-- ── ABA: DASHBOARD ── -->
@@ -6709,7 +6753,7 @@ function _authFirebaseError(code){
       </div>
       <div style="display:flex;gap:10px;margin-top:4px">
         <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="finCPOverlayClose()">Cancelar</button>
-        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#DC2626,#EF4444)" onclick="finCPSalvar()">💾 Registrar Despesa</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#DC2626,#EF4444)" onclick="finCPSalvar(this)">💾 Registrar Despesa</button>
       </div>
     </div>
   </div>
@@ -6899,7 +6943,7 @@ function _authFirebaseError(code){
           <input type="text" id="kbProdObs" placeholder="Ex: placa azul 3mm, prateleira 2">
         </div>
       </div>
-      <button class="gen-submit" onclick="kbConfirmarProd()" style="margin-top:14px">🔧 Confirmar — Iniciar Produção</button>
+      <button class="gen-submit" onclick="_btnBusy(this,'Iniciando…',6000); kbConfirmarProd()" style="margin-top:14px">🔧 Confirmar — Iniciar Produção</button>
     </div>
   </div>
 </div>
@@ -10346,7 +10390,20 @@ function kbOpen(id) {
   // Compute deadline status for modal badge
   var _prazoStatus = '';
   if(_entrega && _entrega !== '—') {
-    var _ped = new Date(_entrega), _tnow = new Date(); _tnow.setHours(0,0,0,0);
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 21) — bug real
+    // reproduzido: new Date(_entrega) direto quebra porque este campo
+    // convive em dois formatos no mesmo sistema (BR "dd/mm/yyyy" ao criar
+    // a OS vs ISO "yyyy-mm-dd" depois de kbNormalizarDatas()/input date).
+    // new Date('07/08/2026') é interpretado como MM/DD (8 de julho), não
+    // 7 de agosto — produzindo "Atrasado 30d" para uma OS no prazo. Todo
+    // outro cálculo de atraso neste arquivo já detecta o separador antes
+    // de parsear (ver kbSalvarPrazo/kbRender) — este era o único ponto
+    // que ainda usava o construtor bruto.
+    var _pp = _entrega.indexOf('/')>=0 ? _entrega.split('/') : _entrega.split('-');
+    var _ped = _entrega.indexOf('/')>=0
+      ? new Date(+_pp[2], +_pp[1]-1, +_pp[0])   // dd/mm/yyyy
+      : new Date(+_pp[0], +_pp[1]-1, +_pp[2]);  // yyyy-mm-dd
+    var _tnow = new Date(); _tnow.setHours(0,0,0,0);
     var _pdiff = Math.ceil((_ped-_tnow)/(864e5));
     if(_pdiff < 0)    _prazoStatus = ' <span style="color:#DC2626;font-weight:700;font-size:10px">⚠️ ATRASADO '+Math.abs(_pdiff)+'d</span>';
     else if(_pdiff===0) _prazoStatus = ' <span style="color:#DC2626;font-weight:700;font-size:10px">🔴 HOJE!</span>';
@@ -10512,19 +10569,7 @@ function kbOpen(id) {
     if(isMaster && osEhPronta) {
       avisarBox.style.display = 'block';
       if(msgEl) {
-        var pNome = (os.cliente||'Cliente').split(' ')[0];
-        var linhas = [
-          'Olá ' + pNome + '! 😊',
-          '',
-          'Passamos para informar que o seu pedido está *pronto para retirada*! 🎉',
-          '',
-          '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||''),
-          '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : ''),
-          (os.qty > 1 ? '🔢 Quantidade: ' + os.qty : ''),
-          '',
-          'Estaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏'
-        ].filter(function(l,i,a){ return !(l==='' && a[i-1]===''); }); // remove duplas linhas vazias
-        if(!msgEl.dataset.editado) msgEl.value = linhas.join('\n');
+        if(!msgEl.dataset.editado) msgEl.value = kbMsgOsPronta(os);
       }
     } else {
       avisarBox.style.display = 'none';
@@ -10753,21 +10798,18 @@ function kbSalvarPrazo() {
   var os=KB_OS[_kbOsId]; if(!os) return;
   var v=(document.getElementById('kbPrazoEntrega')||{}).value||'';
   if(v){
-    // Salva em ISO (yyyy-mm-dd) — mantém card na coluna atual, sem mover
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 21) — bug real
+    // reproduzido: salvar um novo prazo só repintava o badge do card no
+    // lugar ("mantém card na coluna atual, sem mover", comentário
+    // removido), nunca chamava kbRender() — então o card ficava na
+    // coluna/semana antiga até um refresh (ou até o listener em tempo
+    // real do Firestore reagir, o que é assíncrono e pode demorar/falhar
+    // silenciosamente). Corrigido: KB_OS é atualizado localmente e
+    // kbRender() roda na hora — reposiciona o card de forma otimista,
+    // sem esperar o round-trip do servidor. O listener real, quando
+    // chegar, apenas confirma o mesmo estado.
     os.entrega=v; os.prazo=v;
-    // Atualizar badge no card diretamente
-    var card=document.querySelector('.kcard[data-osid="'+_kbOsId+'"]');
-    if(card){
-      var _pp=v.split('-');
-      var pd=new Date(+_pp[0],+_pp[1]-1,+_pp[2]); pd.setHours(0,0,0,0);
-      var td=new Date(); td.setHours(0,0,0,0);
-      var diff=Math.round((pd-td)/864e5);
-      var pc=diff<0?'#DC2626':(diff===0?'#DC2626':(diff<=3?'#D97706':'#059669'));
-      var dataBR=_pp[2]+'/'+_pp[1];
-      var pt=diff<0?('⚠️ Atrasado '+Math.abs(diff)+'d · '+dataBR):(diff===0?('🔴 Hoje · '+dataBR):('📅 '+dataBR+' · '+diff+'d'));
-      var badge=card.querySelector('.kb-prazo-badge');
-      if(badge){ badge.style.color=pc; badge.style.background=pc+'18'; badge.style.borderLeftColor=pc; badge.textContent=pt; }
-    }
+    if(typeof kbRender==='function') kbRender();
     // Persistir no Firebase
     _cloudSave('kb_os', KB_OS);
     var dataBR2=v.split('-')[2]+'/'+v.split('-')[1]+'/'+v.split('-')[0];
@@ -11141,13 +11183,28 @@ function kbSalvarObs() {
   if (lbl) { lbl.textContent = '✓ Salvo'; clearTimeout(_kbObsTimer); _kbObsTimer = setTimeout(function(){ lbl.textContent=''; }, 2000); }
 }
 
+// Corrigido 2026-08-07 (Rodada Mestre, seção 22) — dois problemas reais:
+// (1) marcar um item do checklist nunca persistia (kbSaveKbos() nunca era
+// chamado aqui, diferente de kbCheckAddItem/kbCheckDeleteItem) — um
+// refresh ou outra aba perdia o progresso; (2) o checklist não "dirigia"
+// nada — marcar a última etapa (Embalagem) não levava a OS para Pronta
+// sozinha, o operador precisava marcar o checklist E DEPOIS clicar
+// "Marcar como Pronta" separadamente. Agora persiste sempre, e marcar o
+// ÚLTIMO item pendente aciona kbMarcarPronto() automaticamente — sem
+// duplicar a ação se a OS já estava pronta/entregue.
 function kbToggle(i) {
   const os = KB_OS[_kbOsId]; if (!os) return;
   os._ck[i] = !os._ck[i];
   const item = document.getElementById('kbci-' + i);
-  if (!item) return;
-  item.classList.toggle('done', os._ck[i]);
-  item.querySelector('input').checked = os._ck[i];
+  if (item) {
+    item.classList.toggle('done', os._ck[i]);
+    item.querySelector('input').checked = os._ck[i];
+  }
+  kbSaveKbos();
+  var todasFeitas = os._ck && os._ck.length>0 && os._ck.every(function(c){ return !!c; });
+  if (todasFeitas && os.status!=='pronta' && os.status!=='master' && os.status!=='entregue') {
+    if (typeof kbMarcarPronto === 'function') kbMarcarPronto();
+  }
 }
 
 // ============================================================
@@ -11667,6 +11724,21 @@ function kbReceberSaldo() {
   return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
 }
 
+// Corrigido 2026-08-07 (Rodada Mestre, seção 24) — a mensagem de "OS
+// pronta" tinha emojis (😊🎉📋📦🔢🙏) que prejudicam legibilidade e
+// compatibilidade em alguns dispositivos/leitores — pedido explícito para
+// usar texto simples. Função única, reaproveitada nos dois lugares que
+// antes duplicavam (e divergiam sutilmente) o mesmo texto.
+function kbMsgOsPronta(os) {
+  var pNome = (os.cliente||'Cliente').split(' ')[0];
+  var linhas = [
+    'Olá, ' + pNome + '.',
+    'Seu pedido OS #' + (os.num||os.id) + ' está pronto para retirada.',
+    'Produto: ' + (os.titulo||os.material||'—') + '.',
+    'Caso necessário, podemos combinar a retirada.'
+  ];
+  return linhas.join('\n');
+}
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
@@ -11712,10 +11784,7 @@ function kbMarcarPronto() {
     var isMaster = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao !== 'producao';
     if(isMaster) {
       avisarBox.style.display = 'block';
-      if(msgEl && !msgEl.dataset.editado) {
-        var pNome = (os.cliente||'Cliente').split(' ')[0];
-        msgEl.value = 'Olá ' + pNome + '! 😊\n\nPassamos para informar que o seu pedido está *pronto para retirada*! 🎉\n\n' + '📋 *OS #' + (os.num||os.id) + '* — ' + (os.titulo||'') + '\n' + '📦 ' + (os.material||'') + (os.medidas ? ' · ' + os.medidas : '') + '\n' + (os.qty > 1 ? '🔢 Quantidade: ' + os.qty + '\n' : '') + '\nEstaremos aguardando você! Qualquer dúvida, estamos à disposição. 🙏';
-      }
+      if(msgEl && !msgEl.dataset.editado) msgEl.value = kbMsgOsPronta(os);
     }
   }
 
@@ -14332,7 +14401,15 @@ function finCPNovoModal() {
   document.getElementById('finCPOverlay').classList.add('open');
 }
 function finCPOverlayClose(){ document.getElementById('finCPOverlay').classList.remove('open'); }
-function finCPSalvar(){
+// Corrigido 2026-08-07 (Rodada Mestre, seção 5/29) — achado real: esta
+// função não tinha NENHUMA proteção contra duplo clique (nem guard em
+// memória, nem desabilitar o botão) — um clique duplo criava duas
+// despesas idênticas em FIN_CP, dinheiro contado errado no Financeiro.
+// Guard síncrono (_finCPSalvando) bloqueia a segunda chamada antes de
+// qualquer efeito colateral rodar, e o botão entra em loading na hora.
+var _finCPSalvando = false;
+function finCPSalvar(btnEl){
+  if(_finCPSalvando) return;
   var desc=(document.getElementById('finCPDesc')||{}).value||'';
   var cat=(document.getElementById('finCPCat')||{}).value||'Outros';
   var marca=(document.getElementById('finCPMarca')||{}).value||'vr';
@@ -14342,12 +14419,17 @@ function finCPSalvar(){
   var conta=(document.getElementById('finCPConta')||{}).value||'';
   var status=(document.getElementById('finCPStatus')||{}).value||'agendado';
   if(!desc||!valor||!vencRaw){showToast('Preencha descrição, valor e vencimento','warn');return;}
+  _finCPSalvando = true;
+  var _liberar = _btnBusy(btnEl, 'Salvando…');
   var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
   var hoje=new Date();
   FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,contaBancaria:conta,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
   finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
-  _finSaveCP();
+  var _p = _finSaveCP();
   showToast('Despesa registrada!','ok');
+  (_p && typeof _p.then==='function' ? _p : Promise.resolve()).then(function(){
+    _finCPSalvando = false; if(_liberar) _liberar();
+  });
 }
 
 // ── DRE — Regime de Caixa vs Competência ────────────────────────────────────
@@ -16942,6 +17024,11 @@ function orcResetFormularioVR(){
   var descTipo=document.getElementById('orcDescTipo'); if(descTipo) descTipo.value='pct';
   var acresTipo=document.getElementById('orcAcresTipo'); if(acresTipo) acresTipo.value='pct';
   var soCorte=document.getElementById('orcSoCorte'); if(soCorte) soCorte.checked=false;
+  // Corrigido 2026-08-07 (Rodada Mestre, seção 6.3/13) — "valor recebido
+  // como entrada" (usado pelo recibo) vazava do orçamento anterior para o
+  // próximo: novo orçamento sempre começa com esse campo zerado.
+  setV('orcEntradaValor','');
+  var entRestoEl=document.getElementById('orcEntradaResto'); if(entRestoEl) entRestoEl.textContent='R$ —';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
   window._orcSessaoAtualId = null;
@@ -17482,22 +17569,37 @@ function vitreOrcPgtoInit() {
     }
   }
 }
+// Corrigido 2026-08-07 (Rodada Mestre, seção 13) — bug real reproduzido:
+// "usuário informa entrada, salva, valor volta para zero". Causa: esta
+// função SEMPRE reconstruía os campos com valores hardcoded (entrada=0,
+// integral/futuro=total cheio), nunca lendo de volta o que já tinha sido
+// salvo em VITRE_ORC_ATUAL.pagamento — e ela roda de novo logo depois de
+// salvar (vitreOrcSalvarPagamento → vitreOrcAtualizarEstadoAtual →
+// vitreOrcPgtoInit → aqui), então o campo aparecia "salvo" por um
+// instante e voltava a zero. Agora restaura o valor salvo quando o tipo
+// gravado bate com o tipo selecionado.
 function vitreOrcPgtoRenderParcelas() {
   var tipo = document.getElementById('vitreOrcPgtoTipo').value;
   var wrap = document.getElementById('vitreOrcPgtoParcelasWrap');
   var totalReais = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0;
   var vendaJaConfirmada = VITRE_ORC_ATUAL && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago', 'convertido'].includes(VITRE_ORC_ATUAL.status);
   var dis = vendaJaConfirmada ? ' disabled' : '';
+  var pgtoSalvo = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.pagamento && VITRE_ORC_ATUAL.pagamento.tipo === tipo) ? VITRE_ORC_ATUAL.pagamento : null;
+  var parcelasSalvas = pgtoSalvo ? (pgtoSalvo.parcelas || []) : [];
   if (tipo === 'integral') {
     wrap.innerHTML = '<div class="fg"><label>Valor (integral)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>';
   } else if (tipo === 'entrada_saldo') {
-    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="0" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
-      + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div></div>';
+    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : 0;
+    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : totalReais;
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
+      + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + saldoSalvo.toFixed(2) + '" step="0.01" disabled></div></div>';
   } else if (tipo === 'futuro') {
+    var vencSalvo = parcelasSalvas[0] ? (parcelasSalvas[0].vencimento || '') : '';
     wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Valor total (a receber depois)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>'
-      + '<div class="fg"><label>Vencimento previsto</label><input type="date" id="vitreOrcPgtoVenc0"' + dis + '></div></div>';
+      + '<div class="fg"><label>Vencimento previsto</label><input type="date" id="vitreOrcPgtoVenc0" value="' + vencSalvo + '"' + dis + '></div></div>';
   } else {
-    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()"' + dis + '>' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '">' + n + 'x</option>'; }).join('') + '</select></div>'
+    var numSalvo = parcelasSalvas.length || 2;
+    wrap.innerHTML = '<div class="fg"><label>Número de parcelas</label><select id="vitreOrcPgtoNumParcelas" onchange="vitreOrcPgtoGerarParcelas()"' + dis + '>' + [2, 3, 4, 5, 6, 10, 12].map(function (n) { return '<option value="' + n + '"' + (n === numSalvo ? ' selected' : '') + '>' + n + 'x</option>'; }).join('') + '</select></div>'
       + '<div id="vitreOrcPgtoParcelasList"></div>';
     vitreOrcPgtoGerarParcelas();
     return;
@@ -17516,13 +17618,18 @@ function vitreOrcPgtoGerarParcelas() {
   var dis = vendaJaConfirmada ? ' disabled' : '';
   var n = Number(document.getElementById('vitreOrcPgtoNumParcelas').value) || 2;
   var totalC = vitreOrcToCentavos((VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.total) || (VITRE_ORC_ULTIMO && VITRE_ORC_ULTIMO.total) || 0);
+  // Corrigido 2026-08-07 (Rodada Mestre, seção 13) — restaura valores/
+  // vencimentos já salvos (mesmo tipo + mesmo número de parcelas), em vez
+  // de sempre recalcular a divisão igual e perder o que o vendedor digitou.
+  var pgtoSalvo = (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.pagamento && VITRE_ORC_ATUAL.pagamento.tipo === 'parcelado' && (VITRE_ORC_ATUAL.pagamento.parcelas||[]).length === n) ? VITRE_ORC_ATUAL.pagamento.parcelas : null;
   var base = Math.floor(totalC / n);
   var resto = totalC - base * n; // resto sempre na última parcela — nenhum centavo perdido
   var html = '';
   for (var i = 0; i < n; i++) {
-    var valorC = base + (i === n - 1 ? resto : 0);
+    var valorC = pgtoSalvo ? pgtoSalvo[i].valorCentavos : (base + (i === n - 1 ? resto : 0));
+    var vencSalvo = pgtoSalvo ? (pgtoSalvo[i].vencimento||'') : '';
     html += '<div class="fg-row"><div class="fg"><label>Parcela ' + (i + 1) + ' (R$)</label><input type="number" id="vitreOrcPgtoParcela' + i + '" value="' + (valorC / 100).toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarAviso()"' + dis + '></div>'
-      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '"' + dis + '></div></div>';
+      + '<div class="fg"><label>Vencimento</label><input type="date" id="vitreOrcPgtoVenc' + i + '" value="' + vencSalvo + '"' + dis + '></div></div>';
   }
   document.getElementById('vitreOrcPgtoParcelasList').innerHTML = html;
   vitreOrcPgtoAtualizarAviso();
@@ -19299,7 +19406,23 @@ function orcGetValidadeDias(){
 // Retorna o objeto `orc` salvo em caso de sucesso, ou null em caso de
 // falha — usado por orcAutoSalvarSeNecessario() para nunca gerar
 // PDF/WhatsApp sobre um estado não persistido (Parte 8.3).
-async function orcSalvarOrcamento() {
+// Corrigido 2026-08-07 (Rodada Mestre, seção 5) — bug real de duplicidade
+// reproduzido: window._orcSessaoAtualId só é atribuído no FIM desta
+// função, então duas chamadas quase simultâneas (duplo clique em "Salvar
+// Orçamento", ou clique em "Gerar PDF" logo após clicar "Salvar" — ambos
+// chamam esta função) viam idOrigem=null nas duas, pediam o mesmo número
+// oficial (orcObterNumeroOficial() já memoiza a promessa) e cada uma dava
+// lista.unshift(orc) com o MESMO id — dois registros idênticos na lista,
+// corrompendo qualquer find() futuro por esse id. Corrigido com um guard
+// síncrono: a segunda chamada, enquanto a primeira ainda está em voo,
+// nunca executa de novo — só aguarda e reaproveita o MESMO resultado.
+var _orcSalvarEmVoo = null;
+function orcSalvarOrcamento() {
+  if(_orcSalvarEmVoo) return _orcSalvarEmVoo;
+  _orcSalvarEmVoo = _orcSalvarOrcamentoImpl().finally(function(){ _orcSalvarEmVoo = null; });
+  return _orcSalvarEmVoo;
+}
+async function _orcSalvarOrcamentoImpl() {
   var c = window._orcCalc||{};
   if(!c.finalPrice){ showToast('Calcule o orçamento (Passo 3) antes de salvar','warn'); return null; }
   var lista = orcGetEnviados();
@@ -19567,6 +19690,25 @@ function orcClienteSelecionar(idx) {
   if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
   showToast('Dados de ' + c.nome + ' preenchidos automaticamente!','ok');
 }
+// Corrigido 2026-08-07 (Rodada Mestre, seção 6.2) — o cliente só era
+// criado/deduplicado no Firestore no momento de salvar o orçamento
+// inteiro (etapa de Envio), obrigando o vendedor a terminar o orçamento
+// todo antes do cliente existir em Clientes. Agora, ao avançar de
+// Cliente para Itens, o cliente já é criado/casado (por nome, telefone
+// ou email — mesma dedup de orcAutoSalvarCliente()) em segundo plano;
+// não bloqueia a navegação, o vendedor segue direto para os itens.
+function orcAvancarParaItens() {
+  var nome = (document.getElementById('orcClientNome')||{}).value||'';
+  if(nome.trim()){
+    orcAutoSalvarCliente({
+      cliente: nome,
+      tel: (document.getElementById('orcClientTel')||{}).value||'',
+      email: (document.getElementById('orcClientEmail')||{}).value||'',
+      marca: document.body.classList.contains('vitre') ? 'vitre' : 'vr'
+    });
+  }
+  orcStep(2);
+}
 // ── Auto-salva cliente no cadastro ao enviar orçamento ─────────────────────
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
@@ -19740,11 +19882,14 @@ function orcEnviadosRender() {
     if(o.descPix>0)  extras.push('⚡ PIX '+o.descPix+'%');
     if(o.parcelas>1) extras.push('💳 '+o.parcelas+'x');
     var extraHtml = extras.length ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">'+extras.join(' · ')+'</div>' : '';
-    var statusSel = '<select onchange="orcEnvSetStatus(\''+o.id+'\',this.value)" style="font-size:10px;padding:3px 5px;border-radius:5px;border:1px solid var(--border);background:var(--surface)">'
-      + ['aguardando','aprovado','aguardando_pagamento','pago','recusado','expirado'].map(function(s){
-          return '<option value="'+s+'"'+(o.status===s?' selected':'')+'>'+statusLabel[s]+'</option>';
-        }).join('')
-      + '</select>';
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 8) — este <select> deixava
+    // trocar o status para QUALQUER valor direto na listagem densa, sem
+    // passar pelas ações reais (aprovar dispara CR, pagamento libera OS,
+    // etc.) — risco real de marcar "Aprovado" visualmente sem executar o
+    // que devia acontecer junto. A listagem agora só REFLETE o status
+    // canônico (badge somente leitura); a mudança de status acontece nas
+    // ações do detalhe (orcEnvAbrir → Aprovar/Recusar/Confirmar Pgt).
+    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+(statusColor[o.status]||'#9CA3AF')+'22;color:'+(statusColor[o.status]||'#9CA3AF')+'">'+(statusLabel[o.status]||o.status)+'</span>';
     return '<tr>'
       +'<td><strong>#'+o.num+'</strong></td>'
       +'<td>'+o.cliente+'</td>'
@@ -19891,6 +20036,14 @@ function orcEnvAbrir(id) {
     +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'">Fechar</button>'
     +'<button class="topbar-btn ghost" style="color:#983C8F;border-color:#983C8F" onclick="orcEnvEditar(\''+ o.id +'\')" >✏️ Editar</button>'
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 8) — aprovação/recusa
+    // agora só acontece aqui, no detalhe, executando orcEnvSetStatus() de
+    // verdade (que já cria a Conta a Receber ao aprovar) — nunca mais um
+    // dropdown solto na listagem que só mudava a aparência.
+    +(o.status==='aguardando' ? (
+        '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
+       +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
+      ) : '')
     +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
     +'</div></div>';
   modal.style.display='flex';
@@ -19925,6 +20078,27 @@ function orcEnvEditar(id) {
   // Navegar para a aba de orçamento
   nav('orcamento');
   setTimeout(function(){
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 7 — bug crítico
+    // reproduzido): nav('orcamento') dispara orcEscolhaFluxo() (hook
+    // interno, setTimeout 0) que sempre volta para o seletor de marca
+    // (#opg0) e zera ORC_TIPO — e esta função nunca desfazia isso, então
+    // o preenchimento abaixo rodava sobre campos ESCONDIDOS atrás do
+    // seletor. O operador via a tela "Personalizado/Catálogo" de novo, e
+    // o primeiro clique disparava "dados não salvos" porque os campos já
+    // estavam preenchidos (silenciosamente) por este mesmo código.
+    // Corrigido reabrindo explicitamente o wizard VR (mesmos passos de
+    // orcIniciarFluxoVR(), sem o diálogo de descarte — aqui é o carregamento
+    // legítimo de um orçamento existente, não um "novo orçamento") ANTES
+    // de preencher qualquer campo, e limpando qualquer estado remanescente
+    // de uma sessão anterior do wizard.
+    orcResetFormularioVR();
+    document.querySelectorAll('.orc-pg').forEach(function(p){ p.style.display='none'; });
+    var _vw = document.getElementById('vitreOrcWrap'); if(_vw) _vw.style.display='none';
+    var _vs = document.getElementById('vitreOrcSteps'); if(_vs) _vs.style.display='none';
+    var _opg0 = document.getElementById('opg0'); if(_opg0) _opg0.style.display='none';
+    var _os = document.querySelector('.orc-steps'); if(_os) _os.style.display='flex';
+    ORC_TIPO = 'vr_personalizado';
+    orcStep(4);
     // Preencher dados do cliente
     var setV = function(id,v){ var el=document.getElementById(id); if(el) el.value=v||''; };
     setV('orcClientNome', o.cliente);
@@ -23811,19 +23985,49 @@ document.addEventListener('click',function(){
 });
 
 // ── Alterar senha master ──────────────────────────────────────────────────────
+// Corrigido 2026-08-07 (Rodada Mestre, seção 39) — "Alterar Senha Master"
+// nunca alterava a senha real de login (Firebase Auth) de ninguém: lia/
+// gravava um hash único e COMPARTILHADO (_SEC_MASTER/erp_master_pwd, um
+// único documento no Firestore) que nenhum outro lugar do sistema sequer
+// consultava (grep confirma: só esta função lia/escrevia essa chave) —
+// um resquício que não protegia nada e dava a falsa impressão de existir
+// "a senha do Master" compartilhada entre todas as contas com essa role;
+// qualquer conta master podia trocar a "senha" de todas as outras.
+// Substituído pela troca real via Firebase Auth, EXCLUSIVAMENTE da conta
+// autenticada agora — reautentica com a senha atual (o Firebase exige
+// login recente para trocar senha) e só então aplica a nova.
 function secAlterarSenha(){
   var atual=(document.getElementById('secPwdAtual')||{}).value||'';
   var nova =(document.getElementById('secPwdNova') ||{}).value||'';
   var conf =(document.getElementById('secPwdConf') ||{}).value||'';
   var errEl=document.getElementById('secPwdErr');
-  if(secHash(atual)!==secGetMasterHash()){ errEl.textContent='❌ Senha atual incorreta'; return; }
-  if(nova.length<6){ errEl.textContent='❌ Nova senha: mínimo 6 caracteres'; return; }
-  if(nova!==conf){ errEl.textContent='❌ Confirmação não confere'; return; }
-  _SEC_MASTER=secHash(nova); if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_master_pwd',_SEC_MASTER);
+  var btn = document.getElementById('secBtnAlterarSenha');
+  if(!atual){ errEl.textContent='Informe a senha atual'; return; }
+  if(nova.length<6){ errEl.textContent='Nova senha: mínimo 6 caracteres'; return; }
+  if(nova!==conf){ errEl.textContent='Confirmação não confere'; return; }
+  var fbUser = (typeof firebase!=='undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+  var email = (fbUser && fbUser.email) || (typeof _currentSession!=='undefined' && _currentSession && _currentSession.email);
+  if(!fbUser || !email){ errEl.textContent='Sessão inválida — saia e entre novamente.'; return; }
   errEl.textContent='';
-  ['secPwdAtual','secPwdNova','secPwdConf'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
-  secAuditLog('pwd_change','Senha Master alterada');
-  showToast('✅ Senha Master alterada com sucesso!','ok');
+  var done = _btnBusy(btn, 'Alterando…', 10000);
+  var cred = firebase.auth.EmailAuthProvider.credential(email, atual);
+  fbUser.reauthenticateWithCredential(cred)
+    .then(function(){ return fbUser.updatePassword(nova); })
+    .then(function(){
+      ['secPwdAtual','secPwdNova','secPwdConf'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+      secAuditLog('pwd_change','Senha alterada pela própria conta ('+email+')');
+      showToast('Senha alterada com sucesso!','ok');
+      if(done) done();
+    })
+    .catch(function(e){
+      var code = e && e.code;
+      var msg = code==='auth/wrong-password' ? 'Senha atual incorreta'
+        : code==='auth/weak-password' ? 'Nova senha muito fraca para o Firebase'
+        : code==='auth/requires-recent-login' ? 'Sessão expirada — saia e entre novamente para trocar a senha'
+        : 'Não foi possível alterar a senha — tente novamente';
+      errEl.textContent = msg;
+      if(done) done();
+    });
 }
 
 // ── Auditoria ─────────────────────────────────────────────────────────────────
@@ -24833,6 +25037,7 @@ var planManualPieces = [];
 function planAddManual() {
   planManualPieces.push({nome:'Peça '+(planManualPieces.length+1), larg:0, alt:0, qty:1, esp:''});
   planRenderManual();
+  _planCalcAndMerge();
 }
 
 function planRemoveManual(idx) {
@@ -24850,9 +25055,15 @@ function planRenderManual() {
   // Espessuras dinâmicas das Config Orçamento
   var espOpts = (typeof _planGetEspOptions==='function') ? _planGetEspOptions() : [];
   wrap.innerHTML = planManualPieces.map(function(p,i){
-    var espHtml = '<option value="">esp</option>' + espOpts.map(function(o){
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 9.1) — bug real: a opção
+    // mostrava só "3mm — R$100/m²", sem o nome do material. Como existem
+    // materiais DIFERENTES com a MESMA espessura (ex.: Acrílico Cristal
+    // 3mm e Acrílico Fumê 3mm), o vendedor não tinha como saber qual
+    // estava selecionando — _planGetEspOptions() já devolve o nome
+    // (o.label), só não estava sendo usado aqui.
+    var espHtml = '<option value="">material — esp</option>' + espOpts.map(function(o){
       var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
-      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
+      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
     }).join('');
     return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
@@ -24947,6 +25158,10 @@ function _planCalcAndMerge() {
     +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td>'
     +'<td></td></tr>';
   setTimeout(planDrawCanvas, 0);
+  // ver comentário em _planSincronizarComItem() — chamadores de
+  // _planCalcAndMerge() (peça manual add/editar/remover) não passam pelo
+  // wrapper planCalc(), então o sync precisa rodar aqui também.
+  if(typeof _planSincronizarComItem==='function') _planSincronizarComItem();
 }
 
 // ── Visualização do layout de corte ─────────────────────────────────
@@ -25300,7 +25515,48 @@ var _planCalcOrig = (typeof planCalc !== 'undefined') ? planCalc : null;
 if(_planCalcOrig) {
   planCalc = function() {
     if(planManualPieces.length) { _planCalcAndMerge(); } else { _planCalcOrig(); }
+    _planSincronizarComItem();
   };
+}
+// Corrigido 2026-08-07 (Rodada Mestre, seção 9.2) — bug real: uma peça
+// adicionada/editada/removida só refletia no total do ITEM/ORÇAMENTO
+// depois de clicar "Salvar Planificação" (planAplicar()) — até lá, só o
+// preview DENTRO do modal (planPiecesBody/planSumBox) atualizava. Como
+// planCalc() já roda a cada edição (catálogo ou peça manual), este hook
+// escreve os MESMOS dados que planAplicar() grava no item (planArea,
+// planPecas, custo/área manual) e chama orcRecalc() a cada edição — o
+// total do orçamento fica sempre correto em tela, e "Salvar" volta a
+// ser só persistência do que já estava calculado e exibido (a escrita
+// que planAplicar() faz continua lá, mas agora é redundante/idempotente,
+// não a PRIMEIRA vez que o dado é gravado).
+function _planSincronizarComItem() {
+  if(_planIdx===null || typeof _planIdx==='undefined') return;
+  var sumBox = document.getElementById('planSumBox');
+  if(!sumBox) return;
+  var totalArea = parseFloat(sumBox.dataset.totalArea)||0;
+  if(totalArea<=0) return;
+  var totalQty  = parseInt(sumBox.dataset.totalQty)||0;
+  var row = document.getElementById('oir_'+_planIdx);
+  if(!row) return;
+  row.dataset.planArea = totalArea;
+  row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
+  row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
+  row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
+  var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
+    .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
+  row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+  var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
+  row.dataset.planPecasManual = JSON.stringify(_onlyManual);
+  row.dataset.planManualMatCost = parseFloat(sumBox.dataset.planManualMatCost)||0;
+  row.dataset.planManualAreaM2  = parseFloat(sumBox.dataset.planManualAreaM2)||0;
+  if(sumBox.dataset.planImg) row.dataset.planImg=sumBox.dataset.planImg;
+  if(typeof orcRecalc==='function') orcRecalc();
+  var tag = document.getElementById('oi_planTag_'+_planIdx);
+  if(tag){
+    var infoEl = document.getElementById('oi_planInfo_'+_planIdx);
+    if(infoEl) infoEl.textContent = totalQty + ' peças · ' + (totalArea/10000).toFixed(4) + ' m²';
+    tag.classList.add('show');
+  }
 }
 
 // Reset manual on planFechar / planAbrir
@@ -27434,7 +27690,7 @@ async function mktForceSync() {
   <div class="mdrw-item" id="mspItem-financeiro" onclick="mobilePanelClose();setTimeout(function(){navFin('dash',null);},120)"><span class="mdrw-ico">💳</span> Dashboard Financeiro</div>
   <div class="mdrw-item" id="mspItem-fin-cr" onclick="mobilePanelClose();setTimeout(function(){navFin('cr',null);},120)"><span class="mdrw-ico">📥</span> Contas a Receber</div>
   <div class="mdrw-item" id="mspItem-fin-cp" onclick="mobilePanelClose();setTimeout(function(){navFin('cp',null);},120)"><span class="mdrw-ico">📤</span> Contas a Pagar</div>
-  <div class="mdrw-item" id="mspItem-fin-dre" onclick="mobilePanelClose();setTimeout(function(){navFin('dre',null);},120)"><span class="mdrw-ico">📋</span> DRE Gerencial</div>
+  <div class="mdrw-item" id="mspItem-fin-dre" onclick="mobilePanelClose();setTimeout(function(){ nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50); },120)"><span class="mdrw-ico">📋</span> DRE Gerencial</div>
   <div class="mdrw-item" id="mspItem-relatorios" onclick="mobilePanelNav('relatorios')"><span class="mdrw-ico">🖨️</span> Relatórios</div>
   <!-- Nav: Admin -->
   <div class="mdrw-section" id="mspSec-config">Admin</div>
