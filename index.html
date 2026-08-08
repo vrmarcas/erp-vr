@@ -24960,6 +24960,7 @@ var planManualPieces = [];
 function planAddManual() {
   planManualPieces.push({nome:'Peça '+(planManualPieces.length+1), larg:0, alt:0, qty:1, esp:''});
   planRenderManual();
+  _planCalcAndMerge();
 }
 
 function planRemoveManual(idx) {
@@ -24977,9 +24978,15 @@ function planRenderManual() {
   // Espessuras dinâmicas das Config Orçamento
   var espOpts = (typeof _planGetEspOptions==='function') ? _planGetEspOptions() : [];
   wrap.innerHTML = planManualPieces.map(function(p,i){
-    var espHtml = '<option value="">esp</option>' + espOpts.map(function(o){
+    // Corrigido 2026-08-07 (Rodada Mestre, seção 9.1) — bug real: a opção
+    // mostrava só "3mm — R$100/m²", sem o nome do material. Como existem
+    // materiais DIFERENTES com a MESMA espessura (ex.: Acrílico Cristal
+    // 3mm e Acrílico Fumê 3mm), o vendedor não tinha como saber qual
+    // estava selecionando — _planGetEspOptions() já devolve o nome
+    // (o.label), só não estava sendo usado aqui.
+    var espHtml = '<option value="">material — esp</option>' + espOpts.map(function(o){
       var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
-      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
+      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
     }).join('');
     return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
@@ -25074,6 +25081,10 @@ function _planCalcAndMerge() {
     +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td>'
     +'<td></td></tr>';
   setTimeout(planDrawCanvas, 0);
+  // ver comentário em _planSincronizarComItem() — chamadores de
+  // _planCalcAndMerge() (peça manual add/editar/remover) não passam pelo
+  // wrapper planCalc(), então o sync precisa rodar aqui também.
+  if(typeof _planSincronizarComItem==='function') _planSincronizarComItem();
 }
 
 // ── Visualização do layout de corte ─────────────────────────────────
@@ -25427,7 +25438,48 @@ var _planCalcOrig = (typeof planCalc !== 'undefined') ? planCalc : null;
 if(_planCalcOrig) {
   planCalc = function() {
     if(planManualPieces.length) { _planCalcAndMerge(); } else { _planCalcOrig(); }
+    _planSincronizarComItem();
   };
+}
+// Corrigido 2026-08-07 (Rodada Mestre, seção 9.2) — bug real: uma peça
+// adicionada/editada/removida só refletia no total do ITEM/ORÇAMENTO
+// depois de clicar "Salvar Planificação" (planAplicar()) — até lá, só o
+// preview DENTRO do modal (planPiecesBody/planSumBox) atualizava. Como
+// planCalc() já roda a cada edição (catálogo ou peça manual), este hook
+// escreve os MESMOS dados que planAplicar() grava no item (planArea,
+// planPecas, custo/área manual) e chama orcRecalc() a cada edição — o
+// total do orçamento fica sempre correto em tela, e "Salvar" volta a
+// ser só persistência do que já estava calculado e exibido (a escrita
+// que planAplicar() faz continua lá, mas agora é redundante/idempotente,
+// não a PRIMEIRA vez que o dado é gravado).
+function _planSincronizarComItem() {
+  if(_planIdx===null || typeof _planIdx==='undefined') return;
+  var sumBox = document.getElementById('planSumBox');
+  if(!sumBox) return;
+  var totalArea = parseFloat(sumBox.dataset.totalArea)||0;
+  if(totalArea<=0) return;
+  var totalQty  = parseInt(sumBox.dataset.totalQty)||0;
+  var row = document.getElementById('oir_'+_planIdx);
+  if(!row) return;
+  row.dataset.planArea = totalArea;
+  row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
+  row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
+  row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
+  var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
+    .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
+  row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+  var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
+  row.dataset.planPecasManual = JSON.stringify(_onlyManual);
+  row.dataset.planManualMatCost = parseFloat(sumBox.dataset.planManualMatCost)||0;
+  row.dataset.planManualAreaM2  = parseFloat(sumBox.dataset.planManualAreaM2)||0;
+  if(sumBox.dataset.planImg) row.dataset.planImg=sumBox.dataset.planImg;
+  if(typeof orcRecalc==='function') orcRecalc();
+  var tag = document.getElementById('oi_planTag_'+_planIdx);
+  if(tag){
+    var infoEl = document.getElementById('oi_planInfo_'+_planIdx);
+    if(infoEl) infoEl.textContent = totalQty + ' peças · ' + (totalArea/10000).toFixed(4) + ' m²';
+    tag.classList.add('show');
+  }
 }
 
 // Reset manual on planFechar / planAbrir
