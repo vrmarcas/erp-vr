@@ -8141,7 +8141,11 @@ function orcSyncStep3Result() {
 // ── Helper: banco principal da empresa selecionada no orçamento ───────────────
 function orcGetBancoPrincipal(empresa) {
   if(typeof bankListFor !== 'function') return null;
-  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  // Rodada 3 (2026-08-08) — achado real: a chave usada aqui era 'vit', mas a
+  // fonte canônica única (bankRenderLista/finPopularContas) sempre gravou/leu
+  // Vitre sob 'vt'. Contas cadastradas em Config→Banco para Vitre nunca
+  // apareciam aqui — corrigido para usar a MESMA chave em todo o app.
+  var marcaKey = empresa === 'vitre' ? 'vt' : 'vr';
   var bancos = bankListFor(marcaKey);
   if(!bancos || !bancos.length) bancos = bankListFor(empresa);
   if(!bancos || !bancos.length) return null;
@@ -8152,7 +8156,7 @@ function orcGetBancoPrincipal(empresa) {
 function orcPopularBancos(empresa) {
   var sel = document.getElementById('orcSimGtw');
   if(!sel) return;
-  var marcaKey = empresa === 'vitre' ? 'vit' : 'vr';
+  var marcaKey = empresa === 'vitre' ? 'vt' : 'vr'; // Rodada 3 — ver orcGetBancoPrincipal acima
   var bancos = (typeof bankListFor==='function') ? bankListFor(marcaKey) : [];
   if(!bancos || !bancos.length) bancos = (typeof bankListFor==='function') ? bankListFor(empresa) : [];
   sel.innerHTML = '';
