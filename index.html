@@ -3465,9 +3465,13 @@ function _authFirebaseError(code){
             <div id="vitreOrcPgtoBox" style="display:none;flex-direction:column;gap:10px">
               <div class="fg-row">
                 <div class="fg"><label>Condição</label>
+                  <!-- Corrigido 2026-08-07 (Rodada 2, P0.1) — condição padrão
+                       da empresa é 50% entrada / 50% saldo; o select
+                       começava em "Integral", contrariando a regra
+                       operacional. "entrada_saldo" agora é o default. -->
                   <select id="vitreOrcPgtoTipo" onchange="vitreOrcPgtoRenderParcelas()">
                     <option value="integral">Integral (à vista)</option>
-                    <option value="entrada_saldo">Entrada + Saldo</option>
+                    <option value="entrada_saldo" selected>Entrada + Saldo (50/50 padrão)</option>
                     <option value="parcelado">Parcelado</option>
                     <option value="futuro">Pagamento futuro (nada agora)</option>
                   </select>
@@ -17663,9 +17667,10 @@ function vitreOrcPgtoRenderParcelas() {
   if (tipo === 'integral') {
     wrap.innerHTML = '<div class="fg"><label>Valor (integral)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + totalReais.toFixed(2) + '" step="0.01" disabled></div>';
   } else if (tipo === 'entrada_saldo') {
-    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : 0;
-    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : totalReais;
-    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '></div>'
+    var entradaSalva = parcelasSalvas[0] ? (parcelasSalvas[0].valorCentavos / 100) : Math.round((totalReais / 2) * 100) / 100;
+    var saldoSalvo = parcelasSalvas[1] ? (parcelasSalvas[1].valorCentavos / 100) : Math.round((totalReais - entradaSalva) * 100) / 100;
+    var sugestao5050Txt = '= 50% do total — corresponde a R$ ' + entradaSalva.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    wrap.innerHTML = '<div class="fg-row"><div class="fg"><label>Entrada (R$)</label><input type="number" id="vitreOrcPgtoParcela0" value="' + entradaSalva.toFixed(2) + '" step="0.01" oninput="vitreOrcPgtoAtualizarSaldo()"' + dis + '><small style="color:#888;display:block;margin-top:2px">' + sugestao5050Txt + '</small></div>'
       + '<div class="fg"><label>Saldo na retirada (R$)</label><input type="number" id="vitreOrcPgtoParcela1" value="' + saldoSalvo.toFixed(2) + '" step="0.01" disabled></div></div>';
   } else if (tipo === 'futuro') {
     var vencSalvo = parcelasSalvas[0] ? (parcelasSalvas[0].vencimento || '') : '';
@@ -20393,8 +20398,12 @@ function orcPagtoTipoSel(btn){
   if(tipo==='50-50'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal');
-    if(entEl) entEl.value=(valorTotal/2).toFixed(2);
-    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='= 50% do total';
+    var metade=(valorTotal/2);
+    if(entEl) entEl.value=metade.toFixed(2);
+    // Corrigido 2026-08-07 (Rodada 2, P0.1) — só mostrava "= 50% do
+    // total", sem o valor em reais explícito, que era o pedido: "50%
+    // corresponde a R$ X".
+    var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='= 50% do total — corresponde a R$ '+metade.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   } else if(tipo==='parcial'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal'); if(entEl) entEl.value='';
