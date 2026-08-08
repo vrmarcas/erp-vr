@@ -5323,7 +5323,16 @@ function _authFirebaseError(code){
           <button class="cfg-tab" id="cfgTab7" onclick="cfgTab(7)">🏦 Dados Bancários</button>
           <button class="cfg-tab" id="cfgTab8" onclick="cfgTab(8)">🗂️ Produtos</button>
           <button class="cfg-tab" id="cfgTab9" onclick="cfgTab(9)">🔌 Integrações</button>
-          <button class="topbar-btn" onclick="erpBackupExportar()" style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Backup JSON</button>
+          <!-- Corrigido 2026-08-07 (Rodada 2, P3) — auditoria real do que
+               erpBackupExportar() exporta (_BACKUP_KEYS): config, estoque,
+               orçamentos, clientes, CRM, financeiro (CR/CP/transações),
+               fornecedores, retalhos, dados bancários e preços de
+               materiais. Isso é mais do que só "Config. Orçamento", mas
+               NÃO é um backup total do sistema (não inclui, por exemplo,
+               Kanban/OS, compras, auditoria/log de segurança) e não existe
+               nenhuma função de restauração — o rótulo antigo "Backup
+               JSON" prometia mais do que o botão de fato entrega. -->
+          <button class="topbar-btn" onclick="erpBackupExportar()" title="Exporta config, estoque, orçamentos, clientes, CRM, financeiro (CR/CP/transações), fornecedores, retalhos, dados bancários e preços de materiais. NÃO inclui Kanban/OS, compras nem logs — não é um backup completo do sistema, e não há função de restauração." style="margin-left:auto;padding:5px 14px;font-size:11px;background:var(--brand-mid);color:#fff;border:none;border-radius:6px;cursor:pointer">⬇️ Exportar Dados (.JSON)</button>
         </div>
 
         <!-- ── ABA 1: MATERIAIS ── -->
