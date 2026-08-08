@@ -137,6 +137,13 @@ function resetAll() {
   global._lastToast = null; global._lastToastKind = null;
 }
 function baseOs(over) { return Object.assign({ id: 'os1', num: 42, status: 'aguardando_saldo', restante: 500, cliente: 'E2E_FASEF_20260805_Cli', mk: 'vr', formaPgto: 'PIX' }, over || {}); }
+// Rodada 2, P0.6 (2026-08-07) — kbReceberSaldo() passou a ler/gravar
+// restante/formaPgto em kb_os_fin (documento separado, fora do alcance de
+// leitura da Produção), não mais em kb_os. Este teste (escrito antes da
+// mudança) precisa semear os dois documentos juntos, como o Firestore
+// real teria depois da migração — nunca reimplementa a lógica, só ajusta
+// o fixture ao novo formato de dados.
+function seedKbOsFin(id, os) { seedDoc('kb_os_fin', { os1: { restante: os.restante, formaPgto: os.formaPgto } }); }
 
 console.log('\n=== Regressão: kbReceberSaldo() atômico em 4 documentos (item 3 da auditoria) ===\n');
 
@@ -146,12 +153,12 @@ await test('1. sucesso normal — kb_os, fin_cr e fin_tx confirmados juntos (sem
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
-  seedDoc('kb_os', { os1: os });
+  seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
   await mod.kbReceberSaldo();
   assertEq(readDoc('kb_os').os1.status, 'iniciada', 'OS avança para iniciada no servidor');
-  assertEq(readDoc('kb_os').os1.restante, 0, 'restante zerado no servidor');
+  assertEq(readDoc('kb_os_fin').os1.restante, 0, 'restante zerado no servidor (kb_os_fin)');
   assertEq(readDoc('fin_cr')[0].status, 'recebido', 'CR confirmado no servidor');
   assertEq(readDoc('fin_tx').length, 1, 'exatamente um lançamento de caixa');
   assertEq(mod.getKbOs().os1.status, 'iniciada', 'estado local reconciliado com o servidor');
@@ -162,7 +169,7 @@ await test('2. sucesso normal — com orçamento vinculado em aguardando_pagamen
   resetAll();
   var os = baseOs({ orcRef: 'ORC-1' });
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
-  seedDoc('kb_os', { os1: os });
+  seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
   seedDoc('orcamentos', [{ id: 'ORC-1', status: 'aguardando_pagamento' }]);
@@ -177,7 +184,7 @@ await test('A/B/C. falha em QUALQUER ponto da transação (ex: fin_cr) não deix
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
-  seedDoc('kb_os', { os1: os });
+  seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
   _forceErrorOnce = { code: 'unavailable', message: 'boom' }; // a transação inteira falha
@@ -194,7 +201,7 @@ await test('D. resposta perdida (transação falha) — retry subsequente comple
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
-  seedDoc('kb_os', { os1: os });
+  seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
   _forceErrorOnce = { code: 'unavailable', message: 'resposta perdida' };
@@ -218,7 +225,7 @@ await test('E. duas abas tentando quitar o mesmo saldo — só a primeira lança
   resetAll();
   var osA = baseOs(); // "aba A"
   mod.getKbOs().os1 = osA; mod.setKbOsId('os1');
-  seedDoc('kb_os', { os1: osA });
+  seedDoc('kb_os', { os1: osA }); seedKbOsFin('os1', osA);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
 
@@ -236,7 +243,7 @@ await test('E. duas abas tentando quitar o mesmo saldo — só a primeira lança
 
   assertEq(readDoc('fin_tx').length, 1, 'apenas UM lançamento em fin_tx — nenhuma duplicação de recebimento');
   assertEq(readDoc('kb_os').os1.status, 'iniciada', 'OS confirmada como iniciada no servidor');
-  assertEq(readDoc('kb_os').os1.restante, 0, 'saldo zerado, sem sobrescrita destrutiva');
+  assertEq(readDoc('kb_os_fin').os1.restante, 0, 'saldo zerado, sem sobrescrita destrutiva (kb_os_fin)');
 });
 
 console.log('\n=== resultado ===');
