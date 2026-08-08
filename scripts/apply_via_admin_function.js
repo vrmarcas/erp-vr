@@ -26,6 +26,7 @@ const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
+const { execFileSync } = require('child_process');
 const histLib = require('./hist_lib');
 
 const MOCK = process.argv.includes('--mock');
@@ -34,16 +35,51 @@ const SECRET = process.env.ADMIN_ONE_TIME_SECRET;
 const ROLLBACK_ARG = process.argv.find((a) => a.indexOf('--rollback=') === 0);
 const ROLLBACK_ID = ROLLBACK_ARG ? ROLLBACK_ARG.split('=')[1] : null;
 
-const BASE_URL = MOCK
-  ? 'http://localhost:5001/demo-erp-homolog/us-central1/adminOneTimeOps'
-  : 'https://us-central1-erp-vrmarcas.cloudfunctions.net/adminOneTimeOps';
+const BASE_URL = 'http://localhost:5001/demo-erp-homolog/us-central1/adminOneTimeOps'; // só usado em --mock
 
 if (!SECRET) {
   console.error('[apply_via_admin_function] ADMIN_ONE_TIME_SECRET não definido no ambiente. Aborta.');
   process.exit(1);
 }
 
+// ── Achado real (Rodada 3.1): este projeto BLOQUEIA invocação HTTPS pública
+// não-autenticada de Cloud Functions em nível de infraestrutura/política —
+// mesmo com roles/cloudfunctions.invoker concedido a allUsers (confirmado
+// via `gcloud functions get-iam-policy`), toda chamada HTTP direta (curl,
+// https.request) recebe 401/403 da própria borda do Google Front-End, antes
+// mesmo do código da function rodar. Não é um bug desta function — é uma
+// política de segurança pré-existente do projeto, que NÃO deve ser
+// contornada alterando IAM/política (instrução explícita do usuário).
+// O caminho legítimo e já autorizado (identidade gcloud já autenticada
+// neste ambiente) é `gcloud functions call`, que invoca via a API Admin do
+// Cloud Functions (autenticada), não pela borda HTTP pública. Por isso o
+// segredo vai no corpo (`secret`) em vez do header Authorization — a API
+// call do gcloud não expõe controle de headers customizados.
+function callOpProd(body) {
+  var payload = Object.assign({}, body, { secret: SECRET });
+  var out;
+  try {
+    out = execFileSync('gcloud', [
+      'functions', 'call', 'adminOneTimeOps',
+      '--project=erp-vrmarcas', '--region=us-central1',
+      '--data=' + JSON.stringify(payload),
+    ], { encoding: 'utf8' });
+  } catch (e) {
+    out = (e.stdout || '') + (e.stderr || '');
+  }
+  // formato de saída do gcloud: "result: '<json>'" (sucesso HTTP 2xx) ou
+  // "error: '<json>'" (a function respondeu HTTP != 2xx, mas AINDA chegou
+  // até o código — corpo real do meu próprio checkSecret/handler).
+  var m = out.match(/^(?:result|error): '([\s\S]*)'\s*$/m);
+  if (!m) return { status: null, body: null, raw: out };
+  var jsonStr = m[1];
+  var parsed = null; try { parsed = JSON.parse(jsonStr); } catch (e) { /* corpo não-JSON */ }
+  var status = parsed ? (parsed.ok ? 200 : (out.indexOf('error:') === 0 ? 401 : 500)) : null;
+  return { status: status, body: parsed, raw: out };
+}
+
 function callOp(body) {
+  if (!MOCK) return Promise.resolve(callOpProd(body));
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const url = new URL(BASE_URL);

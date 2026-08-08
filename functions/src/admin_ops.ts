@@ -31,7 +31,18 @@ const COL = "erp_vr";
 
 function checkSecret(req: functions.https.Request, res: functions.Response): boolean {
   const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const headerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  // Achado real (Rodada 3.1): este projeto bloqueia invocação HTTPS pública
+  // não-autenticada em nível de infraestrutura/política, mesmo com
+  // roles/cloudfunctions.invoker concedido a allUsers — decisão de segurança
+  // pré-existente que não deve ser contornada alterando IAM/política. O
+  // caminho legítimo é `gcloud functions call` (API Admin do Cloud
+  // Functions, já autenticada pela identidade gcloud existente), que não
+  // permite headers customizados — por isso aceita o segredo também no
+  // corpo (`body.secret`), nunca só isso substituindo o header em contextos
+  // onde o header É controlável.
+  const bodyToken = (req.body && typeof req.body.secret === "string") ? req.body.secret : "";
+  const token = headerToken || bodyToken;
   const expected = process.env.ADMIN_ONE_TIME_SECRET || "";
   if (!expected) {
     res.status(500).json({ ok: false, error: "ADMIN_ONE_TIME_SECRET não configurado no ambiente da function" });
