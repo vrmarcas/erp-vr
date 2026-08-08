@@ -1601,7 +1601,17 @@ function _cloudWatch(key, callback) {
 
 // Carregar todos os dados da nuvem ao iniciar
 function _cloudLoadAll() {
-  var loaded = 0, total = 11; // +1 (kb_os_fin, Rodada 2 P0.6) — manter sincronizado com o número de _cloudLoad(...) abaixo
+  // Achado real (Rodada 4, 2026-08-08): este contador estava em 11 enquanto
+  // a função já tinha 42 chamadas reais do callback de conclusão abaixo —
+  // ficou desatualizado ao longo de várias rodadas que foram adicionando
+  // _cloudLoad(...) sem atualizar este número. Como o callback só marca
+  // _cloudReady=true quando loaded>=total, um total baixo demais faz o
+  // "pronto"/refresh inicial disparar cedo demais, antes de todo o estado
+  // da nuvem (inclusive as 4 novas coleções financeiras desta rodada) ter
+  // realmente chegado. Recontado programaticamente contra o corpo real
+  // desta função — ver scripts/test_cloud_load_all_counter_2026-08-08.js,
+  // que falha se este número voltar a divergir da contagem real.
+  var loaded = 0, total = 42;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1739,6 +1749,9 @@ function _cloudLoadAll() {
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
   _cloudLoad("fin_cp_recorrencias", function(d){ if(d&&d.length){ FIN_CP_RECORRENCIAS=d; } done(); });
+  _cloudLoad("fin_cartoes", function(d){ if(d&&d.length){ FIN_CARTOES=d; } done(); });
+  _cloudLoad("fin_cartao_compras", function(d){ if(d&&d.length){ FIN_CARTAO_COMPRAS=d; } done(); });
+  _cloudLoad("fin_faturas", function(d){ if(d&&d.length){ FIN_FATURAS=d; } done(); });
   _cloudLoad("compras", function(d){ if(d&&d.length){ COMPRAS=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); done(); });
@@ -4815,6 +4828,7 @@ function _authFirebaseError(code){
         <button class="fin-tab-btn" id="finTabBtnCR" onclick="finTab('cr')">📥 Contas a Receber</button>
         <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
         <button class="fin-tab-btn" id="finTabBtnCal" onclick="finTab('cal')">📅 Agenda de Pagamentos</button>
+        <button class="fin-tab-btn" id="finTabBtnCartoes" onclick="finTab('cartoes')">💳 Cartões</button>
         <button class="fin-tab-btn" id="finTabBtnDRE" onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)" title="Abre em Relatórios — fonte única do DRE">📋 DRE ↗</button>
       </div>
 
@@ -5090,6 +5104,27 @@ function _authFirebaseError(code){
         </div>
 
       </div><!-- /finPgCal -->
+
+      <!-- ── ABA: CARTÕES DE CRÉDITO (Rodada 4, seção 2) ── -->
+      <div id="finPgCartoes" style="display:none">
+        <div class="card">
+          <div class="card-h">
+            <div class="card-h-left">💳 Cartões cadastrados</div>
+            <button class="topbar-btn" style="font-size:11px" onclick="finCartaoNovoModal()">+ Novo Cartão</button>
+          </div>
+          <div id="finCartoesLista" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="card-h">
+            <div class="card-h-left">🧾 Faturas</div>
+            <button class="topbar-btn" style="font-size:11px" onclick="finCartaoCompraModal()">+ Nova Compra</button>
+          </div>
+          <table class="table">
+            <tr><th>Cartão</th><th>Competência</th><th>Status</th><th>Valor</th><th>Vencimento</th><th></th></tr>
+            <tbody id="finFaturasBody"></tbody>
+          </table>
+        </div>
+      </div><!-- /finPgCartoes -->
 
       <div id="finPgDRE" style="display:none">
         <!-- Mini descrição do que é o DRE -->
@@ -6850,6 +6885,59 @@ function _authFirebaseError(code){
   </div>
 </div>
 
+
+<!-- MODAL: Novo Cartão -->
+<div class="gen-overlay" id="finCartaoOverlay" onclick="if(event.target===this)document.getElementById('finCartaoOverlay').classList.remove('open')">
+  <div class="gen-modal" style="width:420px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#7C3AED,#A78BFA);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">💳 Novo Cartão</div>
+      <button class="gen-close" onclick="document.getElementById('finCartaoOverlay').classList.remove('open')" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div class="fg"><label>Nome</label><input type="text" id="finCartaoNome" placeholder="Ex: Itaú Empresarial"></div>
+      <div class="fg"><label>Emissor / Banco</label><input type="text" id="finCartaoEmissor" placeholder="Ex: Itaú"></div>
+      <div class="fg2">
+        <div class="fg"><label>Dia de fechamento</label><input type="number" id="finCartaoFechamento" min="1" max="31" value="10"></div>
+        <div class="fg"><label>Dia de vencimento</label><input type="number" id="finCartaoVencimento" min="1" max="31" value="20"></div>
+      </div>
+      <div class="fg"><label>Conta usada para pagar a fatura</label><select id="finCartaoConta"></select></div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="document.getElementById('finCartaoOverlay').classList.remove('open')">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#7C3AED,#A78BFA)" onclick="finCartaoSalvar(this)">💾 Salvar Cartão</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Nova Compra no Cartão -->
+<div class="gen-overlay" id="finCartaoCompraOverlay" onclick="if(event.target===this)document.getElementById('finCartaoCompraOverlay').classList.remove('open')">
+  <div class="gen-modal" style="width:460px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#7C3AED,#A78BFA);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">🛒 Nova Compra no Cartão</div>
+      <button class="gen-close" onclick="document.getElementById('finCartaoCompraOverlay').classList.remove('open')" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div class="fg"><label>Cartão</label><select id="finCCCartao"></select></div>
+      <div class="fg"><label>Descrição</label><input type="text" id="finCCDesc" placeholder="Ex: Material de escritório"></div>
+      <div class="fg2">
+        <div class="fg"><label>Fornecedor</label><input type="text" id="finCCForn" placeholder="Opcional"></div>
+        <div class="fg"><label>Categoria</label><select id="finCCCat"><option value="Operacional">⚙️ Operacional</option><option value="Matéria-Prima">🪵 Matéria-Prima</option><option value="Outros">📌 Outros</option></select></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Data da compra</label><input type="date" id="finCCData"></div>
+        <div class="fg"><label>Marca</label><select id="finCCMarca"><option value="vr">🟣 VR</option><option value="vitre">🌸 Vitre</option></select></div>
+      </div>
+      <div class="fg2">
+        <div class="fg"><label>Valor total (R$)</label><input type="number" id="finCCValor" min="0" step="0.01" placeholder="0,00"></div>
+        <div class="fg"><label>Parcelas</label><input type="number" id="finCCParcelas" min="1" max="24" value="1"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="document.getElementById('finCartaoCompraOverlay').classList.remove('open')">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#7C3AED,#A78BFA)" onclick="finCartaoCompraSalvar(this)">💾 Registrar Compra</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- MINI-MODAL CONFIRMAR BAIXA COM DATA -->
 <div class="gen-overlay" id="finBaixaOverlay" onclick="if(event.target===this)this.classList.remove('open')">
@@ -13048,9 +13136,20 @@ var FIN_CP = [];
 // recorrenciaId+competencia — nunca um array paralelo de "despesas fantasma").
 var FIN_CP_RECORRENCIAS = [];
 
+// Rodada 4 — cartões de crédito: cadastro de cartão, compras (com parcelas
+// embutidas em cada registro de compra — não precisa de 5º documento) e
+// faturas (agregado por cartão+competência). Produção nunca acessa
+// (mesmo grupo de Rules de fin_cp).
+var FIN_CARTOES = [];
+var FIN_CARTAO_COMPRAS = [];
+var FIN_FATURAS = [];
+
 function _finSaveCR(){ return _cloudSave('fin_cr', FIN_CR); }
 function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }
 function _finSaveCPRecorrencias(){ return _cloudSave('fin_cp_recorrencias', FIN_CP_RECORRENCIAS); }
+function _finSaveCartoes(){ return _cloudSave('fin_cartoes', FIN_CARTOES); }
+function _finSaveCartaoCompras(){ return _cloudSave('fin_cartao_compras', FIN_CARTAO_COMPRAS); }
+function _finSaveFaturas(){ return _cloudSave('fin_faturas', FIN_FATURAS); }
 
 // ============================================================
 // COMPRAS — Necessidade → Solicitação → Cotação → Aprovação → Pedido →
@@ -13809,8 +13908,8 @@ function finSetBrand(b) {
 
 function finTab(t) {
   _finActiveTab = t;
-  var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', cal:'Cal', dre:'DRE'};
-  ['dash','cr','cp','cal','dre'].forEach(function(tab){
+  var idSuffix = {dash:'Dash', cr:'CR', cp:'CP', cal:'Cal', dre:'DRE', cartoes:'Cartoes'};
+  ['dash','cr','cp','cal','dre','cartoes'].forEach(function(tab){
     var suffix = idSuffix[tab];
     var btn = document.getElementById('finTabBtn'+suffix);
     var pg  = document.getElementById('finPg'+suffix);
@@ -13827,6 +13926,8 @@ function finTab(t) {
     finCalRender();
   } else if(t==='dre') {
     finDREBuild();
+  } else if(t==='cartoes') {
+    finCartoesRender();
   }
 }
 
@@ -14943,6 +15044,236 @@ function finCPEditarFuturas(recorrenciaId, apartirCompetencia, novosValores) {
   FIN_CP_RECORRENCIAS.push(novaRec);
   finCPGerarOcorrencias(3);
   return { ok: true, novaRecorrenciaId: novaRec.id };
+}
+
+// ── Cartões de Crédito e Faturas (Rodada 4, seção 2) ───────────────────────
+// A COMPRA é a despesa/competência (fica registrada no momento da compra,
+// dividida em parcelas). O PAGAMENTO DA FATURA é só a movimentação de caixa
+// — nunca cria uma segunda despesa. Respeita o dia de fechamento do cartão:
+// compra até o dia de fechamento (inclusive) entra na fatura que fecha
+// NESTE ciclo (competência do mês da compra); compra depois do fechamento
+// entra na fatura do ciclo seguinte (competência do mês seguinte).
+function finCartaoCompetenciaFatura(cartao, dataCompraISO) {
+  var d = finCPParseISO(dataCompraISO);
+  var ano = d.ano, mes = d.mes;
+  if (d.dia > cartao.diaFechamento) { mes++; if (mes > 12) { mes = 1; ano++; } }
+  return finCPCompetenciaStr(ano, mes);
+}
+function finCartaoGerarParcelas(compra, cartao) {
+  var parcelas = [];
+  var compRef = finCartaoCompetenciaFatura(cartao, compra.data);
+  var p0 = finCPParseISO(compRef + '-01');
+  var n = compra.parcelas || 1;
+  var valorParcela = Math.round((compra.valorTotal / n) * 100) / 100;
+  var somaParcial = 0;
+  for (var i = 1; i <= n; i++) {
+    var mes = p0.mes + (i - 1), ano = p0.ano;
+    while (mes > 12) { mes -= 12; ano++; }
+    var competencia = finCPCompetenciaStr(ano, mes);
+    // última parcela absorve a diferença de arredondamento — nunca perde centavos
+    var valor = (i < n) ? valorParcela : Math.round((compra.valorTotal - somaParcial) * 100) / 100;
+    somaParcial += valor;
+    parcelas.push({
+      compraId: compra.id, numero: i, totalParcelas: n, valor: valor, competencia: competencia,
+      vencimento: finCPVencimentoDaCompetencia(ano, mes, cartao.diaVencimento),
+      faturaId: null, status: 'pendente',
+    });
+  }
+  return parcelas;
+}
+function finCartaoRegistrarCompra(dados) {
+  var cartao = FIN_CARTOES.find(function (c) { return c.id === dados.cartaoId; });
+  if (!cartao) return { ok: false, erro: 'cartão não encontrado' };
+  var compra = {
+    id: 'fccompra_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    cartaoId: dados.cartaoId, data: dados.data, fornecedor: dados.fornecedor || '',
+    descricao: dados.descricao, categoria: dados.categoria || 'Outros',
+    valorTotal: dados.valorTotal, parcelas: dados.parcelas || 1, marca: dados.marca || 'vr',
+    criadoEm: Date.now(),
+  };
+  compra.parcelasDetalhe = finCartaoGerarParcelas(compra, cartao);
+  FIN_CARTAO_COMPRAS.push(compra);
+  finCartaoGarantirFaturas();
+  return { ok: true, compraId: compra.id, parcelas: compra.parcelasDetalhe };
+}
+// Idempotente: só cria a fatura de um cartão+competência se ainda não
+// existir (id determinístico); sempre revincula parcelas à fatura certa.
+function finCartaoGarantirFaturas() {
+  var criadas = 0;
+  FIN_CARTAO_COMPRAS.forEach(function (compra) {
+    var cartao = FIN_CARTOES.find(function (c) { return c.id === compra.cartaoId; });
+    if (!cartao) return;
+    (compra.parcelasDetalhe || []).forEach(function (parc) {
+      var faturaId = 'fcfat_' + compra.cartaoId + '_' + parc.competencia;
+      var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
+      if (!fatura) {
+        var p = finCPParseISO(parc.competencia + '-01');
+        fatura = {
+          id: faturaId, cartaoId: compra.cartaoId, competencia: parc.competencia,
+          dataFechamento: finCPVencimentoDaCompetencia(p.ano, p.mes, cartao.diaFechamento),
+          dataVencimento: finCPVencimentoDaCompetencia(p.ano, p.mes, cartao.diaVencimento),
+          status: 'aberta', pago: false, dataPagamento: null, contaBancariaPagamento: null,
+        };
+        FIN_FATURAS.push(fatura);
+        criadas++;
+      }
+      parc.faturaId = fatura.id;
+    });
+  });
+  return criadas;
+}
+function finCartaoValorFatura(faturaId) {
+  var total = 0;
+  FIN_CARTAO_COMPRAS.forEach(function (compra) {
+    (compra.parcelasDetalhe || []).forEach(function (parc) { if (parc.faturaId === faturaId) total += parc.valor; });
+  });
+  return Math.round(total * 100) / 100;
+}
+function finCartaoComprasDaFatura(faturaId) {
+  var out = [];
+  FIN_CARTAO_COMPRAS.forEach(function (compra) {
+    (compra.parcelasDetalhe || []).forEach(function (parc) {
+      if (parc.faturaId === faturaId) out.push({ compra: compra, parcela: parc });
+    });
+  });
+  return out;
+}
+// Pagar a fatura gera a SAÍDA financeira real (o pagamento em si) — nunca
+// duplica a despesa, que já foi registrada no momento de cada compra.
+function finCartaoPagarFatura(faturaId, dataPagamentoISO, contaBancaria) {
+  var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
+  if (!fatura) return { ok: false, erro: 'fatura não encontrada' };
+  if (fatura.pago) return { ok: false, erro: 'fatura já paga' };
+  var valor = finCartaoValorFatura(faturaId);
+  fatura.status = 'paga'; fatura.pago = true; fatura.dataPagamento = dataPagamentoISO; fatura.contaBancariaPagamento = contaBancaria;
+  FIN_CARTAO_COMPRAS.forEach(function (compra) {
+    (compra.parcelasDetalhe || []).forEach(function (parc) { if (parc.faturaId === faturaId) parc.status = 'pago'; });
+  });
+  return { ok: true, valorPago: valor };
+}
+// Atualiza status aberta/fechada/vencida de todas as faturas não pagas
+// conforme a data corrente — chamado ao renderizar a tela de Cartões.
+function finCartaoAtualizarStatusFaturas() {
+  var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  FIN_FATURAS.forEach(function (f) {
+    if (f.pago) return;
+    var fech = finCPParseISO(f.dataFechamento.split('/').reverse().join('-'));
+    var venc = finCPParseISO(f.dataVencimento.split('/').reverse().join('-'));
+    var dFech = new Date(fech.ano, fech.mes - 1, fech.dia);
+    var dVenc = new Date(venc.ano, venc.mes - 1, venc.dia);
+    if (hoje > dVenc) f.status = 'vencida';
+    else if (hoje >= dFech) f.status = 'fechada';
+    else f.status = 'aberta';
+  });
+}
+
+// ── Cartões — UI (Rodada 4) ─────────────────────────────────────────────────
+function finCartaoNovoModal() {
+  document.getElementById('finCartaoNome').value = '';
+  document.getElementById('finCartaoEmissor').value = '';
+  document.getElementById('finCartaoFechamento').value = '10';
+  document.getElementById('finCartaoVencimento').value = '20';
+  if (typeof finPopularContas === 'function') finPopularContas('finCartaoConta');
+  document.getElementById('finCartaoOverlay').classList.add('open');
+}
+var _finCartaoSalvando = false;
+function finCartaoSalvar(btnEl) {
+  if (_finCartaoSalvando) return;
+  var nome = (document.getElementById('finCartaoNome') || {}).value || '';
+  var emissor = (document.getElementById('finCartaoEmissor') || {}).value || '';
+  var fech = parseInt((document.getElementById('finCartaoFechamento') || {}).value, 10) || 10;
+  var venc = parseInt((document.getElementById('finCartaoVencimento') || {}).value, 10) || 20;
+  var conta = (document.getElementById('finCartaoConta') || {}).value || '';
+  if (!nome) { showToast('Informe o nome do cartão', 'warn'); return; }
+  _finCartaoSalvando = true;
+  var _liberar = _btnBusy(btnEl, 'Salvando…');
+  FIN_CARTOES.push({ id: 'fcartao_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nome: nome, emissor: emissor, diaFechamento: fech, diaVencimento: venc, contaBancaria: conta, ativo: true });
+  document.getElementById('finCartaoOverlay').classList.remove('open');
+  finCartoesRender();
+  var _p = _finSaveCartoes();
+  showToast('Cartão cadastrado!', 'ok');
+  (_p && typeof _p.then === 'function' ? _p : Promise.resolve()).then(function () { _finCartaoSalvando = false; if (_liberar) _liberar(); });
+}
+function finCartaoCompraModal() {
+  if (!FIN_CARTOES.length) { showToast('Cadastre um cartão antes de registrar uma compra', 'warn'); return; }
+  var sel = document.getElementById('finCCCartao');
+  sel.innerHTML = FIN_CARTOES.map(function (c) { return '<option value="' + c.id + '">' + c.nome + '</option>'; }).join('');
+  var hoje = new Date();
+  document.getElementById('finCCData').value = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0') + '-' + String(hoje.getDate()).padStart(2, '0');
+  document.getElementById('finCCDesc').value = '';
+  document.getElementById('finCCForn').value = '';
+  document.getElementById('finCCValor').value = '';
+  document.getElementById('finCCParcelas').value = '1';
+  document.getElementById('finCartaoCompraOverlay').classList.add('open');
+}
+var _finCCSalvando = false;
+function finCartaoCompraSalvar(btnEl) {
+  if (_finCCSalvando) return;
+  var cartaoId = (document.getElementById('finCCCartao') || {}).value || '';
+  var desc = (document.getElementById('finCCDesc') || {}).value || '';
+  var forn = (document.getElementById('finCCForn') || {}).value || '';
+  var cat = (document.getElementById('finCCCat') || {}).value || 'Outros';
+  var dataRaw = (document.getElementById('finCCData') || {}).value || '';
+  var marca = (document.getElementById('finCCMarca') || {}).value || 'vr';
+  var valor = parseFloat((document.getElementById('finCCValor') || {}).value || '0');
+  var parcelas = parseInt((document.getElementById('finCCParcelas') || {}).value, 10) || 1;
+  if (!cartaoId || !desc || !valor || !dataRaw) { showToast('Preencha cartão, descrição, valor e data', 'warn'); return; }
+  _finCCSalvando = true;
+  var _liberar = _btnBusy(btnEl, 'Registrando…');
+  var r = finCartaoRegistrarCompra({ cartaoId: cartaoId, data: dataRaw, fornecedor: forn, descricao: desc, categoria: cat, valorTotal: valor, parcelas: parcelas, marca: marca });
+  if (!r.ok) { showToast(r.erro || 'Não foi possível registrar a compra', 'err'); _finCCSalvando = false; if (_liberar) _liberar(); return; }
+  document.getElementById('finCartaoCompraOverlay').classList.remove('open');
+  finCartoesRender();
+  var _saveC = _finSaveCartaoCompras(), _saveF = _finSaveFaturas();
+  var _p = Promise.all([_saveC && _saveC.then ? _saveC : Promise.resolve(), _saveF && _saveF.then ? _saveF : Promise.resolve()]);
+  showToast('Compra registrada — ' + parcelas + 'x de ' + finFmt(r.parcelas[0].valor), 'ok');
+  _p.then(function () { _finCCSalvando = false; if (_liberar) _liberar(); });
+}
+function finCartaoPagarFaturaUI(faturaId) {
+  var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
+  if (!fatura) return;
+  var cartao = FIN_CARTOES.find(function (c) { return c.id === fatura.cartaoId; });
+  var valor = finCartaoValorFatura(faturaId);
+  if (!confirm('Confirmar pagamento da fatura ' + (cartao ? cartao.nome : '') + ' (' + fatura.competencia + ') — ' + finFmt(valor) + '?')) return;
+  var hoje = new Date();
+  var dataISO = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0') + '-' + String(hoje.getDate()).padStart(2, '0');
+  var r = finCartaoPagarFatura(faturaId, dataISO, cartao ? cartao.contaBancaria : '');
+  if (!r.ok) { showToast(r.erro || 'Não foi possível pagar a fatura', 'warn'); return; }
+  finCartoesRender();
+  var _saveC = _finSaveCartaoCompras(), _saveF = _finSaveFaturas();
+  Promise.all([_saveC && _saveC.then ? _saveC : Promise.resolve(), _saveF && _saveF.then ? _saveF : Promise.resolve()]).then(function () {
+    showToast('Fatura paga — ' + finFmt(r.valorPago), 'ok');
+  });
+}
+function finCartoesRender() {
+  if (typeof finCartaoAtualizarStatusFaturas === 'function') finCartaoAtualizarStatusFaturas();
+  var listaEl = document.getElementById('finCartoesLista');
+  if (listaEl) {
+    if (!FIN_CARTOES.length) {
+      listaEl.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">Nenhum cartão cadastrado.</div>';
+    } else {
+      listaEl.innerHTML = FIN_CARTOES.map(function (c) {
+        return '<div style="border:1px solid var(--border);border-radius:9px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">'
+          + '<div><strong>' + c.nome + '</strong><div style="font-size:11px;color:var(--muted)">' + (c.emissor || '—') + ' · fecha dia ' + c.diaFechamento + ' · vence dia ' + c.diaVencimento + '</div></div>'
+          + (c.ativo ? '<span class="fin-badge fin-badge-pendente">Ativo</span>' : '<span class="fin-badge">Inativo</span>')
+          + '</div>';
+      }).join('');
+    }
+  }
+  var tbody = document.getElementById('finFaturasBody');
+  if (!tbody) return;
+  var STATUS_LABEL = { aberta: '🟢 Aberta', fechada: '🟡 Fechada', paga: '✅ Paga', vencida: '🔴 Vencida' };
+  var faturasOrdenadas = FIN_FATURAS.slice().sort(function (a, b) { return b.competencia.localeCompare(a.competencia); });
+  if (!faturasOrdenadas.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Nenhuma fatura ainda — registre uma compra no cartão.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = faturasOrdenadas.map(function (f) {
+    var cartao = FIN_CARTOES.find(function (c) { return c.id === f.cartaoId; });
+    var valor = finCartaoValorFatura(f.id);
+    var acao = f.pago ? '—' : '<button class="topbar-btn" style="font-size:10px;padding:4px 10px" onclick="finCartaoPagarFaturaUI(\'' + f.id + '\')">Pagar</button>';
+    return '<tr><td>' + (cartao ? cartao.nome : '—') + '</td><td>' + f.competencia + '</td><td>' + (STATUS_LABEL[f.status] || f.status) + '</td><td style="font-weight:800">' + finFmt(valor) + '</td><td>' + f.dataVencimento + '</td><td>' + acao + '</td></tr>';
+  }).join('');
 }
 
 // ── DRE — Regime de Caixa vs Competência ────────────────────────────────────
