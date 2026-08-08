@@ -144,7 +144,11 @@ service cloud.firestore {
       // por completo o botão "Gerar OS" para o perfil Comercial (o único
       // que legitimamente aciona essa ação). Alargamento aditivo — não
       // remove nada do que Financeiro já podia fazer.
-      allow read, write: if (isFinanceiro() || (isComercial() && docId=='fin_cr')) && docId in ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant'];
+      allow read, write: if (isFinanceiro() || (isComercial() && docId=='fin_cr')) && docId in
+        ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant',
+         // Rodada 4 — despesas recorrentes, cartões/faturas: mesmo grupo
+         // de acesso do restante do Financeiro. Produção nunca acessa.
+         'fin_cp_recorrencias', 'fin_cartoes', 'fin_cartao_compras', 'fin_faturas'];
 
       // Orçamentos: Comercial cria/edita; Financeiro só lê (conciliação de
       // receita no DRE, contas a receber geradas a partir de orçamento

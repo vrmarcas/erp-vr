@@ -1738,6 +1738,7 @@ function _cloudLoadAll() {
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
+  _cloudLoad("fin_cp_recorrencias", function(d){ if(d&&d.length){ FIN_CP_RECORRENCIAS=d; } done(); });
   _cloudLoad("compras", function(d){ if(d&&d.length){ COMPRAS=d; } done(); });
   _cloudLoad("retalhos", function(d){ if(d){ RETALHOS=d; } done(); });
   _cloudLoad("kb_os", function(d){ if(d&&typeof d==="object"){ Object.keys(d).forEach(function(k){ KB_OS[k]=d[k]; }); } if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); done(); });
@@ -6753,6 +6754,29 @@ function _authFirebaseError(code){
       <div class="fg">
         <label>Descrição</label>
         <input type="text" id="finCPDesc" placeholder="Ex: Salário do Paulo — Julho">
+      </div>
+      <div class="fg">
+        <label>Tipo</label>
+        <select id="finCPTipo" onchange="finCPToggleRecorrenciaFields()">
+          <option value="avulsa">📄 Avulsa (uma vez)</option>
+          <option value="recorrente">🔁 Recorrente (mensal)</option>
+        </select>
+      </div>
+      <div id="finCPRecorrenciaFields" style="display:none;background:var(--bg2);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+        <div class="fg2">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px">Dia do vencimento</label>
+            <input type="number" id="finCPRecDia" min="1" max="31" value="10" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);width:100%">
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px">Início (competência)</label>
+            <input type="month" id="finCPRecInicio" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);width:100%">
+          </div>
+        </div>
+        <div class="fg" style="margin:6px 0 0">
+          <label style="font-size:11px">Fim (opcional — deixe vazio para recorrência sem prazo)</label>
+          <input type="month" id="finCPRecFim" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);width:100%">
+        </div>
       </div>
       <div class="fg2">
         <div class="fg">
@@ -13019,9 +13043,14 @@ var _FIN_CP_DEFAULT = [
   {id:'cp028',descricao:'ISABELLA — VITRE',categoria:'Pessoal',valor:745.28,vencimento:'02/07/2026',status:'pago',marca:'vitre',fornecedor:'',formaPgto:'Banco',dataCriacao:'02/07/2026',dataPagamento:'02/07/2026'}
 ];
 var FIN_CP = [];
+// Rodada 4 — definições de despesa recorrente (fonte separada de FIN_CP;
+// cada ocorrência gerada é um registro normal em FIN_CP, marcado com
+// recorrenciaId+competencia — nunca um array paralelo de "despesas fantasma").
+var FIN_CP_RECORRENCIAS = [];
 
 function _finSaveCR(){ return _cloudSave('fin_cr', FIN_CR); }
 function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }
+function _finSaveCPRecorrencias(){ return _cloudSave('fin_cp_recorrencias', FIN_CP_RECORRENCIAS); }
 
 // ============================================================
 // COMPRAS — Necessidade → Solicitação → Cotação → Aprovação → Pedido →
@@ -14561,7 +14590,20 @@ function finCPBulkDelete() {
   showToast(ids.length+' despesa(s) excluída(s)','ok');
 }
 
+// Gera as próximas ocorrências de despesas recorrentes uma vez por sessão
+// (não a cada render — finCPRender() é chamado com frequência) — idempotente
+// por natureza (finCPGerarOcorrencias só cria o que falta), então rodar de
+// novo nunca duplica; a flag só evita escrita repetida no Firestore à toa.
+var _finCPOcorrenciasGeradasNestaSessao = false;
+function finCPGarantirOcorrenciasAtuais() {
+  if(_finCPOcorrenciasGeradasNestaSessao) return;
+  _finCPOcorrenciasGeradasNestaSessao = true;
+  if(typeof finCPGerarOcorrencias!=='function' || !FIN_CP_RECORRENCIAS.length) return;
+  var criadas = finCPGerarOcorrencias(3);
+  if(criadas>0){ _finSaveCP(); }
+}
 function finCPRender() {
+  finCPGarantirOcorrenciasAtuais();
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
   if(!tbody) return;
@@ -14598,7 +14640,15 @@ function finCPRender() {
     } else {
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEstornar(\''+r.id+'\')">↩ Estornar pagamento</button>';
     }
-    menuItems+='<button class="danger" onclick="_finDotToggle(\''+menuId+'\');if(confirm(\'Excluir esta despesa?\'))finCPDel(\''+r.id+'\')">🗑️ Excluir</button>';
+    if(r.recorrenciaId){
+      // ocorrência de despesa recorrente — ações específicas de série, além
+      // das normais. "Editar só esta" já funciona pelo fluxo normal de edição
+      // (mutação direta no registro, sem tocar a recorrência-mãe).
+      if(r.status!=='pago') menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPCancelarOcorrenciaUI(\''+r.id+'\')">🚫 Cancelar só esta ocorrência</button>';
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEncerrarRecorrenciaUI(\''+r.recorrenciaId+'\')">⏹ Encerrar recorrência (série inteira)</button>';
+    } else {
+      menuItems+='<button class="danger" onclick="_finDotToggle(\''+menuId+'\');if(confirm(\'Excluir esta despesa?\'))finCPDel(\''+r.id+'\')">🗑️ Excluir</button>';
+    }
     var dotMenu='<div class="fin-dot-wrap"><button class="fin-dot-btn" onclick="event.stopPropagation();_finDotToggle(\''+menuId+'\')">⋯</button><div class="fin-dot-menu" id="'+menuId+'">'+menuItems+'</div></div>';
     var chk='<input type="checkbox" '+(_finCPSel[r.id]?'checked':'')+' onchange="finCPToggleSel(\''+r.id+'\')" onclick="event.stopPropagation()">';
     return '<tr>'
@@ -14650,6 +14700,26 @@ function finCPEstornar(id) {
 }
 function finCPDel(id){ FIN_CP=FIN_CP.filter(function(x){return x.id!==id;}); _finSaveCP(); finCPRender(); finDashKPIs(); }
 
+function finCPCancelarOcorrenciaUI(cpId) {
+  if(!confirm('Cancelar só esta ocorrência? A recorrência continua ativa para os próximos meses.')) return;
+  var r = finCPCancelarOcorrencia(cpId);
+  if(!r.ok){ showToast(r.erro||'Não foi possível cancelar','warn'); return; }
+  Promise.all([_finSaveCP(), _finSaveCPRecorrencias()].map(function(p){ return p&&p.then?p:Promise.resolve(); })).then(function(){
+    finCPRender(); finDashKPIs(); finDonutRender();
+    showToast('Ocorrência cancelada — a recorrência continua ativa','ok');
+  });
+}
+function finCPEncerrarRecorrenciaUI(recorrenciaId) {
+  if(!confirm('Encerrar esta recorrência? Nenhuma nova ocorrência será gerada — as já existentes continuam.')) return;
+  var r = finCPEncerrarRecorrencia(recorrenciaId);
+  if(!r.ok){ showToast(r.erro||'Não foi possível encerrar','warn'); return; }
+  var p = _finSaveCPRecorrencias();
+  (p && typeof p.then==='function' ? p : Promise.resolve()).then(function(){
+    finCPRender();
+    showToast('Recorrência encerrada — ocorrências já geradas foram preservadas','ok');
+  });
+}
+
 function finCPFornSelect() {
   var sel=document.getElementById('finCPFornSel');
   var inp=document.getElementById('finCPForn');
@@ -14668,10 +14738,27 @@ function finCPPopularForn() {
   });
   sel.innerHTML=opts;
 }
+function finCPToggleRecorrenciaFields() {
+  var tipo=(document.getElementById('finCPTipo')||{}).value||'avulsa';
+  var recBox=document.getElementById('finCPRecorrenciaFields');
+  var vencFg=document.getElementById('finCPVenc'); var vencWrap = vencFg && vencFg.closest ? vencFg.closest('.fg') : null;
+  var statusFg=document.getElementById('finCPStatus'); var statusWrap = statusFg && statusFg.closest ? statusFg.closest('.fg') : null;
+  var isRec = tipo==='recorrente';
+  if(recBox) recBox.style.display = isRec ? 'block' : 'none';
+  // recorrente usa "dia do vencimento" (recorrência) em vez de uma data única,
+  // e toda ocorrência nasce 'agendado' — nunca faz sentido pré-marcar como paga.
+  if(vencWrap) vencWrap.style.display = isRec ? 'none' : '';
+  if(statusWrap) statusWrap.style.display = isRec ? 'none' : '';
+}
 function finCPNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
   var vencEl=document.getElementById('finCPVenc');
   if(vencEl) vencEl.value=yy+'-'+mm+'-'+dd;
+  var tipoEl=document.getElementById('finCPTipo'); if(tipoEl) tipoEl.value='avulsa';
+  var recInicio=document.getElementById('finCPRecInicio'); if(recInicio) recInicio.value=yy+'-'+mm;
+  var recFim=document.getElementById('finCPRecFim'); if(recFim) recFim.value='';
+  var recDia=document.getElementById('finCPRecDia'); if(recDia) recDia.value=dd;
+  finCPToggleRecorrenciaFields();
   finPopularContas('finCPConta');
   finCPPopularForn();
   document.getElementById('finCPOverlay').classList.add('open');
@@ -14690,22 +14777,172 @@ function finCPSalvar(btnEl){
   var cat=(document.getElementById('finCPCat')||{}).value||'Outros';
   var marca=(document.getElementById('finCPMarca')||{}).value||'vr';
   var valor=parseFloat((document.getElementById('finCPValor')||{}).value||'0');
-  var vencRaw=(document.getElementById('finCPVenc')||{}).value||'';
   var forn=(document.getElementById('finCPForn')||{}).value||'';
   var conta=(document.getElementById('finCPConta')||{}).value||'';
+  var tipo=(document.getElementById('finCPTipo')||{}).value||'avulsa';
+
+  if(tipo==='recorrente'){
+    var dia=parseInt((document.getElementById('finCPRecDia')||{}).value,10)||1;
+    var inicioRaw=(document.getElementById('finCPRecInicio')||{}).value||''; // "AAAA-MM"
+    var fimRaw=(document.getElementById('finCPRecFim')||{}).value||'';
+    if(!desc||!valor||!inicioRaw){showToast('Preencha descrição, valor e início da recorrência','warn');return;}
+    _finCPSalvando = true;
+    var _liberarRec = _btnBusy(btnEl, 'Salvando…');
+    var r = finCPCriarRecorrencia({descricao:desc, categoria:cat, valor:valor, fornecedor:forn, contaBancaria:conta, marca:marca, diaVencimento:dia, dataInicial:inicioRaw+'-01', dataFinal:fimRaw?(fimRaw+'-01'):null});
+    finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
+    var _saveRec = _finSaveCPRecorrencias(), _saveCP = _finSaveCP();
+    var _pRec = Promise.all([
+      _saveRec && typeof _saveRec.then==='function' ? _saveRec : Promise.resolve(),
+      _saveCP && typeof _saveCP.then==='function' ? _saveCP : Promise.resolve(),
+    ]);
+    showToast('Despesa recorrente criada — '+r.ocorrenciasCriadas+' ocorrência(s) gerada(s)!','ok');
+    _pRec.then(function(){
+      _finCPSalvando = false; if(_liberarRec) _liberarRec();
+    });
+    return;
+  }
+
+  var vencRaw=(document.getElementById('finCPVenc')||{}).value||'';
   var status=(document.getElementById('finCPStatus')||{}).value||'agendado';
   if(!desc||!valor||!vencRaw){showToast('Preencha descrição, valor e vencimento','warn');return;}
   _finCPSalvando = true;
   var _liberar = _btnBusy(btnEl, 'Salvando…');
   var parts=vencRaw.split('-'); var venc=parts[2]+'/'+parts[1]+'/'+parts[0];
   var hoje=new Date();
-  FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,contaBancaria:conta,dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
+  FIN_CP.unshift({id:'cp'+Date.now(),descricao:desc,categoria:cat,valor:valor,vencimento:venc,status:status,marca:marca,fornecedor:forn,contaBancaria:conta,tipo:'avulsa',dataCriacao:hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear(),dataPagamento:status==='pago'?venc:null});
   finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
   var _p = _finSaveCP();
   showToast('Despesa registrada!','ok');
   (_p && typeof _p.then==='function' ? _p : Promise.resolve()).then(function(){
     _finCPSalvando = false; if(_liberar) _liberar();
   });
+}
+
+// ── Contas a Pagar — Despesas Recorrentes (Rodada 4, seção 1) ──────────────
+// Cada ocorrência gerada é um registro NORMAL em FIN_CP (nunca um array
+// paralelo de "despesas fantasma") marcado com recorrenciaId+competencia.
+// Idempotência real: o id da ocorrência é DETERMINÍSTICO
+// ('cp_rec_'+recorrenciaId+'_'+competencia) e finCPGerarOcorrencias() só
+// cria quando não existe NENHUM registro com esse par — rodar 2x nunca
+// duplica. Nunca mexe em ocorrência já paga (status='pago').
+function finCPCompetenciaStr(ano, mes) { return ano + '-' + String(mes).padStart(2, '0'); }
+function finCPParseISO(iso) {
+  if (!iso) return null;
+  var p = String(iso).split('-');
+  if (p.length < 2) return null;
+  return { ano: parseInt(p[0], 10), mes: parseInt(p[1], 10), dia: p[2] ? parseInt(p[2], 10) : 1 };
+}
+function finCPVencimentoDaCompetencia(ano, mes, diaVenc) {
+  var ultimoDia = new Date(ano, mes, 0).getDate();
+  var dia = Math.min(diaVenc || 1, ultimoDia);
+  return String(dia).padStart(2, '0') + '/' + String(mes).padStart(2, '0') + '/' + ano;
+}
+function finCPProximasCompetencias(rec, horizonteMeses) {
+  var out = [];
+  var ini = finCPParseISO(rec.dataInicial);
+  if (!ini) return out;
+  var hoje = new Date();
+  var limite = new Date(hoje.getFullYear(), hoje.getMonth() + (horizonteMeses || 3), 1);
+  var fim = rec.dataFinal ? finCPParseISO(rec.dataFinal) : null;
+  var fimData = fim ? new Date(fim.ano, fim.mes - 1, 1) : null;
+  var cursor = new Date(ini.ano, ini.mes - 1, 1);
+  var guard = 0;
+  while (cursor <= limite && guard < 600) {
+    guard++;
+    if (fimData && cursor > fimData) break;
+    out.push({ ano: cursor.getFullYear(), mes: cursor.getMonth() + 1 });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return out;
+}
+function finCPGerarOcorrencias(horizonteMeses) {
+  var criadas = 0;
+  FIN_CP_RECORRENCIAS.forEach(function (rec) {
+    if (!rec.ativa) return;
+    finCPProximasCompetencias(rec, horizonteMeses || 3).forEach(function (c) {
+      var compStr = finCPCompetenciaStr(c.ano, c.mes);
+      if ((rec.competenciasCanceladas || []).indexOf(compStr) >= 0) return;
+      var jaExiste = FIN_CP.some(function (x) { return x.recorrenciaId === rec.id && x.competencia === compStr; });
+      if (jaExiste) return;
+      var hoje = new Date();
+      FIN_CP.push({
+        id: 'cp_rec_' + rec.id + '_' + compStr,
+        descricao: rec.descricao, categoria: rec.categoria, valor: rec.valor,
+        vencimento: finCPVencimentoDaCompetencia(c.ano, c.mes, rec.diaVencimento),
+        status: 'agendado', marca: rec.marca || 'vr',
+        fornecedor: rec.fornecedor || '', contaBancaria: rec.contaBancaria || '',
+        dataCriacao: hoje.getDate().toString().padStart(2, '0') + '/' + (hoje.getMonth() + 1).toString().padStart(2, '0') + '/' + hoje.getFullYear(),
+        dataPagamento: null, tipo: 'recorrente', recorrenciaId: rec.id, competencia: compStr,
+      });
+      criadas++;
+    });
+  });
+  return criadas;
+}
+function finCPCriarRecorrencia(dados) {
+  var rec = {
+    id: 'fcprec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    descricao: dados.descricao, categoria: dados.categoria, valor: dados.valor,
+    fornecedor: dados.fornecedor || '', contaBancaria: dados.contaBancaria || '',
+    marca: dados.marca || 'vr', frequencia: 'mensal',
+    diaVencimento: dados.diaVencimento, dataInicial: dados.dataInicial,
+    dataFinal: dados.dataFinal || null, ativa: true, competenciasCanceladas: [],
+    criadoEm: Date.now(),
+  };
+  FIN_CP_RECORRENCIAS.push(rec);
+  var criadas = finCPGerarOcorrencias(3);
+  return { ok: true, recorrenciaId: rec.id, ocorrenciasCriadas: criadas };
+}
+// Cancela SÓ esta ocorrência — a recorrência-mãe continua ativa, futuras
+// competências continuam sendo geradas normalmente. Nunca cancela paga.
+function finCPCancelarOcorrencia(cpId) {
+  var r = FIN_CP.find(function (x) { return x.id === cpId; });
+  if (!r) return { ok: false, erro: 'ocorrência não encontrada' };
+  if (r.status === 'pago') return { ok: false, erro: 'não é possível cancelar uma ocorrência já paga — estorne o pagamento primeiro' };
+  if (r.recorrenciaId && r.competencia) {
+    var rec = FIN_CP_RECORRENCIAS.find(function (x) { return x.id === r.recorrenciaId; });
+    if (rec) {
+      rec.competenciasCanceladas = rec.competenciasCanceladas || [];
+      if (rec.competenciasCanceladas.indexOf(r.competencia) < 0) rec.competenciasCanceladas.push(r.competencia);
+    }
+  }
+  FIN_CP = FIN_CP.filter(function (x) { return x.id !== cpId; });
+  return { ok: true };
+}
+// Encerra a série inteira — ocorrências já geradas (inclusive futuras não
+// pagas) permanecem; só para de gerar competências novas.
+function finCPEncerrarRecorrencia(recorrenciaId) {
+  var rec = FIN_CP_RECORRENCIAS.find(function (x) { return x.id === recorrenciaId; });
+  if (!rec) return { ok: false, erro: 'recorrência não encontrada' };
+  rec.ativa = false;
+  return { ok: true };
+}
+// "Editar esta e futuras": encerra a recorrência antiga na competência
+// anterior, remove só as ocorrências FUTURAS NÃO PAGAS dela (histórico e
+// pagas nunca são tocados), e cria uma nova recorrência com os valores
+// atualizados a partir da competência de corte.
+function finCPEditarFuturas(recorrenciaId, apartirCompetencia, novosValores) {
+  var recAntiga = FIN_CP_RECORRENCIAS.find(function (x) { return x.id === recorrenciaId; });
+  if (!recAntiga) return { ok: false, erro: 'recorrência não encontrada' };
+  var dataFinalOriginal = recAntiga.dataFinal || null;
+  var p = apartirCompetencia.split('-');
+  var anoA = parseInt(p[0], 10), mesA = parseInt(p[1], 10);
+  var anoAnt = mesA === 1 ? anoA - 1 : anoA, mesAnt = mesA === 1 ? 12 : mesA - 1;
+  recAntiga.dataFinal = anoAnt + '-' + String(mesAnt).padStart(2, '0') + '-01';
+  FIN_CP = FIN_CP.filter(function (x) {
+    if (x.recorrenciaId !== recorrenciaId) return true;
+    if (x.status === 'pago') return true;
+    return x.competencia < apartirCompetencia;
+  });
+  var novaRec = Object.assign({}, recAntiga, novosValores || {}, {
+    id: 'fcprec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    dataInicial: apartirCompetencia + '-01',
+    dataFinal: (novosValores && novosValores.dataFinal !== undefined) ? novosValores.dataFinal : dataFinalOriginal,
+    ativa: true, competenciasCanceladas: [],
+  });
+  FIN_CP_RECORRENCIAS.push(novaRec);
+  finCPGerarOcorrencias(3);
+  return { ok: true, novaRecorrenciaId: novaRec.id };
 }
 
 // ── DRE — Regime de Caixa vs Competência ────────────────────────────────────
