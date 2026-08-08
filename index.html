@@ -3100,13 +3100,14 @@ function _authFirebaseError(code){
             <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
               <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">📤 Enviar Orçamento ao Cliente</div>
               <div style="display:flex;gap:7px;flex-wrap:wrap">
-                <button class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
-                <button class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
-                <button class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
-                <button id="orcBtnSalvar" class="topbar-btn ghost" style="font-size:11px;color:var(--brand-mid);border-color:var(--brand-mid)" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
-                <button class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="orcGerarLinkPagamento()">🔗 Link Pgto</button>
+                <button id="orcBtnSalvar" class="topbar-btn" style="font-size:11px;color:#fff;background:var(--brand-mid);border-color:var(--brand-mid);font-weight:700" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
+                <button id="orcBtnWA" class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
+                <button id="orcBtnPDF" class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
+                <button id="orcBtnEmail" class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
+                <button id="orcBtnLinkPgto" class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="_btnBusy(this,'Gerando…',6000); orcGerarLinkPagamento()">🔗 Link Pgto</button>
               </div>
-              <div style="font-size:10px;color:var(--muted);margin-top:7px">Envie o orçamento antes de confirmar o pagamento</div>
+              <div id="orcEnvioAvisoSalvar" style="font-size:10px;color:#B45309;margin-top:7px;font-weight:700">Salve o orçamento para liberar WhatsApp, PDF, E-mail e Link de Pagamento.</div>
+              <div id="orcEnvioAvisoOk" style="font-size:10px;color:var(--muted);margin-top:7px;display:none">Orçamento salvo — envie ao cliente antes de confirmar o pagamento.</div>
             </div>
 
             <!-- Prazo de Produção -->
@@ -8029,6 +8030,29 @@ function orcStep(n) {
     var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
     if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);
   }
+  if(n===4 && typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
+}
+
+// RODADA 2, P0.2 — antes do 1º salvamento o único botão ativo na etapa
+// "Envio ao Cliente" é Salvar Orçamento; WhatsApp/PDF/E-mail/Link de
+// Pagamento ficam desabilitados (nunca disparam envio de um orçamento
+// que não existe ainda no Firestore). Depois que window._orcSessaoAtualId
+// é atribuído (1º save bem-sucedido, ver _orcSalvarOrcamentoImpl), os
+// canais são liberados e continuam liberados nas edições seguintes.
+function _orcAtualizarVisibilidadeEnvio() {
+  var salvo = !!window._orcSessaoAtualId;
+  ['orcBtnWA','orcBtnPDF','orcBtnEmail','orcBtnLinkPgto'].forEach(function(id){
+    var btn = document.getElementById(id);
+    if(!btn) return;
+    btn.disabled = !salvo;
+    btn.style.opacity = salvo ? '1' : '.4';
+    btn.style.cursor = salvo ? 'pointer' : 'not-allowed';
+    btn.title = salvo ? '' : 'Salve o orçamento primeiro para liberar este envio.';
+  });
+  var avisoSalvar = document.getElementById('orcEnvioAvisoSalvar');
+  var avisoOk = document.getElementById('orcEnvioAvisoOk');
+  if(avisoSalvar) avisoSalvar.style.display = salvo ? 'none' : '';
+  if(avisoOk) avisoOk.style.display = salvo ? '' : 'none';
 }
 
 // Custos Avançados inline toggle no Step 2
@@ -17113,6 +17137,7 @@ function orcResetFormularioVR(){
   window._orcCalc = {};
   _orcClienteAprovado = false;
   if(typeof orcRecalc==='function') orcRecalc();
+  if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
 }
 function orcIniciarFluxoVR() {
   if(orcVRTemDadosPendentes() && !_e2eDlgConfirm('Os dados deste orçamento ainda não foram salvos. Iniciar um novo orçamento agora vai descartá-los. Continuar?')) return;
@@ -19649,6 +19674,7 @@ async function _orcSalvarOrcamentoImpl() {
     lista.unshift(orc);
   }
   window._orcSessaoAtualId = orc.id;
+  if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
   orcSetEnviados(lista);
   // Dual-write: além do array legado (erp_vr/orcamentos, ainda a fonte de
   // verdade lida pela UI existente), grava também o núcleo comercial deste
@@ -20263,6 +20289,7 @@ function orcEnvEditar(id) {
     // Idempotência: liga esta sessão do wizard ao orçamento existente —
     // orcSalvarOrcamento() vai atualizar o mesmo registro, nunca duplicar.
     window._orcSessaoAtualId = o.id;
+    if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
     showToast('Orçamento #'+o.num+' carregado para edição','ok');
     orcRecalc();
   }, 200);

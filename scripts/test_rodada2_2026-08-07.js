@@ -144,8 +144,41 @@ console.log('\n── Vitre OS com ficha incompleta não bloqueia (P0.4) ──�
   test('19. OS com item ficha_tecnica_pendente NÃO é bloqueada', osEhBloqueada([itemSemFicha]), false);
 }
 
-console.log('\n' + '='.repeat(70));
-console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
-console.log('='.repeat(70) + '\n');
+// ────────────────────────────────────────────────────────────────────────
+// P0.2 — Salvar antes de enviar: WhatsApp/PDF/E-mail/Link de Pagamento só
+// liberados após o 1º save (window._orcSessaoAtualId atribuído). Espelha
+// _orcAtualizarVisibilidadeEnvio().
+// ────────────────────────────────────────────────────────────────────────
+console.log('\n── Salvar antes de enviar (P0.2) ──────────────────────────────\n');
+{
+  function estadoBotoesEnvio(sessaoAtualId) {
+    var salvo = !!sessaoAtualId;
+    return { salvar: true, whatsapp: salvo, pdf: salvo, email: salvo, linkPgto: salvo };
+  }
+  test('20. antes do 1º save (sessao=null): só Salvar habilitado', estadoBotoesEnvio(null), { salvar: true, whatsapp: false, pdf: false, email: false, linkPgto: false });
+  test('21. depois do 1º save (sessao=ORC-1): todos os canais liberados', estadoBotoesEnvio('ORC-1'), { salvar: true, whatsapp: true, pdf: true, email: true, linkPgto: true });
+
+  // Duplo clique em Salvar: orcSalvarOrcamento() reusa a MESMA promise em
+  // voo (_orcSalvarEmVoo) — nunca dispara duas gravações/duas reservas de
+  // número para o mesmo clique duplicado.
+  function simularSalvarComDedup() {
+    var emVoo = null, chamadasReais = 0;
+    function salvarImpl() { chamadasReais++; return Promise.resolve({ id: 'ORC-1', num: '1' }); }
+    function salvar() {
+      if (emVoo) return emVoo;
+      emVoo = salvarImpl().finally(function () { emVoo = null; });
+      return emVoo;
+    }
+    return Promise.all([salvar(), salvar()]).then(function () { return chamadasReais; });
+  }
+  simularSalvarComDedup().then(function (chamadas) {
+    test('22. duplo clique em Salvar dispara só 1 gravação real (dedup por promise em voo)', chamadas, 1);
+
+    console.log('\n' + '='.repeat(70));
+    console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
+    console.log('='.repeat(70) + '\n');
+    if (failed > 0) process.exitCode = 1;
+  });
+}
 
 if (failed > 0) process.exitCode = 1;
