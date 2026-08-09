@@ -398,9 +398,13 @@ service cloud.firestore {
     // conversão de orçamento em Ordem de Serviço. Produção só vê ISTO,
     // nunca o orçamento comercial de origem (vitre_orcamentos acima
     // continua Produção-negado, decisão já testada/homologada).
+    // RODADA 6, seção 10 — vitreClassificarItensPedidoUnificado também
+    // grava aqui (itens Vitre de um "pedido único" VR+Vitre, marcados
+    // origemPedidoUnificado:true, grupoPedidoId apontando para a kb_os do
+    // pedido) — mesma leitura permitida, nenhuma regra nova necessária.
     match /vitre_os/{osId} {
       allow read:  if isComercial() || isProducao() || isFinanceiro();
-      allow write: if false; // só vitreConverterOrcamentoParaOS grava
+      allow write: if false; // só vitreConverterOrcamentoParaOS / vitreClassificarItensPedidoUnificado gravam
     }
     match /vitre_idem_keys/{key} {
       allow read, write: if false; // uso interno exclusivo das Cloud Functions

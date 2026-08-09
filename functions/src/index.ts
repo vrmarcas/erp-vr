@@ -71,6 +71,7 @@ export {
   vitreIniciarNovaVersao,
   vitreRegistrarAprovacaoCliente,
   vitreConfirmarVenda,
+  vitreClassificarItensPedidoUnificado,
 } from "./vitre";
 
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────

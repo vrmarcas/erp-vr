@@ -986,3 +986,127 @@ export const vitreConverterOrcamentoParaOS = functions.https.onCall(async (data,
   await writeAudit("conversao_os_realizada", caller.uid, caller.role, { orcamentoId, osId: osRef.id, itens });
   return { ok: true, bloqueado: false, id: osRef.id, itens };
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// Pedido unificado VR+Vitre (RODADA 6, seção 10 — Ponte de OS vinculadas)
+// ══════════════════════════════════════════════════════════════════════════
+// Quando um pedido do lado VR (o "pedido de registro" — um único orçamento/
+// venda/lançamento financeiro, sempre do lado VR) inclui itens do catálogo
+// Vitre, esta função roda A MESMA classificação de estoque/ficha técnica de
+// vitreConverterOrcamentoParaOS (pronta_entrega / produzido_apos_pedido /
+// ficha_tecnica_pendente / produto_removido) e grava uma vitre_os real —
+// mas deliberadamente SEM criar um vitre_orcamentos e SEM tocar fin_cr: o
+// financeiro do pedido inteiro continua vivendo só do lado VR, nunca
+// duplicado. `grupoPedidoId` (sempre o id da kb_os do pedido) é o vínculo
+// canônico entre as duas OS tecnicamente separadas — uma futura unificação
+// completa pode migrar puramente consultando `vitre_os where
+// grupoPedidoId == <id>`, sem precisar remodelar nada gravado aqui.
+export const vitreClassificarItensPedidoUnificado = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "gerar OS Vitre vinculada a um pedido único");
+
+  const grupoPedidoId = String(data?.grupoPedidoId || "").trim();
+  const kbOsRef = String(data?.kbOsRef || "").trim();
+  const requestId = String(data?.requestId || "");
+  const clienteNome = String(data?.clienteNome || "").trim();
+  const clienteTel = data?.clienteTel ? String(data.clienteTel) : null;
+  const itensInput = Array.isArray(data?.itens) ? data.itens : [];
+
+  if (!grupoPedidoId) throw new functions.https.HttpsError("invalid-argument", "grupoPedidoId obrigatório.");
+  if (!kbOsRef) throw new functions.https.HttpsError("invalid-argument", "kbOsRef obrigatório.");
+  if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+  if (!clienteNome) throw new functions.https.HttpsError("invalid-argument", "clienteNome obrigatório.");
+  if (!itensInput.length) throw new functions.https.HttpsError("invalid-argument", "itens obrigatório (não vazio).");
+
+  const itensValidados: Array<{ sku: string; qtd: number }> = [];
+  for (const raw of itensInput) {
+    const sku = String((raw as { sku?: unknown })?.sku || "").trim();
+    const qtd = Number((raw as { qtd?: unknown })?.qtd);
+    if (!sku) throw new functions.https.HttpsError("invalid-argument", "item sem sku.");
+    if (!Number.isInteger(qtd) || qtd < 1) throw new functions.https.HttpsError("invalid-argument", `qtd inválida para ${sku}.`);
+    itensValidados.push({ sku, qtd });
+  }
+
+  const idemKey = `conv_os_grupo:${requestId}`;
+  const acquired = await acquireIdem(idemKey);
+  if (!acquired) {
+    const existing = await admin.firestore().collection(COL_OS).where("requestId", "==", requestId).limit(1).get();
+    if (!existing.empty) return { ok: true, jaProcessado: true, id: existing.docs[0].id };
+  }
+
+  const db = admin.firestore();
+
+  // ── 1. Classificar cada item lendo o estado ATUAL do produto — mesma
+  //       lógica de vitreConverterOrcamentoParaOS, mas sem ler nenhum
+  //       vitre_orcamentos (não existe um, aqui: os itens vêm direto do
+  //       pedido único do lado VR). ─────────────────────────────────────
+  const itens: ItemClassificado[] = [];
+  for (const it of itensValidados) {
+    const prodSnap = await db.collection(COL_PRODUTOS).doc(it.sku).get();
+    if (!prodSnap.exists) {
+      itens.push({ sku: it.sku, nomeSnapshot: it.sku, qtd: it.qtd, tipo: "produto_removido", motivoBloqueio: "Produto não existe mais no catálogo." });
+      continue;
+    }
+    const prod = prodSnap.data() as VitreProduto;
+    const estoquePronto = Number(prod.estoqueProntoUnidades) || 0;
+    const temFichaCompleta = !!(prod.fichaTecnica && prod.fichaTecnica.componentes && prod.fichaTecnica.componentes.length && prod.arquivoCorte);
+    if (estoquePronto >= it.qtd) {
+      itens.push({ sku: it.sku, nomeSnapshot: prod.nome, qtd: it.qtd, tipo: "pronta_entrega" });
+    } else if (temFichaCompleta) {
+      itens.push({
+        sku: it.sku, nomeSnapshot: prod.nome, qtd: it.qtd, tipo: "produzido_apos_pedido",
+        fichaTecnicaSnapshot: prod.fichaTecnica, arquivoCorteRef: prod.arquivoCorte, prazoProducaoDiasEstimado: prod.prazoDias ?? null,
+      });
+    } else {
+      itens.push({
+        sku: it.sku, nomeSnapshot: prod.nome, qtd: it.qtd, tipo: "ficha_tecnica_pendente",
+        avisoOperacional: true,
+        motivoBloqueio: estoquePronto > 0
+          ? `Estoque pronto insuficiente (${estoquePronto}/${it.qtd}) e ficha técnica incompleta — produção deve completar a ficha técnica antes de cortar.`
+          : "Sem estoque pronto e sem ficha técnica completa (componentes/arquivo de corte) — produção deve completar o cadastro antes de cortar.",
+      });
+    }
+  }
+
+  // Só o produto removido do catálogo bloqueia — mesma regra da conversão
+  // padrão (ficha_tecnica_pendente nunca bloqueia).
+  const bloqueado = itens.some((i) => i.tipo === "produto_removido");
+  if (bloqueado) {
+    await writeAudit("conversao_os_grupo_bloqueada", caller.uid, caller.role, { grupoPedidoId, kbOsRef, itens });
+    return { ok: false, bloqueado: true, itens };
+  }
+
+  // ── 2. Baixa de estoque + criação da vitre_os vinculada, em UMA
+  //       transação — nunca cria vitre_orcamentos nem toca fin_cr: o
+  //       financeiro do pedido continua único, do lado VR. ─────────────
+  const osRef = db.collection(COL_OS).doc();
+  await db.runTransaction(async (tx) => {
+    for (const it of itens) {
+      if (it.tipo !== "pronta_entrega") continue;
+      const prodRef = db.collection(COL_PRODUTOS).doc(it.sku);
+      const prodTx = await tx.get(prodRef);
+      const estoqueAtual = Number(prodTx.data()?.estoqueProntoUnidades) || 0;
+      if (estoqueAtual < it.qtd) {
+        throw new functions.https.HttpsError("aborted", "ESTOQUE_MUDOU_DURANTE_CONVERSAO:" + it.sku);
+      }
+      tx.set(prodRef, { estoqueProntoUnidades: estoqueAtual - it.qtd }, { merge: true });
+    }
+    const temProduzido = itens.some((i) => i.tipo === "produzido_apos_pedido");
+    const temProntaEntrega = itens.some((i) => i.tipo === "pronta_entrega");
+    const temFichaPendente = itens.some((i) => i.tipo === "ficha_tecnica_pendente");
+    const statusOS = (temProduzido || temFichaPendente) && temProntaEntrega ? "mista_aguardando_producao" : (temProduzido || temFichaPendente) ? "aguardando_producao" : "pronta_expedicao";
+    tx.set(osRef, {
+      id: osRef.id, grupoPedidoId, kbOsRef, requestId, marca: "vitre",
+      origemPedidoUnificado: true,
+      // Sem orcamentoId: este documento não tem um vitre_orcamentos
+      // correspondente — o registro comercial/financeiro do pedido vive
+      // inteiro do lado VR (kb_os + erp_vr), nunca duplicado aqui.
+      clienteNome, clienteTel,
+      itens, status: statusOS, fichaTecnicaPendente: temFichaPendente,
+      criadoPorUid: caller.uid, criadoPorRole: caller.role, criadoEm: Date.now(),
+    });
+  });
+
+  await writeAudit("conversao_os_grupo_realizada", caller.uid, caller.role, { grupoPedidoId, kbOsRef, osId: osRef.id, itens });
+  return { ok: true, bloqueado: false, id: osRef.id, itens };
+});
