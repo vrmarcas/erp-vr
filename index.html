@@ -12160,10 +12160,20 @@ function kbSalvarPrazo() {
     // Atualizar countdown no modal sem fechar
     var cd=document.getElementById('kbPrazoCd');
     if(cd){
-      var diff2=Math.round((new Date(+v.split('-')[0],+v.split('-')[1]-1,+v.split('-')[2])-new Date())/864e5);
+      // SPRINT PRÉ-GO-LIVE, Bloco L (achado real: em 09/08 com prazo
+      // 10/08, o card mostrava "Entrega hoje!" em vez de "amanhã") — esta
+      // era a ÚNICA das 3 implementações de contagem de dias do Kanban
+      // que comparava contra `new Date()` bruto (com a hora atual
+      // embutida) em vez de meia-noite local; dependendo da hora do dia,
+      // a diferença em ms virava uma fração que Math.round jogava para 0.
+      // As outras 2 (linha ~11825 e ~12421) já normalizavam com
+      // setHours(0,0,0,0) — aqui só faltava a mesma normalização.
+      var _cdPrazoDate=new Date(+v.split('-')[0],+v.split('-')[1]-1,+v.split('-')[2]); _cdPrazoDate.setHours(0,0,0,0);
+      var _cdHoje=new Date(); _cdHoje.setHours(0,0,0,0);
+      var diff2=Math.round((_cdPrazoDate-_cdHoje)/864e5);
       cd.style.display='';
       cd.style.color=diff2<0?'#DC2626':(diff2<=3?'#D97706':'#059669');
-      cd.textContent=diff2<0?('⚠️ Atrasado '+Math.abs(diff2)+' dias'):(diff2===0?'🔴 Entrega hoje!':('⏳ '+diff2+' dia(s) restante(s)'));
+      cd.textContent=diff2<0?('⚠️ Atrasado '+Math.abs(diff2)+' dias'):(diff2===0?'🔴 Entrega hoje!':(diff2===1?'⏰ Entrega amanhã':('⏳ '+diff2+' dia(s) restante(s)')));
     }
   }
 }
