@@ -8364,7 +8364,14 @@ function nav(page, el) {
   };
   document.getElementById('topbarTitle').textContent = titles[page] || page;
   // Ao entrar no orçamento, sempre resetar para a escolha de fluxo (Personalizado VR vs Catálogo Vitre)
-  if (page === 'orcamento') { setTimeout(function(){ if(typeof orcEscolhaFluxo==='function') orcEscolhaFluxo(); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){} }, 0); }
+  if (page === 'orcamento') { setTimeout(function(){ if(typeof orcEscolhaFluxo==='function') orcEscolhaFluxo(); var dp=document.getElementById('orcDataPedido'); if(dp&&!dp.value) dp.value=new Date().toISOString().slice(0,10); try{orcPopulateVendedores();}catch(e){}
+    // SPRINT PRÉ-GO-LIVE, Bloco A — achado real: reabrir "Novo Orçamento"
+    // numa navegação normal (sem nunca ter passado pelo bloqueio por
+    // inatividade) nunca oferecia recuperar um rascunho não finalizado —
+    // só o desbloqueio disparava isso (ver authUnlock). Agora os dois
+    // pontos de entrada oferecem a mesma recuperação.
+    if(typeof _currentSession!=='undefined' && _currentSession && _currentSession.uid && typeof orcRascunhoOferecerRecuperacao==='function') orcRascunhoOferecerRecuperacao(_currentSession.uid);
+  }, 0); }
   // Ao entrar em Config. Orçamento, carregar tabelas de preços
   if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); setTimeout(function(){ try{ if(_cfgDataLoaded) cfgRenderTables(); }catch(e){} }, 3500); }
   // Ao entrar no Financeiro, renderizar todos os painéis
@@ -22186,30 +22193,90 @@ function orcRascunhoLimpar(uid){
   try{ return _db.collection('erp_vr_rascunho_orc').doc(uid).delete().catch(function(){}); }catch(e){ return null; }
 }
 
-function orcRascunhoRestaurar(uid){
+// Aplica os dados de um rascunho salvo no wizard VR (já visível e limpo —
+// chamador decide QUANDO chamar isto; esta função nunca decide sozinha se
+// deve rodar).
+function orcRascunhoAplicar(d){
+  var set = function(id,v){ var el=document.getElementById(id); if(el && v!=null) el.value=v; };
+  set('orcClientNome', d.nome); set('orcClientDoc', d.doc); set('orcClientEmail', d.email);
+  set('orcClientTel', d.tel); set('orcClientCidade', d.cidade); set('orcClientVendedor', d.vendedor);
+  // Remove a linha em branco que DOMContentLoaded/orcIniciarFluxoVR sempre
+  // semeia (ver orcRascunhoEstaVazio) antes de recriar as linhas salvas —
+  // senão a restauração empilha em cima dela em vez de substituí-la.
+  if(d.itens && d.itens.length){ var _ib=document.getElementById('orcItemBody'); if(_ib) _ib.innerHTML=''; }
+  (d.itens||[]).forEach(function(it){
+    if(typeof orcAddItem!=='function') return;
+    orcAddItem();
+    var ri = orcItemCount;
+    set('oi_prod_'+ri, it.prod); set('oi_qty_'+ri, it.qty); set('oi_mat_'+ri, it.mat);
+    set('oi_det_'+ri, it.det); set('oi_larg_'+ri, it.larg); set('oi_alt_'+ri, it.alt);
+  });
+  if(typeof orcRecalc==='function') orcRecalc();
+}
+
+// SPRINT PRÉ-GO-LIVE, Bloco A — achado real: antes, a restauração do
+// rascunho era SILENCIOSA (só um toast depois de já ter escrito nos
+// campos) e só era chamada uma vez, no desbloqueio por inatividade —
+// nunca ao simplesmente abrir "Novo Orçamento" de novo numa navegação
+// normal (sem nunca ter passado pelo bloqueio). Corrigido com uma escolha
+// EXPLÍCITA do usuário (Continuar / Sair e continuar depois / Descartar),
+// oferecida nos dois pontos de entrada reais: desbloqueio (ver authUnlock)
+// e nav('orcamento') (ver nav()).
+function orcRascunhoOferecerRecuperacao(uid){
   if(typeof _db==='undefined' || !_db || !uid) return;
-  if(!orcRascunhoEstaVazio()) return; // DOM sobreviveu ao bloqueio (sem refresh) — nunca sobrescreve edição em andamento
+  if(!orcRascunhoEstaVazio()) return; // já tem algo no wizard — nunca sobrescreve edição em andamento
   _db.collection('erp_vr_rascunho_orc').doc(uid).get().then(function(doc){
     if(!doc.exists) return;
     var d = doc.data()||{};
     if(!orcRascunhoEstaVazio()) return; // reconfirma — usuário pode ter começado a digitar durante o fetch
-    var set = function(id,v){ var el=document.getElementById(id); if(el && v!=null) el.value=v; };
-    set('orcClientNome', d.nome); set('orcClientDoc', d.doc); set('orcClientEmail', d.email);
-    set('orcClientTel', d.tel); set('orcClientCidade', d.cidade); set('orcClientVendedor', d.vendedor);
-    // Remove a linha em branco que DOMContentLoaded sempre semeia (ver
-    // orcRascunhoEstaVazio) antes de recriar as linhas salvas — senão a
-    // restauração empilha em cima dela em vez de substituí-la.
-    if(d.itens && d.itens.length){ var _ib=document.getElementById('orcItemBody'); if(_ib) _ib.innerHTML=''; }
-    (d.itens||[]).forEach(function(it){
-      if(typeof orcAddItem!=='function') return;
-      orcAddItem();
-      var ri = orcItemCount;
-      set('oi_prod_'+ri, it.prod); set('oi_qty_'+ri, it.qty); set('oi_mat_'+ri, it.mat);
-      set('oi_det_'+ri, it.det); set('oi_larg_'+ri, it.larg); set('oi_alt_'+ri, it.alt);
-    });
-    if(typeof orcRecalc==='function') orcRecalc();
-    if(d.nome || (d.itens&&d.itens.length)) showToast('📝 Rascunho de orçamento restaurado','ok');
-  }).catch(function(e){ console.warn('[orcRascunho] restauração falhou:', e); });
+    if(!d.nome && !(d.itens && d.itens.length)) return; // rascunho vazio de verdade — nada a oferecer
+    orcRascunhoMostrarModal(uid, d);
+  }).catch(function(e){ console.warn('[orcRascunho] verificação falhou:', e); });
+}
+
+function orcRascunhoFecharModal(){
+  var el = document.getElementById('orcRascunhoModal');
+  if(el) el.remove();
+}
+
+function orcRascunhoMostrarModal(uid, d){
+  orcRascunhoFecharModal(); // nunca duas cópias na tela
+  var resumo = d.nome ? ('Cliente: '+cfgEsc(d.nome)) : ((d.itens && d.itens.length) ? (d.itens.length+' item(ns) preenchido(s)') : '');
+  var quando = d.salvoEm ? new Date(d.salvoEm).toLocaleString('pt-BR') : '';
+  var html = ''
+    +'<div id="orcRascunhoModal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center">'
+    +'<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:360px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">📝 Orçamento em andamento</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:14px">Você tem um rascunho não finalizado'+(quando?' de '+quando:'')+'.'+(resumo?'<br>'+resumo:'')+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'
+    +'<button onclick="orcRascunhoEscolherContinuar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">Continuar de onde parei</button>'
+    +'<button onclick="orcRascunhoFecharModal()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Sair e continuar depois</button>'
+    +'<button onclick="orcRascunhoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">Descartar rascunho</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+  window._orcRascunhoPendente = { uid: uid, dados: d };
+}
+
+function orcRascunhoEscolherContinuar(){
+  var pend = window._orcRascunhoPendente;
+  orcRascunhoFecharModal();
+  if(!pend) return;
+  // orcIniciarFluxoVR() primeiro: entra no wizard VR (passo 1) e reseta o
+  // formulário (nunca há dado real para perder aqui — o wizard estava
+  // vazio, checado por orcRascunhoOferecerRecuperacao). SÓ DEPOIS aplica o
+  // rascunho — na ordem inversa, o reset apagaria o que acabou de ser
+  // restaurado.
+  if(typeof orcIniciarFluxoVR==='function') orcIniciarFluxoVR();
+  orcRascunhoAplicar(pend.dados);
+  if(typeof showToast==='function') showToast('📝 Rascunho de orçamento restaurado','ok');
+  window._orcRascunhoPendente = null;
+}
+
+function orcRascunhoEscolherDescartar(){
+  var pend = window._orcRascunhoPendente;
+  orcRascunhoFecharModal();
+  if(pend && pend.uid && typeof orcRascunhoLimpar==='function') orcRascunhoLimpar(pend.uid);
+  window._orcRascunhoPendente = null;
 }
 
 // Achado real: o <select> de Validade (passo 1) nunca teve id — PDF e
@@ -27120,12 +27187,15 @@ function authUnlock(){
       if(!_cloudIniciou) _cloudIniciar();
       secAuditLog('unlock','Tela desbloqueada — '+_currentSession.user);
       if(pwdEl) pwdEl.value='';
-      // Restaura o rascunho de Novo Orçamento (Fase F, Seção 5) — só se o
-      // wizard estiver vazio (refresh durante o bloqueio destruiu o DOM;
-      // se o DOM sobreviveu, orcRascunhoRestaurar() detecta e não sobrescreve).
-      // Reautenticação da MESMA conta já está garantida aqui: authUnlock()
-      // só chega a este ponto quando cred.user.uid===lockState.uid.
-      if(typeof orcRascunhoRestaurar==='function') orcRascunhoRestaurar(_currentSession.uid);
+      // Oferece a recuperação do rascunho de Novo Orçamento (Fase F, Seção 5;
+      // SPRINT PRÉ-GO-LIVE, Bloco A) — só se o wizard estiver vazio (refresh
+      // durante o bloqueio destruiu o DOM; se o DOM sobreviveu,
+      // orcRascunhoOferecerRecuperacao() detecta e não sobrescreve). Nunca
+      // mais restaura silenciosamente — pergunta ao usuário (Continuar/Sair
+      // e continuar depois/Descartar). Reautenticação da MESMA conta já está
+      // garantida aqui: authUnlock() só chega a este ponto quando
+      // cred.user.uid===lockState.uid.
+      if(typeof orcRascunhoOferecerRecuperacao==='function') orcRascunhoOferecerRecuperacao(_currentSession.uid);
     })
     .catch(function(e){
       var msg;
