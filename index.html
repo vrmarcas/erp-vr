@@ -21340,6 +21340,21 @@ function orcColetarItensDistribuidos(baseEfetiva){
     _matTotalRaw += totRaw;
     _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, matLbl:matLbl, det:det, totRaw:totRaw});
   });
+  // RODADA 6, seção 10/3 — Híbrido VR+Vitre: achado real da auditoria de
+  // paridade PDF/WhatsApp — itens do catálogo Vitre vivem em
+  // _orcVitreItensPedido (não em linhas #orcItemBody), então o PDF/
+  // WhatsApp de um pedido híbrido saía SEM os itens Vitre, mesmo o total
+  // já incluindo o valor deles (window._orcCalc.finalPrice). Entram aqui
+  // na mesma distribuição proporcional, com preço de catálogo já final
+  // (qty*precoVenda) como peso — nunca custo de material a marcar.
+  if(typeof _orcVitreItensPedido!=='undefined' && _orcVitreItensPedido.length){
+    _orcVitreItensPedido.forEach(function(it){
+      var qty = parseInt(it.qty,10)||1;
+      var totRaw = qty * (parseFloat(it.precoVenda)||0);
+      _matTotalRaw += totRaw;
+      _itensDados.push({prod:it.prod||it.sku||'Item Vitre', qty:qty, larg:'', alt:'', matLbl:'', det:'', totRaw:totRaw});
+    });
+  }
   var _totalParaDistribuir = baseEfetiva || c.finalPrice || 0;
   return _itensDados.map(function(item){
     var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);

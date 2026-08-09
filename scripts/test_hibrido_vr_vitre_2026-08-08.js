@@ -104,6 +104,58 @@ console.log('\n=== RODADA 6 — Híbrido VR+Vitre: carrinho único (seção 10) 
     /catch\(function\(e\)\{[\s\S]{0,300}return resultado;/.test(srcGerarOS), true);
 }
 
+// ── RODADA 6, seção 3 — achado real da auditoria de paridade PDF/
+//    WhatsApp: orcColetarItensDistribuidos() (fonte única de itens usada
+//    por AMBOS) só lia #orcItemBody (linhas VR) — um pedido híbrido saía
+//    do PDF/WhatsApp SEM os itens Vitre, mesmo o total já incluindo o
+//    valor deles. Testa por EXECUÇÃO real (não só regex) com um DOM fake.
+{
+  var FN_DIST = ['orcColetarItensDistribuidos'];
+  var srcDist = FN_DIST.map(extractFn).join('\n\n') + '\n\nmodule.exports = { coletar: orcColetarItensDistribuidos };';
+  var modPathDist = path.join(__dirname, '_hibrido_vr_vitre_distribuidos_extracted.tmp.js');
+  fs.writeFileSync(modPathDist, srcDist);
+  delete require.cache[require.resolve(modPathDist)];
+
+  var _elements = {};
+  function makeEl(props) { return Object.assign({ value: '', textContent: '' }, props || {}); }
+  global.window = { _orcCalc: { finalPrice: 1300 } };
+  global.document = {
+    getElementById: function (id) { return _elements[id]; },
+    querySelectorAll: function (sel) {
+      if (sel === '#orcItemBody tr') return [{ dataset: { idx: '1' } }];
+      return [];
+    }
+  };
+  _elements = {
+    oi_prod_1: makeEl({ value: 'Caixa Acrílico' }),
+    oi_qty_1: makeEl({ value: '1' }),
+    oi_larg_1: makeEl({ value: '' }),
+    oi_alt_1: makeEl({ value: '' }),
+    oi_det_1: makeEl({ value: '' }),
+    oi_mat_1: { selectedIndex: 0, options: [{ text: '' }] },
+    oi_tot_1: makeEl({ textContent: 'R$ 300,00' })
+  };
+  global._orcVitreItensPedido = [
+    { tipoItem: 'vitre_catalogo', sku: 'SKU-1', prod: 'Porta-Retrato Vitre', qty: 2, precoVenda: 500 }
+  ];
+  var modDist = require(modPathDist);
+  var itens = modDist.coletar(1300);
+
+  test('18. achado real corrigido: itens do catálogo Vitre no carrinho aparecem no PDF/WhatsApp (antes saíam de fora)',
+    itens.length, 2);
+  test('19. item Vitre entra com a descrição do produto (não "—"/vazio)',
+    itens[1].desc, 'Porta-Retrato Vitre');
+  test('20. soma dos itens distribuídos (VR + Vitre) bate exatamente com o total do pedido — nunca falta o valor Vitre',
+    Math.round((itens[0].total + itens[1].total) * 100) / 100, 1300);
+  test('21. proporção respeita o peso de catálogo do item Vitre (300 VR : 1000 Vitre, de um total de 1300)',
+    Math.round(itens[1].total), 1000);
+
+  global._orcVitreItensPedido = [];
+  var itensSoVR = modDist.coletar(300);
+  test('22. carrinho sem itens Vitre continua funcionando exatamente como antes (nunca quebra o caso comum)',
+    itensSoVR.length, 1);
+}
+
 console.log('\n' + '='.repeat(70));
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
 console.log('='.repeat(70) + '\n');
