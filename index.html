@@ -23003,6 +23003,33 @@ function orcEnvEditar(id) {
     // Forma pagamento
     var pgtoEl=document.getElementById('orcFormaPgto');
     if(pgtoEl && o.pgto){ for(var i=0;i<pgtoEl.options.length;i++){ if(pgtoEl.options[i].text===o.pgto){ pgtoEl.selectedIndex=i; break; } } }
+    // SPRINT PRÉ-GO-LIVE, Bloco C (achado real: reabrir um orçamento salvo
+    // com desconto condicional/parcelamento/PIX mostrava esses campos
+    // desmarcados/vazios, mesmo o registro tendo os valores gravados em
+    // o.descCond/o.dcData/o.descPix/o.parcelas — orcEnvEditar() nunca lia
+    // esses 4 campos de volta para o DOM). Restaura fielmente o snapshot
+    // salvo; nunca inventa 0 quando o valor gravado é positivo.
+    var descCondCb = document.getElementById('orcDescCondToggle');
+    if(descCondCb){
+      var temDescCond = !!(o.descCond>0);
+      if(descCondCb.checked !== temDescCond){ descCondCb.checked=temDescCond; if(typeof orcToggleDescCond==='function') orcToggleDescCond(); }
+      if(temDescCond){ setV('orcDescCond', o.descCond); setV('orcDescCondData', o.dcData); if(typeof orcDescCondPreview==='function') orcDescCondPreview(); }
+    }
+    var pixCb = document.getElementById('orcPixDiscToggle');
+    if(pixCb){
+      var temPix = !!(o.descPix>0);
+      if(pixCb.checked !== temPix){ pixCb.checked=temPix; if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); }
+      if(temPix){ setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
+    }
+    var parcCb = document.getElementById('orcParcToggle');
+    if(parcCb){
+      var temParc = !!(o.parcelas>1);
+      if(parcCb.checked !== temParc){ parcCb.checked=temParc; if(typeof orcToggleParc==='function') orcToggleParc(); }
+      if(temParc){
+        var parcSel = document.getElementById('orcParcSel');
+        if(parcSel){ parcSel.value = String(o.parcelas); if(typeof orcCalcParc==='function') orcCalcParc(); }
+      }
+    }
     if(materiaisNaoEncontrados.length) showToast('Material não encontrado na config atual para: '+materiaisNaoEncontrados.join(', ')+' — reselecione manualmente.','warn');
     // Badge de edição
     var _editBanner = document.getElementById('orcEditBanner');
