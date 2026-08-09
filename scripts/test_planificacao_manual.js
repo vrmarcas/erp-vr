@@ -75,7 +75,13 @@ var FN_NAMES = [
   // reimplementada), e é inerte neste harness porque document.
   // querySelectorAll já é stub (retorna []), então orcAutoLaser() só
   // itera uma lista vazia e retorna sem tocar em nenhum dado testado.
-  'orcAutoLaserSeNecessario', 'orcAutoLaser'
+  'orcAutoLaserSeNecessario', 'orcAutoLaser',
+  // RODADA 6, seção 1 — campos de entrada extras da receita: planAbrir()
+  // agora chama planRenderCamposExtras() e planCalc() chama
+  // planLerCamposExtras()/receitaCamposContexto() (que por sua vez chama
+  // receitaCamposEfetivos()). Sem extraí-las, planAbrir()/planCalc()
+  // lançam ReferenceError neste harness isolado.
+  'planRenderCamposExtras', 'planLerCamposExtras', 'receitaCamposEfetivos', 'receitaCamposContexto'
 ];
 var wrapBlock = extractBetween(
   '// Wrap planCalc to also merge manual pieces if any exist',
@@ -130,6 +136,7 @@ global.document = {
   createElement: function () { return makeEl(); }
 };
 global.showToast = function () {};
+global.cfgEsc = function (v) { return v==null ? '' : String(v); };
 global.planDrawCanvas = function () {};
 global.ORC_MATS = [];
 global._cfgData = {};
@@ -152,6 +159,8 @@ reg('planAplicarBtn', makeEl({ disabled: true }));
 reg('planLarg', makeEl());
 reg('planAlt', makeEl());
 reg('planProf', makeEl());
+reg('planCamposExtrasRow', makeEl());
+reg('planCamposExtrasAviso', makeEl());
 reg('planManualWrap', makeEl());
 reg('planManualHint', makeEl());
 reg('planModal', makeEl());

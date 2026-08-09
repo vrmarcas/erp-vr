@@ -6048,6 +6048,37 @@ function _authFirebaseError(code){
             <div id="planProdPecasEmpty" style="text-align:center;color:var(--muted);font-size:11px;padding:16px;display:none">Nenhuma peça adicionada ainda.</div>
           </div>
 
+          <!-- RODADA 6, seção 1 — Campos de entrada adicionais (além de L/A/P) -->
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)">🧩 Campos de Entrada Adicionais</div>
+              <button class="topbar-btn" style="font-size:11px;padding:5px 12px" onclick="planProdAddCampo()">+ Adicionar Campo</button>
+            </div>
+            <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
+              💡 Além de <code>L</code>/<code>A</code>/<code>P</code>/<code>e</code>, esta receita pode exigir outros parâmetros do vendedor
+              (ex: nº de furos, cor). A chave vira disponível nas fórmulas das peças acima.
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr style="background:var(--bg);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Chave</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border)">Label</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:90px">Unidade</th>
+                    <th style="padding:7px 8px;text-align:center;border-bottom:1px solid var(--border);width:60px">Obrig.</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:70px">Mín</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:70px">Máx</th>
+                    <th style="padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);width:80px">Default</th>
+                    <th style="padding:7px 8px;border-bottom:1px solid var(--border);width:40px"></th>
+                  </tr>
+                </thead>
+                <tbody id="planProdCamposBody"></tbody>
+              </table>
+            </div>
+            <div id="planProdCamposEmpty" style="text-align:center;color:var(--muted);font-size:11px;padding:12px;display:none">Nenhum campo adicional — a receita usa só L/A/P.</div>
+            <div id="planProdCamposErro" style="color:#DC2626;font-size:11px;padding-top:4px;display:none"></div>
+          </div>
+
           <!-- Botões -->
           <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--border)">
             <button class="topbar-btn ghost" onclick="planProdFechar()">Cancelar</button>
@@ -8737,7 +8768,13 @@ function receitaMudancaRelevante(produtoAtual, mudancas) {
   var pecasDepois = JSON.stringify((mudancas && mudancas.pecas) || produtoAtual.pecas || []);
   var dim3dAntes = !!produtoAtual.dim3d;
   var dim3dDepois = mudancas && ('dim3d' in mudancas) ? !!mudancas.dim3d : dim3dAntes;
-  return pecasAntes !== pecasDepois || dim3dAntes !== dim3dDepois;
+  // RODADA 6, seção 1 — campos de entrada adicionais (chave/tipo/obrigatório/
+  // min/max/default) também afetam o cálculo (uma fórmula pode referenciá-
+  // los, um campo pode virar obrigatório) — mudar a lista é tão relevante
+  // quanto mudar peças.
+  var camposAntes = JSON.stringify(produtoAtual.campos || []);
+  var camposDepois = JSON.stringify((mudancas && mudancas.campos) || produtoAtual.campos || []);
+  return pecasAntes !== pecasDepois || dim3dAntes !== dim3dDepois || camposAntes !== camposDepois;
 }
 // Retorna o registro ATUALIZADO com nova versão, preservando a versão
 // anterior íntegra em recipeHistory — nunca perde o snapshot antigo.
@@ -8750,6 +8787,7 @@ function receitaCriarNovaVersao(produtoAtual, mudancas) {
     desc: produtoAtual.desc,
     dim3d: produtoAtual.dim3d,
     pecas: produtoAtual.pecas,
+    campos: produtoAtual.campos || [],
     planificacoes: produtoAtual.planificacoes,
   };
   var novo = Object.assign({}, produtoAtual, mudancas, {
@@ -8771,9 +8809,81 @@ function receitaSnapshotParaItem(produto) {
       desc: produto.desc,
       dim3d: !!produto.dim3d,
       pecas: JSON.parse(JSON.stringify(produto.pecas || [])),
+      campos: JSON.parse(JSON.stringify(produto.campos || [])),
       planificacoes: JSON.parse(JSON.stringify(produto.planificacoes || [])),
     },
   };
+}
+
+// ============================================================
+// RECEITA — CAMPOS DE ENTRADA DINÂMICOS (RODADA 6, seção 1)
+// ============================================================
+// Cada receita pode declarar campos de entrada ALÉM de L/A/P (reservados,
+// ligados à planificação/corte de chapa já existente) — id/chave, label,
+// tipo, unidade, obrigatório, mínimo, máximo, default. Puras — não tocam
+// DOM, só validam/combinam dados, para serem testáveis por extração como
+// o resto do motor de receita.
+var RECEITA_CAMPOS_RESERVADOS = ['L', 'A', 'P', 'e'];
+
+// Lista efetiva de campos de um produto: os dimensionais embutidos
+// (sempre L/A; P só quando dim3d) + os campos extras declarados pelo
+// usuário, na ordem em que foram cadastrados. `builtin:true` marca os
+// que já são atendidos pela UI de planificação existente (Comprimento/
+// Largura/Altura) — nunca duplicados nem removíveis pela UI de campos.
+function receitaCamposEfetivos(produto) {
+  var builtin = [
+    { chave: 'L', label: 'Largura', tipo: 'numero', unidade: 'cm', obrigatorio: true, builtin: true },
+    { chave: 'A', label: 'Altura', tipo: 'numero', unidade: 'cm', obrigatorio: true, builtin: true },
+  ];
+  if (produto && produto.dim3d) builtin.push({ chave: 'P', label: 'Profundidade', tipo: 'numero', unidade: 'cm', obrigatorio: true, builtin: true });
+  var extras = ((produto && produto.campos) || []).map(function (c) {
+    return {
+      chave: c.chave, label: c.label || c.chave, tipo: c.tipo || 'numero', unidade: c.unidade || '',
+      obrigatorio: !!c.obrigatorio, min: c.min, max: c.max, default: c.default, builtin: false,
+    };
+  });
+  return builtin.concat(extras);
+}
+
+// Valida uma lista de campos ANTES de salvar: chave obrigatória, sem
+// colisão com os nomes reservados (L/A/P/e — o parser de fórmula sempre
+// resolve esses para as dimensões/espessura reais, nunca para um campo
+// customizado com o mesmo nome) nem entre si, e min<=max quando ambos
+// informados. Retorna {ok:true} ou {ok:false, erro, campo}.
+function receitaCamposValidar(campos) {
+  var vistos = {};
+  for (var i = 0; i < (campos || []).length; i++) {
+    var c = campos[i];
+    var chave = (c && c.chave || '').trim();
+    if (!chave) return { ok: false, erro: 'campo sem chave', indice: i };
+    if (RECEITA_CAMPOS_RESERVADOS.indexOf(chave) >= 0) return { ok: false, erro: 'chave "' + chave + '" é reservada (L/A/P/e)', indice: i, campo: chave };
+    if (vistos[chave]) return { ok: false, erro: 'chave "' + chave + '" duplicada', indice: i, campo: chave };
+    vistos[chave] = true;
+    if (c.min != null && c.max != null && parseFloat(c.min) > parseFloat(c.max)) {
+      return { ok: false, erro: 'mínimo maior que máximo em "' + chave + '"', indice: i, campo: chave };
+    }
+  }
+  return { ok: true };
+}
+
+// Constrói o contexto {chave: valor} para receitaFormulaAvaliar a partir
+// dos campos efetivos de um produto + valores brutos informados pelo
+// vendedor (ex.: lidos dos inputs dinâmicos da planificação). Aplica
+// default quando o valor não foi informado; nunca lança — campos
+// obrigatórios sem valor nem default ficam listados em `faltando`.
+function receitaCamposContexto(produto, valores) {
+  var campos = receitaCamposEfetivos(produto);
+  var ctx = {}, faltando = [];
+  campos.forEach(function (c) {
+    if (c.builtin) return; // L/A/P/e resolvidos separadamente pelo chamador
+    var bruto = valores && (c.chave in valores) ? valores[c.chave] : undefined;
+    var n = bruto === '' || bruto == null ? NaN : parseFloat(bruto);
+    if (!isNaN(n)) { ctx[c.chave] = n; return; }
+    if (c.default != null && c.default !== '') { ctx[c.chave] = parseFloat(c.default) || 0; return; }
+    if (c.obrigatorio) faltando.push(c.chave);
+    else ctx[c.chave] = 0;
+  });
+  return { ctx: ctx, faltando: faltando };
 }
 // Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
 // item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
@@ -8868,6 +8978,7 @@ function orcItemVRRestaurarDados(itemSalvo) {
     recipeSnapshot: itemSalvo.recipeSnapshot || null,
     recipeVersion: itemSalvo.recipeVersion || null,
     productId: itemSalvo.productId || null,
+    camposExtras: itemSalvo.camposExtras || null,
     extras: itemSalvo.extras || null,
   };
 }
@@ -8884,12 +8995,17 @@ function osProjecaoOperacionalItem(item) {
     planArea: item.planArea, pieces: item.pieces,
     productId: item.productId || null,
     recipeVersion: item.recipeVersion || null,
+    // RODADA 6, seção 1 — valores dos campos de entrada extras (ex.: nº de
+    // furos) são dado OPERACIONAL (a Produção precisa deles para executar
+    // a peça), nunca financeiro — seguem para a OS.
+    camposExtras: item.camposExtras || null,
   };
   if (item.recipeSnapshot) {
     seguro.recipeSnapshot = {
       nome: item.recipeSnapshot.nome,
       dim3d: item.recipeSnapshot.dim3d,
       pecas: item.recipeSnapshot.pecas,
+      campos: item.recipeSnapshot.campos || [],
     };
   }
   return seguro;
@@ -8909,6 +9025,16 @@ function planEvalFormula(formula, L, A, P, e) {
   if(!r.ok) return 0;
   return Math.round(Math.max(0, r.valor) * 100) / 100;
 }
+// RODADA 6, seção 1 — mesmo contrato de planEvalFormula, mas aceita um
+// contexto COMPLETO (L/A/P/e + campos extras da receita) em vez do
+// conjunto fixo de 4 parâmetros. Usada por peças cujas fórmulas
+// referenciam campos declarados em receitaCamposEfetivos além de L/A/P/e.
+function planEvalFormulaCtx(formula, ctx) {
+  if(!formula || formula==='') return 0;
+  var r = receitaFormulaAvaliar(formula, ctx || {});
+  if(!r.ok) return 0;
+  return Math.round(Math.max(0, r.valor) * 100) / 100;
+}
 
 function planGetRecipe(produto) {
   // 1. Custom recipes from localStorage take priority
@@ -8918,13 +9044,19 @@ function planGetRecipe(produto) {
     return {
       dim3d: !!custom.dim3d,
       desc: custom.desc || custom.nome,
-      pieces: function(L, A, P, e) {
+      campos: custom.campos || [],
+      // RODADA 6, seção 1 — `extra` (opcional) traz os valores dos campos
+      // de entrada adicionais da receita (além de L/A/P/e), lidos pela UI
+      // de planificação a partir de receitaCamposEfetivos(). Sem `extra`
+      // (chamadores antigos), o comportamento é idêntico ao de antes.
+      pieces: function(L, A, P, e, extra) {
+        var ctx = Object.assign({L:L, A:A, P:P, e:e}, extra||{});
         return (custom.pecas||[]).map(function(peca) {
           return {
             qty:  parseInt(peca.qty)||1,
             nome: peca.nome||'Peça',
-            larg: planEvalFormula(peca.larg, L, A, P, e),
-            alt:  planEvalFormula(peca.alt,  L, A, P, e),
+            larg: planEvalFormulaCtx(peca.larg, ctx),
+            alt:  planEvalFormulaCtx(peca.alt,  ctx),
             esp:  peca.esp||'',
             tipo: peca.tipo||''
           };
@@ -8974,6 +9106,12 @@ function planAbrir(idx) {
   // show/hide profundidade
   var pw = document.getElementById('planProfWrap');
   if(pw) pw.style.display = rec.dim3d ? '' : 'none';
+
+  // RODADA 6, seção 1 — campos de entrada extras da receita (nunca hardcode
+  // só L/A/P): restaura valores já salvos no item (se houver) e renderiza.
+  var savedExtras = {};
+  try { savedExtras = row && row.dataset.planCamposExtras ? JSON.parse(row.dataset.planCamposExtras) : {}; } catch(e){ savedExtras = {}; }
+  planRenderCamposExtras(rec.campos || [], savedExtras);
 
   // clear pieces and restore saved manual pieces
   document.getElementById('planPiecesBody').innerHTML = '';
@@ -9109,6 +9247,38 @@ function orcMatChanged(idx) {
   orcRecalc();
 }
 
+// RODADA 6, seção 1 — renderiza os inputs dos campos extras declarados na
+// receita (além de L/A/P/e, que continuam nos campos fixos já existentes).
+// Puramente apresentação: os valores digitados aqui são lidos de volta por
+// planLerCamposExtras() no momento do cálculo — nunca são a fonte de
+// verdade entre uma abertura e outra do modal (isso é o snapshot do item).
+function planRenderCamposExtras(campos, valoresSalvos) {
+  var wrap = document.getElementById('planCamposExtrasRow');
+  if(!wrap) return;
+  if(!campos || !campos.length) { wrap.innerHTML=''; wrap.style.display='none'; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = campos.map(function(c){
+    var val = (valoresSalvos && (c.chave in valoresSalvos)) ? valoresSalvos[c.chave] : (c.default!=null?c.default:'');
+    var attrs = ['type="number"', 'id="planExtra_'+c.chave+'"', 'data-campo-chave="'+cfgEsc(c.chave)+'"', 'oninput="planCalc()"', 'step="0.1"'];
+    if(c.min!=null && c.min!=='') attrs.push('min="'+cfgEsc(c.min)+'"');
+    if(c.max!=null && c.max!=='') attrs.push('max="'+cfgEsc(c.max)+'"');
+    return '<div class="fg-s"><label>'+cfgEsc(c.label||c.chave)+(c.unidade?' ('+cfgEsc(c.unidade)+')':'')+(c.obrigatorio?' *':'')+'</label>'
+      + '<input '+attrs.join(' ')+' value="'+cfgEsc(val)+'"></div>';
+  }).join('');
+}
+
+// Lê os valores atualmente digitados nos campos extras renderizados —
+// devolve {valores, faltando} no mesmo formato de receitaCamposContexto,
+// pronto para ser passado a rec.pieces(L,A,P,e,extra).
+function planLerCamposExtras() {
+  var wrap = document.getElementById('planCamposExtrasRow');
+  var valores = {};
+  if(wrap) wrap.querySelectorAll('[data-campo-chave]').forEach(function(el){
+    valores[el.dataset.campoChave] = el.value;
+  });
+  return valores;
+}
+
 function planCalc() {
   if(_planIdx===null) return;
   var prodEl  = document.getElementById('oi_prod_'+_planIdx);
@@ -9138,7 +9308,26 @@ function planCalc() {
     return;
   }
 
-  var pieces = rec.pieces(L, A, P, e);
+  // RODADA 6, seção 1 — campos de entrada extras da receita: resolve o
+  // contexto (com defaults) e BLOQUEIA o cálculo se algum obrigatório
+  // ainda não foi informado — nunca calcula peças com dado faltando em
+  // silêncio.
+  var _camposAviso = document.getElementById('planCamposExtrasAviso');
+  var extra = {};
+  if(rec.campos && rec.campos.length) {
+    var _camposRes = receitaCamposContexto({ dim3d: rec.dim3d, campos: rec.campos }, planLerCamposExtras());
+    extra = _camposRes.ctx;
+    if(_camposRes.faltando.length) {
+      sumBox.style.display='none';
+      if(btn) btn.disabled=true;
+      tbody.innerHTML='';
+      if(_camposAviso) { _camposAviso.textContent = '⚠️ Preencha os campos obrigatórios: '+_camposRes.faltando.join(', '); _camposAviso.style.display='block'; }
+      return;
+    }
+  }
+  if(_camposAviso) _camposAviso.style.display='none';
+
+  var pieces = rec.pieces(L, A, P, e, extra);
   var totalArea = 0, totalQty = 0;
 
   // Inicializar array editável (preserva edições anteriores se recalcular)
@@ -9240,6 +9429,11 @@ function planAplicar() {
     row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
     row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
     row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
+    // RODADA 6, seção 1 — valores dos campos de entrada extras (além de
+    // L/A/P), persistidos junto com o item para sobreviver a uma reabertura
+    // do modal de planificação (nunca perdidos, nunca recalculados com a
+    // receita vigente — só usados para re-popular os inputs).
+    row.dataset.planCamposExtras = JSON.stringify(planLerCamposExtras());
     // planPecas = TODAS (catálogo + extras) — usado pelo cálculo de laser
     var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
       .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
@@ -21384,6 +21578,11 @@ async function _orcSalvarOrcamentoImpl() {
     try { _pecasSalvas = row.dataset.planPecas ? JSON.parse(row.dataset.planPecas) : null; } catch(e){ _pecasSalvas = null; }
     var _recipeSnapshotSalvo = null;
     try { _recipeSnapshotSalvo = row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(e){ _recipeSnapshotSalvo = null; }
+    // RODADA 6, seção 1 — valores informados nos campos de entrada extras
+    // da receita (além de L/A/P) — parte dos dados operacionais do item,
+    // nunca recalculados a partir da receita vigente ao reabrir.
+    var _camposExtrasSalvos = null;
+    try { _camposExtrasSalvos = row.dataset.planCamposExtras ? JSON.parse(row.dataset.planCamposExtras) : null; } catch(e){ _camposExtrasSalvos = null; }
     _itens.push({
       tipoItem: 'personalizado_vr',
       prod:  (document.getElementById('oi_prod_'+ri)||{}).value||'',
@@ -21402,6 +21601,7 @@ async function _orcSalvarOrcamentoImpl() {
       productId: row.dataset.recipeProductId || null,
       recipeVersion: row.dataset.recipeVersion ? parseInt(row.dataset.recipeVersion,10) : null,
       recipeSnapshot: _recipeSnapshotSalvo,
+      camposExtras: _camposExtrasSalvos || null,
       extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null
     });
   });
@@ -22101,6 +22301,7 @@ function orcEnvEditar(id) {
             if(_rd.productId) row.dataset.recipeProductId = _rd.productId;
             if(_rd.recipeVersion) row.dataset.recipeVersion = String(_rd.recipeVersion);
             if(_rd.recipeSnapshot) row.dataset.recipeSnapshot = JSON.stringify(_rd.recipeSnapshot);
+            if(_rd.camposExtras) row.dataset.planCamposExtras = JSON.stringify(_rd.camposExtras);
           }
           // Espelha o feedback visual de planAplicar(): esconde larg/alt,
           // mostra o badge 📐 e a tag de planificação — sem isso o operador
@@ -26342,6 +26543,9 @@ document.addEventListener('DOMContentLoaded', function() {
         <input type="number" id="planProf" placeholder="ex: 30" oninput="planCalc()" min="0" step="0.1">
       </div>
     </div>
+    <!-- RODADA 6, seção 1 — campos de entrada extras da receita (além de L/A/P), renderizados dinamicamente por planRenderCamposExtras() -->
+    <div class="plan-dim-row" id="planCamposExtrasRow"></div>
+    <div id="planCamposExtrasAviso" style="display:none;color:#DC2626;font-size:11px;margin-bottom:8px"></div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-style:italic">✏️ As dimensões abaixo são editáveis — ajuste diretamente se precisar corrigir alguma peça.</div>
     <table class="plan-ptable">
       <thead><tr>
@@ -28020,6 +28224,7 @@ function cfgResetProdutos() {
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
 var _planProdPecas  = [];
+var _planProdCampos = []; // RODADA 6, seção 1 — campos de entrada além de L/A/P
 // Sanitização de SVG (seção 15 — requisito de segurança explícito): remove
 // vetores de XSS conhecidos antes de ARMAZENAR e novamente antes de EXIBIR
 // (defesa em profundidade — cobre também SVGs legados salvos antes desta
@@ -28499,12 +28704,14 @@ function planSvgParsePecas(svgText, sourceKey) {
 function planProdNovoOpen() {
   _planProdEditId = null;
   _planProdPecas  = [];
+  _planProdCampos = [];
   document.getElementById('planProdModalTitle').textContent = '📐 Novo Produto';
   document.getElementById('planProdNome').value  = '';
   document.getElementById('planProdDesc').value  = '';
   document.getElementById('planProdDim3d').checked = true;
   _planEspReset(null, null);
   planProdRenderPecas();
+  planProdRenderCampos();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
 }
@@ -28515,19 +28722,21 @@ function planProdEditar(id) {
   if(!p) return;
   _planProdEditId = id;
   _planProdPecas  = JSON.parse(JSON.stringify(p.pecas||[]));
+  _planProdCampos = JSON.parse(JSON.stringify(p.campos||[]));
   document.getElementById('planProdModalTitle').textContent = '✏️ Editar: '+p.nome;
   document.getElementById('planProdNome').value  = p.nome||'';
   document.getElementById('planProdDesc').value  = p.desc||'';
   document.getElementById('planProdDim3d').checked = !!p.dim3d;
   _planEspReset(p.planificacoes||null, p.svg||null);
   planProdRenderPecas();
+  planProdRenderCampos();
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
 }
 
 function planProdFechar() {
   document.getElementById('planProdOverlay').classList.remove('open');
-  _planProdEditId = null; _planProdPecas = []; _planPlanificacoes = [];
+  _planProdEditId = null; _planProdPecas = []; _planProdCampos = []; _planPlanificacoes = [];
 }
 
 function planProdAddPeca() {
@@ -28609,6 +28818,60 @@ function _planProdUpdateTableHeader(hasEsp) {
     +'</tr>';
 }
 
+// RODADA 6, seção 1 — CRUD de campos de entrada adicionais (além de
+// L/A/P), espelhando o padrão já usado para peças (planProdAddPeca/
+// planProdRemovePeca/planProdReadPecas/planProdRenderPecas).
+function planProdAddCampo() {
+  _planProdCampos.push({ chave: '', label: '', tipo: 'numero', unidade: '', obrigatorio: false, min: '', max: '', default: '' });
+  planProdRenderCampos();
+}
+
+function planProdRemoveCampo(idx) {
+  _planProdCampos.splice(idx, 1);
+  planProdRenderCampos();
+}
+
+function planProdReadCampos() {
+  _planProdCampos = [];
+  var tbody = document.getElementById('planProdCamposBody');
+  if(!tbody) return;
+  tbody.querySelectorAll('tr').forEach(function(row) {
+    var g = function(field){ var el = row.querySelector('[data-field="'+field+'"]'); return el ? el.value : ''; };
+    var gc = function(field){ var el = row.querySelector('[data-field="'+field+'"]'); return el ? el.checked : false; };
+    _planProdCampos.push({
+      chave: g('chave').trim(), label: g('label'), tipo: 'numero', unidade: g('unidade'),
+      obrigatorio: gc('obrigatorio'), min: g('min'), max: g('max'), default: g('default')
+    });
+  });
+}
+
+function planProdRenderCampos() {
+  var tbody = document.getElementById('planProdCamposBody');
+  var empty = document.getElementById('planProdCamposEmpty');
+  var erro  = document.getElementById('planProdCamposErro');
+  if(!tbody) return;
+  if(erro){ erro.style.display='none'; erro.textContent=''; }
+  if(!_planProdCampos.length) {
+    tbody.innerHTML = '';
+    if(empty) empty.style.display='block';
+    return;
+  }
+  if(empty) empty.style.display='none';
+  var inpSt = 'style="width:100%;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"';
+  tbody.innerHTML = _planProdCampos.map(function(c, i) {
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:6px 8px"><input type="text" data-field="chave" value="'+cfgEsc(c.chave)+'" placeholder="ex: furos" style="width:90px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--surface);color:var(--text)"></td>'
+      +'<td style="padding:6px 8px"><input type="text" data-field="label" value="'+cfgEsc(c.label)+'" placeholder="Ex: Nº de furos" '+inpSt+'></td>'
+      +'<td style="padding:6px 8px"><input type="text" data-field="unidade" value="'+cfgEsc(c.unidade)+'" placeholder="un" '+inpSt+'></td>'
+      +'<td style="padding:6px 8px;text-align:center"><input type="checkbox" data-field="obrigatorio"'+(c.obrigatorio?' checked':'')+'></td>'
+      +'<td style="padding:6px 8px"><input type="number" data-field="min" value="'+cfgEsc(c.min)+'" '+inpSt+'></td>'
+      +'<td style="padding:6px 8px"><input type="number" data-field="max" value="'+cfgEsc(c.max)+'" '+inpSt+'></td>'
+      +'<td style="padding:6px 8px"><input type="number" data-field="default" value="'+cfgEsc(c.default)+'" '+inpSt+'></td>'
+      +'<td style="padding:6px 8px;text-align:center"><button data-idx="'+i+'" onclick="planProdReadCampos();planProdRemoveCampo(this.dataset.idx*1)" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:14px" title="Remover">✕</button></td>'
+      +'</tr>';
+  }).join('');
+}
+
 function planProdPrevCalc() {
   planProdReadPecas();
   var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
@@ -28644,11 +28907,21 @@ function planProdPrevCalc() {
 
 function planProdSalvar() {
   planProdReadPecas();
+  planProdReadCampos();
   var nome = (document.getElementById('planProdNome')||{}).value||'';
   if(!nome.trim()) { showToast('Informe o nome do produto','err'); return; }
   if(!_planProdPecas.length) { showToast('Adicione pelo menos uma peça','err'); return; }
   var hasBlankFormula = _planProdPecas.some(function(p){ return !p.larg.trim()||!p.alt.trim(); });
   if(hasBlankFormula) { showToast('Preencha as fórmulas de largura e altura em todas as peças','err'); return; }
+  // RODADA 6, seção 1 — bloqueia o save se algum campo extra for inválido
+  // (chave vazia/reservada/duplicada, mín>máx) — nunca salva silenciosamente.
+  var _camposCheck = receitaCamposValidar(_planProdCampos);
+  if(!_camposCheck.ok) {
+    showToast('Campo de entrada inválido: '+_camposCheck.erro,'err');
+    var _erroEl = document.getElementById('planProdCamposErro');
+    if(_erroEl){ _erroEl.textContent = '⚠️ '+_camposCheck.erro; _erroEl.style.display='block'; }
+    return;
+  }
 
   var prods = planProdLoad();
   // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
@@ -28669,6 +28942,7 @@ function planProdSalvar() {
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
     pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',__src:p.__src||null}; }),
+    campos: _planProdCampos.map(function(c){ return {chave:c.chave,label:c.label,tipo:c.tipo||'numero',unidade:c.unidade||'',obrigatorio:!!c.obrigatorio,min:c.min!==''?c.min:undefined,max:c.max!==''?c.max:undefined,default:c.default!==''?c.default:undefined}; }),
     planificacoes: _planifs,
     svg: _firstSvg || undefined
   };

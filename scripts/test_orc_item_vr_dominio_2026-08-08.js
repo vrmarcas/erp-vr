@@ -109,9 +109,10 @@ test('7. item sem produto resolvido (Vitre/legado) não quebra e não grava reci
   var projecao = mod.projecaoOS(itemComFinanceiro);
   test('19. projeção da OS NUNCA inclui unit/total (preço)', { unit: projecao.unit, total: projecao.total }, { unit: undefined, total: undefined });
   test('20. projeção da OS mantém os campos operacionais (prod/mat/pieces/recipeSnapshot.pecas)', { prod: projecao.prod, mat: projecao.mat, pieces: projecao.pieces }, { prod: 'Caixa', mat: 'Acrílico Cristal 3mm', pieces: dadosLinha1.planPecas });
-  test('21. projeção da OS mantém recipeSnapshot só com dados operacionais (nome/dim3d/peças)', Object.keys(projecao.recipeSnapshot).sort(), ['dim3d', 'nome', 'pecas']);
+  test('21. projeção da OS mantém recipeSnapshot só com dados operacionais (nome/dim3d/peças/campos)', Object.keys(projecao.recipeSnapshot).sort(), ['campos', 'dim3d', 'nome', 'pecas']);
   test('22. projeção da OS nunca vaza planManualMatCost (custo de material manual)', 'planManualMatCost' in projecao, false);
   test('23. projeção da OS lida com item nulo sem quebrar', mod.projecaoOS(null), null);
+  test('24. projeção da OS inclui camposExtras (dado operacional, ex: nº de furos) quando presente', mod.projecaoOS(Object.assign({}, itemComFinanceiro, {camposExtras:{furos:6}})).camposExtras, {furos:6});
 }
 
 console.log('\n' + '='.repeat(70));
