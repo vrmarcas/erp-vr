@@ -8477,17 +8477,13 @@ function orcStep(n) {
   }
   if (n===4) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100); }
   if (n===5) {
-    const v = window._orcCalc; if(v) {
-      // RODADA 6, seção 2 (achado no smoke de produção) — este valor usava
-      // v.finalPrice bruto, ignorando desconto condicional/PIX já aplicados
-      // no Resumo/PDF/WhatsApp (mesmo motor central usado pela linha de
-      // parcelamento logo abaixo). Também tinha "R$ " duplicado, já que
-      // orcFmt() já inclui o prefixo.
-      const cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
-      const valorEfetivo = orcMotorPagamento(v.finalPrice||0, cond).afterPix;
-      const sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valorEfetivo);
-      const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valorEfetivo);
-    }
+    // SPRINT PRÉ-GO-LIVE, Bloco F — fonte única (orcPgtoAtualizarValorReceber,
+    // ver definição) tanto na entrada da etapa quanto em toda troca de
+    // método/parcela feita pelo vendedor; nunca mais duas contas correndo
+    // em paralelo (achado real: trocar de PIX para Cartão aqui não
+    // atualizava mais nada, porque o valor só era calculado uma vez, na
+    // entrada da etapa).
+    if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber();
     // Sincroniza bancos com a empresa selecionada
     var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
     if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);
@@ -11250,7 +11246,7 @@ function orcCalcParcelaDisplay() {
   if(!sel||!disp) return;
   var n = parseInt(sel.value)||1;
   var base = window._orcCalc ? (window._orcCalc.finalPrice||0) : 0;
-  if(n<=1){disp.style.display='none';return;}
+  if(n<=1){disp.style.display='none'; if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber(); return;}
   // RODADA 6, seção 2 — achado real: esta tela ("Confirmação de Pagamento")
   // dividia o preço BRUTO por n, ignorando desconto condicional, desconto
   // PIX e a própria taxa do cartão — mostrando um valor de parcela
@@ -11258,9 +11254,45 @@ function orcCalcParcelaDisplay() {
   // mesmo motor central (orcMotorPagamento), com as condições atuais da
   // tela (orcLerCondicoesPagamentoDOM).
   var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
-  var motor = orcMotorPagamento(base, Object.assign({}, cond, {parcAtivo:true, nParc:n}));
+  // SPRINT PRÉ-GO-LIVE, Bloco F — achado real (encontrado escrevendo o
+  // teste de regressão do "Valor a Receber"): esta linha de parcelamento
+  // só é mostrada quando o método selecionado é Cartão/Link
+  // (orcSimParcelasRow só aparece nesses casos — ver orcAtualizarIconePgto)
+  // — mas continuava aplicando o desconto PIX (cond.pxOn) mesmo assim,
+  // divergindo do "Valor a Receber" (que já não aplica PIX fora do método
+  // PIX). PIX e parcelamento no cartão são condições mutuamente
+  // exclusivas: nunca soma desconto de PIX aqui.
+  var motor = orcMotorPagamento(base, Object.assign({}, cond, {pxOn:false, parcAtivo:true, nParc:n}));
   disp.style.display='';
   disp.textContent = n+'× de R$ '+motor.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' (total: R$ '+motor.totalComTaxa.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')';
+  if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber();
+}
+
+// SPRINT PRÉ-GO-LIVE, Bloco F (gap remanescente da homologação) — achado
+// real: trocar a "Forma de Pagamento" na tela de Confirmação de Pagamento
+// (PIX → Cartão) atualizava corretamente a linha de parcelamento logo
+// abaixo, mas o "Valor a Receber" em destaque (orcPgtoValorDisplay)
+// continuava travado no valor calculado quando a etapa foi aberta pela
+// primeira vez — sempre o valor de PIX, mesmo depois de trocar para
+// Cartão. Exemplo real relatado: cartão 3x totalizava R$117,98, mas
+// "Valor a Receber" continuava mostrando R$112,21 (o valor de PIX).
+// Fonte ÚNICA agora usada tanto na entrada da etapa (orcStep) quanto em
+// toda troca de método/parcela (orcAtualizarIconePgto/
+// orcCalcParcelaDisplay) — nunca mais duas contas correndo em paralelo.
+function orcPgtoAtualizarValorReceber() {
+  var v = window._orcCalc; if(!v) return;
+  var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
+  var metodo = (document.getElementById('orcSimMetodo')||{}).value||'pix';
+  var parcSel = document.getElementById('orcSimParcelas');
+  var nParc = (metodo==='cartao'||metodo==='link') && parcSel ? (parseInt(parcSel.value)||1) : 1;
+  // O desconto PIX (pxOn/pxPct) só se aplica quando o método SELECIONADO
+  // é de fato PIX — nunca soma o desconto de PIX ao escolher Cartão/
+  // Dinheiro, mesmo que o toggle de desconto PIX do orçamento esteja ligado.
+  var motorCond = Object.assign({}, cond, { pxOn: metodo==='pix' ? cond.pxOn : false, parcAtivo: nParc>1, nParc: nParc });
+  var motor = orcMotorPagamento(v.finalPrice||0, motorCond);
+  var valor = nParc>1 ? motor.totalComTaxa : motor.afterPix;
+  var vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valor);
+  var sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valor);
 }
 
 function orcAtualizarIconePgto() {
