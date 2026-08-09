@@ -5277,34 +5277,13 @@ function _authFirebaseError(code){
         </div>
       </div>
 
-
-      <!-- ── Relatório Fiscal ──────────────────────────────────── -->
-      <div id="relPgNF" style="display:none">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-          <div class="fg" style="margin:0">
-            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Mês</label>
-            <select id="relNFMes" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
-              <option value="">Todos</option>
-              <option value="/01/">Janeiro</option><option value="/02/">Fevereiro</option>
-              <option value="/03/">Março</option><option value="/04/">Abril</option>
-              <option value="/05/">Maio</option><option value="/06/">Junho</option>
-              <option value="/07/">Julho</option><option value="/08/">Agosto</option>
-              <option value="/09/">Setembro</option><option value="/10/">Outubro</option>
-              <option value="/11/">Novembro</option><option value="/12/">Dezembro</option>
-            </select>
-          </div>
-          <div class="fg" style="margin:0">
-            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Empresa</label>
-            <select id="relNFMarca" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
-              <option value="">Todas</option>
-              <option value="vr">VR Marcas</option>
-              <option value="vitre">Vitre</option>
-            </select>
-          </div>
-          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="relFiscalExportar()">📥 Exportar</button>
-        </div>
-        <div id="relNFBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Clique em Relatório Fiscal para carregar.</div></div>
-      </div>
+      <!-- RODADA 6.1 — o painel do Relatório Fiscal (relPgNF) foi movido
+           para dentro de #pg-relatorios (ver bloco relPgContas ali) — este
+           container (#pg-financeiro) é legado e permanece display:none
+           para sempre; deixar o painel aqui o tornava inatingível (achado
+           do smoke de produção 2026-08-09: a aba "Relatório Fiscal" abria
+           em branco porque relTab('nf') populava o #relNFBody ÓRFÃO deste
+           container oculto, nunca o visível). -->
 
       <!-- ── Histórico 2018-2026 (Rodada 3) ─────────────────────────── -->
       <div id="relPgHistorico" style="display:none">
@@ -5462,6 +5441,39 @@ function _authFirebaseError(code){
         </div>
         <div id="relContasConteudo"></div>
       </div><!-- /relPgContas -->
+
+      <!-- ── Relatório Fiscal ──────────────────────────────────── -->
+      <!-- RODADA 6.1 — movido de dentro do container legado #pg-financeiro
+           (nunca visível em tela) para cá, o único container que a página
+           de Relatórios de fato exibe (achado do smoke de produção
+           2026-08-09: a aba abria em branco porque populava um #relNFBody
+           órfão dentro daquele container oculto). -->
+      <div id="relPgNF" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Mês</label>
+            <select id="relNFMes" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="">Todos</option>
+              <option value="/01/">Janeiro</option><option value="/02/">Fevereiro</option>
+              <option value="/03/">Março</option><option value="/04/">Abril</option>
+              <option value="/05/">Maio</option><option value="/06/">Junho</option>
+              <option value="/07/">Julho</option><option value="/08/">Agosto</option>
+              <option value="/09/">Setembro</option><option value="/10/">Outubro</option>
+              <option value="/11/">Novembro</option><option value="/12/">Dezembro</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Empresa</label>
+            <select id="relNFMarca" onchange="relFiscalRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="">Todas</option>
+              <option value="vr">VR Marcas</option>
+              <option value="vitre">Vitre</option>
+            </select>
+          </div>
+          <button class="topbar-btn" style="margin-top:18px;font-size:11px" onclick="relFiscalExportar()">📥 Exportar</button>
+        </div>
+        <div id="relNFBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Clique em Relatório Fiscal para carregar.</div></div>
+      </div><!-- /relPgNF -->
 
     </div><!-- /pg-relatorios -->
 
@@ -17146,7 +17158,7 @@ function relFiscalRender() {
   var porSituacao = {pendente:0, emitida:0, dispensada:0, cancelada:0};
   orcs.forEach(function(o){ var s=o.statusFiscal||'pendente'; porSituacao[s]=(porSituacao[s]||0)+(o.valorFinal||o.valorBase||0); });
   var resumoHtml = Object.keys(FISCAL_STATUS_LABEL).map(function(s){
-    return '<span style="margin-right:14px">'+FISCAL_STATUS_LABEL[s]+': <strong>R$ '+(porSituacao[s]||0).toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></span>';
+    return '<span style="margin-right:14px">'+FISCAL_STATUS_LABEL[s]+': <strong>'+finFmt(porSituacao[s]||0)+'</strong></span>';
   }).join('');
   var rows = orcs.map(function(o){
     var marca = o.marca==='vitre' ? '🌸 Vitre' : '🟣 VR Marcas';
@@ -17161,7 +17173,7 @@ function relFiscalRender() {
     var nfValor = (typeof o.valorEmitidoNF==='number') ? o.valorEmitidoNF : null;
     var nfCell = nfValor===null
       ? '<span style="color:var(--muted)">—</span>'
-      : 'R$ '+nfValor.toLocaleString('pt-BR',{minimumFractionDigits:2})
+      : finFmt(nfValor)
         + (o.divergenciaNF ? '<div title="'+cfgEsc(o.divergenciaNFJustificativa||'')+'" style="font-size:9px;font-weight:700;color:#DC2626;margin-top:1px">⚠ diverge da venda</div>' : '');
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:6px 8px">'+cfgEsc(o.id)+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+cfgEsc(o.numeroNF)+(o.chaveNF?' · '+cfgEsc(o.chaveNF):'')+'</div>':'')+(o.observacaoNF?'<div style="font-size:9px;color:var(--muted)">'+cfgEsc(o.observacaoNF)+'</div>':'')+'</td>'
@@ -17169,16 +17181,16 @@ function relFiscalRender() {
       +'<td style="padding:6px 8px"><strong>'+cfgEsc(o.cliente)+'</strong>'
         +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+cfgEsc(o.nf.doc)+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+marca+'</td>'
-      +'<td style="padding:6px 8px;font-weight:700;color:#1D4ED8">R$ '+vendaValor.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
-      +'<td style="padding:6px 8px;font-weight:700;color:#059669">R$ '+recebidoValor.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#1D4ED8">'+finFmt(vendaValor)+'</td>'
+      +'<td style="padding:6px 8px;font-weight:700;color:#059669">'+finFmt(recebidoValor)+'</td>'
       +'<td style="padding:6px 8px;font-weight:700;color:#7C3AED">'+nfCell+'</td>'
       +'<td style="padding:6px 8px;font-size:10px;color:var(--muted)">'+cfgEsc(o.email||'—')+'</td>'
       +'<td style="padding:6px 8px">'+statusSel+'</td>'
       +'</tr>';
   }).join('');
   el.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">'
-    +orcs.length+' NF(s) solicitada(s) &mdash; Total (venda): <strong style="color:#1D4ED8">R$ '
-    +totalNF.toLocaleString('pt-BR',{minimumFractionDigits:2})+'</strong></div>'
+    +orcs.length+' NF(s) solicitada(s) &mdash; Total (venda): <strong style="color:#1D4ED8">'
+    +finFmt(totalNF)+'</strong></div>'
     +'<div style="font-size:11px;margin-bottom:10px">'+resumoHtml+'</div>'
     +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="color:var(--muted);border-bottom:2px solid var(--border)">'
