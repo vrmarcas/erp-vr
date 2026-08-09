@@ -2834,25 +2834,37 @@ function _authFirebaseError(code){
       <div class="card">
         <div class="card-h">
           <div class="card-h-left">📄 Todas as Ordens de Serviço <span id="osTableCount" style="font-size:11px;font-weight:500;color:var(--muted)"></span></div>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input id="osSearchInput" oninput="renderOsTable()" placeholder="🔍 Buscar..." style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:130px">
-            <select id="osFilterStatus" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
-              <option value="">Todos os status</option>
-              <option value="iniciada">Iniciada</option>
-              <option value="producao">Em produção</option>
-              <option value="pronta">Pronta</option>
-
-              <option value="entregue">Entregue</option>
-            </select>
-            <select id="osFilterMarca" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
-              <option value="">Todas as marcas</option>
-              <option value="vr">VR Marcas</option>
-              <option value="vit">Vitre</option>
-            </select>
-          </div>
+        </div>
+        <!-- Bloco M (Sprint Pré-Go-Live, 2026-08-09) — 4 abas: Ativas / Prontas /
+             Entregues Recentes / Histórico. Histórico é a fonte completa (nunca
+             corta por tempo); Entregues Recentes é só um recorte de conveniência. -->
+        <div class="rel-tab-bar">
+          <button class="rel-tab-btn on" id="osListTabBtnAtivas" onclick="osListTab('ativas',this)">🔧 Ativas</button>
+          <button class="rel-tab-btn" id="osListTabBtnProntas" onclick="osListTab('prontas',this)">✅ Prontas</button>
+          <button class="rel-tab-btn" id="osListTabBtnRecentes" onclick="osListTab('recentes',this)">📦 Entregues Recentes</button>
+          <button class="rel-tab-btn" id="osListTabBtnHistorico" onclick="osListTab('historico',this)">🗂️ Histórico</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0">
+          <input id="osSearchInput" oninput="renderOsTable()" placeholder="🔍 Buscar..." style="padding:5px 9px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);width:130px">
+          <select id="osFilterStatus" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+            <option value="">Todos os status</option>
+            <option value="iniciada">Iniciada</option>
+            <option value="producao">Em produção</option>
+            <option value="master">Aguard. Master</option>
+          </select>
+          <select id="osFilterMarca" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+            <option value="">Todas as marcas</option>
+            <option value="vr">VR Marcas</option>
+            <option value="vit">Vitre</option>
+          </select>
+          <span id="osHistDataWrap" style="display:none;gap:6px;align-items:center">
+            <input type="date" id="osHistDataIni" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+            <span style="font-size:11px;color:var(--muted)">até</span>
+            <input type="date" id="osHistDataFim" onchange="renderOsTable()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg)">
+          </span>
         </div>
         <table class="table">
-          <tr><th>OS #</th><th>Cliente</th><th>Produto</th><th>Marca</th><th>Valor</th><th>Prazo</th><th>Status</th><th>Ação</th></tr>
+          <tr><th>OS #</th><th>Cliente</th><th>Produto</th><th>Marca</th><th>Valor</th><th id="osColPrazo">Prazo</th><th>Status</th><th>Ação</th></tr>
           <tbody id="osTableBody"></tbody>
         </table>
       </div>
@@ -14595,26 +14607,90 @@ function kbOpenNovaOS() {
 }
 
 // ============================================================
-// OS TABLE
+// OS TABLE — abas Ativas / Prontas / Entregues Recentes / Histórico
+// (Bloco M, Sprint Pré-Go-Live, 2026-08-09)
+// ------------------------------------------------------------
+// Histórico é a fonte COMPLETA — nunca aplica corte de tempo, lista toda
+// OS com status 'entregue' que ainda existe em KB_OS (exclusão continua
+// sendo só a ação manual explícita osExcluir(), nunca um corte silencioso
+// daqui). Entregues Recentes é apenas um recorte de conveniência (últimos
+// _OS_RECENTES_DIAS dias, por os.entregueEm) — OS entregues antes deste
+// campo existir (legado, sem entregueEm) não entram no recorte "recente"
+// mas continuam aparecendo no Histórico normalmente.
 // ============================================================
+var _osListTab = 'ativas';
+var _OS_ATIVOS_STATUS = ['iniciada','producao','master','em_andamento','aguard_master'];
+var _OS_RECENTES_DIAS = 30;
+
+function osFiltrarPorAba(tab, list, agora) {
+  agora = agora || new Date();
+  list = list || [];
+  if (tab === 'prontas') return list.filter(function(os){ return os.status === 'pronta'; });
+  if (tab === 'recentes') {
+    return list.filter(function(os){
+      if (os.status !== 'entregue') return false;
+      var d = orcEnvParseDataSalvo(os.entregueEm);
+      if (!d) return false;
+      var diasAtras = (agora.getTime() - d.getTime()) / 86400000;
+      return diasAtras >= 0 && diasAtras <= _OS_RECENTES_DIAS;
+    }).sort(function(a,b){
+      var da = orcEnvParseDataSalvo(a.entregueEm) || new Date(0);
+      var db = orcEnvParseDataSalvo(b.entregueEm) || new Date(0);
+      return db.getTime() - da.getTime();
+    });
+  }
+  if (tab === 'historico') return list.filter(function(os){ return os.status === 'entregue'; });
+  // 'ativas' (padrão) — inclui aliases legados equivalentes
+  return list.filter(function(os){ return _OS_ATIVOS_STATUS.indexOf(os.status) >= 0; });
+}
+
+function osListTab(t, el) {
+  _osListTab = t;
+  ['Ativas','Prontas','Recentes','Historico'].forEach(function(k){
+    var btn = document.getElementById('osListTabBtn'+k);
+    if (btn) btn.classList.toggle('on', k.toLowerCase() === t);
+  });
+  var fsSel = document.getElementById('osFilterStatus');
+  if (fsSel) fsSel.style.display = (t === 'ativas') ? '' : 'none';
+  var histWrap = document.getElementById('osHistDataWrap');
+  if (histWrap) histWrap.style.display = (t === 'historico') ? 'flex' : 'none';
+  var colPrazo = document.getElementById('osColPrazo');
+  if (colPrazo) colPrazo.textContent = (t === 'recentes' || t === 'historico') ? 'Entregue em' : 'Prazo';
+  renderOsTable();
+}
+
 function renderOsTable() {
   var tbody=document.getElementById('osTableBody'); if(!tbody) return;
+  var tab = _osListTab || 'ativas';
   var q=(document.getElementById('osSearchInput')||{}).value||'';
-  var fs=(document.getElementById('osFilterStatus')||{}).value||'';
+  var fs=(tab==='ativas') ? ((document.getElementById('osFilterStatus')||{}).value||'') : '';
   var fm=(document.getElementById('osFilterMarca')||{}).value||'';
+  var histIni=(document.getElementById('osHistDataIni')||{}).value||'';
+  var histFim=(document.getElementById('osHistDataFim')||{}).value||'';
   var mkNorm=function(m){return m==='VR Marcas'?'vr':m==='Vitre'?'vit':m;};
-  var rows=Object.values(KB_OS).filter(function(os){
+  var base = osFiltrarPorAba(tab, Object.values(KB_OS));
+  var rows=base.filter(function(os){
     var mk=mkNorm(os.marca);
     var _tit=os.titulo||os.prod||''; var txtOk=!q||(os.cliente+os.num+_tit).toLowerCase().includes(q.toLowerCase());
     var stOk=!fs||os.status===fs;
     var mkOk=!fm||mk===fm;
-    return txtOk&&stOk&&mkOk;
+    var dtOk=true;
+    if(tab==='historico' && (histIni||histFim)){
+      var d = orcEnvParseDataSalvo(os.entregueEm);
+      if(!d){ dtOk=false; }
+      else {
+        if(histIni){ var _di=new Date(histIni+'T00:00:00'); if(d<_di) dtOk=false; }
+        if(histFim){ var _df=new Date(histFim+'T23:59:59'); if(d>_df) dtOk=false; }
+      }
+    }
+    return txtOk&&stOk&&mkOk&&dtOk;
   });
   var cnt=document.getElementById('osTableCount');
   if(cnt) cnt.textContent='('+rows.length+' OS)';
   if(!rows.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';return;}
   var sL={iniciada:'Iniciada',producao:'Em Produção',pronta:'Pronta ✅',master:'🔐 Aguard. Master',entregue:'Entregue 🎉',em_andamento:'Iniciada',aguard_master:'🔐 Aguard. Master',cancelado:'Cancelado',orcamento:'Orçamento'};
   var sC={iniciada:'#6B7280',producao:'#D97706',pronta:'#059669',master:'#1EB8D8',entregue:'#059669',em_andamento:'#D97706',aguard_master:'#1EB8D8',cancelado:'#DC2626',orcamento:'#6B7280'};
+  var showEntregaCol = (tab==='recentes'||tab==='historico');
   var rows2=rows.map(function(os){
     var mk=mkNorm(os.marca);
     var isVR=mk==='vr';
@@ -14622,12 +14698,15 @@ function renderOsTable() {
     var valFmt=_v?(typeof _v==='number'?'R$ '+_v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):String(_v)):'—';
     var id=os.id;
     var tr=document.createElement('tr');
+    var colEntregaOuPrazo = showEntregaCol
+      ? '<td style="font-size:10px">'+(os.entregueEm||'—')+(os.entreguePor?'<br><span style="color:var(--muted)">'+os.entreguePor+'</span>':'')+'</td>'
+      : '<td>'+(os.entrega||os.prazo||'—')+'</td>';
     tr.innerHTML='<td style="cursor:pointer"><strong>#'+os.num+'</strong></td>'
       +'<td style="cursor:pointer">'+os.cliente+'</td>'
       +'<td style="cursor:pointer;font-size:10px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(os.titulo||os.prod||'—')+'</td>'
       +'<td><span style="background:'+( isVR?'#E3F7FB':'#E3F0F1')+';color:'+( isVR?'#983C8F':'#134F57')+';padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">'+( isVR?'VR Marcas':'Vitre')+'</span></td>'
       +'<td style="font-weight:600;color:#059669;font-size:11px">'+valFmt+'</td>'
-      +'<td>'+(os.entrega||os.prazo||'—')+'</td>'
+      +colEntregaOuPrazo
       +'<td><span style="color:'+( sC[os.status]||'#6B7280')+';font-weight:600;font-size:11px">'+( sL[os.status]||os.status)+'</span></td>'
       +'<td style="white-space:nowrap"></td>';
     tr.querySelectorAll('td').forEach(function(td,idx){if(idx<7)td.onclick=function(){kbOpen(id);}; });
@@ -14635,10 +14714,17 @@ function renderOsTable() {
     var btnVer=document.createElement('button');
     btnVer.textContent='Ver'; btnVer.style.cssText='padding:3px 7px;border:1px solid var(--border);background:transparent;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
     btnVer.onclick=function(){kbOpen(id);};
+    actTd.appendChild(btnVer);
+    if(os.status==='pronta'){
+      var btnEnt=document.createElement('button');
+      btnEnt.textContent='Entregar'; btnEnt.style.cssText='padding:3px 7px;border:1px solid #059669;background:transparent;color:#059669;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
+      btnEnt.onclick=function(e){e.stopPropagation();osLiberar(id);};
+      actTd.appendChild(btnEnt);
+    }
     var btnDel=document.createElement('button');
     btnDel.textContent='Excluir'; btnDel.style.cssText='padding:3px 7px;border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:5px;font-size:10px;cursor:pointer';
     btnDel.onclick=function(e){e.stopPropagation();osExcluir(id);};
-    actTd.appendChild(btnVer); actTd.appendChild(btnDel);
+    actTd.appendChild(btnDel);
     return tr;
   });
   tbody.innerHTML='';
@@ -14651,14 +14737,28 @@ function osLiberar(id) {
   // explícita e justificada — que registra usuário/data/motivo e mantém a dívida aberta
   // (não mexe em os.restante nem no lançamento pendente em FIN_CR).
   var saldoPendente = (os.restante||0) > 0;
+  var _quem=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.user||_currentSession.email))||'desconhecido';
   if(saldoPendente){
     var justificativa = prompt('⚠️ OS #'+os.num+' ainda tem saldo pendente de '+finFmt(os.restante)+'.\n\nEntregar mesmo assim é uma exceção e precisa de justificativa (ex.: acordo com o cliente, cobrança à parte). Descreva o motivo para confirmar, ou cancele para não entregar agora:');
     if(justificativa===null || !justificativa.trim()){ showToast('Entrega cancelada — saldo pendente não autorizado','warn'); return; }
-    var _quem=(typeof _currentSession!=='undefined'&&_currentSession&&(_currentSession.user||_currentSession.email))||'desconhecido';
     if(typeof secAuditLog==='function') secAuditLog('os_entrega_excecao','OS #'+os.num+' entregue com saldo pendente de '+finFmt(os.restante)+' — responsável: '+_quem+' — justificativa: '+justificativa.trim());
+  } else {
+    // Bloco M (Sprint Pré-Go-Live, 2026-08-09) — antes, o caminho normal
+    // (sem saldo pendente) mudava o status para 'entregue' sem registrar
+    // NENHUMA auditoria (quem entregou, quando). Corrigido: todo caminho de
+    // entrega grava auditoria, com ação própria ('os_entrega') distinta da
+    // exceção de saldo pendente ('os_entrega_excecao', mantida como já era).
+    if(typeof secAuditLog==='function') secAuditLog('os_entrega','OS #'+os.num+' entregue — responsável: '+_quem);
   }
   var _statusAnterior = os.status;
+  var _entregueEmAnterior = os.entregueEm;
+  var _entreguePorAnterior = os.entreguePor;
   os.status='entregue';
+  // Campos puramente operacionais (quem/quando entregou) — NUNCA financeiros,
+  // por isso é seguro viverem direto em KB_OS/kb_os (kbSaveKbos), sem passar
+  // pelo documento separado kb_os_fin (ver _KB_OS_FIN_FIELDS acima).
+  os.entregueEm = new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  os.entreguePor = _quem;
   os._liberando = true;
   function _refletirNaTela() {
     document.querySelectorAll('.kcard[data-osid="'+id+'"]').forEach(function(card){var stag=card.querySelector('.stag');if(stag){ if(os.status==='entregue'){stag.className='stag sm ok';stag.textContent='✅ Entregue';} else { var sm=_kbStatusMap[os.status]||{cls:'si',txt:os.status}; stag.className='stag '+sm.cls; stag.textContent=sm.txt; } }});
@@ -14683,7 +14783,7 @@ function osLiberar(id) {
   }
   _confirmarAposSalvar(
     kbSaveKbos(),
-    function(){ os.status = _statusAnterior; },
+    function(){ os.status = _statusAnterior; os.entregueEm = _entregueEmAnterior; os.entreguePor = _entreguePorAnterior; },
     _refletirNaTela,
     saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!',
     'Não foi possível liberar a OS #'+os.num
