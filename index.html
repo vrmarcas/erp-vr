@@ -2963,6 +2963,26 @@ function _authFirebaseError(code){
               <div style="margin-top:8px"><button class="topbar-btn ghost" style="font-size:11px;padding:5px 10px" onclick="orcAddItem()">+ Linha</button></div>
             </div>
 
+            <!-- RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"):
+                 o mesmo pedido/orçamento/venda pode incluir itens do catálogo
+                 Vitre. Nunca cria um segundo orçamento/financeiro — só soma o
+                 valor destes itens ao total do pedido (ver orcRecalc). A
+                 classificação real de estoque/ficha técnica roda ao gerar a
+                 OS (vitreClassificarItensPedidoUnificado). -->
+            <div class="card" style="margin-top:12px">
+              <div class="card-h">
+                <div class="card-h-left">🌸 Itens do Catálogo Vitre (mesmo pedido)</div>
+              </div>
+              <div style="padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;gap:8px">
+                  <input type="text" id="orcVitreBusca" placeholder="Buscar por SKU ou nome..." style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px" oninput="orcVitreBuscar()">
+                </div>
+                <div id="orcVitreBuscaResult" style="max-height:120px;overflow-y:auto;display:none;border:1px solid var(--border);border-radius:7px"></div>
+                <div id="orcVitreItensLista" style="display:flex;flex-direction:column;gap:4px"></div>
+                <div id="orcVitreItensEmpty" style="font-size:11px;color:var(--muted)">Nenhum item Vitre neste pedido ainda.</div>
+              </div>
+            </div>
+
           </div>
 
           <!-- resultado sticky -->
@@ -9145,6 +9165,34 @@ function receitaResolverParaCalculo(item, produtoAtual) {
 }
 
 // ============================================================
+// RODADA 6, seção 10 — HÍBRIDO VR+VITRE (Ponte de OS vinculadas)
+// ============================================================
+// Um pedido continua sendo UM orçamento/venda/lançamento financeiro do
+// lado VR (nunca duplicado) — mas o carrinho pode incluir itens do
+// catálogo Vitre além dos itens personalizados VR. Cada item Vitre no
+// carrinho carrega tipoItem:'vitre_catalogo' (mesmo discriminador já
+// usado por VR: 'personalizado_vr'), sku, prod (nome), qty e um preço
+// de referência (precoVenda) — o preço aqui é só para exibir o total do
+// pedido; a classificação real de estoque/ficha técnica (que decide se
+// o item é pronta-entrega ou vai para produção) só acontece ao gerar a
+// OS, via vitreClassificarItensPedidoUnificado() (Cloud Function).
+function orcVitreItensPedidoTotal(itens) {
+  return (itens || []).reduce(function (s, it) {
+    var qtd = parseInt(it.qty, 10) || 1;
+    var preco = parseFloat(it.precoVenda) || 0;
+    return s + qtd * preco;
+  }, 0);
+}
+// Payload {sku,qtd} para vitreClassificarItensPedidoUnificado — nunca
+// envia preço/nome (o servidor sempre re-resolve do catálogo vigente,
+// mesmo contrato de vitreCriarOrcamento).
+function orcMontarPayloadVitreParaOS(itens) {
+  return (itens || [])
+    .filter(function (it) { return it && it.tipoItem === 'vitre_catalogo' && it.sku; })
+    .map(function (it) { return { sku: it.sku, qtd: parseInt(it.qty, 10) || 1 }; });
+}
+
+// ============================================================
 // ITEM DE ORÇAMENTO VR — MODELO DE DOMÍNIO (RODADA 6, seções 8/9/10/11)
 // ============================================================
 // Constrói o objeto COMPLETO de um item personalizado VR a partir dos
@@ -9909,6 +9957,16 @@ function orcRecalc() {
     if(scEl) scEl.textContent = 'R$ '+finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   }
 
+  // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre somam
+  // ao total do MESMO pedido (nunca um segundo orçamento/financeiro) —
+  // mas ficam FORA do cálculo de markup/margem do lado VR, porque já são
+  // preço final de catálogo (vindo do cadastro Vitre), não custo de
+  // material a marcar. `finalPriceVR` preserva o total só-VR para a
+  // margem exibida abaixo continuar correta.
+  var vitreItensPedidoTotal = (typeof orcVitreItensPedidoTotal==='function') ? orcVitreItensPedidoTotal(_orcVitreItensPedido) : 0;
+  var finalPriceVR = finalPrice;
+  finalPrice = finalPriceVR + vitreItensPedidoTotal;
+
   // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
   if (tv) {
@@ -9930,8 +9988,9 @@ function orcRecalc() {
         }
         if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
         if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl+'</span></div>'; }
-        var _margin=finalPrice>0?((finalPrice-totalCost)/finalPrice*100):0;
-        lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
+        if(vitreItensPedidoTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
+        var _margin=finalPriceVR>0?((finalPriceVR-totalCost)/finalPriceVR*100):0;
+        lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada (só VR)</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
         lines += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
         brk.innerHTML = lines;
       }
@@ -9952,7 +10011,8 @@ function orcRecalc() {
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-top:1px solid var(--border);margin-top:2px"><span style="color:var(--muted)">Custo Total</span><span style="font-weight:700">'+orcFmt(totalCost)+'</span></div>';
     if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
     if(acresPct>0||acresRS>0){ var _acresLbl3=acresRS>0?('+'+orcFmt(acresRS)):('+'+( acresPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl3+'</span></div>'; }
-    var _margin3=finalPrice>0?((finalPrice-totalCost)/finalPrice*100):0;
+    if(vitreItensPedidoTotal>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
+    var _margin3=finalPriceVR>0?((finalPriceVR-totalCost)/finalPriceVR*100):0;
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin3.toFixed(1)+'%</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid);margin-top:4px"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:18px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
     b3.innerHTML = lines3;
@@ -10021,6 +10081,76 @@ window.calcularOrcamentoAPI = function(params) {
     return { finalPrice: 0, totalCost: 0, matTotal: 0, error: e.message };
   }
 };
+
+// RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): itens
+// do catálogo Vitre dentro do MESMO pedido/orçamento VR (nunca um segundo
+// orçamento/financeiro). Espelha o formato de item usado por
+// orcMontarPayloadVitreParaOS/orcVitreItensPedidoTotal (funções puras,
+// testadas em test_hibrido_vr_vitre_2026-08-08.js).
+var _orcVitreItensPedido = [];
+
+function orcVitreBuscar() {
+  var termo = (document.getElementById('orcVitreBusca')||{}).value||'';
+  var termoNorm = termo.trim().toLowerCase();
+  var resultBox = document.getElementById('orcVitreBuscaResult');
+  if(!resultBox) return;
+  if(!termoNorm) { resultBox.style.display='none'; resultBox.innerHTML=''; return; }
+  var catalogo = (typeof VITRE_CATALOGO_CACHE!=='undefined' ? VITRE_CATALOGO_CACHE : []) || [];
+  var achados = catalogo.filter(function(p){
+    if(!p || p.status!=='ativo') return false;
+    var sku = (p.sku||'').toLowerCase(), nome=(p.nome||'').toLowerCase();
+    return sku.indexOf(termoNorm)>=0 || nome.indexOf(termoNorm)>=0;
+  }).slice(0, 12);
+  if(!achados.length) { resultBox.style.display='block'; resultBox.innerHTML='<div style="padding:8px;font-size:11px;color:var(--muted)">Nenhum produto Vitre encontrado.</div>'; return; }
+  resultBox.style.display='block';
+  resultBox.innerHTML = achados.map(function(p){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer" onclick="orcVitreAdicionarItem(\''+cfgEsc(p.sku)+'\')">'
+      + '<span style="font-size:12px"><strong>'+cfgEsc(p.sku)+'</strong> — '+cfgEsc(p.nome)+'</span>'
+      + '<span style="font-size:11px;color:var(--brand-mid);font-weight:700">R$'+(parseFloat(p.precoVenda)||0).toFixed(2)+'</span>'
+      + '</div>';
+  }).join('');
+}
+function orcVitreAdicionarItem(sku) {
+  var catalogo = (typeof VITRE_CATALOGO_CACHE!=='undefined' ? VITRE_CATALOGO_CACHE : []) || [];
+  var p = catalogo.find(function(x){ return x.sku===sku; });
+  if(!p) return;
+  var existente = _orcVitreItensPedido.find(function(it){ return it.sku===sku; });
+  if(existente) existente.qty = (parseInt(existente.qty,10)||1) + 1;
+  else _orcVitreItensPedido.push({ tipoItem:'vitre_catalogo', sku: p.sku, prod: p.nome, qty: 1, precoVenda: parseFloat(p.precoVenda)||0 });
+  var busca = document.getElementById('orcVitreBusca'); if(busca) busca.value='';
+  var resultBox = document.getElementById('orcVitreBuscaResult'); if(resultBox){ resultBox.style.display='none'; resultBox.innerHTML=''; }
+  orcVitreRenderLista();
+  orcRecalc();
+}
+function orcVitreAlterarQty(idx, delta) {
+  var it = _orcVitreItensPedido[idx]; if(!it) return;
+  it.qty = Math.max(1, (parseInt(it.qty,10)||1) + delta);
+  orcVitreRenderLista();
+  orcRecalc();
+}
+function orcVitreRemoverItem(idx) {
+  _orcVitreItensPedido.splice(idx, 1);
+  orcVitreRenderLista();
+  orcRecalc();
+}
+function orcVitreRenderLista() {
+  var lista = document.getElementById('orcVitreItensLista');
+  var empty = document.getElementById('orcVitreItensEmpty');
+  if(!lista) return;
+  if(!_orcVitreItensPedido.length) { lista.innerHTML=''; if(empty) empty.style.display='block'; return; }
+  if(empty) empty.style.display='none';
+  lista.innerHTML = _orcVitreItensPedido.map(function(it, i){
+    var subtotal = (parseInt(it.qty,10)||1) * (parseFloat(it.precoVenda)||0);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg2);border-radius:7px;font-size:12px">'
+      + '<span style="flex:1"><strong>'+cfgEsc(it.sku)+'</strong> — '+cfgEsc(it.prod)+'</span>'
+      + '<button class="topbar-btn ghost" style="padding:2px 8px;font-size:11px" onclick="orcVitreAlterarQty('+i+',-1)">−</button>'
+      + '<span style="min-width:18px;text-align:center">'+(parseInt(it.qty,10)||1)+'</span>'
+      + '<button class="topbar-btn ghost" style="padding:2px 8px;font-size:11px" onclick="orcVitreAlterarQty('+i+',1)">+</button>'
+      + '<span style="min-width:70px;text-align:right;font-weight:700;color:var(--brand-mid)">R$'+subtotal.toFixed(2)+'</span>'
+      + '<button style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:13px" onclick="orcVitreRemoverItem('+i+')" title="Remover">×</button>'
+      + '</div>';
+  }).join('');
+}
 
 // Per-item extras store
 var ORC_ITEM_EXTRAS = {};
@@ -11577,6 +11707,26 @@ function kbOpen(id) {
     ${_maquinasField}
   `;
   kbRenderItensDetalhe(os);
+  // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
+  // itens do catálogo Vitre já aparecem na lista acima (mesmo itens[] do
+  // pedido — um único pedido comercial/gerencial). Este selo só informa
+  // que a classificação de estoque/ficha técnica desses itens rodou em
+  // uma OS Vitre separada (vitre_os), vinculada por grupoPedidoId — nunca
+  // um segundo orçamento/venda.
+  (function(){
+    var _vitreBadgeWrap = document.getElementById('kbVitreLinkBadge');
+    if(!_vitreBadgeWrap){
+      _vitreBadgeWrap = document.createElement('div');
+      _vitreBadgeWrap.id = 'kbVitreLinkBadge';
+      var _itensWrap = document.getElementById('kbItensDetalhe');
+      if(_itensWrap && _itensWrap.parentNode) _itensWrap.parentNode.insertBefore(_vitreBadgeWrap, _itensWrap.nextSibling);
+    }
+    if(_vitreBadgeWrap){
+      _vitreBadgeWrap.innerHTML = os.vitreOsRef
+        ? '<div style="margin-top:8px;padding:6px 10px;background:#F3E8F5;border:1px solid #983C8F;border-radius:8px;font-size:11px;color:#983C8F;font-weight:600">🌸 Itens do catálogo Vitre deste pedido já classificados (estoque/produção) — vínculo: '+cfgEsc(os.vitreOsRef)+'</div>'
+        : '';
+    }
+  })();
 
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
   kbRenderChecklist(os);
@@ -19452,6 +19602,11 @@ function orcResetFormularioVR(){
   if(tbody) tbody.innerHTML='';
   orcItemCount=0;
   if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
+  // RODADA 6, seção 10 — Híbrido VR+Vitre: novo pedido nunca herda itens
+  // Vitre do pedido anterior.
+  _orcVitreItensPedido = [];
+  if(typeof orcVitreRenderLista==='function') orcVitreRenderLista();
+  if(typeof vitreCatalogoInit==='function') vitreCatalogoInit(); // idempotente — só liga o listener 1x
   var setV=function(id,v){ var el=document.getElementById(id); if(el) el.value=v; };
   ['orcClientNome','orcClientTel','orcClientEmail','orcClientDoc','orcClientCidade'].forEach(function(id){ setV(id,''); });
   var vend=document.getElementById('orcClientVendedor'); if(vend) vend.value=(typeof _currentSession!=='undefined' && _currentSession && _currentSession.user) || '';
@@ -21939,6 +22094,17 @@ async function _orcSalvarOrcamentoImpl() {
       extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null
     });
   });
+  // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
+  // itens do catálogo Vitre adicionados ao MESMO pedido entram no mesmo
+  // itens[] do orçamento VR (nunca um segundo orçamento/documento). O
+  // preço já é final de catálogo — nada aqui é recalculado, só transportado.
+  (_orcVitreItensPedido||[]).forEach(function(it){
+    _itens.push({
+      tipoItem: 'vitre_catalogo',
+      sku: it.sku, prod: it.prod||'', qty: String(it.qty||1),
+      precoVenda: parseFloat(it.precoVenda)||0
+    });
+  });
   var _nome  = (document.getElementById('orcClientNome')||{}).value||'';
   var _tel   = (document.getElementById('orcClientTel')||{}).value||'';
   var _email = (document.getElementById('orcClientEmail')||{}).value||'';
@@ -22595,6 +22761,16 @@ function orcEnvEditar(id) {
       orcItemCount=0;
       if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
       o.itens.forEach(function(it, idxOriginal){
+        // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre
+        // salvos no mesmo itens[] não são linhas VR — voltam para o
+        // carrinho Vitre (_orcVitreItensPedido), nunca para orcAddItem().
+        if(it.tipoItem==='vitre_catalogo'){
+          _orcVitreItensPedido.push({
+            tipoItem:'vitre_catalogo', sku: it.sku, prod: it.prod||'',
+            qty: parseInt(it.qty,10)||1, precoVenda: parseFloat(it.precoVenda)||0
+          });
+          return;
+        }
         orcAddItem();
         var ri = orcItemCount;
         setV('oi_prod_'+ri, it.prod);
@@ -22666,6 +22842,7 @@ function orcEnvEditar(id) {
           if(_pbtn) _pbtn.classList.add('active');
         }
       });
+      if(typeof orcVitreRenderLista==='function') orcVitreRenderLista();
     }
     if(snap && snap.parametros){
       var p = snap.parametros;
@@ -22917,6 +23094,12 @@ function orcEnvGerarOS(){
   var prodNome=o.produto||'Produto';
   var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
   var itens=o.itens||[];
+  // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): se
+  // o pedido tem itens do catálogo Vitre, eles são classificados (estoque
+  // pronto/produzir/ficha pendente) por uma Cloud Function dedicada DEPOIS
+  // que a OS/orçamento/financeiro VR (únicos) já foram confirmados pela
+  // transação abaixo — nunca cria um segundo orçamento/venda.
+  var _vitreItensPayload = (typeof orcMontarPayloadVitreParaOS==='function') ? orcMontarPayloadVitreParaOS(itens) : [];
   var matLabel=itens.length&&itens[0].mat?itens[0].mat:'—';
   var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
   var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
@@ -23011,6 +23194,7 @@ function orcEnvGerarOS(){
   var refOSFin=_db.collection(_COL).doc('kb_os_fin');
   var refCR =_db.collection(_COL).doc('fin_cr');
   var refCnt=_db.collection(_COL).doc('erp_os_counter');
+  var _newIdCaptured = null; // grupoPedidoId/kbOsRef para vínculo Vitre — capturado dentro da transação, usado depois que ela confirmar
 
   return _db.runTransaction(function(txn){
     return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refCnt)])
@@ -23034,6 +23218,7 @@ function orcEnvGerarOS(){
 
         var n = cnt+1;
         var newId = 'os'+Date.now()+'_'+n;
+        _newIdCaptured = newId; // só o vínculo final da tentativa que realmente confirmar importa
 
         objOS[newId] = {
           id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
@@ -23098,6 +23283,60 @@ function orcEnvGerarOS(){
     _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
     _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
+    // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas",
+    // decisão do usuário): a OS/orçamento/financeiro VR (únicos) já estão
+    // confirmados acima. Se o pedido tinha itens do catálogo Vitre, eles
+    // são classificados agora (estoque pronto/produzir/ficha pendente) por
+    // uma Cloud Function dedicada, que grava um vitre_os SEPARADO mas
+    // vinculado por grupoPedidoId = o próprio id deste kb_os — nunca um
+    // segundo orçamento/venda/lançamento financeiro. Se esta etapa falhar,
+    // a OS/orçamento VR permanecem válidos (o operador pode tentar de novo
+    // pelo Kanban); nunca desfazemos a transação já confirmada por isso.
+    if(_vitreItensPayload.length && _newIdCaptured && typeof firebase!=='undefined' && firebase.functions){
+      var _vitreReqId = 'vitreunif:'+_newIdCaptured+':'+Date.now()+':'+Math.random().toString(36).slice(2);
+      return firebase.functions().httpsCallable('vitreClassificarItensPedidoUnificado')({
+        grupoPedidoId: _newIdCaptured, kbOsRef: _newIdCaptured, requestId: _vitreReqId,
+        clienteNome: o.cliente||'Cliente', clienteTel: o.tel||'', itens: _vitreItensPayload
+      }).then(function(res){
+        var _vitreOsIdResolvido = (res && res.data && res.data.id) || null;
+        if(res && res.data && res.data.bloqueado) showToast('OS criada, mas alguns itens Vitre não puderam ser classificados (produto removido do catálogo) — revise pelo Kanban.','warn');
+        if(KB_OS[_newIdCaptured]){
+          KB_OS[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
+          KB_OS[_newIdCaptured].grupoPedidoId = _newIdCaptured;
+        }
+        // Grava o vínculo com uma transação dedicada (lê o kb_os direto do
+        // Firestore, nunca o global KB_OS em memória) — o listener ao vivo de
+        // kb_os pode reatribuir KB_OS inteiro entre o commit da transação
+        // acima e esta chamada assíncrona à Cloud Function; um kbSaveKbos()
+        // simples correria risco real de perder este patch por last-write-
+        // wins contra essa recarga. Achado nesta rodada via E2E real no
+        // Emulator: o vínculo silenciosamente não persistia no Firestore
+        // mesmo com o patch em memória e o toast de sucesso aparecendo.
+        if(typeof _db!=='undefined' && _db && typeof _db.runTransaction==='function'){
+          var _refOSLink = _db.collection(_COL).doc('kb_os');
+          return _db.runTransaction(function(txnLink){
+            return txnLink.get(_refOSLink).then(function(snapLink){
+              var objOSLink = (snapLink.exists && snapLink.data() && snapLink.data().data) ? JSON.parse(snapLink.data().data) : {};
+              if(objOSLink[_newIdCaptured]){
+                objOSLink[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
+                objOSLink[_newIdCaptured].grupoPedidoId = _newIdCaptured;
+                txnLink.set(_refOSLink, {data:JSON.stringify(objOSLink), ts:Date.now()});
+              }
+            });
+          }).then(function(){ return resultado; }).catch(function(eLink){
+            console.warn('[orcEnvGerarOS] falha ao gravar vínculo vitreOsRef no kb_os (classificação Vitre já concluída):', eLink);
+            return resultado;
+          });
+        }
+        return resultado;
+      }).catch(function(e){
+        console.warn('[orcEnvGerarOS] classificação Vitre falhou — OS/orçamento VR já confirmados, itens Vitre pendentes:', e);
+        showToast('OS criada, mas os itens Vitre não puderam ser classificados agora — tente novamente pelo Kanban.','warn');
+        return resultado;
+      });
+    }
+    return resultado;
+  }).then(function(resultado){
     finalizar(true, resultado);
   }).catch(function(e){
     finalizar(false, (e && e.message==='OS_JA_EXISTE') ? 'OS_JA_EXISTE' : e);
