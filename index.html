@@ -9945,6 +9945,61 @@ function orcRemItem(idx) { const r=document.getElementById('oir_'+idx); if(r) r.
 function orcFmt(v) { return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function orcSetV(id,v) { const el=document.getElementById(id); if(el) el.textContent='R$'+v.toFixed(2).replace('.',','); }
 
+// ============================================================
+// SPRINT PRÉ-GO-LIVE, Bloco D — ajuste de preço por item
+// ============================================================
+// Modelo de domínio do ajuste comercial de um item, isolado da UI e do
+// resto do motor de orçamento — funções puras, testáveis sozinhas, toda
+// matemática em CENTAVOS (nunca ponto flutuante direto). O ajuste é
+// interno: nunca aparece como linha separada em PDF/WhatsApp, sempre
+// dobrado dentro do preço final do item.
+//
+// Ordem de cálculo canônica (Bloco D, seção 2) — cada etapa consome o
+// resultado em centavos da etapa anterior, nunca lê o DOM diretamente:
+//   preço original do item → AJUSTE DO ITEM → soma dos itens →
+//   ajuste global → frete → preço à vista/base → preço comercial de
+//   cartão → PIX.
+// orcItemAplicarAjuste/orcItemCalcularTotal cobrem a 2ª etapa
+// (AJUSTE DO ITEM); orcMotorPagamento (mais abaixo) já cobre cartão/PIX.
+
+// Aplica um ajuste comercial (acréscimo/desconto, fixo/percentual) a um
+// preço original em centavos. operacao=null (ou qualquer valor que não
+// seja 'acrescimo'/'desconto') significa "sem ajuste" — devolve o preço
+// original intacto. Nunca deixa o preço final ficar negativo.
+function orcItemAplicarAjuste(precoOriginalCents, operacao, tipo, valor) {
+  precoOriginalCents = Math.round(precoOriginalCents || 0);
+  if (operacao !== 'acrescimo' && operacao !== 'desconto') {
+    return { ajusteCents: 0, precoFinalItemCents: precoOriginalCents };
+  }
+  valor = parseFloat(valor) || 0;
+  var ajusteCents = (tipo === 'percentual')
+    ? Math.round(precoOriginalCents * (valor / 100))
+    : Math.round(valor * 100);
+  ajusteCents = ajusteCents * (operacao === 'acrescimo' ? 1 : -1);
+  var precoFinalItemCents = Math.max(0, precoOriginalCents + ajusteCents);
+  return { ajusteCents: ajusteCents, precoFinalItemCents: precoFinalItemCents };
+}
+
+// Recebe o registro completo de um item (preço original + campos de
+// ajuste + quantidade) e devolve o objeto pronto para ser persistido no
+// snapshot do orçamento (Bloco D: precoOriginalCents/ajusteOperacao/
+// ajusteTipo/ajusteValor/ajusteCents/precoFinalItemCents) e o total da
+// linha (preço final unitário × quantidade).
+function orcItemCalcularTotal(item) {
+  item = item || {};
+  var r = orcItemAplicarAjuste(item.precoOriginalCents, item.ajusteOperacao, item.ajusteTipo, item.ajusteValor);
+  var qty = item.qty > 0 ? item.qty : 1;
+  return {
+    precoOriginalCents: Math.round(item.precoOriginalCents || 0),
+    ajusteOperacao: (item.ajusteOperacao === 'acrescimo' || item.ajusteOperacao === 'desconto') ? item.ajusteOperacao : null,
+    ajusteTipo: item.ajusteTipo === 'percentual' ? 'percentual' : 'fixo',
+    ajusteValor: parseFloat(item.ajusteValor) || 0,
+    ajusteCents: r.ajusteCents,
+    precoFinalItemCents: r.precoFinalItemCents,
+    totalItemCents: r.precoFinalItemCents * qty
+  };
+}
+
 function orcRecalc() {
   // Lê overhead, impostos e vrml do Config salvo (não mais do Step 3)
   var _cfgFin = (_cfgData&&_cfgData.financeiro)||{};
