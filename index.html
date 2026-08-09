@@ -2157,12 +2157,11 @@ function _authFirebaseError(code){
       <div class="sb-item" id="sbFinDash" onclick="navFin('dash',this)"><span class="ico">💳</span> Dashboard Financeiro</div>
       <div class="sb-item" id="sbFinCR"   onclick="navFin('cr',this)"><span class="ico">📥</span> Contas a Receber</div>
       <div class="sb-item" id="sbFinCP"   onclick="navFin('cp',this)"><span class="ico">📤</span> Contas a Pagar</div>
-      <!-- Corrigido 2026-08-07 (Rodada Mestre, seção 33) — DRE existia
-           duplicado (aba própria dentro de Financeiro + Relatórios→DRE).
-           Fonte/rota canônica única: Relatórios→DRE. Este item da barra
-           lateral agora só atalha para lá (mesmo botão real da aba, para
-           garantir que o estado visual "ativo" fica correto). -->
-      <div class="sb-item" id="sbFinDRE"  onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)"><span class="ico">📋</span> DRE</div>
+      <!-- SPRINT PRÉ-GO-LIVE, Bloco O (2026-08-07 já tinha removido a
+           duplicação de LÓGICA — este item só redirecionava para
+           Relatórios→DRE; nunca renderizava a própria DRE). Removido por
+           completo: acesso oficial único é Relatórios→DRE (item abaixo),
+           sem atalho paralelo na sidebar. -->
       <div class="sb-item" id="sbFinRel"  onclick="nav('relatorios',this)"><span class="ico">🖨️</span> Relatórios</div>
     </div>
 
@@ -4943,8 +4942,10 @@ function _authFirebaseError(code){
         <button class="fin-tab-btn" id="finTabBtnCP" onclick="finTab('cp')">📤 Contas a Pagar</button>
         <button class="fin-tab-btn" id="finTabBtnCal" onclick="finTab('cal')">📅 Agenda de Pagamentos</button>
         <button class="fin-tab-btn" id="finTabBtnCartoes" onclick="finTab('cartoes')">💳 Cartões</button>
-        <button class="fin-tab-btn" id="finTabBtnDRE" onclick="nav('relatorios'); setTimeout(function(){ var b=document.getElementById('relTabBtnDRE'); if(b) b.click(); },50)" title="Abre em Relatórios — fonte única do DRE">📋 DRE ↗</button>
       </div>
+      <!-- SPRINT PRÉ-GO-LIVE, Bloco O — removido o atalho "DRE ↗" (só
+           redirecionava para Relatórios→DRE, nunca renderizava a própria
+           DRE aqui). Acesso oficial único: Relatórios→DRE. -->
 
       <!-- ── ABA: DASHBOARD ── -->
       <div id="finPgDash">
