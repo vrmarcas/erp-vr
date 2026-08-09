@@ -54,7 +54,7 @@ test('2. orcAtualizarIconePgto() (disparado ao trocar a Forma de Pagamento) cont
   /orcCalcParcelaDisplay\(\)/.test(srcIcone), true);
 
 // ── 3-8. Execução real: DOM fake completo, reproduzindo a troca PIX→Cartão ──
-var FN_NAMES = ['orcFmt', 'orcMotorPagamento', 'orcLerCondicoesPagamentoDOM', 'orcCalcParcelaDisplay', 'orcPgtoAtualizarValorReceber'];
+var FN_NAMES = ['orcFmt', 'orcMotorPagamento', 'orcDistribuirParcelas', 'orcMotorComercial', 'orcLerCondicoesPagamentoDOM', 'orcCalcParcelaDisplay', 'orcPgtoAtualizarValorReceber'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   "module.exports = { orcCalcParcelaDisplay: orcCalcParcelaDisplay, orcPgtoAtualizarValorReceber: orcPgtoAtualizarValorReceber };"

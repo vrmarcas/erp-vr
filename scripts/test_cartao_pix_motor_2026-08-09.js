@@ -51,8 +51,15 @@ function extractFn(name) {
 console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regressão estrutural ===\n');
 
 // ── 1. orcCalcParcelaDisplay() — execução real ──────────────────────────
+// SPRINT PRÉ-GO-LIVE, Bloco E/F (gap encontrado no preview local pré-
+// deploy, ver test_sprint_pregolive_gate_pagamento_semjuros_2026-08-09.js
+// para o achado completo) — esta função passou a usar o motor central
+// orcMotorComercial (sempre sem juros em até 3x) em vez do motor legado
+// orcMotorPagamento (que aplicava a taxa real da operadora). O <select>
+// de parcelas também foi capado a 1-3x — os cenários de 6x/taxa abaixo
+// não existem mais na UI e foram substituídos por cenários sem-juros.
 {
-  var FN1 = ['orcMotorPagamento', 'orcLerCondicoesPagamentoDOM', 'orcCalcParcelaDisplay'];
+  var FN1 = ['orcDistribuirParcelas', 'orcMotorComercial', 'orcLerCondicoesPagamentoDOM', 'orcCalcParcelaDisplay'];
   var src1 = FN1.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN1.join(',') + '};';
   var modPath1 = path.join(__dirname, '_cartao_pix_display_extracted.tmp.js');
   fs.writeFileSync(modPath1, src1);
@@ -62,7 +69,7 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
   function makeEl(props) { return Object.assign({ value: '', textContent: '', checked: false, style: {} }, props || {}); }
   global.document = { getElementById: function (id) { return _elements[id]; } };
   global.CFG_DEFAULT = { parcelamento: [
-    { parcelas: 1, taxa: 0 }, { parcelas: 3, taxa: 0 }, { parcelas: 6, taxa: 8 }
+    { parcelas: 1, taxa: 0 }, { parcelas: 2, taxa: 2.99 }, { parcelas: 3, taxa: 3.99 }
   ] };
   global.cfgLoad = function () { return JSON.parse(JSON.stringify(global.CFG_DEFAULT)); };
 
@@ -74,9 +81,7 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
       orcSimParcelaDisplay: makeEl({}),
       orcDescCondToggle: makeEl({ checked: !!opts.dcOn }),
       orcDescCond: makeEl({ value: String(opts.dcPct || 0) }),
-      orcPixDiscToggle: makeEl({ checked: !!opts.pxOn }),
       orcPixDiscPct: makeEl({ value: String(opts.pxPct || 0) }),
-      orcParcToggle: makeEl({ checked: true }),
       orcParcSel: { value: String(opts.n || 1) }
     };
   }
@@ -87,31 +92,30 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
   mod1.orcCalcParcelaDisplay();
   test('1. n<=1 esconde o display (à vista, sem "parcela")', _elements.orcSimParcelaDisplay.style.display, 'none');
 
-  resetEls(1000, { n: 6 });
+  resetEls(1000, { n: 3 });
   mod1.orcCalcParcelaDisplay();
-  test('2. achado real corrigido: 6x com taxa de 8% mostra R$180,00 (1080/6), NUNCA R$166,67 (1000/6 ignorando a taxa)',
-    _elements.orcSimParcelaDisplay.textContent, '6× de R$ 180,00 (total: R$ 1.080,00)');
+  test('2. achado real corrigido: 3x nunca aplica a taxa real configurada (3,99%) — 1000/3 = 3x de R$333,33 (total: R$1.000,00), NUNCA R$1.039,90',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 333,33 (total: R$ 1.000,00)');
 
   resetEls(1000, { n: 3, dcOn: true, dcPct: 10 });
   mod1.orcCalcParcelaDisplay();
   test('3. achado real corrigido: desconto condicional de 10% é aplicado ANTES de dividir (3x de R$300,00 = 900/3), nunca ignorado (1000/3)',
     _elements.orcSimParcelaDisplay.textContent, '3× de R$ 300,00 (total: R$ 900,00)');
 
-  resetEls(1000, { n: 3, pxOn: true, pxPct: 5 });
+  resetEls(1000, { n: 3, pxPct: 5 });
   mod1.orcCalcParcelaDisplay();
   // SPRINT PRÉ-GO-LIVE, Bloco F (gap remanescente da homologação) —
-  // achado real MAIS PROFUNDO encontrado ao corrigir o "Valor a Receber"
-  // não atualizar ao trocar de Forma de Pagamento: esta linha de
-  // parcelamento só é mostrada quando o método selecionado é Cartão/Link
-  // (nunca PIX), mas continuava aplicando o desconto de "Desconto no
-  // PIX" (cond.pxOn) mesmo assim — um desconto cujo próprio rótulo diz
-  // "Aplica desconto se pagamento for feito via PIX", sendo aplicado a
-  // uma simulação de pagamento NO CARTÃO. Corrigido para nunca aplicar
-  // PIX aqui (pxOn forçado false) — 1000/3, sem nenhum desconto, dá
-  // R$333,33 × 3 = R$999,99 (o total reconciliado com a parcela já
-  // arredondada, nunca duas contas que divergem entre si).
-  test('4. achado real corrigido: desconto de "PIX" NUNCA se aplica na simulação de parcelamento no CARTÃO (são condições mutuamente exclusivas) — 1000/3 sem desconto = 3x de R$333,33 (total: R$999,99)',
-    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 333,33 (total: R$ 999,99)');
+  // achado real: esta linha de parcelamento só é mostrada quando o método
+  // selecionado é Cartão/Link (nunca PIX), mas continuava aplicando o
+  // desconto de "Desconto no PIX" mesmo assim — um desconto cujo próprio
+  // rótulo diz "Aplica desconto se pagamento for feito via PIX", sendo
+  // aplicado a uma simulação de pagamento NO CARTÃO. orcMotorComercial()
+  // aqui é chamado sem repassar cfgFinanceiro.pix, então PIX nunca entra
+  // nesta conta — 1000/3 sem nenhum desconto = 3x de R$333,33 (total
+  // exato: R$1.000,00, a soma real das parcelas — nunca uma aproximação
+  // reconstruída via valorParcela×n, que perderia 1 centavo).
+  test('4. achado real corrigido: desconto de "PIX" NUNCA se aplica na simulação de parcelamento no CARTÃO (são condições mutuamente exclusivas) — 1000/3 sem desconto = 3x de R$333,33 (total exato: R$1.000,00)',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 333,33 (total: R$ 1.000,00)');
 }
 
 // ── 2. finAntecipar() — execução real, achado do unit-mismatch ─────────
@@ -221,8 +225,12 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     /if \(n===5\)[\s\S]{0,600}orcPgtoAtualizarValorReceber\(\)/.test(srcStep), true);
 
   var srcRecv = extractFn('orcPgtoAtualizarValorReceber');
-  test('13. orcPgtoAtualizarValorReceber() usa o motor central (orcMotorPagamento), não v.finalPrice bruto',
-    /orcMotorPagamento\(v\.finalPrice\|\|0,\s*motorCond\)/.test(srcRecv), true);
+  // SPRINT PRÉ-GO-LIVE, Bloco E/F (gap encontrado no preview local
+  // pré-deploy) — esta função passou do motor legado orcMotorPagamento
+  // para o motor central orcMotorComercial (cartão em até 3x sempre sem
+  // juros); nunca mais usa v.finalPrice bruto direto.
+  test('13. orcPgtoAtualizarValorReceber() usa o motor central orcMotorComercial (sem juros), não v.finalPrice bruto',
+    /orcMotorComercial\(baseAposCond,/.test(srcRecv), true);
   test('14. nunca o prefixo duplicado "R$ "+orcFmt(...) (orcFmt já inclui "R$ ")',
     /orcPgtoValorDisplay[^\n]*=\s*'R\$ '\s*\+\s*orcFmt/.test(srcRecv), false);
 }

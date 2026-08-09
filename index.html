@@ -3401,13 +3401,8 @@ function _authFirebaseError(code){
                 <label>Parcelas</label>
                 <select id="orcSimParcelas" onchange="orcCalcParcelaDisplay()">
                   <option value="1">1× (à vista)</option>
-                  <option value="2">2×</option>
-                  <option value="3">3×</option>
-                  <option value="4">4×</option>
-                  <option value="5">5×</option>
-                  <option value="6">6×</option>
-                  <option value="10">10×</option>
-                  <option value="12">12×</option>
+                  <option value="2">2× sem juros</option>
+                  <option value="3" selected>3× sem juros</option>
                 </select>
               </div>
               <div id="orcSimParcelaDisplay" style="display:none;background:#E3F7FB;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:700;color:#54565A;margin-top:4px"></div>
@@ -11270,24 +11265,22 @@ function orcCalcParcelaDisplay() {
   var n = parseInt(sel.value)||1;
   var base = window._orcCalc ? (window._orcCalc.finalPrice||0) : 0;
   if(n<=1){disp.style.display='none'; if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber(); return;}
-  // RODADA 6, seção 2 — achado real: esta tela ("Confirmação de Pagamento")
-  // dividia o preço BRUTO por n, ignorando desconto condicional, desconto
-  // PIX e a própria taxa do cartão — mostrando um valor de parcela
-  // diferente do que o PDF/WhatsApp já mostravam ao cliente. Agora usa o
-  // mesmo motor central (orcMotorPagamento), com as condições atuais da
-  // tela (orcLerCondicoesPagamentoDOM).
+  // SPRINT PRÉ-GO-LIVE, Bloco E/F (gap encontrado no preview local pré-
+  // deploy) — esta linha ainda usava o motor legado orcMotorPagamento (taxa
+  // real da operadora: 2,99%/3,99%), mostrando R$200,25 para um total de
+  // R$192,58 em 3x — divergindo da regra "cartão em até 3x sempre sem
+  // juros" já aplicada em "Envio ao Cliente" (orcRefreshFinalPrice/
+  // orcMotorComercial). Corrigido para a mesma fonte central, incluindo o
+  // mesmo pré-desconto condicional (dcOn/dcPct) que orcRefreshFinalPrice()
+  // já aplica — nunca mais soma taxa, e nunca mais ignora o desconto
+  // condicional (um achado separado que a correção anterior teria
+  // introduzido se só trocasse o motor sem replicar esse pré-cálculo).
   var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
-  // SPRINT PRÉ-GO-LIVE, Bloco F — achado real (encontrado escrevendo o
-  // teste de regressão do "Valor a Receber"): esta linha de parcelamento
-  // só é mostrada quando o método selecionado é Cartão/Link
-  // (orcSimParcelasRow só aparece nesses casos — ver orcAtualizarIconePgto)
-  // — mas continuava aplicando o desconto PIX (cond.pxOn) mesmo assim,
-  // divergindo do "Valor a Receber" (que já não aplica PIX fora do método
-  // PIX). PIX e parcelamento no cartão são condições mutuamente
-  // exclusivas: nunca soma desconto de PIX aqui.
-  var motor = orcMotorPagamento(base, Object.assign({}, cond, {pxOn:false, parcAtivo:true, nParc:n}));
+  var baseAposCond = (cond.dcOn && cond.dcPct>0) ? base*(1-cond.dcPct/100) : base;
+  var motorCom = orcMotorComercial(baseAposCond, {});
+  var c = motorCom.cartao[n] || motorCom.cartao[3];
   disp.style.display='';
-  disp.textContent = n+'× de R$ '+motor.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' (total: R$ '+motor.totalComTaxa.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')';
+  disp.textContent = n+'× de R$ '+c.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' (total: R$ '+(c.totalCents/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')';
   if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber();
 }
 
@@ -11306,14 +11299,16 @@ function orcPgtoAtualizarValorReceber() {
   var v = window._orcCalc; if(!v) return;
   var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
   var metodo = (document.getElementById('orcSimMetodo')||{}).value||'pix';
-  var parcSel = document.getElementById('orcSimParcelas');
-  var nParc = (metodo==='cartao'||metodo==='link') && parcSel ? (parseInt(parcSel.value)||1) : 1;
-  // O desconto PIX (pxOn/pxPct) só se aplica quando o método SELECIONADO
-  // é de fato PIX — nunca soma o desconto de PIX ao escolher Cartão/
-  // Dinheiro, mesmo que o toggle de desconto PIX do orçamento esteja ligado.
-  var motorCond = Object.assign({}, cond, { pxOn: metodo==='pix' ? cond.pxOn : false, parcAtivo: nParc>1, nParc: nParc });
-  var motor = orcMotorPagamento(v.finalPrice||0, motorCond);
-  var valor = nParc>1 ? motor.totalComTaxa : motor.afterPix;
+  // SPRINT PRÉ-GO-LIVE, Bloco E/F (gap encontrado no preview local pré-
+  // deploy) — mesmo achado de orcCalcParcelaDisplay(): esta função ainda
+  // chamava o motor legado orcMotorPagamento, que soma a taxa real da
+  // operadora em 2x/3x. Corrigido para orcMotorComercial — cartão em até 3x
+  // é sempre igual ao valor à vista (sem juros); só o PIX aplica desconto,
+  // e só quando PIX é de fato o método selecionado (nunca soma desconto de
+  // PIX ao escolher Cartão/Dinheiro/Link).
+  var baseAposCond = (cond.dcOn && cond.dcPct>0) ? (v.finalPrice||0)*(1-cond.dcPct/100) : (v.finalPrice||0);
+  var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
+  var valor = (metodo==='pix' && cond.pxOn) ? (motorCom.pix.totalCents/100) : (motorCom.baseCents/100);
   var vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valor);
   var sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valor);
 }
