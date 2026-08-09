@@ -6089,6 +6089,19 @@ function _authFirebaseError(code){
             <div id="planProdOperacoesBody" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
+          <!-- RODADA 6, seção 7 — Consumíveis por receita (opcional) -->
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)">🧴 Consumíveis (opcional)</div>
+            </div>
+            <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
+              💡 Define se cada consumível do painel "Custos" do orçamento é sempre usado, nunca usado, ou fica a critério do
+              vendedor neste produto. "Obrigatória" só força automaticamente Adesivo/Adh. Branco (sim/não); os demais ficam
+              só documentados aqui.
+            </div>
+            <div id="planProdConsumiveisBody" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+
           <!-- RODADA 6, seção 6 — Máquinas relacionadas à receita (opcional) -->
           <div>
             <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🖨️ Máquinas relacionadas (opcional)</div>
@@ -9057,6 +9070,45 @@ function receitaMaquinasEfetivas(produto, maquinasDisponiveis) {
 function osMaquinasNecessarias(produto, maquinasDisponiveis) {
   return receitaMaquinasEfetivas(produto, maquinasDisponiveis).map(function (m) { return m.nome; });
 }
+
+// RODADA 6, seção 7 — consumíveis reais (Adesivo/Adh. Branco/Impressão/
+// Spray/Extra) por receita, cada um Obrigatória/Opcional/Não-aplicável.
+// Mesmo catálogo REAL já usado no painel "🧴 Consumíveis" do orçamento
+// (m_adh/m_adhb/m_imp/m_spray/m_extra, seção 14 — Parte 1.1) — nunca
+// reintroduz o "Adesivo/Vinil" fictício que já foi removido dos Extras.
+var CONSUMIVEIS_PADRAO = [
+  { chave: 'adh', label: 'Adesivo' },
+  { chave: 'adhb', label: 'Adh. Branco' },
+  { chave: 'imp', label: 'Impressão' },
+  { chave: 'spray', label: 'Spray' },
+  { chave: 'extra', label: 'Extra' },
+];
+function receitaConsumiveisEfetivos(produto) {
+  var config = (produto && produto.consumiveis) || {};
+  return CONSUMIVEIS_PADRAO.map(function (c) {
+    return { chave: c.chave, label: c.label, status: config[c.chave] || null };
+  });
+}
+function receitaConsumiveisValidar(consumiveis) {
+  var chavesValidas = CONSUMIVEIS_PADRAO.map(function (c) { return c.chave; });
+  for (var chave in (consumiveis || {})) {
+    if (chavesValidas.indexOf(chave) < 0) return { ok: false, erro: 'consumível desconhecido: "' + chave + '"' };
+    if (OPERACAO_STATUS_VALIDOS.indexOf(consumiveis[chave]) < 0) return { ok: false, erro: 'status inválido para "' + chave + '"' };
+  }
+  return { ok: true };
+}
+// Só se aplica aos consumíveis sim/não (Adesivo/Adh. Branco — os únicos
+// com um valor binário natural para forçar); Impressão/Spray/Extra são
+// campos R$ livres, sem um "obrigatório" natural, e ficam só documentados
+// no modelo acima. Devolve 'sim'/'nao' quando a receita força o consumível,
+// ou null quando é 'opcional'/não configurada (o vendedor decide).
+function orcConsumivelResolverValor(produto, chave) {
+  var cfg = receitaConsumiveisEfetivos(produto).find(function (c) { return c.chave === chave; });
+  if (!cfg || !cfg.status) return null;
+  if (cfg.status === 'obrigatoria') return 'sim';
+  if (cfg.status === 'nao_aplicavel') return 'nao';
+  return null;
+}
 // Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
 // item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
 // atual) — é isto que garante que um orçamento antigo nunca muda de
@@ -10653,7 +10705,29 @@ function orcOnProdChange(sel) {
     orcSugerirPrazo(prodNome);
     var _idx = sel.id ? sel.id.replace('oi_prod_','') : '';
     if(_idx) orcAplicarMaterialReceita(_idx, prodNome);
+    orcAplicarConsumivelReceita(prodNome);
   }
+}
+// RODADA 6, seção 7 — aplica o Adesivo/Adh. Branco obrigatório/não-aplicável
+// da receita ao painel de Consumíveis do orçamento (oc_adh/oc_adhb). Esses
+// campos são GLOBAIS ao orçamento (não por item — limitação pré-existente),
+// então só agimos quando este é o ÚNICO item da lista: com múltiplos itens
+// de receitas diferentes não há uma resposta correta única, e forçar o
+// valor a cada troca de produto sobrescreveria silenciosamente a escolha
+// já feita para outro item.
+function orcAplicarConsumivelReceita(prodNome) {
+  var totalItens = document.querySelectorAll('#orcItemBody tr[data-idx]').length;
+  if(totalItens !== 1) return;
+  var receita = (planProdLoad()||[]).find(function(p){ return p.nome===prodNome; });
+  if(!receita) return;
+  var mudou = false;
+  ['adh','adhb'].forEach(function(chave){
+    var valor = orcConsumivelResolverValor(receita, chave);
+    if(valor===null) return;
+    var el = document.getElementById(chave==='adh' ? 'oc_adh' : 'oc_adhb');
+    if(el && el.value!==valor) { el.value = valor; mudou = true; }
+  });
+  if(mudou && typeof orcRecalc==='function') orcRecalc();
 }
 
 function orcCalcDataEntrega() {
@@ -28908,6 +28982,7 @@ function planProdNovoOpen() {
   planProdRenderPecas();
   planProdRenderCampos();
   planProdRenderOperacoes(null);
+  planProdRenderConsumiveis(null);
   planProdRenderMaquinas(null);
   planProdRenderMaterial(null, []);
   planProdPrevCalc();
@@ -28929,6 +29004,7 @@ function planProdEditar(id) {
   planProdRenderPecas();
   planProdRenderCampos();
   planProdRenderOperacoes(p.operacoes||null);
+  planProdRenderConsumiveis(p.consumiveis||null);
   planProdRenderMaquinas(p.maquinasRelacionadas||[]);
   planProdRenderMaterial(p.materialPadrao||null, p.materiaisPermitidos||[]);
   planProdPrevCalc();
@@ -29157,6 +29233,35 @@ function planProdLerMaquinas() {
   return selecionadas;
 }
 
+// RODADA 6, seção 7 — renderiza um select por consumível padrão (Adesivo/
+// Adh. Branco/Impressão/Spray/Extra), mesmo padrão visual/contrato de
+// planProdRenderOperacoes().
+function planProdRenderConsumiveis(consumiveisSalvos) {
+  var wrap = document.getElementById('planProdConsumiveisBody');
+  if(!wrap) return;
+  var config = consumiveisSalvos || {};
+  wrap.innerHTML = CONSUMIVEIS_PADRAO.map(function(c){
+    var atual = config[c.chave] || '';
+    function optHtml(valor, label) { return '<option value="'+valor+'"'+(atual===valor?' selected':'')+'>'+label+'</option>'; }
+    return '<div style="display:flex;align-items:center;gap:10px">'
+      + '<span style="min-width:90px;font-size:12px;font-weight:600;color:var(--text)">'+cfgEsc(c.label)+'</span>'
+      + '<select data-consumivel-chave="'+c.chave+'" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">'
+      + optHtml('', '— usar padrão do sistema —')
+      + optHtml('obrigatoria', 'Obrigatória')
+      + optHtml('opcional', 'Opcional')
+      + optHtml('nao_aplicavel', 'Não-aplicável')
+      + '</select></div>';
+  }).join('');
+}
+function planProdLerConsumiveis() {
+  var wrap = document.getElementById('planProdConsumiveisBody');
+  var consumiveis = {};
+  if(wrap) wrap.querySelectorAll('[data-consumivel-chave]').forEach(function(sel){
+    if(sel.value) consumiveis[sel.dataset.consumivelChave] = sel.value;
+  });
+  return consumiveis;
+}
+
 function planProdPrevCalc() {
   planProdReadPecas();
   var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
@@ -29218,6 +29323,10 @@ function planProdSalvar() {
   var _operacoes = planProdLerOperacoes();
   var _opCheck = receitaOperacoesValidar(_operacoes);
   if(!_opCheck.ok) { showToast('Operação inválida: '+_opCheck.erro,'err'); return; }
+  // RODADA 6, seção 7 — mesmo check defensivo, mesmo motivo da seção 5.
+  var _consumiveis = planProdLerConsumiveis();
+  var _consCheck = receitaConsumiveisValidar(_consumiveis);
+  if(!_consCheck.ok) { showToast('Consumível inválido: '+_consCheck.erro,'err'); return; }
   var _maquinasRelacionadas = planProdLerMaquinas();
 
   var prods = planProdLoad();
@@ -29243,6 +29352,7 @@ function planProdSalvar() {
     materialPadrao: _material.materialPadrao,
     materiaisPermitidos: _material.materiaisPermitidos,
     operacoes: _operacoes,
+    consumiveis: _consumiveis,
     maquinasRelacionadas: _maquinasRelacionadas,
     planificacoes: _planifs,
     svg: _firstSvg || undefined
