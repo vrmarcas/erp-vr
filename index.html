@@ -10071,20 +10071,38 @@ function orcRecalc() {
   const totalCost = matTotal + extras + itemExtrasTotal;
 
   // PASS 2: colunas do item mostram APENAS custo de material (extras só no sidebar)
+  // SPRINT PRÉ-GO-LIVE, Bloco D — cada item pode ter um ajuste comercial
+  // (R$/% acréscimo/desconto, ver orcItemAplicarAjuste/ORC_ITEM_AJUSTES) já
+  // aplicado ao PREÇO DE VENDA da linha (nunca ao custo — o "Custo Total"
+  // do Step 3 continua refletindo custo real, sem o ajuste comercial).
+  // itemAjusteDeltaCents acumula a diferença (venda ajustada − venda
+  // original) de todos os itens, em centavos, para entrar no preço final
+  // ANTES do desconto/acréscimo GLOBAL — ordem canônica do Bloco D: preço
+  // original do item → ajuste do item → soma dos itens → ajuste global.
+  var itemAjusteDeltaCents = 0;
   itemRows.forEach(function(item) {
     if(item.matCost > 0 && factor > 0) {
       var uc = item.matCost / item.qty;          // custo unitário só de material
-      var us = uc / factor;                       // preço unitário de venda (markup s/ material)
-      var ts = item.matCost / factor;             // total de venda (markup s/ material)
+      var ts = item.matCost / factor;             // total de venda da linha, ANTES do ajuste do item (markup s/ material)
+      var precoOriginalItemCents = Math.round(ts * 100);
+      var _aj = (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[item.idx]) || {};
+      var _ajRes = (typeof orcItemAplicarAjuste==='function')
+        ? orcItemAplicarAjuste(precoOriginalItemCents, _aj.operacao, _aj.tipo, _aj.valor)
+        : { ajusteCents: 0, precoFinalItemCents: precoOriginalItemCents };
+      itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
+      var tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item
+      var usFinal = tsFinal / item.qty;                 // preço unitário de venda, já com o ajuste do item
+      var row = document.getElementById('oir_'+item.idx);
+      if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
       var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
-      var eu=document.getElementById('oi_unit_'+item.idx);  if(eu) eu.textContent='R$'+us.toFixed(2).replace('.',',');
-      var et=document.getElementById('oi_tot_'+item.idx);   if(et) et.textContent='R$'+ts.toFixed(2).replace('.',',');
+      var eu=document.getElementById('oi_unit_'+item.idx);  if(eu) eu.textContent='R$'+usFinal.toFixed(2).replace('.',',');
+      var et=document.getElementById('oi_tot_'+item.idx);   if(et) et.textContent='R$'+tsFinal.toFixed(2).replace('.',',');
     }
   });
 
   // preço final
   let finalPrice = 0;
-  if (factor>0 && totalCost>0) finalPrice = (totalCost/factor) * (1-descPct) - descRS;
+  if (factor>0 && totalCost>0) finalPrice = ((totalCost/factor) + (itemAjusteDeltaCents/100)) * (1-descPct) - descRS;
   // Acréscimo
   var _acresTipo=(document.getElementById('orcAcresTipo')?.value)||'pct';
   var _acresVal=parseFloat(document.getElementById('orcAcres')?.value)||0;
@@ -10297,13 +10315,21 @@ function orcVitreRenderLista() {
 
 // Per-item extras store
 var ORC_ITEM_EXTRAS = {};
+// SPRINT PRÉ-GO-LIVE, Bloco D — ajuste comercial por item (R$/%
+// acréscimo/desconto). Mesmo padrão de ciclo de vida do ORC_ITEM_EXTRAS
+// acima: chave = índice da linha (ri), reset em "Novo Orçamento", gravado
+// no snapshot do item ao salvar, restaurado ao reabrir. Formato de cada
+// entrada: { operacao: 'acrescimo'|'desconto'|null, tipo: 'fixo'|'percentual', valor: number }.
+var ORC_ITEM_AJUSTES = {};
 
 function orcItemExtras(ri) {
   window._extrasRiAtual = ri; // usado por orcExtrasAutoLaser
   var ex   = ORC_ITEM_EXTRAS[ri] || {};
+  var aj   = ORC_ITEM_AJUSTES[ri] || {}; // Bloco D — ajuste comercial deste item
   // Snapshot para permitir descartar alterações não salvas ao clicar Cancelar/×
   window._extrasSnapshotRi = ri;
   window._extrasSnapshot = JSON.parse(JSON.stringify(ex));
+  window._ajusteSnapshot = JSON.parse(JSON.stringify(aj));
   window._extrasSalvo = false;
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
@@ -10377,6 +10403,27 @@ function orcItemExtras(ri) {
   +'<input type="number" id="exOutros" value="'+(ex.outros||0)+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'"></div>'
   +'<input type="text" id="exDesc" value="'+(ex.descricao||'')+'" placeholder="Descrição opcional..." style="width:100%;margin-top:6px;padding:6px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;background:var(--bg);color:var(--text)">'
   +'<div id="exPreview" style="margin-top:5px;font-size:11px;color:var(--brand-mid);font-weight:700;min-height:14px"></div>'
+  +'</div>'
+
+  // SPRINT PRÉ-GO-LIVE, Bloco D — Ajuste Comercial deste item (R$/%
+  // acréscimo/desconto). Interno: nunca aparece como linha separada em
+  // PDF/WhatsApp — dobra dentro do preço final do item (oi_unit_/oi_tot_
+  // já mostram o valor ajustado, computado por orcRecalc()).
+  +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💲 Ajuste Comercial deste Item</div>'
+  +'<div style="display:flex;gap:5px;margin-bottom:6px">'
+  +'<select id="exAjusteOp" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';flex:1">'
+  +'<option value=""'+(!aj.operacao?' selected':'')+'>Sem ajuste</option>'
+  +'<option value="acrescimo"'+(aj.operacao==='acrescimo'?' selected':'')+'>Acréscimo</option>'
+  +'<option value="desconto"'+(aj.operacao==='desconto'?' selected':'')+'>Desconto</option>'
+  +'</select>'
+  +'<select id="exAjusteTipo" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';width:56px">'
+  +'<option value="fixo"'+((aj.tipo||'fixo')==='fixo'?' selected':'')+'>R$</option>'
+  +'<option value="percentual"'+(aj.tipo==='percentual'?' selected':'')+'>%</option>'
+  +'</select>'
+  +'<input type="number" id="exAjusteValor" value="'+(aj.valor||'')+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+';width:64px" placeholder="0,00">'
+  +'</div>'
+  +'<div id="exAjustePreview" style="font-size:11px;color:var(--brand-mid);font-weight:700;min-height:14px"></div>'
   +'</div>'
 
   // "Parâmetros da Ordem" (Desconto/Acréscimo/Montagem/Deslocamento)
@@ -10681,6 +10728,9 @@ function orcItemExtrasFechar() {
   // ao vivo por orcItemExtraPreview() e restaura o valor salvo anteriormente.
   if(!window._extrasSalvo && window._extrasSnapshotRi!=null){
     ORC_ITEM_EXTRAS[window._extrasSnapshotRi] = window._extrasSnapshot;
+    // Bloco D — mesmo descarte para o ajuste comercial do item.
+    if(window._ajusteSnapshot!=null && (window._ajusteSnapshot.operacao||window._ajusteSnapshot.valor)) ORC_ITEM_AJUSTES[window._extrasSnapshotRi] = window._ajusteSnapshot;
+    else delete ORC_ITEM_AJUSTES[window._extrasSnapshotRi];
     if(typeof orcRecalc==='function') orcRecalc();
   }
   window._extrasSnapshotRi = null;
@@ -10713,6 +10763,22 @@ function orcItemExtraPreview(ri){
     outros: outVal,
     descricao: (document.getElementById('exDesc')||{}).value||''
   });
+
+  // SPRINT PRÉ-GO-LIVE, Bloco D — ajuste comercial do item, mesmo padrão
+  // de recálculo em tempo real (sem esperar "Salvar").
+  var ajOp  = (document.getElementById('exAjusteOp')||{}).value||'';
+  var ajTipo= (document.getElementById('exAjusteTipo')||{}).value||'fixo';
+  var ajVal = parseFloat((document.getElementById('exAjusteValor')||{}).value)||0;
+  if(ajOp) ORC_ITEM_AJUSTES[ri] = { operacao: ajOp, tipo: ajTipo, valor: ajVal };
+  else delete ORC_ITEM_AJUSTES[ri];
+  var ajPrevEl = document.getElementById('exAjustePreview');
+  if(ajPrevEl){
+    var precoOrigCents = parseFloat(row && row.dataset.precoOriginalItemCents)||0;
+    if(ajOp && precoOrigCents>0 && typeof orcItemAplicarAjuste==='function'){
+      var _r = orcItemAplicarAjuste(precoOrigCents, ajOp, ajTipo, ajVal);
+      ajPrevEl.textContent = 'Preço da linha: '+orcFmt(precoOrigCents/100)+' → '+orcFmt(_r.precoFinalItemCents/100);
+    } else ajPrevEl.textContent = '';
+  }
   if(typeof orcRecalc==='function') orcRecalc();
 }
 
@@ -10723,6 +10789,16 @@ function orcItemExtrasSalvar(ri){
     outros:     parseFloat((document.getElementById('exOutros')||{}).value)||0,
     descricao:  (document.getElementById('exDesc')||{}).value||''
   };
+  // Bloco D — finaliza o ajuste comercial do item (mesmo valor já
+  // aplicado ao vivo por orcItemExtraPreview(); "Salvar" só confirma).
+  var _ajOp = (document.getElementById('exAjusteOp')||{}).value||'';
+  if(_ajOp){
+    ORC_ITEM_AJUSTES[ri] = {
+      operacao: _ajOp,
+      tipo: (document.getElementById('exAjusteTipo')||{}).value||'fixo',
+      valor: parseFloat((document.getElementById('exAjusteValor')||{}).value)||0
+    };
+  } else delete ORC_ITEM_AJUSTES[ri];
   // Escrever valores de máquinas + consumíveis de volta nos inputs do
   // Step 3 — Desconto/Acréscimo/Montagem/Deslocamento NÃO fazem mais
   // parte deste modal (Parte 1.3): são globais do orçamento, editados só
@@ -19837,6 +19913,7 @@ function orcResetFormularioVR(){
   if(tbody) tbody.innerHTML='';
   orcItemCount=0;
   if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
+  if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D — novo pedido nunca herda ajuste comercial do anterior
   // RODADA 6, seção 10 — Híbrido VR+Vitre: novo pedido nunca herda itens
   // Vitre do pedido anterior.
   _orcVitreItensPedido = [];
@@ -22460,7 +22537,10 @@ async function _orcSalvarOrcamentoImpl() {
       recipeVersion: row.dataset.recipeVersion ? parseInt(row.dataset.recipeVersion,10) : null,
       recipeSnapshot: _recipeSnapshotSalvo,
       camposExtras: _camposExtrasSalvos || null,
-      extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null
+      extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null,
+      // SPRINT PRÉ-GO-LIVE, Bloco D — snapshot do ajuste comercial do
+      // item; reabrir o orçamento restaura exatamente (ver orcEnvEditar).
+      ajuste: (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_AJUSTES[ri])) : null
     });
   });
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
@@ -23129,6 +23209,7 @@ function orcEnvEditar(id) {
       if(tbody) tbody.innerHTML='';
       orcItemCount=0;
       if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
+      if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D
       o.itens.forEach(function(it, idxOriginal){
         // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre
         // salvos no mesmo itens[] não são linhas VR — voltam para o
@@ -23165,6 +23246,8 @@ function orcEnvEditar(id) {
           if(typeof orcMatChanged==='function') orcMatChanged(ri);
         }
         if(it.extras && typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS[ri]=JSON.parse(JSON.stringify(it.extras));
+        // SPRINT PRÉ-GO-LIVE, Bloco D — reabertura fiel do ajuste comercial do item.
+        if(it.ajuste && typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES[ri]=JSON.parse(JSON.stringify(it.ajuste));
         // RODADA 6, seção 11/12 — reabertura fiel: restaura planArea/peças/
         // recipeSnapshot EXATAMENTE como foram salvos (nunca busca a receita
         // vigente de novo aqui — ver orcItemVRRestaurarDados). Fecha o bug
