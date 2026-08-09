@@ -5395,6 +5395,7 @@ function _authFirebaseError(code){
       <div class="rel-tab-bar">
         <button class="rel-tab-btn on" id="relTabBtnCaixa" onclick="relTab('caixa',this)">🏧 Caixa Diário</button>
         <button class="rel-tab-btn" id="relTabBtnMensal" onclick="relTab('mensal',this)">📅 Relatório Mensal</button>
+        <button class="rel-tab-btn" id="relTabBtnAnual" onclick="relTab('anual',this)">📆 Relatório Anual</button>
         <button class="rel-tab-btn" id="relTabBtnDRE" onclick="relTab('dre',this)">📋 DRE</button>
         <button class="rel-tab-btn" id="relTabBtnContas" onclick="relTab('contas',this)">📌 Contas Pagas</button>
         <button class="rel-tab-btn" id="relTabBtnNF" onclick="relTab('nf',this)">🧾 Relatório Fiscal</button>
@@ -5449,6 +5450,19 @@ function _authFirebaseError(code){
         </div>
         <div id="relMensalConteudo"></div>
       </div><!-- /relPgMensal -->
+
+      <!-- ── Relatório Anual (SPRINT PRÉ-GO-LIVE, Bloco P2/P3) ───────── -->
+      <div id="relPgAnual" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="fg" style="margin:0">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px">Ano</label>
+            <select id="relAnualAno" onchange="relAnual()" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <option value="2025">2025</option><option value="2026" selected>2026</option><option value="2027">2027</option>
+            </select>
+          </div>
+        </div>
+        <div id="relAnualConteudo"></div>
+      </div><!-- /relPgAnual -->
 
       <!-- ── DRE ───────────────────────────────────────────────────── -->
       <div id="relPgDRE" style="display:none">
@@ -17214,7 +17228,9 @@ function relImprimir() {
 var _relActiveTab = 'caixa';
 function relTab(t, el) {
   _relActiveTab = t;
-  ['Caixa','Mensal','DRE','Contas','NF','Historico'].forEach(function(k){
+  // SPRINT PRÉ-GO-LIVE, Bloco P2/P3 — nova aba "Anual" adicionada à mesma
+  // lista de abas já existente (Caixa/Mensal/DRE/Contas/Fiscal/Histórico).
+  ['Caixa','Mensal','Anual','DRE','Contas','NF','Historico'].forEach(function(k){
     var btn=document.getElementById('relTabBtn'+k);
     var pg =document.getElementById('relPg'+k);
     if(btn) btn.classList.toggle('on', k.toLowerCase()===t);
@@ -17225,6 +17241,7 @@ function relTab(t, el) {
   setTimeout(function(){
     if(_rt==='caixa')     relCaixaDiario();
     if(_rt==='mensal')    relMensal();
+    if(_rt==='anual')     relAnual();
     if(_rt==='dre')       relatoriosRender();
     if(_rt==='contas')    relContasPagas();
     if(_rt==='nf')        relFiscalRender();
@@ -17315,7 +17332,7 @@ function relSetMesAtualUmaVez() {
   // ano no próprio select (nunca força um value inexistente, que o
   // navegador silenciosamente ignora deixando o select no primeiro item).
   var anoAtual = String(new Date().getFullYear());
-  ['relMensalAno','relContasAno'].forEach(function(id){
+  ['relMensalAno','relContasAno','relAnualAno'].forEach(function(id){
     var elSel=document.getElementById(id);
     if(elSel && elSel.querySelector('option[value="'+anoAtual+'"]')) elSel.value=anoAtual;
   });
@@ -17920,6 +17937,88 @@ function relContasPagas() {
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody>'
     +'<tfoot><tr><td colspan="5">Total Pago em '+mesesNome[mes]+'</td><td style="text-align:right;color:#DC2626">'+f(total)+'</td></tr></tfoot>'
+    +'</table>';
+}
+
+// ── RELATÓRIO ANUAL (SPRINT PRÉ-GO-LIVE, Bloco P2/P3) ──────────────────────────
+// Achado real do usuário: "Nunca misturar VENDA com RECEBIMENTO" — as duas
+// colunas usam fontes e datas estritamente distintas:
+//   VENDAS       = orcGetEnviados() com status==='aprovado', pela data em
+//                  que o orçamento foi aprovado/salvo (o.dataSalvo).
+//   RECEBIMENTOS = FIN_CR com status==='recebido', pela data em que o
+//                  dinheiro efetivamente entrou (r.dataRecebimento) — igual
+//                  à fonte já usada em relMensal()/relCaixaDiario().
+//   SAÍDAS       = FIN_CP com status==='pago', por r.dataPagamento — mesma
+//                  fonte já usada em relMensal()/relContasPagas().
+function relAnual() {
+  var el=document.getElementById('relAnualConteudo'); if(!el) return;
+  var ano=parseInt((document.getElementById('relAnualAno')||{}).value||String(new Date().getFullYear()));
+  var mesesNome=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var f=finFmt;
+
+  var envList = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
+  var allCR=FIN_CR, allCP=FIN_CP;
+
+  var porMes=[];
+  for(var m=1;m<=12;m++) porMes.push({vendas:0,recebimentos:0,saidas:0});
+
+  envList.forEach(function(o){
+    if(o.status!=='aprovado') return;
+    var d = (typeof orcEnvParseDataSalvo==='function') ? orcEnvParseDataSalvo(o.dataSalvo) : null;
+    if(!d || d.getFullYear()!==ano) return;
+    porMes[d.getMonth()].vendas += (o.valorFinal||o.valorBase||0);
+  });
+  allCR.forEach(function(r){
+    if(r.status!=='recebido'||!r.dataRecebimento) return;
+    var p=r.dataRecebimento.split('/'); if(p.length!==3) return;
+    if(parseInt(p[2])!==ano) return;
+    porMes[parseInt(p[1])-1].recebimentos += r.valor;
+  });
+  allCP.forEach(function(c){
+    if(c.status!=='pago'||!c.dataPagamento) return;
+    var p=c.dataPagamento.split('/'); if(p.length!==3) return;
+    if(parseInt(p[2])!==ano) return;
+    porMes[parseInt(p[1])-1].saidas += c.valor;
+  });
+
+  var totVendas=0, totReceb=0, totSaidas=0;
+  var rows=porMes.map(function(mv, i){
+    if(mv.vendas===0 && mv.recebimentos===0 && mv.saidas===0) return '';
+    totVendas+=mv.vendas; totReceb+=mv.recebimentos; totSaidas+=mv.saidas;
+    var saldoMes=mv.recebimentos-mv.saidas;
+    return '<tr>'
+      +'<td style="font-weight:700">'+mesesNome[i+1]+'</td>'
+      +'<td style="color:#2563EB">'+f(mv.vendas)+'</td>'
+      +'<td style="color:#059669">'+f(mv.recebimentos)+'</td>'
+      +'<td style="color:#DC2626">'+f(mv.saidas)+'</td>'
+      +'<td style="font-weight:800;color:'+(saldoMes>=0?'#059669':'#DC2626')+'">'+f(saldoMes)+'</td>'
+      +'</tr>';
+  }).join('');
+
+  if(!rows){
+    el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">Nenhuma movimentação lançada em '+ano+'</div>';
+    return;
+  }
+
+  var saldoAnual=totReceb-totSaidas;
+  el.innerHTML='<div style="margin-bottom:12px;font-size:13px;font-weight:800">Relatório Anual — '+ano+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Vendas (aprovadas)</div><div class="caixa-card-val" style="color:#2563EB">'+f(totVendas)+'</div></div>'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Recebimentos</div><div class="caixa-card-val caixa-saldo-pos">'+f(totReceb)+'</div></div>'
+    +'<div class="caixa-card"><div class="caixa-card-lbl">Total Saídas</div><div class="caixa-card-val caixa-saldo-neg">'+f(totSaidas)+'</div></div>'
+    +'<div class="caixa-card" style="border-color:'+(saldoAnual>=0?'#10B981':'#EF4444')+'"><div class="caixa-card-lbl">Saldo Anual</div><div class="caixa-card-val '+(saldoAnual>=0?'caixa-saldo-pos':'caixa-saldo-neg')+'">'+f(saldoAnual)+'</div></div>'
+    +'</div>'
+    +'<table class="rel-table"><thead><tr>'
+    +'<th>Mês</th><th>Vendas</th><th>Recebimentos</th><th>Saídas</th><th>Saldo do Mês</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'<tfoot><tr>'
+    +'<td style="font-weight:800">TOTAL ANUAL</td>'
+    +'<td style="color:#2563EB;font-weight:800">'+f(totVendas)+'</td>'
+    +'<td style="color:#059669;font-weight:800">'+f(totReceb)+'</td>'
+    +'<td style="color:#DC2626;font-weight:800">'+f(totSaidas)+'</td>'
+    +'<td style="font-weight:900;color:'+(saldoAnual>=0?'#059669':'#DC2626')+'">'+f(saldoAnual)+'</td>'
+    +'</tr></tfoot>'
     +'</table>';
 }
 
