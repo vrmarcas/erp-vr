@@ -11727,9 +11727,6 @@ function kbOpen(id) {
   const _mat     = os.material || (os.itens && os.itens[0] ? (os.itens[0].matLabel || os.itens[0].mat || '') : '') || '—';
   const _med     = os.medidas  || (os.itens && os.itens[0] && os.itens[0].larg ? os.itens[0].larg+'×'+os.itens[0].alt+'cm' : '') || (os.esp ? os.esp+'mm' : '') || '—';
   const _qty     = os.qty      || (os.itens ? os.itens.reduce((s,i)=>s+(i.qty||1),0) : 1) || 1;
-  const _valorFmt = typeof os.valor === 'number'
-    ? 'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
-    : (os.valor || '—');
   const _late = _entrega !== '—' && _entrega <= '10/07';
   document.getElementById('kbOsTit').textContent = _titulo;
   // RODADA 6, seção 6 — máquinas relacionadas à receita, exibidas só quando
@@ -11743,7 +11740,6 @@ function kbOpen(id) {
     <div class="kb-os-field"><div class="kb-os-field-lbl">Material</div><div class="kb-os-field-val">${_mat}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Medidas · Qtd</div><div class="kb-os-field-val">${_med} · ${_qty}un</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Entrega</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
-    <div class="kb-os-field"><div class="kb-os-field-lbl">Valor Total</div><div class="kb-os-field-val" style="color:#059669;font-size:14px;font-weight:700">${_valorFmt}</div></div>
     ${_maquinasField}
   `;
   kbRenderItensDetalhe(os);
@@ -12086,7 +12082,12 @@ function kbFornOnSelect() {
 function _kbFornOsMsgText() {
   var os = KB_OS[_kbOsId]; if(!os) return '';
   var link = os.fileLink||'';
-  var val  = os.valor ? (typeof os.valor==='number'?'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):String(os.valor)) : '';
+  // SPRINT PRÉ-GO-LIVE, Bloco J (achado real: "VALOR TOTAL" vazava no
+  // detalhe do Kanban) — esta mensagem para FORNECEDOR (externo à
+  // empresa) incluía o valor de venda ao cliente final; nunca deveria
+  // sair daqui, muito menos para fora. Kanban/Produção é 100% operacional
+  // — nunca expõe valor de venda/custo/margem, nem em tela nem em
+  // mensagens geradas a partir dela.
   var msg  = 'Ola! Segue o pedido de producao referente a OS #'+os.num;
   if(os.titulo)   msg += ' - '+os.titulo;
   msg += '.';
@@ -12094,7 +12095,6 @@ function _kbFornOsMsgText() {
   if(os.material) msg += '\nMaterial: '+os.material;
   if(os.medidas)  msg += '\nMedidas: '+os.medidas;
   if(os.qty)      msg += '\nQuantidade: '+os.qty+' un';
-  if(val)         msg += '\nValor: '+val;
   if(os.entrega)  msg += '\nPrazo de entrega: '+os.entrega;
   if(link)        msg += '\n\nArquivo / Arte: '+link;
   msg += '\n\nAgradecemos a parceria!';
