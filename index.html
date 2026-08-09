@@ -6079,6 +6079,16 @@ function _authFirebaseError(code){
             <div id="planProdCamposErro" style="color:#DC2626;font-size:11px;padding-top:4px;display:none"></div>
           </div>
 
+          <!-- RODADA 6, seção 5 — Operações de produção (opcional) -->
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🛠️ Operações de Produção (opcional)</div>
+            <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
+              💡 Define quais etapas entram no checklist da OS para este produto. Deixe "usar padrão do sistema" para manter o
+              comportamento atual (Corte/Gravação/Acabamento/Embalagem sempre; Montagem só se o orçamento cobrar montagem).
+            </div>
+            <div id="planProdOperacoesBody" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+
           <!-- RODADA 6, seção 4 — Material vinculado à receita (opcional) -->
           <div>
             <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🎨 Material vinculado à receita (opcional)</div>
@@ -8973,6 +8983,49 @@ function orcMaterialSelecaoResolver(receita, valorAnterior, matKeysDisponiveis) 
   var padraoValido = padrao && opcoesFiltradas.indexOf(padrao) >= 0;
   var valor = anteriorValido ? valorAnterior : (padraoValido ? padrao : (opcoesFiltradas[0] || valorAnterior));
   return { opcoes: opcoesFiltradas, valor: valor, mudou: valor !== valorAnterior };
+}
+
+// RODADA 6, seção 5 — operações padrão (Corte/Gravação/Montagem/
+// Acabamento/Embalagem) por receita, cada uma Obrigatória/Opcional/
+// Não-aplicável, alimentando o checklist da OS. Aditivo: quando a receita
+// não configura `operacoes`, o checklist gerado é IDÊNTICO ao legado
+// (Corte/Gravação/Acabamento/Embalagem sempre + Montagem só quando o
+// orçamento cobrou montagem) — nunca quebra pedidos/receitas existentes.
+var OPERACOES_PADRAO = [
+  { chave: 'corte', label: 'Corte' },
+  { chave: 'gravacao', label: 'Gravação' },
+  { chave: 'montagem', label: 'Montagem' },
+  { chave: 'acabamento', label: 'Acabamento' },
+  { chave: 'embalagem', label: 'Embalagem' },
+];
+var OPERACAO_STATUS_VALIDOS = ['obrigatoria', 'opcional', 'nao_aplicavel'];
+// Mescla o catálogo fixo de operações com a configuração da receita —
+// status=null significa "receita não configurou esta operação" (o
+// chamador decide o comportamento legado, nunca aqui).
+function receitaOperacoesEfetivas(produto) {
+  var config = (produto && produto.operacoes) || {};
+  return OPERACOES_PADRAO.map(function (op) {
+    return { chave: op.chave, label: op.label, status: config[op.chave] || null };
+  });
+}
+function receitaOperacoesValidar(operacoes) {
+  var chavesValidas = OPERACOES_PADRAO.map(function (o) { return o.chave; });
+  for (var chave in (operacoes || {})) {
+    if (chavesValidas.indexOf(chave) < 0) return { ok: false, erro: 'operação desconhecida: "' + chave + '"' };
+    if (OPERACAO_STATUS_VALIDOS.indexOf(operacoes[chave]) < 0) return { ok: false, erro: 'status inválido para "' + chave + '"' };
+  }
+  return { ok: true };
+}
+// Decide a lista de labels de operações que entram no checklist da OS —
+// usada tanto pelo caminho transacional real quanto pelo fallback local de
+// orcEnvGerarOS(). `temMontagemPaga` preserva a regra legada (Montagem só
+// aparece quando o orçamento efetivamente cobrou montagem) para receitas
+// que não configuram a operação explicitamente.
+function osChecklistDeOperacoes(produto, temMontagemPaga) {
+  return receitaOperacoesEfetivas(produto).filter(function (op) {
+    if (op.status) return op.status !== 'nao_aplicavel';
+    return op.chave === 'montagem' ? !!temMontagemPaga : true;
+  }).map(function (op) { return op.label; });
 }
 // Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
 // item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
@@ -22676,9 +22729,16 @@ function orcEnvGerarOS(){
   // personalizado com orcMontagem>0) — etapas que não se aplicam a este
   // pedido não aparecem, em vez de um checklist fixo genérico.
   var _temMontagem = !!(o.snapshotCompleto && o.snapshotCompleto.parametros && parseFloat(o.snapshotCompleto.parametros.orcMontagem) > 0);
-  var checksProducao = ['Corte','Gravação','Acabamento'];
-  if(_temMontagem) checksProducao.push('Montagem');
-  checksProducao.push('Embalagem');
+  // RODADA 6, seção 5 — quando o item principal tem uma receita cadastrada
+  // com operações configuradas (Obrigatória/Opcional/Não-aplicável), ela
+  // decide o checklist; senão osChecklistDeOperacoes() reproduz exatamente
+  // o comportamento legado acima (nunca quebra receitas/pedidos antigos).
+  var _produtoPrincipalOp = (itens[0] && itens[0].productId && typeof planProdLoad==='function')
+    ? (planProdLoad()||[]).find(function(p){ return p.id===itens[0].productId; })
+    : null;
+  var checksProducao = (typeof osChecklistDeOperacoes==='function')
+    ? osChecklistDeOperacoes(_produtoPrincipalOp, _temMontagem)
+    : (_temMontagem ? ['Corte','Gravação','Montagem','Acabamento','Embalagem'] : ['Corte','Gravação','Acabamento','Embalagem']);
   var _ckProducao = checksProducao.map(function(){ return false; });
 
   function finalizar(sucesso, dados){
@@ -28805,6 +28865,7 @@ function planProdNovoOpen() {
   _planEspReset(null, null);
   planProdRenderPecas();
   planProdRenderCampos();
+  planProdRenderOperacoes(null);
   planProdRenderMaterial(null, []);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -28824,6 +28885,7 @@ function planProdEditar(id) {
   _planEspReset(p.planificacoes||null, p.svg||null);
   planProdRenderPecas();
   planProdRenderCampos();
+  planProdRenderOperacoes(p.operacoes||null);
   planProdRenderMaterial(p.materialPadrao||null, p.materiaisPermitidos||[]);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -28997,6 +29059,37 @@ function planProdLerMaterial() {
   return { materialPadrao: materialPadrao, materiaisPermitidos: materiaisPermitidos };
 }
 
+// RODADA 6, seção 5 — renderiza um select por operação padrão (Corte/
+// Gravação/Montagem/Acabamento/Embalagem) no modal Novo/Editar Produto.
+// "— usar padrão do sistema —" grava ausência de configuração (mesmo
+// contrato de receitaOperacoesEfetivas: status=null deixa o comportamento
+// legado decidir), nunca um valor sintético.
+function planProdRenderOperacoes(operacoesSalvas) {
+  var wrap = document.getElementById('planProdOperacoesBody');
+  if(!wrap) return;
+  var config = operacoesSalvas || {};
+  wrap.innerHTML = OPERACOES_PADRAO.map(function(op){
+    var atual = config[op.chave] || '';
+    function optHtml(valor, label) { return '<option value="'+valor+'"'+(atual===valor?' selected':'')+'>'+label+'</option>'; }
+    return '<div style="display:flex;align-items:center;gap:10px">'
+      + '<span style="min-width:90px;font-size:12px;font-weight:600;color:var(--text)">'+cfgEsc(op.label)+'</span>'
+      + '<select data-operacao-chave="'+op.chave+'" style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)">'
+      + optHtml('', '— usar padrão do sistema —')
+      + optHtml('obrigatoria', 'Obrigatória')
+      + optHtml('opcional', 'Opcional')
+      + optHtml('nao_aplicavel', 'Não-aplicável')
+      + '</select></div>';
+  }).join('');
+}
+function planProdLerOperacoes() {
+  var wrap = document.getElementById('planProdOperacoesBody');
+  var operacoes = {};
+  if(wrap) wrap.querySelectorAll('[data-operacao-chave]').forEach(function(sel){
+    if(sel.value) operacoes[sel.dataset.operacaoChave] = sel.value;
+  });
+  return operacoes;
+}
+
 function planProdPrevCalc() {
   planProdReadPecas();
   var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
@@ -29052,6 +29145,12 @@ function planProdSalvar() {
   var _material = planProdLerMaterial();
   var _matCheck = receitaMaterialValidar(_material.materialPadrao, _material.materiaisPermitidos);
   if(!_matCheck.ok) { showToast('Material inválido: '+_matCheck.erro,'err'); return; }
+  // RODADA 6, seção 5 — as operações vêm de <select> com valores fixos
+  // (nunca digitados), então este check é defensivo — mantém o mesmo
+  // padrão de nunca salvar configuração inválida silenciosamente.
+  var _operacoes = planProdLerOperacoes();
+  var _opCheck = receitaOperacoesValidar(_operacoes);
+  if(!_opCheck.ok) { showToast('Operação inválida: '+_opCheck.erro,'err'); return; }
 
   var prods = planProdLoad();
   // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
@@ -29075,6 +29174,7 @@ function planProdSalvar() {
     campos: _planProdCampos.map(function(c){ return {chave:c.chave,label:c.label,tipo:c.tipo||'numero',unidade:c.unidade||'',obrigatorio:!!c.obrigatorio,min:c.min!==''?c.min:undefined,max:c.max!==''?c.max:undefined,default:c.default!==''?c.default:undefined}; }),
     materialPadrao: _material.materialPadrao,
     materiaisPermitidos: _material.materiaisPermitidos,
+    operacoes: _operacoes,
     planificacoes: _planifs,
     svg: _firstSvg || undefined
   };
