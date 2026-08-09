@@ -8405,7 +8405,17 @@ function orcStep(n) {
   }
   if (n===4) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100); }
   if (n===5) {
-    const v = window._orcCalc; if(v) { const sv = document.getElementById('orcSimValor'); if(sv) sv.value = 'R$ '+orcFmt(v.finalPrice||0); const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = 'R$ '+orcFmt(v.finalPrice||0); }
+    const v = window._orcCalc; if(v) {
+      // RODADA 6, seção 2 (achado no smoke de produção) — este valor usava
+      // v.finalPrice bruto, ignorando desconto condicional/PIX já aplicados
+      // no Resumo/PDF/WhatsApp (mesmo motor central usado pela linha de
+      // parcelamento logo abaixo). Também tinha "R$ " duplicado, já que
+      // orcFmt() já inclui o prefixo.
+      const cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
+      const valorEfetivo = orcMotorPagamento(v.finalPrice||0, cond).afterPix;
+      const sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valorEfetivo);
+      const vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valorEfetivo);
+    }
     // Sincroniza bancos com a empresa selecionada
     var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
     if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);
@@ -10764,12 +10774,17 @@ function orcUpdateSummary() {
 
 function orcCalcEntradaResto() {
   var c = window._orcCalc||{};
-  var total = c.finalPrice||0;
-  if(!total) return;
+  if(!c.finalPrice) return;
+  // RODADA 6, seção 2 (achado no smoke de produção) — mesma classe de bug
+  // do orcPgtoValorDisplay: usava c.finalPrice bruto (ignorando desconto
+  // condicional/PIX) e formatava sem maximumFractionDigits, exibindo até 3
+  // casas decimais quando finalPrice carregava resíduo de ponto flutuante.
+  var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
+  var total = orcMotorPagamento(c.finalPrice, cond).afterPix;
   var entrada = parseFloat((document.getElementById('orcEntradaValor')||{}).value)||0;
   var resto = Math.max(0, total - entrada);
   var el = document.getElementById('orcEntradaResto');
-  if(el) el.textContent = 'R$ '+resto.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  if(el) el.textContent = orcFmt(resto);
   // Corrigido 2026-08-07 — este campo de entrada alimenta só o Recibo de
   // Entrada (orcGerarReciboEntrada()); o botão final do wizard não deve
   // mais mudar de rótulo conforme ele, pois a confirmação real de

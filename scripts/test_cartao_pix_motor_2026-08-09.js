@@ -137,6 +137,69 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     /orcMotorPagamento\([^)]*parcAtivo\s*:\s*false/.test(srcSalvar), true);
 }
 
+// ── 4. orcCalcEntradaResto() — execução real, achado do smoke de produção
+// (Rodada 6, 2026-08-09): usava c.finalPrice bruto (ignorando desconto
+// condicional/PIX) e formatava sem maximumFractionDigits, o que exibia até
+// 3 casas decimais quando finalPrice carregava resíduo de ponto flutuante.
+{
+  var FN4 = ['orcFmt', 'orcMotorPagamento', 'orcLerCondicoesPagamentoDOM', 'orcCalcEntradaResto'];
+  var src4 = FN4.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN4.join(',') + '};';
+  var modPath4 = path.join(__dirname, '_cartao_pix_entrada_resto_extracted.tmp.js');
+  fs.writeFileSync(modPath4, src4);
+  delete require.cache[require.resolve(modPath4)];
+
+  global.CFG_DEFAULT = { parcelamento: [{ parcelas: 1, taxa: 0 }] };
+  global.cfgLoad = function () { return JSON.parse(JSON.stringify(global.CFG_DEFAULT)); };
+
+  var _elements4 = {};
+  function makeEl4(props) { return Object.assign({ value: '', textContent: '', checked: false, style: {} }, props || {}); }
+  global.document = { getElementById: function (id) { return _elements4[id]; } };
+
+  function resetEls4(finalPrice, entradaVal, opts) {
+    opts = opts || {};
+    global.window = { _orcCalc: { finalPrice: finalPrice } };
+    _elements4 = {
+      orcEntradaValor: makeEl4({ value: entradaVal == null ? '' : String(entradaVal) }),
+      orcEntradaResto: makeEl4({}),
+      orcDescCondToggle: makeEl4({ checked: !!opts.dcOn }),
+      orcDescCond: makeEl4({ value: String(opts.dcPct || 0) }),
+      orcPixDiscToggle: makeEl4({ checked: !!opts.pxOn }),
+      orcPixDiscPct: makeEl4({ value: String(opts.pxPct || 0) }),
+      orcParcToggle: makeEl4({ checked: false }),
+      orcParcSel: { value: '1' }
+    };
+  }
+
+  var mod4 = require(modPath4);
+
+  resetEls4(779.37, 0, { pxOn: true, pxPct: 0.99 });
+  mod4.orcCalcEntradaResto();
+  test('9. achado real (smoke de produção): "Restante na retirada" aplica o desconto PIX de 0,99% já configurado no orçamento — R$771,65, NUNCA R$779,37 (valor bruto, ignorando o PIX)',
+    _elements4.orcEntradaResto.textContent, 'R$ 771,65');
+
+  resetEls4(779.37, 0, { pxOn: true, pxPct: 0.99 });
+  mod4.orcCalcEntradaResto();
+  test('10. achado real: nunca mostra 3 casas decimais (maximumFractionDigits ausente no bug original)',
+    /,\d{2}$/.test(_elements4.orcEntradaResto.textContent), true);
+
+  resetEls4(1000, 400, {});
+  mod4.orcCalcEntradaResto();
+  test('11. sem desconto/PIX ativo: entrada de R$400 sobre total de R$1000 deixa restante de R$600,00',
+    _elements4.orcEntradaResto.textContent, 'R$ 600,00');
+}
+
+// ── 5. Regressão estrutural: bloco n===5 do orcStep() usa o motor central ─
+// (Rodada 6, achado do smoke de produção 2026-08-09) — mesma classe de bug
+// do item 4: "Valor a Receber" da tela "Confirmação de Pagamento" usava
+// v.finalPrice bruto e tinha "R$ " duplicado (orcFmt já inclui o prefixo).
+{
+  var srcStep = extractFn('orcStep');
+  test('12. "Valor a Receber" (orcPgtoValorDisplay) é calculado via orcMotorPagamento, não mais v.finalPrice bruto',
+    /orcPgtoValorDisplay[\s\S]{0,80}=\s*orcFmt\(valorEfetivo\)/.test(srcStep) && /orcMotorPagamento\(v\.finalPrice\|\|0,\s*cond\)/.test(srcStep), true);
+  test('13. nunca mais o prefixo duplicado "R$ "+orcFmt(...) (orcFmt já inclui "R$ ")',
+    /orcPgtoValorDisplay[^\n]*=\s*'R\$ '\s*\+\s*orcFmt/.test(srcStep), false);
+}
+
 console.log('\n' + '='.repeat(70));
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
 console.log('='.repeat(70) + '\n');
