@@ -23115,7 +23115,17 @@ function orcPagtoTipoSel(btn){
   if(tipo==='50-50'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal');
-    var metade=(valorTotal/2);
+    // RODADA 6 (achado no smoke de produção, 2026-08-09) — metade em ponto
+    // flutuante direto (valorTotal/2) podia cair bem em cima de ",xx5"
+    // (ex.: 771.65/2) e `.toFixed(2)` vs `.toLocaleString(...)` arredondam
+    // esse caso-limite de forma DIFERENTE por causa de imprecisão binária
+    // (771.65 não é representável exatamente) — o campo mostrava "385,82"
+    // enquanto o texto ao lado, calculado do MESMO número, mostrava
+    // "385,83". Pior: o valor do campo (não o do texto) é o que
+    // orcEnvGerarOS() de fato grava no CR/OS. Cálculo em centavos elimina
+    // a ambiguidade — mesma disciplina do motor central (orcMotorPagamento).
+    var metadeCent=Math.round(Math.round((valorTotal||0)*100)/2);
+    var metade=metadeCent/100;
     if(entEl) entEl.value=metade.toFixed(2);
     // Corrigido 2026-08-07 (Rodada 2, P0.1) — só mostrava "= 50% do
     // total", sem o valor em reais explícito, que era o pedido: "50%

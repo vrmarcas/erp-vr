@@ -200,6 +200,44 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     /orcPgtoValorDisplay[^\n]*=\s*'R\$ '\s*\+\s*orcFmt/.test(srcStep), false);
 }
 
+// ── 6. orcPagtoTipoSel() — execução real, achado do smoke de produção
+// (2026-08-09): metade=(valorTotal/2) em ponto flutuante direto, com
+// `.toFixed(2)` (campo real gravado no CR/OS) e `.toLocaleString(...)`
+// (texto ao lado) arredondando o MESMO número de forma diferente no
+// caso-limite ",xx5" — campo mostrava R$385,82, texto mostrava R$385,83,
+// para o mesmo orçamento de R$771,65.
+{
+  var FN6 = ['orcPagtoTipoSel'];
+  var src6 = FN6.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN6.join(',') + '};';
+  var modPath6 = path.join(__dirname, '_cartao_pix_5050_extracted.tmp.js');
+  fs.writeFileSync(modPath6, src6);
+  delete require.cache[require.resolve(modPath6)];
+
+  function makeEl6(props) { return Object.assign({ value: '', textContent: '', style: {}, dataset: {} }, props || {}); }
+  var _elements6 = {};
+  global.document = {
+    getElementById: function (id) { return _elements6[id]; },
+    querySelectorAll: function () { return { forEach: function () {} }; }
+  };
+  global._orcPagtoId = 'orc1';
+  global.orcGetEnviados = function () { return [{ id: 'orc1', valorFinal: 771.65 }]; };
+
+  _elements6 = {
+    pgtoEntradaBox: makeEl6({}),
+    pgtoEntradaVal: makeEl6({}),
+    pgtoEntradaPct: makeEl6({})
+  };
+  var btn6 = { style: {}, dataset: { tipo: '50-50' } };
+
+  var mod6 = require(modPath6);
+  mod6.orcPagtoTipoSel(btn6);
+
+  test('14. achado real (smoke de produção): campo de entrada 50/50 (valor de fato gravado no CR/OS) mostra R$385,83, NUNCA R$385,82 (ponto flutuante direto de 771.65/2)',
+    _elements6.pgtoEntradaVal.value, '385.83');
+  test('15. o texto de apoio ao lado nunca diverge do campo — ambos vêm do mesmo cálculo em centavos',
+    _elements6.pgtoEntradaPct.textContent, '= 50% do total — corresponde a R$ 385,83');
+}
+
 console.log('\n' + '='.repeat(70));
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
 console.log('='.repeat(70) + '\n');
