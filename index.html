@@ -1440,6 +1440,10 @@ _CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
 // confirmou ter visto" — ver _cloudSave().
 var _cloudLastPayload = {};
 
+// SPRINT PRÉ-GO-LIVE, Blocos H/K — fila de gravação por chave, dentro desta
+// aba. Ver comentário completo em _cloudSave().
+var _cloudSaveQueue = {};
+
 // Salvar documento no Firestore.
 //
 // Protege contra sobrescrita por estado local obsoleto (achado real, não
@@ -1453,6 +1457,21 @@ var _cloudLastPayload = {};
 // servidor já mudou desde então, a gravação é recusada — nunca perde dado
 // silenciosamente, nunca reaplica um snapshot antigo por conta própria.
 //
+// SPRINT PRÉ-GO-LIVE, Blocos H/K — achado real: chamadores que gravam a
+// MESMA chave duas vezes em sequência síncrona (ex.: orcEnvSetStatus grava
+// o status e, logo em seguida, o crId do orçamento aprovado;
+// kbAceitarSugestaoBtn grava o tempo estimado e, logo em seguida, o prazo)
+// disparavam duas transações concorrentes para a mesma chave. A segunda
+// capturava o baseline ANTES da primeira confirmar no servidor; quando sua
+// própria transação relia o servidor — já atualizado pela primeira
+// gravação DESTA MESMA aba —, o valor não batia com o baseline antigo e
+// caía no mesmo caminho de um conflito real entre abas, mostrando "foi
+// alterado por outra sessão" para uma mudança feita pela própria aba.
+// Corrigido enfileirando as gravações por chave: cada _cloudSave(key,...)
+// só começa sua transação depois que a gravação anterior desta MESMA chave
+// (nesta aba) já terminou — sem enfraquecer a detecção real de conflito
+// entre abas, que continua comparando com o servidor a cada transação.
+//
 // Sempre retorna uma Promise resolvida com {ok, reason, serverData?} — nunca
 // rejeita — para que chamadores que precisem reagir a falha possam aguardar
 // sem precisar de try/catch, mas chamadores existentes que ignoram o retorno
@@ -1465,7 +1484,17 @@ function _cloudSave(key, data) {
   catch(e){ console.warn("[Cloud] _cloudSave falhou:", e); return Promise.resolve({ok:false, reason:'erro-serializacao', error:e}); }
   if(_cloudLastPayload[key] === payload) return Promise.resolve({ok:true, unchanged:true}); // dado idêntico — nada a gravar
 
+  var fila = (_cloudSaveQueue[key] || Promise.resolve()).catch(function(){});
+  var atual = fila.then(function(){ return _cloudSaveExec(key, payload); });
+  _cloudSaveQueue[key] = atual;
+  return atual;
+}
+
+function _cloudSaveExec(key, payload) {
   var ref = _db.collection(_COL).doc(key);
+  // Lido só agora (depois de aguardar a fila desta chave) — reflete
+  // qualquer gravação anterior desta aba que já tenha confirmado, nunca um
+  // valor capturado antes dela terminar.
   var baseline = _cloudLastPayload[key]; // undefined = nunca observamos este doc nesta aba — grava sem checar
 
   function tentar(jaRenovouToken) {

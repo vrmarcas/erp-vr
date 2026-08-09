@@ -66,22 +66,34 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados'];
 var COL = 'erp_vr';
+// SPRINT PRÉ-GO-LIVE, Bloco H — envolvido numa fábrica para que cada
+// chamada da fábrica produza uma instância com seu PRÓPRIO
+// _cloudLastPayload/_cloudSaveQueue, isoladas uma da outra — exatamente
+// como duas abas reais do navegador, cada uma com seu próprio heap de JS,
+// mas compartilhando o mesmo backend (o _db fake global). Sem isso, dois
+// _cloudSave() vindos da MESMA instância seriam corretamente serializados
+// pela fila por chave (ver _cloudSaveExec) e não serviriam para simular um
+// conflito real entre duas sessões distintas.
 var src = [
+  "function _makeCloudModule(){",
   "var _COL = " + JSON.stringify(COL) + ";",
   "var _cloudLastPayload = {};",
+  "var _cloudSaveQueue = {};",
   "var _HOMOLOG_MODE = false;",
   "var _HOMOLOG_EMULATORS_CONNECTED = true;",
   "var _cloudReady = true;",
   "var _ORC_ENVIADOS_DATA = [];",
   FN_NAMES.map(extractFn).join('\n\n'),
-  "module.exports = {",
+  "return {",
   "  _cloudSave: _cloudSave, orcSetEnviados: orcSetEnviados, orcGetEnviados: orcGetEnviados,",
   "  getLastPayload: function(k){ return _cloudLastPayload[k]; },",
   "  setLastPayload: function(k,v){ _cloudLastPayload[k] = v; },",
   "  setEnviadosRaw: function(arr){ _ORC_ENVIADOS_DATA = arr; }",
-  "};"
+  "};",
+  "}",
+  "module.exports = _makeCloudModule;"
 ].join('\n\n');
 var modPath = path.join(__dirname, '_cloudsave_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
@@ -135,7 +147,8 @@ global.showToast = function (msg, kind) { global._lastToast = msg; global._lastT
 global._renderCalls = 0;
 global.orcEnviadosRender = function () { global._renderCalls++; };
 
-var mod = require(modPath);
+var _makeCloudModule = require(modPath);
+var mod = _makeCloudModule();
 function fakeOrc(key) { var raw = _fakeStore[key]; return raw ? JSON.parse(raw.data) : null; }
 function makeArr(ids) { return ids.map(function (id) { return { id: id, cliente: 'E2E_FASEF_20260805_' + id }; }); }
 
@@ -266,19 +279,58 @@ await test('11. nenhum documento parcial: falha de transação não deixa payloa
   assertEq(fakeOrc('orcamentos'), antes, 'documento no servidor permanece exatamente como estava — nada parcial');
 });
 
-await test('12. duas "abas" simultâneas gravando a mesma chave — apenas uma vence, a outra é recusada de forma limpa', async function () {
+await test('12. duas ABAS REAIS (instâncias independentes) gravando a mesma chave a partir do mesmo baseline — apenas uma vence, a outra é recusada de forma limpa', async function () {
   resetFakeStore();
-  await mod._cloudSave('orcamentos', makeArr(['A']));
-  var baselineComum = mod.getLastPayload('orcamentos');
+  var abaA = _makeCloudModule(), abaB = _makeCloudModule();
+  await abaA._cloudSave('orcamentos', makeArr(['A']));
+  abaB.setLastPayload('orcamentos', abaA.getLastPayload('orcamentos')); // aba B "viu" o mesmo estado inicial
   _txnDelayMs = 15;
   try {
-    var p1 = mod._cloudSave('orcamentos', makeArr(['A', 'ABA1']));
-    mod.setLastPayload('orcamentos', baselineComum); // "aba 2" parte do mesmo baseline
-    var p2 = mod._cloudSave('orcamentos', makeArr(['A', 'ABA2']));
+    var p1 = abaA._cloudSave('orcamentos', makeArr(['A', 'ABA1']));
+    var p2 = abaB._cloudSave('orcamentos', makeArr(['A', 'ABA2']));
     var results = await Promise.all([p1, p2]);
     var sucessos = results.filter(function (r) { return r.ok; }).length;
-    assertEq(sucessos, 1, 'exatamente uma das duas gravações concorrentes sucede');
+    assertEq(sucessos, 1, 'exatamente uma das duas gravações concorrentes de abas DIFERENTES sucede — conflito real entre sessões continua detectado');
   } finally { _txnDelayMs = 0; }
+});
+
+// ── SPRINT PRÉ-GO-LIVE, Blocos H/K — achado real: "Cliente Aprovou" no
+// orçamento e "aceitar horário sugerido" no Kanban disparavam DUAS chamadas
+// de _cloudSave() para a MESMA chave, na MESMA aba, em sequência síncrona
+// (sem aguardar a primeira), o que produzia um falso "foi alterado por
+// outra sessão" causado pela própria aba. Corrigido enfileirando por chave
+// dentro de _cloudSave(). Os testes 13-15 provam a serialização direto na
+// função genérica (a causa raiz), sem depender de nenhuma tela específica.
+await test('13. achado real corrigido: duas gravações da MESMA aba para a MESMA chave, disparadas sem aguardar a primeira, NUNCA mais colidem entre si', async function () {
+  resetFakeStore();
+  var p1 = mod._cloudSave('orcamentos', makeArr(['A', 'STATUS'])); // ex.: orcEnvSetStatus grava o status
+  var p2 = mod._cloudSave('orcamentos', makeArr(['A', 'STATUS', 'CRID'])); // ex.: grava o crId, em seguida, sem esperar
+  var r1 = await p1, r2 = await p2;
+  assertEq(r1.ok, true, 'primeira gravação sucede');
+  assertEq(r2.ok, true, 'segunda gravação da mesma aba NUNCA é recusada por "conflito consigo mesma"');
+  assertEq(fakeOrc('orcamentos').length, 3, 'servidor reflete a gravação mais recente (a segunda), nenhuma foi perdida');
+});
+await test('14. a serialização preserva a ORDEM: a segunda gravação sempre vence sobre a primeira, nunca o inverso', async function () {
+  resetFakeStore();
+  _txnDelayMs = 10;
+  try {
+    var p1 = mod._cloudSave('kb_os', { os1: { tempoProd: '4' } }); // ex.: kbSalvarTempo
+    var p2 = mod._cloudSave('kb_os', { os1: { tempoProd: '4', prazo: '2026-08-10' } }); // ex.: kbSalvarPrazo, logo em seguida
+    await Promise.all([p1, p2]);
+    var servidor = JSON.parse(_fakeStore['kb_os'].data);
+    assertEq(servidor.os1.prazo, '2026-08-10', 'o resultado final tem os dois campos — nenhuma gravação sobrescreveu a outra por estar "atrasada"');
+  } finally { _txnDelayMs = 0; }
+});
+await test('15. três gravações em cadeia da mesma aba para a mesma chave (ex.: várias ações rápidas em sequência) — todas sucedem, nenhuma falsamente recusada', async function () {
+  resetFakeStore();
+  var ps = [
+    mod._cloudSave('fin_cr', ['um']),
+    mod._cloudSave('fin_cr', ['um', 'dois']),
+    mod._cloudSave('fin_cr', ['um', 'dois', 'tres'])
+  ];
+  var results = await Promise.all(ps);
+  assertEq(results.every(function (r) { return r.ok; }), true, 'nenhuma das três gravações em cadeia é recusada por falso conflito consigo mesma');
+  assertEq(fakeOrc('fin_cr').length, 3, 'estado final do servidor é o da última gravação da cadeia');
 });
 
 console.log('\n=== resultado ===');
