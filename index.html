@@ -5313,15 +5313,13 @@ function _authFirebaseError(code){
            para sempre; deixar o painel aqui o tornava inatingível (achado
            do smoke de produção 2026-08-09: a aba "Relatório Fiscal" abria
            em branco porque relTab('nf') populava o #relNFBody ÓRFÃO deste
-           container oculto, nunca o visível). -->
-
-      <!-- ── Histórico 2018-2026 (Rodada 3) ─────────────────────────── -->
-      <div id="relPgHistorico" style="display:none">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;background:var(--bg2);border-radius:8px;padding:10px 12px">
-          Fonte: importação histórica de relatórios de fechamento (2018–2026). <strong>2026 é parcial — só janeiro a julho</strong> neste pacote; não compare com anos completos sem considerar isso. Vendas ≠ Entradas/Recebimentos (não são somadas).
-        </div>
-        <div id="histBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Carregando…</div></div>
-      </div>
+           container oculto, nunca o visível).
+           SPRINT PRÉ-GO-LIVE, Bloco P4 — o painel de Histórico (relPgHistorico)
+           tinha exatamente o mesmo problema e foi movido para dentro de
+           #pg-relatorios pela mesma razão (ver bloco ao lado de relPgNF ali) —
+           achado real: a aba "Histórico" abria sempre em branco, apesar dos
+           dados de 2018-2026 estarem importados, porque histRender() populava
+           o #histBody ÓRFÃO deste mesmo container oculto. -->
 
     </div>
 
@@ -5384,7 +5382,7 @@ function _authFirebaseError(code){
         <button class="rel-tab-btn" id="relTabBtnDRE" onclick="relTab('dre',this)">📋 DRE</button>
         <button class="rel-tab-btn" id="relTabBtnContas" onclick="relTab('contas',this)">📌 Contas Pagas</button>
         <button class="rel-tab-btn" id="relTabBtnNF" onclick="relTab('nf',this)">🧾 Relatório Fiscal</button>
-        <button class="rel-tab-btn" id="relTabBtnHistorico" onclick="relTab('historico',this)">📈 Histórico 2018-2026</button>
+        <button class="rel-tab-btn" id="relTabBtnHistorico" onclick="relTab('historico',this)">📈 Histórico</button>
         <div class="rel-tab-spacer"></div>
         <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="window.print()">🖨️ Imprimir</button>
       </div>
@@ -5504,6 +5502,15 @@ function _authFirebaseError(code){
         </div>
         <div id="relNFBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Clique em Relatório Fiscal para carregar.</div></div>
       </div><!-- /relPgNF -->
+
+      <!-- ── Histórico 2018-2026 (Rodada 3) — movido de #pg-financeiro para
+           cá na Sprint Pré-Go-Live, Bloco P4 (ver comentário acima). ── -->
+      <div id="relPgHistorico" style="display:none">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;background:var(--bg2);border-radius:8px;padding:10px 12px">
+          Fonte: importação histórica de relatórios de fechamento (2018–2026). <strong>2026 é parcial — só janeiro a julho</strong> neste pacote; não compare com anos completos sem considerar isso. Vendas ≠ Entradas/Recebimentos (não são somadas).
+        </div>
+        <div id="histBody"><div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Carregando…</div></div>
+      </div><!-- /relPgHistorico -->
 
     </div><!-- /pg-relatorios -->
 
