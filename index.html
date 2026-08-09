@@ -21307,6 +21307,56 @@ window.crmReceiveChatvoltLead = function(data) {
 // ============================================================
 // ORÇAMENTO — ENVIO E CONFIRMAÇÃO DO CLIENTE
 // ============================================================
+// SPRINT PRÉ-GO-LIVE, Bloco E — distribuição EXATA de um total (em
+// centavos) por N parcelas: soma das parcelas devolvidas === totalCents,
+// SEMPRE — nunca uma representação que implique um total diferente do
+// real (achado real anterior: "3x de R$39,33" ao lado de "total:
+// R$117,98", mas 39,33×3=117,99). O resto da divisão inteira vai INTEIRO
+// na primeira parcela (nunca espalhado 1 centavo em cada uma — mais
+// simples de auditar e reproduz exatamente o exemplo pedido: R$117,98 em
+// 3x → [R$39,34, R$39,32, R$39,32]).
+function orcDistribuirParcelas(totalCents, n) {
+  totalCents = Math.round(totalCents || 0);
+  n = n > 0 ? Math.round(n) : 1;
+  var base = Math.floor(totalCents / n);
+  var resto = totalCents - base * n;
+  var parcelas = [];
+  for (var i = 0; i < n; i++) parcelas.push(base);
+  parcelas[0] += resto;
+  return parcelas;
+}
+
+// SPRINT PRÉ-GO-LIVE, Bloco E — motor central ÚNICO da nova regra
+// comercial definitiva de Cartão/PIX: o preço em até 3x no cartão é
+// SEMPRE "sem juros" (o cliente nunca vê a taxa de processamento do
+// cartão embutida nas parcelas — ela é um custo interno, absorvido na
+// margem, nunca uma linha visível) e o PIX está SEMPRE disponível como
+// alternativa (nunca mais atrás de um toggle Sim/Não). Substitui, para
+// consumidores da NOVA regra, a antiga leitura solta de
+// orcPixDiscToggle/orcParcToggle — todo consumidor (resumo do wizard,
+// Confirmação de Pagamento, PDF, WhatsApp) deve usar esta função, nunca
+// reimplementar a conta.
+//
+// Retorna: { baseCents, cartao: {1,2,3: {parcelas:[cents...], valorParcela,
+// totalCents}}, pix: {percentual, totalCents} }.
+function orcMotorComercial(baseReais, cfgFinanceiro) {
+  var baseCents = Math.round((baseReais || 0) * 100);
+  cfgFinanceiro = cfgFinanceiro || {};
+  var cartao = {};
+  [1, 2, 3].forEach(function (n) {
+    var parcelas = orcDistribuirParcelas(baseCents, n);
+    // valor "representativo" da parcela = o valor que se repete (a
+    // maioria das parcelas, quando não dividem exato) — nunca a parcela
+    // que absorveu o resto, para exibição singular tipo "3x de R$Y,YY"
+    // ficar com o valor mais comum, não a exceção.
+    var valorRepresentativoCents = n > 1 ? parcelas[parcelas.length - 1] : parcelas[0];
+    cartao[n] = { parcelas: parcelas, valorParcela: valorRepresentativoCents / 100, totalCents: baseCents };
+  });
+  var pixPct = cfgFinanceiro.pix != null ? cfgFinanceiro.pix : 0;
+  var pixTotalCents = Math.round(baseCents * (1 - pixPct / 100));
+  return { baseCents: baseCents, cartao: cartao, pix: { percentual: pixPct, totalCents: pixTotalCents } };
+}
+
 // RODADA 6, seção 2 — motor central de Cartão/PIX, em centavos: fonte
 // única do cálculo de desconto condicional + desconto PIX + taxa de
 // parcelamento no cartão. Antes desta rodada existiam 3 reimplementações
@@ -21316,6 +21366,9 @@ window.crmReceiveChatvoltLead = function(data) {
 // desconto/PIX/taxa, mostrando um valor de parcela errado ao vendedor.
 // Cálculo sempre em centavos (nunca ponto flutuante direto) para eliminar
 // qualquer chance de 1 centavo de diferença entre o que cada tela mostra.
+// Ainda usada pelos fluxos legados que mantêm o toggle desconto
+// condicional/parcelamento com taxa (compatibilidade — ver Bloco E para
+// a nova regra sem juros/PIX sempre visível).
 function orcMotorPagamento(baseReais, cond) {
   cond = cond || {};
   var baseCent = Math.round((baseReais||0) * 100);
