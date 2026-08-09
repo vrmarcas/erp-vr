@@ -14613,21 +14613,34 @@ function kbOpenNovaOS() {
 // _OS_RECENTES_DIAS dias, por os.entregueEm) — OS entregues antes deste
 // campo existir (legado, sem entregueEm) não entram no recorte "recente"
 // mas continuam aparecendo no Histórico normalmente.
+//
+// HOTFIX 2026-08-09 (correção pós-Sprint) — o requisito aprovado sempre
+// foi 7 dias corridos, não 30 (divergência encontrada na revisão do
+// relatório final do Sprint Pré-Go-Live). Fronteira exata, em DIAS DE
+// CALENDÁRIO (não horas corridas): uma OS entregue há exatamente
+// _OS_RECENTES_DIAS dias ainda conta como "recente" — só sai da aba
+// quando o dia seguinte começa. Por isso `agora` é normalizado para
+// meia-noite (mesmo padrão setHours(0,0,0,0) já usado em todo o
+// arquivo, ex. Bloco L) antes de comparar com `d`, que já vem à meia-
+// noite do dia da entrega direto de orcEnvParseDataSalvo() — assim o
+// corte nunca depende da hora do dia em que a OS foi entregue nem da
+// hora do dia em que o operador está olhando a tela.
 // ============================================================
 var _osListTab = 'ativas';
 var _OS_ATIVOS_STATUS = ['iniciada','producao','master','em_andamento','aguard_master'];
-var _OS_RECENTES_DIAS = 30;
+var _OS_RECENTES_DIAS = 7;
 
 function osFiltrarPorAba(tab, list, agora) {
   agora = agora || new Date();
   list = list || [];
   if (tab === 'prontas') return list.filter(function(os){ return os.status === 'pronta'; });
   if (tab === 'recentes') {
+    var _agoraDia = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
     return list.filter(function(os){
       if (os.status !== 'entregue') return false;
       var d = orcEnvParseDataSalvo(os.entregueEm);
       if (!d) return false;
-      var diasAtras = (agora.getTime() - d.getTime()) / 86400000;
+      var diasAtras = Math.round((_agoraDia.getTime() - d.getTime()) / 86400000);
       return diasAtras >= 0 && diasAtras <= _OS_RECENTES_DIAS;
     }).sort(function(a,b){
       var da = orcEnvParseDataSalvo(a.entregueEm) || new Date(0);
