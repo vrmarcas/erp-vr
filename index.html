@@ -927,7 +927,13 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
   .sidebar,.topbar,.topbar-btn,.fin-tab-bar,.fin-brand-filter,.fin-kpi-grid,.fin-chart-row,.rel-tab-bar,
   #pg-financeiro .card:not(.rel-block){display:none!important}
   #pg-relatorios{display:block!important}
-  #pg-relatorios [id^="relPg"]{display:block!important}
+  /* RODADA 6, seção 4 — impressão-por-aba: aqui havia uma regra forçando
+     TODAS as abas de Relatórios (Caixa/Mensal/DRE/Contas/Fiscal/
+     Histórico) a display:block!important na impressão, mesmo estando
+     escondidas em tela — o botão "Imprimir" único imprimia as 6 abas
+     concatenadas, nunca só a aba ativa. Sem essa regra, a impressão
+     respeita o mesmo display:none/block inline que relTab() já mantém
+     em tela — só a aba ativa aparece no papel. */
   .rel-block,.caixa-card,.rel-table{break-inside:avoid}
   .rel-block{border:1px solid #ccc;border-radius:0;box-shadow:none;margin-bottom:16pt}
   body{background:#fff;color:#000}
