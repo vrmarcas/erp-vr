@@ -3232,48 +3232,36 @@ function _authFirebaseError(code){
               </div>
             </div>
 
-            <!-- PARCELAMENTO NO CARTÃO -->
+            <!-- PARCELAMENTO NO CARTÃO — SPRINT PRÉ-GO-LIVE, Bloco E: nova
+            regra comercial definitiva — cartão em até 3x é SEMPRE sem
+            juros e SEMPRE oferecido (não é mais um Sim/Não que o vendedor
+            liga/desliga). O checkbox abaixo continua existindo no DOM
+            (sempre "checked", nunca exibido) só para as funções internas
+            orcToggleParc()/orcLerCondicoesPagamentoDOM() não precisarem de
+            um redesenho maior — mas não existe mais nenhum controle visual
+            Sim/Não na tela: o vendedor só escolhe QUANTAS parcelas (1/2/3x). -->
             <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <div>
-                  <div style="font-size:12px;font-weight:700;color:var(--text)">💳 Parcelamento no cartão</div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:2px">Inclui opção de parcelamento no orçamento</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:7px;cursor:pointer" onclick="document.getElementById('orcParcToggle').click()">
-                  <input type="checkbox" id="orcParcToggle" onchange="orcToggleParc()" style="display:none">
-                  <div id="orcParcTrack" style="width:38px;height:20px;border-radius:10px;background:#D1D5DB;position:relative;transition:.2s;pointer-events:none">
-                    <div id="orcParcThumb" style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;left:2px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
-                  </div>
-                  <span id="orcParcLbl" style="font-size:11px;font-weight:700;color:var(--muted)">Não</span>
-                </div>
-              </div>
-              <!-- Campos -->
-              <div id="orcParcFields" style="display:none;margin-top:12px;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:9px;padding:12px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)">💳 Pagamento no cartão — sempre sem juros</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">Preço principal do orçamento; o vendedor escolhe 1x, 2x ou 3x</div>
+              <input type="checkbox" id="orcParcToggle" checked style="display:none">
+              <div id="orcParcFields" style="display:block;margin-top:12px;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:9px;padding:12px">
                 <div class="fg" style="margin-bottom:10px">
-                  <label>Número de parcelas</label>
+                  <label>Número de parcelas (sem juros)</label>
                   <select id="orcParcSel" onchange="orcCalcParc()" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface)"></select>
                 </div>
-                <div id="orcParcInterno" style="background:#fff;border:1px solid #BFDBFE;border-radius:7px;padding:9px 11px;font-size:11px;color:#1E40AF;line-height:1.7;margin-bottom:8px"></div>
                 <div id="orcParcClientePreview" style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px;padding:8px 11px;font-size:11px;color:#166534;line-height:1.5"></div>
               </div>
             </div>
 
-            <!-- DESCONTO PIX -->
+            <!-- DESCONTO PIX — SPRINT PRÉ-GO-LIVE, Bloco E: PIX é SEMPRE
+            oferecido como alternativa ao cliente (nunca mais um Sim/Não).
+            Mesmo raciocínio do bloco de parcelamento acima: checkbox
+            interno sempre "checked", sem nenhum controle visual Sim/Não. -->
             <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-              <div style="display:flex;align-items:center;justify-content:space-between">
-                <div>
-                  <div style="font-size:12px;font-weight:700;color:var(--text)">⚡ Desconto no PIX</div>
-                  <div style="font-size:10px;color:var(--muted);margin-top:2px">Aplica desconto se pagamento for feito via PIX</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:7px;cursor:pointer" onclick="document.getElementById('orcPixDiscToggle').click()">
-                  <input type="checkbox" id="orcPixDiscToggle" onchange="orcTogglePixDisc()" style="display:none">
-                  <div id="orcPixDiscTrack" style="width:38px;height:20px;border-radius:10px;background:#D1D5DB;position:relative;transition:.2s;pointer-events:none">
-                    <div id="orcPixDiscThumb" style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;left:2px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
-                  </div>
-                  <span id="orcPixDiscLbl" style="font-size:11px;font-weight:700;color:var(--muted)">Não</span>
-                </div>
-              </div>
-              <div id="orcPixDiscFields" style="display:none;margin-top:12px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:9px;padding:12px">
+              <div style="font-size:12px;font-weight:700;color:var(--text)">⚡ Alternativa: PIX à vista</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">Sempre mostrado ao cliente como opção, com desconto automático</div>
+              <input type="checkbox" id="orcPixDiscToggle" checked style="display:none">
+              <div id="orcPixDiscFields" style="display:block;margin-top:12px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:9px;padding:12px">
                 <div class="fg" style="margin-bottom:10px">
                   <label>Desconto PIX (%)</label>
                   <input type="number" id="orcPixDiscPct" value="" min="0" max="50" step="0.5" placeholder="Ex: 5" oninput="orcCalcPixDisc()" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px">
@@ -8489,7 +8477,15 @@ function orcStep(n) {
     if(i<n) el.classList.add('done');
     if(i===n) el.classList.add('on');
   }
-  if (n===4) { orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100); }
+  if (n===4) {
+    orcSyncStep3Result(); if(typeof orcLoadMatPrecos==='function') orcLoadMatPrecos(); orcUpdateSummary(); setTimeout(orcPreencherPrazoAuto,100);
+    // SPRINT PRÉ-GO-LIVE, Bloco E — parcelamento (1/2/3x sem juros) e PIX
+    // deixaram de ser Sim/Não: sempre inicializa os dois ao entrar nesta
+    // etapa (idempotente — só populam o select/percentual padrão na 1ª
+    // vez, ver guards internos de orcToggleParc/orcTogglePixDisc).
+    if(typeof orcToggleParc==='function') orcToggleParc();
+    if(typeof orcTogglePixDisc==='function') orcTogglePixDisc();
+  }
   if (n===5) {
     // SPRINT PRÉ-GO-LIVE, Bloco F — fonte única (orcPgtoAtualizarValorReceber,
     // ver definição) tanto na entrada da etapa quanto em toda troca de
@@ -20032,11 +20028,16 @@ function orcResetCondicoesPagamentoCompartilhadas(){
   var descCondCb = document.getElementById('orcDescCondToggle');
   if(descCondCb && descCondCb.checked){ descCondCb.checked=false; if(typeof orcToggleDescCond==='function') orcToggleDescCond(); }
   setV('orcDescCond',''); setV('orcDescCondData','');
-  var parcCb = document.getElementById('orcParcToggle');
-  if(parcCb && parcCb.checked){ parcCb.checked=false; if(typeof orcToggleParc==='function') orcToggleParc(); }
-  var pixCb = document.getElementById('orcPixDiscToggle');
-  if(pixCb && pixCb.checked){ pixCb.checked=false; if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); }
+  // SPRINT PRÉ-GO-LIVE, Bloco E — parcelamento no cartão (1/2/3x sem
+  // juros) e desconto PIX deixaram de ser Sim/Não (nunca mais existe um
+  // estado "desligado" para resetar aqui). Um novo orçamento nunca deve
+  // herdar a seleção manual do anterior: o seletor de parcelas volta ao
+  // padrão (3x) e o percentual de PIX é limpo (repopulado da config
+  // financeira central por orcTogglePixDisc()).
   setV('orcPixDiscPct','');
+  var parcSel = document.getElementById('orcParcSel'); if(parcSel) parcSel.innerHTML='';
+  if(typeof orcToggleParc==='function') orcToggleParc();
+  if(typeof orcTogglePixDisc==='function') orcTogglePixDisc();
   if(typeof _pgtoTipoAtual!=='undefined') _pgtoTipoAtual = null;
 }
 function orcResetFormularioVR(){
@@ -21540,11 +21541,23 @@ function orcMotorPagamento(baseReais, cond) {
 function orcLerCondicoesPagamentoDOM() {
   var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
   var dcPct = dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
-  var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
-  var pxPct = pxOn ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var parcAtivo = !!(document.getElementById('orcParcToggle')?.checked);
+  // SPRINT PRÉ-GO-LIVE, Bloco E — nova regra comercial definitiva: PIX
+  // (orcPixDiscToggle) e parcelamento no cartão (orcParcToggle) deixaram
+  // de ser Sim/Não — pxOn/parcAtivo NÃO dependem mais de um checkbox
+  // existir/estar marcado no DOM (o antigo toggle visual foi removido;
+  // manter a leitura de .checked deixaria o PIX/parcelamento
+  // silenciosamente quebrados se esse elemento algum dia sumir do HTML).
+  // pxOn agora é só um fato derivado do percentual configurado; parcAtivo
+  // é sempre true (cartão em até 3x sempre disponível).
+  var pxPct = parseFloat(document.getElementById('orcPixDiscPct')?.value)||0;
+  var pxOn  = pxPct > 0;
+  var parcAtivo = true;
   var parcSel   = document.getElementById('orcParcSel');
-  var nParc = parcAtivo && parcSel ? parseInt(parcSel.value)||1 : 1;
+  var nParc = parcSel ? parseInt(parcSel.value)||3 : 3;
+  // Nunca deixa um valor salvo/legado maior que 3 vazar para o motor
+  // central e quebrar o cálculo do resumo/PDF/WhatsApp — o cartão só
+  // oferece até 3x, sempre sem juros (orcMotorComercial só conhece 1/2/3).
+  if(nParc<1) nParc=1; if(nParc>3) nParc=3;
   var dpd = cfgLoad();
   return { dcOn: dcOn, dcPct: dcPct, pxOn: pxOn, pxPct: pxPct, parcAtivo: parcAtivo, nParc: nParc, tabelaParcelamento: dpd.parcelamento||CFG_DEFAULT.parcelamento };
 }
@@ -21556,11 +21569,21 @@ function orcLerCondicoesPagamentoDOM() {
 function orcCalcCondicoesPagamento(baseEfetiva) {
   var cond = orcLerCondicoesPagamentoDOM();
   var parcela = null;
+  // SPRINT PRÉ-GO-LIVE, Bloco E — troca o motor LEGADO (orcMotorPagamento,
+  // que soma a taxa real da operadora — 2,99%/3,99% — ao total) pelo motor
+  // comercial central único (orcMotorComercial): cartão em até 3x é
+  // SEMPRE sem juros (nova regra comercial definitiva) e o PIX é sempre
+  // calculado como alternativa, nunca mais atrás do toggle
+  // orcPixDiscToggle (removido da UI — ver bloco "DESCONTO PIX" do HTML).
+  // baseEfetiva chega aqui já com o desconto condicional (dcPct) aplicado
+  // pelo chamador quando ativo — o PIX é calculado em cima dessa MESMA
+  // base, uma única vez (nunca dois descontos aplicados por engano).
+  var motor = orcMotorComercial(baseEfetiva, { pix: cond.pxPct });
   if (cond.parcAtivo && cond.nParc > 1) {
-    var motor = orcMotorPagamento(baseEfetiva, { dcOn:false, dcPct:0, pxOn:false, pxPct:0, parcAtivo:true, nParc:cond.nParc, tabelaParcelamento:cond.tabelaParcelamento });
-    parcela = { nParc: cond.nParc, valorParcela: motor.valorParcela, taxa: motor.taxaPct, semJuros: motor.semJuros };
+    var cartaoSel = motor.cartao[cond.nParc] || motor.cartao[3];
+    parcela = { nParc: cond.nParc, valorParcela: cartaoSel.valorParcela, totalCents: cartaoSel.totalCents, semJuros: true };
   }
-  return { dcOn: cond.dcOn, dcPct: cond.dcPct, pxOn: cond.pxOn, pxPct: cond.pxPct, parcela: parcela };
+  return { dcOn: cond.dcOn, dcPct: cond.dcPct, pxOn: cond.pxPct>0, pxPct: cond.pxPct, pixTotal: motor.pix.totalCents/100, parcela: parcela, cartao: motor.cartao };
 }
 
 // Saudação por horário comercial em America/Sao_Paulo — nunca o horário
@@ -21626,15 +21649,18 @@ async function orcEnviarOrcamentoWA() {
   var marca = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
   var responsavel = orcGetResponsavel(marca);
 
-  // Descontos e parcelamento — mesma fonte usada pelo PDF A4
-  // (orcCalcCondicoesPagamento) — os dois nunca mostram valores diferentes.
-  var baseEfetivaWA = (c.finalPrice||0);
-  var _condWA = orcCalcCondicoesPagamento(baseEfetivaWA);
-  var dcOnWA = _condWA.dcOn, dcPctWA = _condWA.dcPct, pxOnWA = _condWA.pxOn, pxPctWA = _condWA.pxPct;
-  baseEfetivaWA = (c.finalPrice||0)*(1-dcPctWA/100)*(1-pxPctWA/100);
+  // SPRINT PRÉ-GO-LIVE, Bloco I — "VALOR TOTAL" = preço no cartão
+  // comercial padrão (1/2/3x sem juros, nova regra), só reduzido pelo
+  // desconto condicional (dcOn) quando ativo. O PIX NUNCA mais é
+  // subtraído do valor principal aqui — é sempre uma ALTERNATIVA exibida
+  // à parte (extrasStr abaixo), calculada em cima dessa MESMA base (uma
+  // única vez, nunca dois descontos empilhados por engano).
+  var _condDomWA = orcLerCondicoesPagamentoDOM();
+  var dcOnWA = _condDomWA.dcOn, dcPctWA = _condDomWA.dcPct;
+  var baseEfetivaWA = dcOnWA ? (c.finalPrice||0)*(1-dcPctWA/100) : (c.finalPrice||0);
   var fmtBRLWA = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var totalExibido = baseEfetivaWA>0 ? fmtBRLWA(baseEfetivaWA) : (c.finalPrice?fmtBRLWA(c.finalPrice):'—');
-  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento sobre o valor já com desconto
+  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento/PIX calculados sobre o "Total" já exibido acima
 
   // Itens numerados — mesma fonte usada pelo PDF (orcColetarItensDistribuidos).
   var itensLista = orcColetarItensDistribuidos(baseEfetivaWA>0 ? baseEfetivaWA : (c.finalPrice||0));
@@ -21650,16 +21676,24 @@ async function orcEnviarOrcamentoWA() {
   // Pix, parcelamento) são funcionalidade real e configurável do orçamento
   // — preservadas aqui, só sem emoji (o modelo padrão não usa emoji).
   var extrasStr = '';
-  if(_condWA2.parcela){
-    extrasStr += '\n\n*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+(_condWA2.parcela.semJuros?' sem juros':' (parcelas com acréscimo)');
+  if(_condWA2.parcela && _condWA2.parcela.nParc>1){
+    // SPRINT PRÉ-GO-LIVE, Bloco I — o termo antigo, que citava um
+    // percentual extra cobrado do cliente, nunca mais aparece: com a nova
+    // regra comercial, cartão em até 3x é SEMPRE sem juros (orcMotorComercial
+    // garante isso), então o cliente nunca vê nenhuma menção a custo extra
+    // de processamento embutido na parcela.
+    extrasStr += '\n\n*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+' sem juros';
   }
   if(dcOnWA && dcPctWA>0){
     var condData = document.getElementById('orcDescCondData')?.value||'';
     var dataFmt  = condData ? condData.split('-').reverse().join('/') : '';
     extrasStr += '\n\n*Oferta especial:* '+dcPctWA+'% de desconto já aplicado no valor acima'+(dataFmt?' — válido para fechamento até '+dataFmt+'. Após essa data, o valor retorna ao normal.':'.');
   }
-  if(pxOnWA && pxPctWA>0 && !dcOnWA){
-    extrasStr += '\n\n*Desconto PIX:* '+pxPctWA+'% de desconto pagando à vista via PIX (já aplicado no valor acima).';
+  // SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE mostrado como alternativa
+  // (nunca mais atrás do toggle orcPixDiscToggle, removido da UI) — nunca
+  // "escondido" mesmo quando a oferta condicional (dcOn) está ativa.
+  if(_condWA2.pxPct>0){
+    extrasStr += '\n\n*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
   }
 
   var saudacaoNome = primeiroNome ? (orcSaudacaoHorario()+', *'+primeiroNome+'*!') : 'Olá!';
@@ -21705,9 +21739,12 @@ function orcSalvarHistoricoCliente() {
   var marca  = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
   var condPct = !!(document.getElementById('orcDescCondToggle')?.checked) ?
     (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
-  var pixPct = !!(document.getElementById('orcPixDiscToggle')?.checked) ?
-    (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var valor = c2.finalPrice ? c2.finalPrice*(1-condPct/100)*(1-pixPct/100) : 0;
+  // SPRINT PRÉ-GO-LIVE, Bloco E — valor registrado no histórico é o preço
+  // no cartão (sem juros, após desconto condicional se ativo) — o mesmo
+  // "Total Geral" mostrado no PDF/WhatsApp. PIX nunca mais é subtraído
+  // aqui por padrão (é uma alternativa oferecida ao cliente, só vira
+  // desconto real se ele de fato pagar via PIX).
+  var valor = c2.finalPrice ? c2.finalPrice*(1-condPct/100) : 0;
   var key = clientHistGetKey(tel, email);
   if(!key || valor <= 0) return;
 
@@ -21905,9 +21942,12 @@ async function orcImprimirOrcamentoPDF() {
   var condAtivo = !!(document.getElementById('orcDescCondToggle')?.checked);
   var condPct   = condAtivo ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
   var condData  = condAtivo ? (document.getElementById('orcDescCondData')?.value||'') : '';
-  var pixAtivo  = !!(document.getElementById('orcPixDiscToggle')?.checked);
-  var pixPct    = pixAtivo  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100)*(1-pixPct/100) : 0;
+  // SPRINT PRÉ-GO-LIVE, Bloco I — "Total Geral" do PDF = preço no cartão
+  // comercial padrão (1/2/3x sem juros, nova regra), só reduzido pelo
+  // desconto condicional quando ativo. PIX nunca mais é subtraído aqui —
+  // é uma alternativa sempre exibida à parte (ver condPagamentoHtml
+  // abaixo), calculada sobre esta MESMA base, nunca duas vezes.
+  var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100) : 0;
 
   // Itens já redistribuídos — mesma fonte usada pelo WhatsApp
   // (orcColetarItensDistribuidos), PDF e WhatsApp nunca mais divergem aqui.
@@ -21925,18 +21965,22 @@ async function orcImprimirOrcamentoPDF() {
     ? 'R$ '+baseEfetiva.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (c2.finalPrice ? 'R$ '+c2.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
 
-  // Condições de pagamento (parcelamento, desconto Pix) — mesma fonte usada no
-  // WhatsApp (orcCalcCondicoesPagamento), para PDF e WhatsApp nunca divergirem.
+  // SPRINT PRÉ-GO-LIVE, Bloco I — Condições de pagamento (parcelamento no
+  // cartão, PIX) — mesma fonte usada no WhatsApp (orcCalcCondicoesPagamento
+  // → orcMotorComercial), para PDF e WhatsApp nunca divergirem. Cartão em
+  // até 3x é SEMPRE sem juros e o PIX é SEMPRE mostrado como alternativa
+  // (nunca mais atrás de um toggle) — nunca mais o texto "(parcelas com
+  // acréscimo)" nem qualquer menção a taxa/juros/acréscimo pro cliente.
   var _condPDF = orcCalcCondicoesPagamento(baseEfetiva>0 ? baseEfetiva : (c2.finalPrice||0));
   var condPagamentoHtml = '';
-  if(_condPDF.parcela || (_condPDF.pxOn && _condPDF.pxPct>0 && !_condPDF.dcOn)){
+  if((_condPDF.parcela && _condPDF.parcela.nParc>1) || _condPDF.pxPct>0){
     var _linhas = '';
-    if(_condPDF.parcela){
+    if(_condPDF.parcela && _condPDF.parcela.nParc>1){
       var _p = _condPDF.parcela;
-      _linhas += '<div>💳 Parcelável em até <strong>'+_p.nParc+'x de R$ '+_p.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+(_p.semJuros?' sem juros':' (parcelas com acréscimo)')+'</strong></div>';
+      _linhas += '<div>💳 Parcelável em até <strong>'+_p.nParc+'x de R$ '+_p.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' sem juros</strong></div>';
     }
-    if(_condPDF.pxOn && _condPDF.pxPct>0 && !_condPDF.dcOn){
-      _linhas += '<div>⚡ '+_condPDF.pxPct+'% de desconto pagando via PIX</div>';
+    if(_condPDF.pxPct>0){
+      _linhas += '<div>⚡ '+_condPDF.pxPct+'% de desconto pagando via PIX (R$ '+_condPDF.pixTotal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')</div>';
     }
     condPagamentoHtml = '<div style="margin-top:8px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;color:#334155;line-height:1.6">'+_linhas+'</div>';
   }
@@ -22007,7 +22051,7 @@ async function orcImprimirOrcamentoPDF() {
     +'</svg>'
     +'<div class="content">'
     +'<div class="hdr">'
-    +'<div class="brand"><img src="'+_brandBase+'vitre-logo.png" alt="Vitre" style="height:40px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
+    +'<div class="brand"><img src="'+_brandBase+'vitre-logo.png" alt="Vitre" style="height:60px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
     +'<div class="orc-right"><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Nº '+numeroPDF+'<br>Data: '+dataHoje+'<br>Validade: '+validadeDiasPDF+' dias<br>Responsável: '+responsavelPDF+'</div></div>'
     +'</div>'
     +'<div class="div1"></div>'
@@ -22072,7 +22116,7 @@ async function orcImprimirOrcamentoPDF() {
     +'</svg>'
     +'<div class="content">'
     +'<div class="hdr">'
-    +'<div><img src="'+_brandBase+'vr-marcas-logo.png" alt="VR Marcas" style="height:52px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
+    +'<div><img src="'+_brandBase+'vr-marcas-logo.png" alt="VR Marcas" style="height:76px;width:auto;display:block;margin-bottom:6px"><div class="brand-phone">(62) 3941-6787</div></div>'
     +'<div><div class="orc-title">ORÇAMENTO</div><div class="orc-meta">Nº '+numeroPDF+'<br>Data: '+dataHoje+'<br>Validade: '+validadeDiasPDF+' dias<br>Responsável: '+responsavelPDF+'</div></div>'
     +'</div>'
     +'<div class="rainbow-bar"></div>'
@@ -22174,17 +22218,18 @@ function orcClienteConfirmou() { if(!_orcClienteAprovado) orcToggleClienteAprov(
 // ============================================================
 // DESCONTO PIX — toggle + cálculo
 // ============================================================
+// SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE oferecido como alternativa
+// (o toggle visual Sim/Não foi removido do HTML; o checkbox
+// orcPixDiscToggle continua no DOM, sempre "checked", só para esta
+// função não precisar de um redesenho maior). Nome preservado
+// (orcTogglePixDisc) por compatibilidade — só pré-preenche o percentual
+// padrão da config financeira central na 1ª vez (nunca sobrescreve um
+// valor que o vendedor já digitou).
 function orcTogglePixDisc() {
   var cb    = document.getElementById('orcPixDiscToggle');
-  var track = document.getElementById('orcPixDiscTrack');
-  var thumb = document.getElementById('orcPixDiscThumb');
-  var lbl   = document.getElementById('orcPixDiscLbl');
   var fields= document.getElementById('orcPixDiscFields');
-  var on = cb.checked;
-  if(track){ track.style.background = on ? '#10B981' : '#D1D5DB'; }
-  if(thumb){ thumb.style.left = on ? '20px' : '2px'; }
-  if(lbl)  { lbl.textContent = on ? 'Sim' : 'Não'; lbl.style.color = on ? '#065F46' : 'var(--muted)'; }
-  if(fields){ fields.style.display = on ? 'block' : 'none'; }
+  var on = cb ? cb.checked : true;
+  if(fields) fields.style.display = 'block';
   // Parte 4.3 (2026-08-07) — pré-preenche com o percentual padrão da
   // configuração central (Config > Financeiro > PIX), em vez de sempre
   // começar vazio; o operador continua podendo ajustar por negociação.
@@ -22197,25 +22242,11 @@ function orcTogglePixDisc() {
   }
   if(on) { orcCalcPixDisc(); } else { orcRefreshFinalPrice(); }
 }
+// SPRINT PRÉ-GO-LIVE, Bloco E — o preview do PIX (economia/valor com
+// desconto) agora é calculado dentro da fonte única orcRefreshFinalPrice()
+// (mesmo motor comercial usado pelo "Total" do resumo, PDF e WhatsApp) —
+// esta função só existe como o handler do campo orcPixDiscPct.
 function orcCalcPixDisc() {
-  var pct  = parseFloat(document.getElementById('orcPixDiscPct')?.value)||0;
-  var prev = document.getElementById('orcPixDiscPreview');
-  var c    = window._orcCalc||{};
-  var base = c.finalPrice||0;
-  var dcOn = !!(document.getElementById('orcDescCondToggle')?.checked);
-  var dcPct= dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
-  var baseAposDesc = base*(1-dcPct/100);
-  if(prev){
-    if(!pct){ prev.innerHTML='<em style="color:#aaa;font-size:11px">Preencha o % de desconto PIX.</em>'; }
-    else {
-      var comPix = baseAposDesc*(1-pct/100);
-      var eco    = baseAposDesc-comPix;
-      prev.innerHTML='Valor sem PIX: <span style="text-decoration:line-through;color:#aaa">'+orcFmt(baseAposDesc)+'</span><br>'
-        +'Com PIX (<strong>'+pct+'%</strong> off): <strong style="color:#065F46;font-size:13px">'+orcFmt(comPix)+'</strong>'
-        +' — economia de <strong>'+orcFmt(eco)+'</strong><br>'
-        +'<span style="font-size:10px;opacity:.8">⚡ Aparece no orçamento como: '+pct+'% de desconto à vista no PIX</span>';
-    }
-  }
   orcRefreshFinalPrice();
 }
 document.addEventListener('input',function(e){
@@ -22223,53 +22254,54 @@ document.addEventListener('input',function(e){
 });
 
 // ── FUNÇÃO CENTRAL DE ATUALIZAÇÃO DO VALOR FINAL ──
+// SPRINT PRÉ-GO-LIVE, Bloco E — troca o motor LEGADO (orcMotorPagamento,
+// que soma a taxa real da operadora ao total do cartão) pelo motor
+// comercial central único (orcMotorComercial): o "Total" principal do
+// Resumo do Orçamento é SEMPRE o preço no cartão em até 3x SEM JUROS
+// (nunca mais um valor "com taxa embutida"), só reduzido pelo desconto
+// condicional (dcOn) quando ativo. PIX é sempre calculado e mostrado como
+// ALTERNATIVA (nunca subtraído do "Total" principal, nunca escondido
+// atrás de um toggle) — mesma fonte usada pelo PDF/WhatsApp
+// (orcCalcCondicoesPagamento), então o resumo do wizard nunca mais
+// diverge do que o cliente recebe.
 function orcRefreshFinalPrice() {
   var c    = window._orcCalc||{};
   var base = c.finalPrice||0;
   var tot  = document.getElementById('orcRsmTotal');
   var orig = document.getElementById('orcRsmOriginal');
   if(!tot||!base) return;
-  // RODADA 6, seção 2 — usa o motor central (orcMotorPagamento) em vez de
-  // recalcular desconto/PIX/taxa de cartão aqui de novo — mesma fórmula
-  // (centavo-precisa) usada pelo PDF/WhatsApp (orcCalcCondicoesPagamento).
   var cond = orcLerCondicoesPagamentoDOM();
-  var motor = orcMotorPagamento(base, cond);
-  var dcOn = cond.dcOn, pxOn = cond.pxOn, paOn = cond.parcAtivo;
-  var afterDisc = motor.afterPix;
-  var hasDisc   = afterDisc < base;
-  if(paOn){
-    var nParc = cond.nParc;
-    var taxa  = motor.taxaPct;
-    var comTaxa   = motor.totalComTaxa;
-    var parcelVal = motor.valorParcela;
-    if(nParc>1){
-      if(orig){orig.textContent=orcFmt(base);orig.style.display='block';}
-      tot.textContent=orcFmt(comTaxa); tot.style.color='#1E40AF';
-    } else if(hasDisc){
-      if(orig){orig.textContent=orcFmt(base);orig.style.display='block';}
-      tot.textContent=orcFmt(afterDisc); tot.style.color='#D97706';
-    } else {
-      if(orig) orig.style.display='none';
-      tot.textContent=orcFmt(base); tot.style.color='var(--brand-mid)';
-    }
-    var intEl=document.getElementById('orcParcInterno');
-    var cliEl=document.getElementById('orcParcClientePreview');
-    if(intEl){
-      if(nParc===1){ intEl.innerHTML='✅ <strong>À vista</strong> — sem taxa<br>Valor cobrado: <strong>'+orcFmt(afterDisc)+'</strong>'; }
-      else { intEl.innerHTML='<span style="font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;opacity:.7">🔒 Interno — não aparece no orçamento do cliente</span><br>'+'Taxa operadora: <strong>'+taxa+'%</strong> → +'+orcFmt(comTaxa-afterDisc)+'<br>'+'Total com taxa embutida: <strong style="color:#1E40AF">'+orcFmt(comTaxa)+'</strong><br>'+'Valor por parcela: <strong>'+orcFmt(parcelVal)+'</strong>'; }
-    }
-    if(cliEl){
-      if(nParc===1){ cliEl.innerHTML='👁️ <strong>O cliente verá:</strong> Valor à vista: <strong>'+orcFmt(afterDisc)+'</strong>'; }
-      else { cliEl.innerHTML='👁️ <strong>O cliente verá:</strong> Parcelável em até <strong>'+nParc+'x</strong> de <strong>'+orcFmt(parcelVal)+'</strong>'; }
-    }
-    return;
-  }
-  if(hasDisc){
+  var hasDescCond = cond.dcOn && cond.dcPct>0;
+  var baseAposCond = hasDescCond ? base*(1-cond.dcPct/100) : base;
+  var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
+  var nParc = cond.nParc;
+  var cartaoInfo = motor.cartao[nParc] || motor.cartao[3];
+
+  if(hasDescCond){
     if(orig){orig.textContent=orcFmt(base);orig.style.display='block';}
-    tot.textContent=orcFmt(afterDisc); tot.style.color='#D97706';
+    tot.textContent=orcFmt(cartaoInfo.totalCents/100); tot.style.color='#D97706';
   } else {
     if(orig) orig.style.display='none';
-    tot.textContent=orcFmt(base); tot.style.color='var(--brand-mid)';
+    tot.textContent=orcFmt(cartaoInfo.totalCents/100); tot.style.color='var(--brand-mid)';
+  }
+
+  var cliEl=document.getElementById('orcParcClientePreview');
+  if(cliEl){
+    if(nParc<=1){ cliEl.innerHTML='👁️ <strong>O cliente verá:</strong> à vista/1x no cartão: <strong>'+orcFmt(cartaoInfo.totalCents/100)+'</strong> (sem juros)'; }
+    else { cliEl.innerHTML='👁️ <strong>O cliente verá:</strong> Parcelável em até <strong>'+nParc+'x</strong> de <strong>'+orcFmt(cartaoInfo.valorParcela)+'</strong> sem juros'; }
+  }
+  // PIX — sempre calculado e mostrado como alternativa (nunca escondido
+  // atrás de um toggle, nunca subtraído do "Total" principal acima).
+  var pixPrev = document.getElementById('orcPixDiscPreview');
+  if(pixPrev){
+    if(!cond.pxPct){ pixPrev.innerHTML='<em style="color:#aaa;font-size:11px">Preencha o % de desconto PIX (ou deixe em branco para não oferecer).</em>'; }
+    else {
+      var eco = (cartaoInfo.totalCents - motor.pix.totalCents)/100;
+      pixPrev.innerHTML='Valor no cartão: <span style="text-decoration:line-through;color:#aaa">'+orcFmt(cartaoInfo.totalCents/100)+'</span><br>'
+        +'Com PIX (<strong>'+cond.pxPct+'%</strong> off): <strong style="color:#065F46;font-size:13px">'+orcFmt(motor.pix.totalCents/100)+'</strong>'
+        +' — economia de <strong>'+orcFmt(eco)+'</strong><br>'
+        +'<span style="font-size:10px;opacity:.8">⚡ Aparece no orçamento como alternativa: PIX com '+cond.pxPct+'% de desconto à vista</span>';
+    }
   }
 }
 
@@ -22664,15 +22696,20 @@ async function _orcSalvarOrcamentoImpl() {
   var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
   var pxPct = pxOn ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
   var paOn  = !!(document.getElementById('orcParcToggle')?.checked);
-  var nParc = paOn && document.getElementById('orcParcSel') ? parseInt(document.getElementById('orcParcSel').value)||1 : 1;
+  var nParc = paOn && document.getElementById('orcParcSel') ? parseInt(document.getElementById('orcParcSel').value)||3 : 3;
+  if(nParc<1) nParc=1; if(nParc>3) nParc=3; // Bloco E — cartão só oferece até 3x sem juros
   var dcData= dcOn ? (document.getElementById('orcDescCondData')?.value||'') : '';
-  // RODADA 6, seção 2 — mesmo motor central (centavo-preciso) usado pelo
-  // resumo do wizard, PDF e WhatsApp — valorFinal persistido aqui é a
-  // mesma base à vista (desconto condicional + PIX) mostrada como "Total"
-  // nos documentos do cliente; a taxa de cartão nunca entra aqui porque é
-  // uma condição do MÉTODO de pagamento (decidida ao confirmar o
-  // recebimento), não do preço do pedido.
-  var afterDisc = orcMotorPagamento(c.finalPrice, {dcOn:dcOn, dcPct:dcPct, pxOn:pxOn, pxPct:pxPct, parcAtivo:false, nParc:1}).afterPix;
+  // SPRINT PRÉ-GO-LIVE, Bloco E — valorFinal persistido é o preço no
+  // cartão comercial padrão (1/2/3x sem juros — orcMotorComercial), só
+  // reduzido pelo desconto condicional (dcOn) quando ativo — é a MESMA
+  // base mostrada como "Total Geral"/"VALOR TOTAL" no PDF e no WhatsApp.
+  // PIX NUNCA mais é subtraído daqui por padrão (motor legado
+  // orcMotorPagamento aplicava pxPct sempre que o toggle estivesse ligado
+  // — mas o toggle de PIX foi removido da UI e não existe mais estado
+  // "desligado" para decidir isso; aplicar aqui geraria um valorFinal
+  // sempre descontado, mesmo quando o cliente nem escolheu pagar via PIX).
+  var baseAposCondSalvar = dcOn ? c.finalPrice*(1-dcPct/100) : (c.finalPrice||0);
+  var afterDisc = orcMotorComercial(baseAposCondSalvar, {}).baseCents/100;
   // Snapshot COMPLETO de itens — chave real do material (matKey) + área/
   // extras planificados + extras por item (ORC_ITEM_EXTRAS), não só os
   // campos exibidos em tela.
@@ -23516,21 +23553,20 @@ function orcEnvEditar(id) {
       if(descCondCb.checked !== temDescCond){ descCondCb.checked=temDescCond; if(typeof orcToggleDescCond==='function') orcToggleDescCond(); }
       if(temDescCond){ setV('orcDescCond', o.descCond); setV('orcDescCondData', o.dcData); if(typeof orcDescCondPreview==='function') orcDescCondPreview(); }
     }
-    var pixCb = document.getElementById('orcPixDiscToggle');
-    if(pixCb){
-      var temPix = !!(o.descPix>0);
-      if(pixCb.checked !== temPix){ pixCb.checked=temPix; if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); }
-      if(temPix){ setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
+    // SPRINT PRÉ-GO-LIVE, Bloco E — PIX e parcelamento no cartão deixaram
+    // de ser Sim/Não (o Bloco C original marcava/desmarcava os toggles
+    // orcPixDiscToggle/orcParcToggle; agora os dois estão sempre "ligados"
+    // — só os VALORES salvos precisam ser restaurados nos campos sempre
+    // visíveis, sem nenhum toggle para acionar).
+    var parcSel = document.getElementById('orcParcSel');
+    if(parcSel){
+      if(typeof orcToggleParc==='function') orcToggleParc(); // idempotente — só popula o select (1x/2x/3x) na 1ª vez
+      var parcSalvo = (o.parcelas>=1 && o.parcelas<=3) ? o.parcelas : 3;
+      parcSel.value = String(parcSalvo);
+      if(typeof orcCalcParc==='function') orcCalcParc();
     }
-    var parcCb = document.getElementById('orcParcToggle');
-    if(parcCb){
-      var temParc = !!(o.parcelas>1);
-      if(parcCb.checked !== temParc){ parcCb.checked=temParc; if(typeof orcToggleParc==='function') orcToggleParc(); }
-      if(temParc){
-        var parcSel = document.getElementById('orcParcSel');
-        if(parcSel){ parcSel.value = String(o.parcelas); if(typeof orcCalcParc==='function') orcCalcParc(); }
-      }
-    }
+    if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); // idempotente — só pré-preenche o % padrão se o campo estiver vazio
+    if(o.descPix>0){ setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
     if(materiaisNaoEncontrados.length) showToast('Material não encontrado na config atual para: '+materiaisNaoEncontrados.join(', ')+' — reselecione manualmente.','warn');
     // Badge de edição
     var _editBanner = document.getElementById('orcEditBanner');
@@ -25138,29 +25174,34 @@ function cfgSalvarParc() {
   showToast('Taxas de parcelamento salvas!','ok');
 }
 
-// ── TOGGLE / CÁLCULO DE PARCELAMENTO NO ORÇAMENTO ──
+// ── PARCELAMENTO NO CARTÃO — SPRINT PRÉ-GO-LIVE, Bloco E ──
+// Nova regra comercial definitiva: cartão em até 3x é SEMPRE sem juros e
+// SEMPRE oferecido — não é mais um Sim/Não que o vendedor liga/desliga
+// (o toggle visual foi removido do HTML; o checkbox orcParcToggle
+// continua no DOM, sempre "checked", só para esta função não precisar de
+// um redesenho maior). Nome da função preservado (orcToggleParc) por
+// compatibilidade com quem já chama para (re)popular o seletor — só
+// preenche o select na 1ª vez (idempotente), nunca sobrescreve uma
+// seleção que o vendedor já fez.
 function orcToggleParc() {
-  var cb    = document.getElementById('orcParcToggle');
-  var track = document.getElementById('orcParcTrack');
-  var thumb = document.getElementById('orcParcThumb');
-  var lbl   = document.getElementById('orcParcLbl');
-  var fields= document.getElementById('orcParcFields');
-  var on = cb.checked;
-  if(track){ track.style.background = on ? '#3B82F6' : '#D1D5DB'; }
-  if(thumb){ thumb.style.left = on ? '20px' : '2px'; }
-  if(lbl)  { lbl.textContent = on ? 'Sim' : 'Não'; lbl.style.color = on ? '#1E40AF' : 'var(--muted)'; }
-  if(fields){ fields.style.display = on ? 'block' : 'none'; }
+  var cb  = document.getElementById('orcParcToggle');
+  var on  = cb ? cb.checked : true;
+  var fields = document.getElementById('orcParcFields');
+  if(fields) fields.style.display = 'block';
   if(on) {
     var sel = document.getElementById('orcParcSel');
-    if(sel){
+    if(sel && !sel.options.length){
       sel.innerHTML='';
-      var d=cfgLoad(); var parc=d.parcelamento||CFG_DEFAULT.parcelamento;
-      parc.forEach(function(r){
+      // Nova regra comercial: só até 3x, e SEMPRE sem juros — a taxa real
+      // da operadora (config .parcelamento, 2,99%/3,99%) continua
+      // existindo só como custo interno, nunca repassada/exibida aqui.
+      [1,2,3].forEach(function(n){
         var opt=document.createElement('option');
-        opt.value=r.parcelas;
-        opt.textContent=r.parcelas===1?'1x — à vista (sem taxa)':r.parcelas+'x — taxa '+r.taxa+'%';
+        opt.value=n;
+        opt.textContent = n===1 ? '1x — à vista' : n+'x — sem juros';
         sel.appendChild(opt);
       });
+      sel.value='3'; // 3x sem juros é o padrão da nova regra comercial
     }
   }
   orcRefreshFinalPrice();

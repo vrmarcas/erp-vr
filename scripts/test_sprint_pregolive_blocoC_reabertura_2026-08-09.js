@@ -52,8 +52,12 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco C — reabertura fiel de orçament
     /o\.descCond\s*>\s*0/.test(src), true);
   test('2. lê o.dcData (data limite do desconto condicional)', /setV\('orcDescCondData',\s*o\.dcData\)/.test(src), true);
   test('3. achado real corrigido: orcEnvEditar() lê o.descPix do registro salvo', /o\.descPix\s*>\s*0/.test(src), true);
-  test('4. achado real corrigido: orcEnvEditar() lê o.parcelas do registro salvo e repõe no orcParcSel',
-    /o\.parcelas\s*>\s*1/.test(src) && /parcSel\.value\s*=\s*String\(o\.parcelas\)/.test(src), true);
+  // SPRINT PRÉ-GO-LIVE, Bloco E — parcelamento no cartão deixou de ser
+  // Sim/Não (nova regra comercial: 1/2/3x sempre sem juros); o valor
+  // salvo agora é aplicado direto no orcParcSel, capado em 1-3x (nunca
+  // repassa um valor legado/fora da faixa nova, tipo 6x).
+  test('4. achado real corrigido: orcEnvEditar() lê o.parcelas do registro salvo e repõe no orcParcSel (capado em 1-3x)',
+    /o\.parcelas\s*>=\s*1\s*&&\s*o\.parcelas\s*<=\s*3/.test(src) && /parcSel\.value\s*=\s*String\(/.test(src), true);
   test('5. reaciona os toggles visuais (não só seta .checked em silêncio — o card teria texto/preview desatualizado)',
     /orcToggleDescCond\(\)/.test(src) && /orcTogglePixDisc\(\)/.test(src) && /orcToggleParc\(\)/.test(src), true);
   test('6. recalcula os previews de desconto condicional/PIX/parcela após restaurar (orcDescCondPreview/orcCalcPixDisc/orcCalcParc)',

@@ -140,12 +140,19 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 }
 
 // ── 3. Regressão estrutural: _orcSalvarOrcamentoImpl usa o motor central ─
+// SPRINT PRÉ-GO-LIVE, Bloco E — nova regra comercial definitiva: o motor
+// LEGADO (orcMotorPagamento, que aplicava a taxa real do cartão e o
+// desconto PIX condicionado ao toggle) foi substituído pelo motor
+// comercial central único (orcMotorComercial) para o valorFinal
+// persistido — cartão em até 3x é SEMPRE sem juros, e o PIX NUNCA mais é
+// subtraído automaticamente daqui (é uma alternativa, só vira desconto
+// real se o cliente de fato escolher pagar via PIX).
 {
   var srcSalvar = extractFn('_orcSalvarOrcamentoImpl');
-  test('7. valorFinal é calculado via orcMotorPagamento (não mais uma 4ª fórmula duplicada em ponto flutuante)',
-    /afterDisc\s*=\s*orcMotorPagamento\(/.test(srcSalvar), true);
-  test('8. valorFinal nunca inclui a taxa de cartão (parcAtivo:false explícito) — é a base à vista, mesma que PDF/WhatsApp mostram como Total',
-    /orcMotorPagamento\([^)]*parcAtivo\s*:\s*false/.test(srcSalvar), true);
+  test('7. valorFinal é calculado via orcMotorComercial (Bloco E), não mais orcMotorPagamento (motor legado com taxa real) nem uma 4ª fórmula duplicada em ponto flutuante',
+    /afterDisc\s*=\s*orcMotorComercial\(/.test(srcSalvar), true);
+  test('8. valorFinal só é reduzido pelo desconto condicional (dcOn) quando ativo — PIX nunca mais é subtraído automaticamente (não existe mais gate pxOn/pxPct dentro do cálculo de afterDisc)',
+    /baseAposCondSalvar\s*=\s*dcOn\s*\?\s*c\.finalPrice\*\(1-dcPct\/100\)/.test(srcSalvar), true);
 }
 
 // ── 4. orcCalcEntradaResto() — execução real, achado do smoke de produção
