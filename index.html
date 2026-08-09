@@ -9119,7 +9119,13 @@ function receitaResolverParaCalculo(item, produtoAtual) {
     return {
       dim3d: !!item.recipeSnapshot.dim3d,
       desc: item.recipeSnapshot.desc,
+      nome: item.recipeSnapshot.nome,
       pecasFormulas: item.recipeSnapshot.pecas || [],
+      // RODADA 6, seção 8/9 — GAP CRÍTICO: campos de entrada extras (seção
+      // 1) também fazem parte da receita congelada — sem isto, reabrir um
+      // item histórico continuaria pedindo/avaliando campos da versão
+      // VIGENTE da receita, não da v1 salva.
+      campos: item.recipeSnapshot.campos || [],
       recipeVersion: item.recipeVersion || 1,
       origem: 'snapshot',
     };
@@ -9128,7 +9134,9 @@ function receitaResolverParaCalculo(item, produtoAtual) {
     return {
       dim3d: !!produtoAtual.dim3d,
       desc: produtoAtual.desc,
+      nome: produtoAtual.nome,
       pecasFormulas: produtoAtual.pecas || [],
+      campos: produtoAtual.campos || [],
       recipeVersion: produtoAtual.recipeVersion || 1,
       origem: 'atual',
     };
@@ -9277,7 +9285,42 @@ function planEvalFormulaCtx(formula, ctx) {
   return Math.round(Math.max(0, r.valor) * 100) / 100;
 }
 
-function planGetRecipe(produto) {
+// RODADA 6, seção 8/9 — GAP CRÍTICO fechado: quando o item de orçamento já
+// tem um recipeSnapshot congelado (orçamento salvo), a fonte da receita
+// para QUALQUER recálculo daquele item (medidas, peças, campos extras) é
+// SEMPRE o snapshot — nunca a versão vigente do produto em planProdLoad(),
+// mesmo que a receita tenha sido editada depois. A decisão é centralizada
+// aqui, delegando a receitaResolverParaCalculo() (mesma função já usada e
+// testada para o cálculo de preço da OS) — nunca espalhar este `if` pelo
+// resto do código. `recipeSnapshot` (2º parâmetro, opcional) só deve ser
+// passado quando o item JÁ FOI planificado e salvo antes; um item novo
+// (ainda sem snapshot) continua usando a receita vigente do produto, como
+// sempre. Guarda adicional: se o snapshot pertence a um NOME de produto
+// diferente do selecionado agora (vendedor trocou o produto do item), o
+// snapshot é ignorado — a troca de produto sempre usa a receita vigente
+// do produto novo, nunca mistura peças de um produto com o nome de outro.
+function planGetRecipe(produto, recipeSnapshot) {
+  if (recipeSnapshot && recipeSnapshot.nome === produto) {
+    var resolvido = receitaResolverParaCalculo({ recipeSnapshot: recipeSnapshot }, null);
+    return {
+      dim3d: resolvido.dim3d,
+      desc: resolvido.desc,
+      campos: resolvido.campos || [],
+      pieces: function(L, A, P, e, extra) {
+        var ctx = Object.assign({L:L, A:A, P:P, e:e}, extra||{});
+        return (resolvido.pecasFormulas||[]).map(function(peca) {
+          return {
+            qty:  parseInt(peca.qty)||1,
+            nome: peca.nome||'Peça',
+            larg: planEvalFormulaCtx(peca.larg, ctx),
+            alt:  planEvalFormulaCtx(peca.alt,  ctx),
+            esp:  peca.esp||'',
+            tipo: peca.tipo||''
+          };
+        });
+      }
+    };
+  }
   // 1. Custom recipes from localStorage take priority
   var customs = planProdLoad();
   var custom = customs.find(function(p){ return p.nome === produto; });
@@ -9322,7 +9365,14 @@ function planAbrir(idx) {
   var espEl   = document.getElementById('oi_esp_'+idx);
   var matEl   = document.getElementById('oi_mat_'+idx);
   var produto = prodEl ? prodEl.value : 'Produto';
-  var rec     = planGetRecipe(produto);
+  // pre-fill dims — restore saved values if item was already planified
+  var row = document.getElementById('oir_'+idx);
+  // RODADA 6, seção 8/9 — GAP CRÍTICO: se o item já tem recipeSnapshot
+  // congelado, a receita usada AQUI (e em qualquer recálculo dentro do
+  // modal) tem que ser sempre a do snapshot — ver planGetRecipe().
+  var _savedSnapshot = null;
+  try { _savedSnapshot = row && row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(e){ _savedSnapshot = null; }
+  var rec     = planGetRecipe(produto, _savedSnapshot);
 
   document.getElementById('planModalTitle').textContent = '📐 Planificação — ' + produto;
 
@@ -9335,8 +9385,6 @@ function planAbrir(idx) {
     '<strong>' + produto + '</strong> &nbsp;·&nbsp; ' + matLabel +
     ' &nbsp;·&nbsp; <span style="color:var(--brand-mid)">' + rec.desc + '</span>';
 
-  // pre-fill dims — restore saved values if item was already planified
-  var row = document.getElementById('oir_'+idx);
   var savedLarg = row && row.dataset.planLarg ? row.dataset.planLarg : (lEl ? (lEl.value||'') : '');
   var savedAlt  = row && row.dataset.planAlt  ? row.dataset.planAlt  : (aEl ? (aEl.value||'') : '');
   var savedProf = row && row.dataset.planProf ? row.dataset.planProf : '';
@@ -9526,7 +9574,13 @@ function planCalc() {
   var espEl   = document.getElementById('oi_esp_'+_planIdx);
   var matEl   = document.getElementById('oi_mat_'+_planIdx);
   var produto = prodEl ? prodEl.value : 'Produto';
-  var rec     = planGetRecipe(produto);
+  // RODADA 6, seção 8/9 — GAP CRÍTICO: qualquer recálculo dentro do modal
+  // (mudar L/A/P, campos extras) tem que usar o recipeSnapshot congelado
+  // quando o item já foi planificado antes — ver planGetRecipe().
+  var _rowCalc = document.getElementById('oir_'+_planIdx);
+  var _savedSnapshotCalc = null;
+  try { _savedSnapshotCalc = _rowCalc && _rowCalc.dataset.recipeSnapshot ? JSON.parse(_rowCalc.dataset.recipeSnapshot) : null; } catch(e){ _savedSnapshotCalc = null; }
+  var rec     = planGetRecipe(produto, _savedSnapshotCalc);
 
   var L = parseFloat(document.getElementById('planLarg')?.value)||0;
   var A = parseFloat(document.getElementById('planAlt')?.value)||0;
