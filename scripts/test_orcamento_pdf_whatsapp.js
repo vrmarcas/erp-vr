@@ -56,7 +56,7 @@ var FN_NAMES = [
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
   'orcProximoNumeroAtomico', 'orcObterNumeroOficial', 'orcLimparNumeroOficial',
-  'orcGetValidadeDias', 'orcCalcCondicoesPagamento',
+  'orcGetValidadeDias', 'orcMotorPagamento', 'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcEnviarOrcamentoWA'
 ];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
@@ -96,6 +96,17 @@ global.window.open = function (url) {
   return w;
 };
 global.location = { origin: 'http://127.0.0.1:5050' };
+
+// ── cfgLoad()/CFG_DEFAULT — usados por orcLerCondicoesPagamentoDOM() para
+// ler a tabela de taxas de parcelamento (RODADA 6, seção 2, motor central
+// de Cartão/PIX). Mesma forma real usada em produção (percentuais, não
+// frações — 3x sem juros, 6x com 8% embutido, para exercitar as duas
+// situações nos testes).
+global.CFG_DEFAULT = { parcelamento: [
+  { parcelas: 1, taxa: 0 }, { parcelas: 2, taxa: 0 }, { parcelas: 3, taxa: 0 },
+  { parcelas: 6, taxa: 8 }, { parcelas: 12, taxa: 15 }
+] };
+global.cfgLoad = function () { return JSON.parse(JSON.stringify(global.CFG_DEFAULT)); };
 
 // ── Mock do Firestore para orcProximoNumeroAtomico() — simula runTransaction
 // com a MESMA semântica de atomicidade real: transações concorrentes contra
@@ -155,7 +166,11 @@ function resetFixture() {
     orcValidadeDias: makeEl({ value: '10' }),
     orcFormaPgto: { selectedIndex: 0, options: [{ text: '50% de entrada, 50% na retirada do material' }] },
     orcDescCondToggle: makeEl({ checked: false }),
+    orcDescCond: makeEl({ value: '0' }),
     orcPixDiscToggle: makeEl({ checked: false }),
+    orcPixDiscPct: makeEl({ value: '0' }),
+    orcParcToggle: makeEl({ checked: false }),
+    orcParcSel: { value: '1' },
     oi_prod_0: makeEl({ value: 'Painel ACM' }),
     oi_qty_0: makeEl({ value: '2' }),
     oi_larg_0: makeEl({ value: '200' }),
@@ -299,6 +314,53 @@ await test('29. proporção respeita o peso bruto de cada item (item1 1500/4000,
   assertTrue(approx(itens[1].total, 3450 * 2500 / 4000), 'item2.total=' + itens[1].total);
 });
 
+console.log('\n── RODADA 6, seção 2 — motor central de Cartão/PIX (centavos) ──\n');
+await test('30. orcMotorPagamento() sem desconto/PIX/parcelamento devolve a base intacta', function () {
+  var m = mod.orcMotorPagamento(1000, {});
+  assertEq(m.afterPix, 1000);
+  assertEq(m.totalComTaxa, 1000);
+  assertEq(m.nParc, 1);
+});
+await test('31. orcMotorPagamento() aplica desconto condicional e depois PIX, em cima do já descontado (não do bruto)', function () {
+  var m = mod.orcMotorPagamento(1000, { dcOn: true, dcPct: 10, pxOn: true, pxPct: 5 });
+  assertEq(m.afterDescCond, 900);
+  assertEq(m.afterPix, 855); // 900 * 0.95
+});
+await test('32. orcMotorPagamento() com parcelamento SEM taxa (3x) não altera o total, só divide', function () {
+  var m = mod.orcMotorPagamento(900, { parcAtivo: true, nParc: 3, tabelaParcelamento: global.CFG_DEFAULT.parcelamento });
+  assertEq(m.totalComTaxa, 900);
+  assertEq(m.valorParcela, 300);
+  assertTrue(m.semJuros);
+});
+await test('33. orcMotorPagamento() com parcelamento COM taxa (6x, 8%) soma a taxa ao total antes de dividir', function () {
+  var m = mod.orcMotorPagamento(1000, { parcAtivo: true, nParc: 6, tabelaParcelamento: global.CFG_DEFAULT.parcelamento });
+  assertEq(m.totalComTaxa, 1080); // 1000 * 1.08
+  assertEq(m.valorParcela, 180); // 1080 / 6
+  assertFalse(m.semJuros);
+});
+await test('34. orcMotorPagamento() nunca usa ponto flutuante cru — resultado sempre com exatamente 2 casas (centavo-preciso)', function () {
+  var m = mod.orcMotorPagamento(333.33, { dcOn: true, dcPct: 7, pxOn: true, pxPct: 3, parcAtivo: true, nParc: 12, tabelaParcelamento: global.CFG_DEFAULT.parcelamento });
+  ['afterDescCond', 'afterPix', 'totalComTaxa', 'valorParcela'].forEach(function (k) {
+    var centavos = Math.round(m[k] * 100);
+    assertTrue(Math.abs(m[k] * 100 - centavos) < 1e-9, k + '=' + m[k] + ' não é centavo-exato');
+  });
+});
+await test('35. orcCalcCondicoesPagamento() com cartão 6x ativo devolve a MESMA parcela que orcMotorPagamento() calcularia direto — nunca uma segunda fórmula divergente', function () {
+  resetFixture(); resetFirestoreCounter();
+  _elements.orcParcToggle.checked = true;
+  _elements.orcParcSel.value = '6';
+  var cond = mod.orcCalcCondicoesPagamento(1000);
+  var direto = mod.orcMotorPagamento(1000, { parcAtivo: true, nParc: 6, tabelaParcelamento: global.CFG_DEFAULT.parcelamento });
+  assertEq(cond.parcela.valorParcela, direto.valorParcela);
+  assertEq(cond.parcela.taxa, 8);
+  assertFalse(cond.parcela.semJuros);
+});
+await test('36. orcCalcCondicoesPagamento() sem cartão ativo não gera objeto parcela (nunca mostra parcelamento indevido)', function () {
+  resetFixture(); resetFirestoreCounter();
+  var cond = mod.orcCalcCondicoesPagamento(1000);
+  assertEq(cond.parcela, null);
+});
+
 console.log('\n── orcEnviarOrcamentoWA() — mensagem completa, encoding e telefone ─\n');
 var urlGerada, textParam;
 {
@@ -306,62 +368,62 @@ var urlGerada, textParam;
   await mod.orcEnviarOrcamentoWA();
   urlGerada = global._openedUrls[global._openedUrls.length - 1];
 
-  await test('30. telefone válido gera exatamente 1 janela/URL (wa.me)', function () {
+  await test('37. telefone válido gera exatamente 1 janela/URL (wa.me)', function () {
     assertEq(global._openedWins.length, 1);
     assertEq(global._openedUrls.length, 1);
     assertTrue(urlGerada.indexOf('https://wa.me/5516999123456?text=') === 0, 'URL: ' + urlGerada);
   });
 
   textParam = decodeURIComponent(urlGerada.split('?text=')[1]);
-  await test('31. texto decodificado não contém caractere de substituição (�) nem HTML <br>', function () {
+  await test('38. texto decodificado não contém caractere de substituição (�) nem HTML <br>', function () {
     assertFalse(textParam.indexOf('�') >= 0, 'contém replacement character');
     assertFalse(/<br\s*\/?>/i.test(textParam), 'contém <br> em vez de quebra de linha real');
   });
-  await test('32. texto decodificado contém saudação + primeiro nome (sem "undefined"/"null")', function () {
+  await test('39. texto decodificado contém saudação + primeiro nome (sem "undefined"/"null")', function () {
     assertFalse(/undefined|null/.test(textParam));
     assertTrue(/^(Bom dia|Boa tarde|Boa noite), \*Fernanda\*!/.test(textParam), textParam.slice(0, 60));
   });
-  await test('33. texto contém a marca emissora (VR Marcas, corpo sem classe "vitre")', function () {
+  await test('40. texto contém a marca emissora (VR Marcas, corpo sem classe "vitre")', function () {
     assertTrue(textParam.indexOf('*VR Marcas*') >= 0);
   });
-  await test('34. texto contém o número oficial reservado (6 dígitos, não mais Date.now())', function () {
+  await test('41. texto contém o número oficial reservado (6 dígitos, não mais Date.now())', function () {
     assertTrue(/\*ORÇAMENTO Nº \d{6}\*/.test(textParam), textParam.slice(0, 120));
   });
-  await test('35. texto contém os 2 itens numerados 01./02. com quantidade/unitário/subtotal', function () {
+  await test('42. texto contém os 2 itens numerados 01./02. com quantidade/unitário/subtotal', function () {
     assertTrue(textParam.indexOf('01. Painel ACM 200×100cm em ACM 4mm Prata — Corte a laser') >= 0);
     assertTrue(textParam.indexOf('02. Letra Caixa em Acrílico 10mm Cristal') >= 0);
     assertTrue(/Quantidade: 2/.test(textParam));
     assertTrue(/Quantidade: 5/.test(textParam));
   });
-  await test('36. texto contém VALOR TOTAL igual ao finalPrice do fixture (R$ 3.450,00)', function () {
+  await test('43. texto contém VALOR TOTAL igual ao finalPrice do fixture (R$ 3.450,00)', function () {
     assertTrue(textParam.indexOf('*VALOR TOTAL: R$ 3.450,00*') >= 0, textParam);
   });
-  await test('37. texto contém prazo, validade e forma de pagamento (mesma fonte do PDF)', function () {
+  await test('44. texto contém prazo, validade e forma de pagamento (mesma fonte do PDF)', function () {
     assertTrue(textParam.indexOf('*Prazo de produção:* De 5 a 7 dias úteis após aprovação e comprovante de pagamento') >= 0);
     assertTrue(textParam.indexOf('*Validade do orçamento:* 10 dias') >= 0);
     assertTrue(textParam.indexOf('*Forma de pagamento:* 50% de entrada, 50% na retirada do material') >= 0);
   });
-  await test('38. texto assina com responsável e marca, sem nome fixo hardcoded', function () {
+  await test('45. texto assina com responsável e marca, sem nome fixo hardcoded', function () {
     assertTrue(textParam.indexOf('*Marcos Andrade*\n*VR Marcas*') >= 0);
   });
-  await test('39. mensagem inteira não tem emoji (template padrão é livre de emoji)', function () {
+  await test('46. mensagem inteira não tem emoji (template padrão é livre de emoji)', function () {
     var temEmoji = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(textParam);
     assertFalse(temEmoji, 'emoji encontrado na mensagem: ' + textParam);
   });
-  await test('40. URL foi codificada exatamente 1 vez (decode único recupera o texto original sem sobra de %25)', function () {
+  await test('47. URL foi codificada exatamente 1 vez (decode único recupera o texto original sem sobra de %25)', function () {
     assertFalse(/%[0-9A-F]{2}/.test(textParam) && textParam.indexOf('%25') >= 0, 'indício de dupla codificação (%25 residual)');
   });
 }
 
 console.log('\n── Telefone inválido nunca abre o wa.me (e nunca gasta uma reserva) ─\n');
-await test('41. telefone vazio: mostra aviso e NÃO abre nenhuma janela', async function () {
+await test('48. telefone vazio: mostra aviso e NÃO abre nenhuma janela', async function () {
   resetFixture(); resetFirestoreCounter();
   _elements.orcClientTel.value = '';
   await mod.orcEnviarOrcamentoWA();
   assertEq(global._openedWins.length, 0);
   assertTrue(!!global._lastToast && global._lastToast.kind === 'warn');
 });
-await test('42. telefone claramente inválido (poucos dígitos): mostra aviso e NÃO abre nenhuma janela', async function () {
+await test('49. telefone claramente inválido (poucos dígitos): mostra aviso e NÃO abre nenhuma janela', async function () {
   resetFixture(); resetFirestoreCounter();
   _elements.orcClientTel.value = '123';
   await mod.orcEnviarOrcamentoWA();
@@ -369,7 +431,7 @@ await test('42. telefone claramente inválido (poucos dígitos): mostra aviso e 
 });
 
 console.log('\n── Marca Vitre — identidade correta na mensagem ────────────────\n');
-await test('43. body.classList com "vitre" -> mensagem assina como Vitre', async function () {
+await test('50. body.classList com "vitre" -> mensagem assina como Vitre', async function () {
   resetFixture(); resetFirestoreCounter();
   _bodyClasses.push('vitre');
   await mod.orcEnviarOrcamentoWA();
@@ -380,7 +442,7 @@ await test('43. body.classList com "vitre" -> mensagem assina como Vitre', async
 });
 
 console.log('\n── Sem nome de cliente — nunca gera saudação quebrada ──────────\n');
-await test('44. nome vazio -> "Olá!" (nunca vírgula solta/undefined)', async function () {
+await test('51. nome vazio -> "Olá!" (nunca vírgula solta/undefined)', async function () {
   resetFixture(); resetFirestoreCounter();
   _elements.orcClientNome.value = '';
   await mod.orcEnviarOrcamentoWA();
@@ -390,7 +452,7 @@ await test('44. nome vazio -> "Olá!" (nunca vírgula solta/undefined)', async f
 });
 
 console.log('\n── Número igual entre chamadas WA/PDF no mesmo rascunho ────────\n');
-await test('45. duas chamadas de orcObterNumeroOficial() dentro do mesmo rascunho (ex.: PDF depois WhatsApp) retornam o MESMO número', async function () {
+await test('52. duas chamadas de orcObterNumeroOficial() dentro do mesmo rascunho (ex.: PDF depois WhatsApp) retornam o MESMO número', async function () {
   resetFixture(); resetFirestoreCounter();
   var nWA = await mod.orcObterNumeroOficial();
   var nPDF = await mod.orcObterNumeroOficial(); // 2ª "renderização" do mesmo rascunho

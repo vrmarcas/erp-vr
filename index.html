@@ -11024,11 +11024,18 @@ function orcCalcParcelaDisplay() {
   var disp = document.getElementById('orcSimParcelaDisplay');
   if(!sel||!disp) return;
   var n = parseInt(sel.value)||1;
-  var total = window._orcCalc ? (window._orcCalc.finalPrice||0) : 0;
+  var base = window._orcCalc ? (window._orcCalc.finalPrice||0) : 0;
   if(n<=1){disp.style.display='none';return;}
-  var parc = total/n;
+  // RODADA 6, seção 2 — achado real: esta tela ("Confirmação de Pagamento")
+  // dividia o preço BRUTO por n, ignorando desconto condicional, desconto
+  // PIX e a própria taxa do cartão — mostrando um valor de parcela
+  // diferente do que o PDF/WhatsApp já mostravam ao cliente. Agora usa o
+  // mesmo motor central (orcMotorPagamento), com as condições atuais da
+  // tela (orcLerCondicoesPagamentoDOM).
+  var cond = (typeof orcLerCondicoesPagamentoDOM==='function') ? orcLerCondicoesPagamentoDOM() : {};
+  var motor = orcMotorPagamento(base, Object.assign({}, cond, {parcAtivo:true, nParc:n}));
   disp.style.display='';
-  disp.textContent = n+'× de R$ '+parc.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' (total: R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')';
+  disp.textContent = n+'× de R$ '+motor.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' (total: R$ '+motor.totalComTaxa.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')';
 }
 
 function orcAtualizarIconePgto() {
@@ -16859,15 +16866,22 @@ function finDeleteTX(osRef, data, cliente) {
 // ── Antecipar recebimento de Cartão (simula taxa MP/Nubank ~3,49%) ────────────
 function finAntecipar(osRef, valor) {
   var cfg = cfgLoad();
-  var taxa = (cfg&&cfg.financeiro&&cfg.financeiro.cartao) ? cfg.financeiro.cartao : 0.0349;
-  var taxaDisplay = (taxa*100).toFixed(2);
-  var msg='Antecipar R$ '+finFmt(valor)+'?\nTaxa: '+taxaDisplay+'%  →  Você receberá: '+finFmt(valor*(1-taxa));
+  // RODADA 6, seção 2 — achado real: cfg.financeiro.cartao é armazenado em
+  // pontos percentuais (3.49 = 3,49%), mesma convenção de financeiro.pix e
+  // de parcelamento[].taxa em todo o resto do arquivo — mas esta função
+  // tratava o valor como fração decimal (esperava 0.0349), então sempre
+  // que o campo vinha do CFG_DEFAULT/nuvem (o caso normal — 3.49, não
+  // 0.0349) o cálculo virava valor*(1-3.49) = valor negativo multiplicado
+  // por ~-2.49. Corrigido para a mesma convenção de pontos percentuais.
+  var taxaPct = (cfg&&cfg.financeiro&&typeof cfg.financeiro.cartao==='number') ? cfg.financeiro.cartao : 3.49;
+  var taxaDisplay = taxaPct.toFixed(2);
+  var msg='Antecipar R$ '+finFmt(valor)+'?\nTaxa: '+taxaDisplay+'%  →  Você receberá: '+finFmt(valor*(1-taxaPct/100));
   if(!confirm(msg)) return;
   var t = FIN_TX.find(function(x){return String(x.os)===String(osRef)&&x.status!=='antecipado';});
   if(!t){ showToast('Transação não encontrada','err'); return; }
   var _statusAnterior = t.status, _valorAnterior = t.valor;
   t.status='antecipado';
-  t.valor=parseFloat((t.valor*(1-taxa)).toFixed(2));
+  t.valor=parseFloat((t.valor*(1-taxaPct/100)).toFixed(2));
   var _valorAntecipado = t.valor;
   _confirmarAposSalvar(
     _cloudSave('fin_tx', FIN_TX),
@@ -20989,11 +21003,46 @@ window.crmReceiveChatvoltLead = function(data) {
 // ============================================================
 // ORÇAMENTO — ENVIO E CONFIRMAÇÃO DO CLIENTE
 // ============================================================
-// Fonte única de condições de pagamento (desconto condicional, desconto Pix,
-// parcelamento) — usada tanto pelo WhatsApp quanto pelo PDF A4, para os dois
-// nunca mais divergirem no que mostram ao cliente (achado da auditoria:
-// antes só o WhatsApp exibia parcelamento/Pix, o PDF nem lia esses campos).
-function orcCalcCondicoesPagamento(baseEfetiva) {
+// RODADA 6, seção 2 — motor central de Cartão/PIX, em centavos: fonte
+// única do cálculo de desconto condicional + desconto PIX + taxa de
+// parcelamento no cartão. Antes desta rodada existiam 3 reimplementações
+// independentes da mesma fórmula em ponto flutuante (resumo do wizard,
+// tela "Confirmação de Pagamento" do wizard, e esta função aqui usada por
+// PDF/WhatsApp) — a da tela de Confirmação de Pagamento nem aplicava
+// desconto/PIX/taxa, mostrando um valor de parcela errado ao vendedor.
+// Cálculo sempre em centavos (nunca ponto flutuante direto) para eliminar
+// qualquer chance de 1 centavo de diferença entre o que cada tela mostra.
+function orcMotorPagamento(baseReais, cond) {
+  cond = cond || {};
+  var baseCent = Math.round((baseReais||0) * 100);
+  var dcPct = cond.dcOn ? (cond.dcPct||0) : 0;
+  var pxPct = cond.pxOn ? (cond.pxPct||0) : 0;
+  var afterDescCondCent = Math.round(baseCent * (1 - dcPct/100));
+  var afterPixCent = Math.round(afterDescCondCent * (1 - pxPct/100));
+  var parcAtivo = !!cond.parcAtivo;
+  var nParc = parcAtivo && cond.nParc > 1 ? cond.nParc : 1;
+  var taxaPct = 0;
+  if (nParc > 1) {
+    var tabela = cond.tabelaParcelamento || [];
+    var found = tabela.find(function(r){ return r.parcelas===nParc; }) || {taxa:0};
+    taxaPct = found.taxa||0;
+  }
+  var totalComTaxaCent = nParc>1 ? Math.round(afterPixCent * (1 + taxaPct/100)) : afterPixCent;
+  var valorParcelaCent = nParc>1 ? Math.round(totalComTaxaCent / nParc) : totalComTaxaCent;
+  return {
+    afterDescCond: afterDescCondCent/100,
+    afterPix: afterPixCent/100,
+    totalComTaxa: totalComTaxaCent/100,
+    valorParcela: valorParcelaCent/100,
+    nParc: nParc, taxaPct: taxaPct, semJuros: !(taxaPct>0)
+  };
+}
+
+// Lê os 5 campos de condição de pagamento do DOM + a tabela de taxas
+// configurada — único lugar que lê estes campos, usado por todo mundo que
+// precisa do estado ATUAL da tela (resumo, Confirmação de Pagamento, PDF,
+// WhatsApp) para nunca lerem o mesmo campo de formas ligeiramente diferentes.
+function orcLerCondicoesPagamentoDOM() {
   var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
   var dcPct = dcOn ? (parseFloat(document.getElementById('orcDescCond')?.value)||0) : 0;
   var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
@@ -21001,14 +21050,22 @@ function orcCalcCondicoesPagamento(baseEfetiva) {
   var parcAtivo = !!(document.getElementById('orcParcToggle')?.checked);
   var parcSel   = document.getElementById('orcParcSel');
   var nParc = parcAtivo && parcSel ? parseInt(parcSel.value)||1 : 1;
+  var dpd = cfgLoad();
+  return { dcOn: dcOn, dcPct: dcPct, pxOn: pxOn, pxPct: pxPct, parcAtivo: parcAtivo, nParc: nParc, tabelaParcelamento: dpd.parcelamento||CFG_DEFAULT.parcelamento };
+}
+
+// Fonte única de condições de pagamento (desconto condicional, desconto Pix,
+// parcelamento) — usada tanto pelo WhatsApp quanto pelo PDF A4, para os dois
+// nunca mais divergirem no que mostram ao cliente (achado da auditoria:
+// antes só o WhatsApp exibia parcelamento/Pix, o PDF nem lia esses campos).
+function orcCalcCondicoesPagamento(baseEfetiva) {
+  var cond = orcLerCondicoesPagamentoDOM();
   var parcela = null;
-  if (parcAtivo && nParc > 1) {
-    var dpd = cfgLoad();
-    var pFound = (dpd.parcelamento||CFG_DEFAULT.parcelamento).find(function(r){return r.parcelas===nParc;}) || {taxa:0};
-    var totalComTaxa = baseEfetiva * (1 + (pFound.taxa||0)/100);
-    parcela = { nParc: nParc, valorParcela: totalComTaxa/nParc, taxa: pFound.taxa||0, semJuros: !(pFound.taxa>0) };
+  if (cond.parcAtivo && cond.nParc > 1) {
+    var motor = orcMotorPagamento(baseEfetiva, { dcOn:false, dcPct:0, pxOn:false, pxPct:0, parcAtivo:true, nParc:cond.nParc, tabelaParcelamento:cond.tabelaParcelamento });
+    parcela = { nParc: cond.nParc, valorParcela: motor.valorParcela, taxa: motor.taxaPct, semJuros: motor.semJuros };
   }
-  return { dcOn: dcOn, dcPct: dcPct, pxOn: pxOn, pxPct: pxPct, parcela: parcela };
+  return { dcOn: cond.dcOn, dcPct: cond.dcPct, pxOn: cond.pxOn, pxPct: cond.pxPct, parcela: parcela };
 }
 
 // Saudação por horário comercial em America/Sao_Paulo — nunca o horário
@@ -21662,22 +21719,19 @@ function orcRefreshFinalPrice() {
   var tot  = document.getElementById('orcRsmTotal');
   var orig = document.getElementById('orcRsmOriginal');
   if(!tot||!base) return;
-  var dcOn  = !!(document.getElementById('orcDescCondToggle')?.checked);
-  var dcPct = dcOn  ? (parseFloat(document.getElementById('orcDescCond')?.value)||0)  : 0;
-  var pxOn  = !!(document.getElementById('orcPixDiscToggle')?.checked);
-  var pxPct = pxOn  ? (parseFloat(document.getElementById('orcPixDiscPct')?.value)||0) : 0;
-  var paOn  = !!(document.getElementById('orcParcToggle')?.checked);
-  var afterDisc = base*(1-dcPct/100)*(1-pxPct/100);
+  // RODADA 6, seção 2 — usa o motor central (orcMotorPagamento) em vez de
+  // recalcular desconto/PIX/taxa de cartão aqui de novo — mesma fórmula
+  // (centavo-precisa) usada pelo PDF/WhatsApp (orcCalcCondicoesPagamento).
+  var cond = orcLerCondicoesPagamentoDOM();
+  var motor = orcMotorPagamento(base, cond);
+  var dcOn = cond.dcOn, pxOn = cond.pxOn, paOn = cond.parcAtivo;
+  var afterDisc = motor.afterPix;
   var hasDisc   = afterDisc < base;
   if(paOn){
-    var sel   = document.getElementById('orcParcSel');
-    var nParc = sel ? parseInt(sel.value)||1 : 1;
-    var d     = cfgLoad();
-    var parc  = d.parcelamento||CFG_DEFAULT.parcelamento;
-    var found = parc.find(function(r){return r.parcelas===nParc;})||{parcelas:1,taxa:0};
-    var taxa  = found.taxa||0;
-    var comTaxa   = nParc>1 ? afterDisc*(1+taxa/100) : afterDisc;
-    var parcelVal = comTaxa/nParc;
+    var nParc = cond.nParc;
+    var taxa  = motor.taxaPct;
+    var comTaxa   = motor.totalComTaxa;
+    var parcelVal = motor.valorParcela;
     if(nParc>1){
       if(orig){orig.textContent=orcFmt(base);orig.style.display='block';}
       tot.textContent=orcFmt(comTaxa); tot.style.color='#1E40AF';
@@ -22042,7 +22096,13 @@ async function _orcSalvarOrcamentoImpl() {
   var paOn  = !!(document.getElementById('orcParcToggle')?.checked);
   var nParc = paOn && document.getElementById('orcParcSel') ? parseInt(document.getElementById('orcParcSel').value)||1 : 1;
   var dcData= dcOn ? (document.getElementById('orcDescCondData')?.value||'') : '';
-  var afterDisc = c.finalPrice*(1-dcPct/100)*(1-pxPct/100);
+  // RODADA 6, seção 2 — mesmo motor central (centavo-preciso) usado pelo
+  // resumo do wizard, PDF e WhatsApp — valorFinal persistido aqui é a
+  // mesma base à vista (desconto condicional + PIX) mostrada como "Total"
+  // nos documentos do cliente; a taxa de cartão nunca entra aqui porque é
+  // uma condição do MÉTODO de pagamento (decidida ao confirmar o
+  // recebimento), não do preço do pedido.
+  var afterDisc = orcMotorPagamento(c.finalPrice, {dcOn:dcOn, dcPct:dcPct, pxOn:pxOn, pxPct:pxPct, parcAtivo:false, nParc:1}).afterPix;
   // Snapshot COMPLETO de itens — chave real do material (matKey) + área/
   // extras planificados + extras por item (ORC_ITEM_EXTRAS), não só os
   // campos exibidos em tela.
