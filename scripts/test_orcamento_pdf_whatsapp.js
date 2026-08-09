@@ -56,7 +56,14 @@ var FN_NAMES = [
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
   'orcProximoNumeroAtomico', 'orcObterNumeroOficial', 'orcLimparNumeroOficial',
-  'orcGetValidadeDias', 'orcMotorPagamento', 'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
+  'orcGetValidadeDias', 'orcMotorPagamento',
+  // SPRINT PRÉ-GO-LIVE, Bloco E — orcCalcCondicoesPagamento() agora usa o
+  // motor comercial central (orcMotorComercial/orcDistribuirParcelas) em
+  // vez do motor legado orcMotorPagamento — sem extrair as duas, qualquer
+  // chamada real (inclusive dentro de orcEnviarOrcamentoWA) quebra com
+  // ReferenceError.
+  'orcDistribuirParcelas', 'orcMotorComercial',
+  'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcEnviarOrcamentoWA'
 ];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
@@ -345,15 +352,30 @@ await test('34. orcMotorPagamento() nunca usa ponto flutuante cru — resultado 
     assertTrue(Math.abs(m[k] * 100 - centavos) < 1e-9, k + '=' + m[k] + ' não é centavo-exato');
   });
 });
-await test('35. orcCalcCondicoesPagamento() com cartão 6x ativo devolve a MESMA parcela que orcMotorPagamento() calcularia direto — nunca uma segunda fórmula divergente', function () {
+// SPRINT PRÉ-GO-LIVE, Bloco E — este teste testava a REGRA ANTIGA (cartão
+// 6x com a taxa real de 8% repassada ao cliente). A nova regra comercial
+// definitiva do usuário substitui isso por completo: cartão só até 3x,
+// SEMPRE sem juros — orcCalcCondicoesPagamento() agora usa o motor
+// comercial central (orcMotorComercial), não mais orcMotorPagamento.
+await test('35. orcCalcCondicoesPagamento() com "6x" selecionado (valor legado/fora da faixa nova) é CLAMPADO para 3x — nunca repassa 6x nem qualquer taxa real ao cliente', function () {
   resetFixture(); resetFirestoreCounter();
   _elements.orcParcToggle.checked = true;
   _elements.orcParcSel.value = '6';
   var cond = mod.orcCalcCondicoesPagamento(1000);
-  var direto = mod.orcMotorPagamento(1000, { parcAtivo: true, nParc: 6, tabelaParcelamento: global.CFG_DEFAULT.parcelamento });
-  assertEq(cond.parcela.valorParcela, direto.valorParcela);
-  assertEq(cond.parcela.taxa, 8);
-  assertFalse(cond.parcela.semJuros);
+  var direto = mod.orcMotorComercial(1000, { pix: 0 });
+  assertEq(cond.parcela.nParc, 3, 'nParc deveria ser clampado para 3, obtido ' + cond.parcela.nParc);
+  assertEq(cond.parcela.valorParcela, direto.cartao[3].valorParcela);
+  assertEq(cond.parcela.totalCents, direto.baseCents, 'cartão 3x nunca pode custar mais que a base (sem juros)');
+  assertTrue(cond.parcela.semJuros, 'nova regra: cartão em até 3x é SEMPRE sem juros');
+});
+await test('35b. orcCalcCondicoesPagamento() com 2x/3x reais (dentro da nova faixa) nunca aplica juros — total do cartão é sempre igual à base', function () {
+  resetFixture(); resetFirestoreCounter();
+  _elements.orcParcToggle.checked = true;
+  _elements.orcParcSel.value = '3';
+  var cond = mod.orcCalcCondicoesPagamento(1000);
+  assertEq(cond.parcela.nParc, 3);
+  assertEq(cond.parcela.totalCents, 100000); // 1000,00 em centavos — nunca mais que a base
+  assertTrue(cond.parcela.semJuros, true);
 });
 await test('36. orcCalcCondicoesPagamento() sem cartão ativo não gera objeto parcela (nunca mostra parcelamento indevido)', function () {
   resetFixture(); resetFirestoreCounter();

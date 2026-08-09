@@ -54,7 +54,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
-  '_cloudSave', '_homologGuardOrThrow', '_confirmarAposSalvar',
+  '_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', '_confirmarAposSalvar',
   '_finSaveCR', '_finSaveCP', '_finCRBaixaConfirmar', '_finCPPagarConfirmar', 'finFmt',
   'stockSaveData', '_stockTombSave', 'stockExcluirItem',
   'cliSaveLixeira', 'cliSaveClientes', 'cliExcluir'
@@ -62,6 +62,7 @@ var FN_NAMES = [
 var src = [
   "var _COL = 'erp_vr';",
   "var _cloudLastPayload = {};",
+  "var _cloudSaveQueue = {};", // SPRINT PRÉ-GO-LIVE, Blocos H/K — fila de gravação por chave (ver _cloudSaveExec)
   "var _HOMOLOG_MODE = false;",
   "var _HOMOLOG_EMULATORS_CONNECTED = true;",
   "var _cloudReady = true;",

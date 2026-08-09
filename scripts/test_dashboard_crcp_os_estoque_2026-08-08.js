@@ -33,7 +33,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['dashCalcularCRCP', 'dashCalcularOSBreakdown', 'dashCalcularEstoqueCritico'];
+var FN_NAMES = ['finCPValorNum', 'dashCalcularCRCP', 'dashCalcularOSBreakdown', 'dashCalcularEstoqueCritico'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { crcp: dashCalcularCRCP, osBreakdown: dashCalcularOSBreakdown, estoque: dashCalcularEstoqueCritico };'

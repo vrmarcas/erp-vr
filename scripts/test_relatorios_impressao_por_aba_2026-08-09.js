@@ -29,7 +29,7 @@ var html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 console.log('\n=== RODADA 6, seção 4 — Relatórios: impressão-por-aba ===\n');
 
-var printBlockMatch = html.match(/@media print \{[\s\S]{0,2000}?\n\}/);
+var printBlockMatch = html.match(/@media print \{[\s\S]{0,4000}?\n\}/);
 if (!printBlockMatch) throw new Error('Bloco @media print de #pg-relatorios não encontrado — teste desatualizado?');
 var printBlock = printBlockMatch[0];
 
