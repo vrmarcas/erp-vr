@@ -50,7 +50,7 @@ test('5. HTML contém o painel relPgAnual com o select relAnualAno e o container
   /id="relPgAnual"/.test(html) && /id="relAnualAno"/.test(html) && /id="relAnualConteudo"/.test(html), true);
 
 // ── 6+. Execução real: DOM fake completo ──
-var FN_NAMES = ['finFmt', 'orcEnvParseDataSalvo', 'relAnual'];
+var FN_NAMES = ['finFmt', 'finCPValorNum', 'orcEnvParseDataSalvo', 'relAnual'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   "module.exports = { relAnual: relAnual };"

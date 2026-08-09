@@ -37,6 +37,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  'finCPValorNum',
   'finCaixaBRtoISO', 'finCaixaISOtoBR', 'finCaixaAddDiaISO', 'finCaixaTotaisDoDia',
   'finCaixaAjustesDoDia', 'finCaixaAjusteTotalDoDia', 'finCaixaGenesisISO',
   'finCaixaSaldoFinal', 'finCaixaAnteriorAuto', 'finCaixaRegistrarAjuste',

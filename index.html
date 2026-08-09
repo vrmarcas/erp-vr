@@ -7071,7 +7071,8 @@ function _authFirebaseError(code){
         <label>Tipo</label>
         <select id="finCPTipo" onchange="finCPToggleRecorrenciaFields()">
           <option value="avulsa">📄 Avulsa (uma vez)</option>
-          <option value="recorrente">🔁 Recorrente (mensal)</option>
+          <option value="recorrente">🔁 Recorrente (valor fixo)</option>
+          <option value="recorrente_variavel">🔁📝 Recorrente (valor variável)</option>
         </select>
       </div>
       <div id="finCPRecorrenciaFields" style="display:none;background:var(--bg2);border-radius:10px;padding:10px 12px;margin-bottom:10px">
@@ -13667,9 +13668,9 @@ function dashCalcularCRCP(finCR, finCP, marcaFiltro, hojeISO) {
     crCount: crPendente.length,
     crVencidoTotal: crVencido.reduce(function (s, r) { return s + r.valor; }, 0),
     crVencidoCount: crVencido.length,
-    cpTotal: cpPendente.reduce(function (s, c) { return s + c.valor; }, 0),
+    cpTotal: cpPendente.reduce(function (s, c) { return s + finCPValorNum(c); }, 0),
     cpCount: cpPendente.length,
-    cpVencidoTotal: cpVencido.reduce(function (s, c) { return s + c.valor; }, 0),
+    cpVencidoTotal: cpVencido.reduce(function (s, c) { return s + finCPValorNum(c); }, 0),
     cpVencidoCount: cpVencido.length,
   };
 }
@@ -13873,8 +13874,8 @@ function dashRender() {
   var mesAnt   = mesAtual===1?12:mesAtual-1;
   var anoAtual = new Date().getFullYear();
   var cpParseDate = function(venc){ var p=(venc||'').split('/'); return p.length===3?new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])):null; };
-  var dspMes   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAtual&&d.getFullYear()===anoAtual; }).reduce(function(s,c){return s+c.valor;},0);
-  var dspAnt   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAnt&&(mesAnt===12?d.getFullYear()===anoAtual-1:d.getFullYear()===anoAtual); }).reduce(function(s,c){return s+c.valor;},0);
+  var dspMes   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAtual&&d.getFullYear()===anoAtual; }).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var dspAnt   = FIN_CP.filter(function(c){ var d=cpParseDate(c.vencimento); return d&&d.getMonth()+1===mesAnt&&(mesAnt===12?d.getFullYear()===anoAtual-1:d.getFullYear()===anoAtual); }).reduce(function(s,c){return s+finCPValorNum(c);},0);
   var dspVar   = dspAnt>0?((dspMes-dspAnt)/dspAnt*100):0;
   var dspVarStr = dspAnt>0?(dspVar>=0?'▲ +'+dspVar.toFixed(1)+'%':'▼ '+dspVar.toFixed(1)+'%'):'(sem dados mês ant.)';
   var dspColor  = dspVar>10?'#DC2626':(dspVar>0?'#D97706':'#059669');
@@ -14847,6 +14848,25 @@ var FIN_CP = [];
 // recorrenciaId+competencia — nunca um array paralelo de "despesas fantasma").
 var FIN_CP_RECORRENCIAS = [];
 
+// Sprint Pré-Go-Live, Bloco N — recorrência VARIÁVEL em Contas a Pagar.
+// Uma ocorrência de despesa recorrente pode nascer "valor a informar"
+// (r.valorPendente===true, r.valor===null) quando a recorrência-mãe é do
+// tipo 'variavel' — cada competência nova NUNCA herda o valor da
+// competência anterior (diferente da recorrência 'fixa', que sempre herda
+// rec.valor). R$0,00 informado explicitamente (valorPendente:false,
+// valor:0) é um estado DIFERENTE de "ainda não informado" — os dois nunca
+// podem se confundir. finCPValorNum() é o único ponto de leitura seguro do
+// valor de um registro de FIN_CP em qualquer soma/total: uma ocorrência
+// pendente contribui 0 para o total (é EXCLUÍDA da soma, nunca contada
+// como "R$0,00 confirmado") — a UI sinaliza a pendência separadamente
+// (contagem de itens, destaque visual), então o total nunca esconde que
+// falta informação.
+function finCPValorNum(r) {
+  if (!r || r.valorPendente) return 0;
+  var v = Number(r.valor);
+  return isNaN(v) ? 0 : v;
+}
+
 // Rodada 4 — cartões de crédito: cadastro de cartão, compras (com parcelas
 // embutidas em cada registro de compra — não precisa de 5º documento) e
 // faturas (agregado por cartão+competência). Produção nunca acessa
@@ -15726,7 +15746,7 @@ function finDashKPIs() {
   var saldoImediato = txTudo.filter(function(t){
     return metImediato.some(function(m){ return (t.metodo||'').toLowerCase().indexOf(m.toLowerCase())>=0; });
   }).reduce(function(s,t){return s+t.valor;},0)
-  - cpPago.reduce(function(s,c){return s+c.valor;},0);
+  - cpPago.reduce(function(s,c){return s+finCPValorNum(c);},0);
 
   // ── Card 2: A Receber + A Compensar (Cartão < 30 dias) ────────────────
   var crPend   = FIN_CR.filter(function(c){return c.status==='pendente';});
@@ -15738,7 +15758,7 @@ function finDashKPIs() {
 
   // ── Card 3: A Pagar + Vencidos ────────────────────────────────────────
   var cpPend = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
-  var totalPagar = cpPend.reduce(function(s,c){return s+c.valor;},0);
+  var totalPagar = cpPend.reduce(function(s,c){return s+finCPValorNum(c);},0);
   var vencidas = FIN_CP.filter(function(c){
     if(c.status==='pago') return false;
     if(!c.vencimento) return false;
@@ -15795,7 +15815,7 @@ function finBarChartRender() {
   var cpMes=FIN_CP.filter(function(c){return c.status==='pago'&&c.dataPagamento&&parseInt((c.dataPagamento||'').split('/')[1])===mes;});
   var entPorSemana=[0,0,0,0], saiPorSemana=[0,0,0,0];
   txMes.forEach(function(t){ entPorSemana[finSemanaDoDia(t.data)]+=t.valor; });
-  cpMes.forEach(function(c){ saiPorSemana[finSemanaDoDia(c.dataPagamento)]+=c.valor; });
+  cpMes.forEach(function(c){ saiPorSemana[finSemanaDoDia(c.dataPagamento)]+=finCPValorNum(c); });
   var maxVal=Math.max.apply(null, entPorSemana.concat(saiPorSemana))||1;
 
   // Ponto de Equilíbrio real do mês: receita mínima para cobrir as despesas operacionais,
@@ -15851,10 +15871,11 @@ function finDonutRender() {
     'Outros':             {color:'#10B981',total:0}
   };
   FIN_CP.filter(function(c){return c.status==='pago';}).forEach(function(c){
-    if(!c.categoria) { cats['Sem categoria'].total+=c.valor; return; }
+    var cv=finCPValorNum(c);
+    if(!c.categoria) { cats['Sem categoria'].total+=cv; return; }
     var cat=finNormCat(c.categoria);
-    if(cats[cat]) cats[cat].total+=c.valor;
-    else cats['Outros'].total+=c.valor;
+    if(cats[cat]) cats[cat].total+=cv;
+    else cats['Outros'].total+=cv;
   });
   var total=Object.values(cats).reduce(function(s,c){return s+c.total;},0)||1;
   var cx=65,cy=65,r=52,stroke=22;
@@ -16211,9 +16232,9 @@ function finCRSalvar(){
 
 // ── Contas a Pagar — Sumário ──────────────────────────────────────────────────
 function finCPUpdateSummary() {
-  var pend  = FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';}).reduce(function(s,r){return s+r.valor;},0);
-  var pago  = FIN_CP.filter(function(r){return r.status==='pago';}).reduce(function(s,r){return s+r.valor;},0);
-  var agend = FIN_CP.filter(function(r){return r.status==='agendado';}).reduce(function(s,r){return s+r.valor;},0);
+  var pend  = FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
+  var pago  = FIN_CP.filter(function(r){return r.status==='pago';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
+  var agend = FIN_CP.filter(function(r){return r.status==='agendado';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
   set('finCPSumPend',pend); set('finCPSumPago',pago); set('finCPSumAgend',agend);
 }
@@ -16263,16 +16284,19 @@ function finCalcularDRE(txFiltro, cpFiltro) {
   var impostos=receitaBruta*FIN_TAXA_IMPOSTO_DRE;
   var receitaLiq=receitaBruta-impostos;
   // CUSTO = diretamente ligado à produção (CMV)
+  // finCPValorNum() (não c.valor direto): uma ocorrência de recorrência
+  // variável ainda "a informar" (valorPendente:true) precisa contribuir 0
+  // aqui — nunca NaN, nunca contada como se R$0,00 fosse o valor real.
   var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+c.valor;},0);
-  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+c.valor;},0);
+  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
   var cmv=cmvMat+cmvMod;
   var lucroBruto=receitaLiq-cmv;
   // DESPESA = operacional/administrativo (independente do imposto automático sobre vendas)
-  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+c.valor;},0);
-  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+c.valor;},0);
+  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
   var desp=cpPessoal+cpOp+cpEmp+cpImp;
   var lucroLiq=lucroBruto-desp;
   return {receitaBruta:receitaBruta,impostos:impostos,receitaLiq:receitaLiq,cmvMat:cmvMat,cmvMod:cmvMod,cmv:cmv,
@@ -16309,22 +16333,29 @@ function finCalCPPorDia() {
 function finCalItemHTML(r, compact) {
   var statusColor = {pago:'#059669',agendado:'#D97706',pendente:'#EF4444',vencido:'#DC2626'}[r.status]||'#6B7280';
   var statusLabel = {pago:'✅ Pago',agendado:'📆 Agendado',pendente:'⏳ Pendente',vencido:'🔴 Vencido'}[r.status]||r.status;
+  // Bloco N — mesma regra de finCPRender(): nunca finFmt(null) para uma
+  // ocorrência "a informar", sempre o destaque "Valor pendente".
+  var valorTxt = r.valorPendente ? '⏳ A informar' : finFmt(r.valor);
+  var valorCor = r.valorPendente ? '#D97706' : statusColor;
   if(compact) {
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;border-left:3px solid '+statusColor+'">'
       +'<span style="font-size:11px;font-weight:700;color:var(--text)">'+r.descricao+'</span>'
-      +'<span style="font-size:12px;font-weight:800;color:'+statusColor+'">'+finFmt(r.valor)+'</span>'
+      +'<span style="font-size:12px;font-weight:800;color:'+valorCor+'">'+valorTxt+'</span>'
       +'</div>';
   }
   return '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:var(--bg2);border-radius:7px;border-left:4px solid '+statusColor+'">'
     +'<div><div style="font-size:12px;font-weight:800">'+r.descricao+'</div>'
     +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(r.fornecedor||r.categoria||'')+'</div>'
     +'<span style="font-size:10px;color:'+statusColor+';font-weight:700">'+statusLabel+'</span></div>'
-    +'<div style="text-align:right"><div style="font-size:13px;font-weight:900;color:'+statusColor+'">'+finFmt(r.valor)+'</div>'
-    +(r.status!=='pago'
+    +'<div style="text-align:right"><div style="font-size:13px;font-weight:900;color:'+valorCor+'">'+valorTxt+'</div>'
+    +(r.valorPendente
+  ?'<button data-rid="'+r.id+'" onclick="finCPInformarValorUI(this.dataset.rid);finCalRender()" '
+  +'style="margin-top:4px;padding:3px 8px;background:#D97706;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">📝 Informar</button>'
+  :(r.status!=='pago'
   ?'<button data-rid="'+r.id+'" onclick="finCPPagar(this.dataset.rid);finCalRender()" '
   +'style="margin-top:4px;padding:3px 8px;background:#059669;color:#fff;border:none;border-radius:5px;font-size:10px;cursor:pointer">✓ Baixar</button>'
   :'<button data-rid="'+r.id+'" onclick="finCPEstornar(this.dataset.rid);finCalRender()" '
-  +'style="margin-top:4px;padding:3px 8px;background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;border-radius:5px;font-size:10px;cursor:pointer">↩ Estornar</button>')
+  +'style="margin-top:4px;padding:3px 8px;background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB;border-radius:5px;font-size:10px;cursor:pointer">↩ Estornar</button>'))
     +'</div></div>';
 }
 
@@ -16341,7 +16372,7 @@ function finCalRenderHoje(mapa) {
       ? lista.map(function(r){ return finCalItemHTML(r,false); }).join('')
       : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">🎉 Nenhuma conta para hoje</div>';
   }
-  var tot = lista.reduce(function(s,r){ return s+(r.status!=='pago'?r.valor:0); },0);
+  var tot = lista.reduce(function(s,r){ return s+(r.status!=='pago'?finCPValorNum(r):0); },0);
   if(totEl) totEl.innerHTML = '<span>Total pendente hoje</span><span style="color:#DC2626;font-weight:900">'+finFmt(tot)+'</span>';
 }
 
@@ -16362,7 +16393,7 @@ function finCalRenderSemana(mapa) {
     if(lista.length){
       rows.push('<div style="margin-bottom:4px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">'
         +d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})+'</div>'
-        +lista.map(function(r){ tot+=(r.status!=='pago'?r.valor:0); return finCalItemHTML(r,true); }).join('')+'</div>');
+        +lista.map(function(r){ tot+=(r.status!=='pago'?finCPValorNum(r):0); return finCalItemHTML(r,true); }).join('')+'</div>');
     }
   }
   if(semEl) semEl.innerHTML = rows.length ? rows.join('') : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Nenhuma conta esta semana</div>';
@@ -16387,7 +16418,7 @@ function finCalRenderGrid(mapa) {
     var k = finCalDayKey(d);
     var contas = (mapa[k]||[]).filter(function(r){ return _finBrand==='todas'||r.marca===_finBrand; });
     var pendentes = contas.filter(function(r){ return r.status!=='pago'; });
-    var totalDia  = pendentes.reduce(function(s,r){ return s+r.valor; },0);
+    var totalDia  = pendentes.reduce(function(s,r){ return s+finCPValorNum(r); },0);
     var isHoje    = (d.getTime()===hoje.getTime());
     var isFim     = (d < hoje);
     var temVenc   = pendentes.some(function(r){ return r.status==='vencido'||(d<hoje&&r.status!=='pago'); });
@@ -16503,7 +16534,11 @@ function finCPRender() {
     return bOk&&cOk&&sOk&&pOk;
   });
   _finCPLastList=list;
-  var total=list.reduce(function(s,r){return s+r.valor;},0);
+  // finCPValorNum(): uma ocorrência "a informar" (valorPendente:true, Bloco
+  // N) nunca entra no total exibido — ela é EXCLUÍDA da soma (nunca
+  // contada como R$0,00 confirmado). A contagem de lançamentos continua
+  // incluindo essas ocorrências normalmente (list.length).
+  var total=list.reduce(function(s,r){return s+finCPValorNum(r);},0);
   if(cnt) cnt.textContent='('+list.length+' lançamento'+(list.length!==1?'s':'')+' · '+finFmt(total)+')';
   if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
   tbody.innerHTML=list.map(function(r){
@@ -16517,10 +16552,20 @@ function finCPRender() {
     var catBadge='<span class="fin-cat-badge" style="background:'+catC+'18;color:'+catC+';border:1px solid '+catC+'33">'+catIco+' '+cat+'</span>';
     // Cor do valor: vermelho só para vencido, verde para pago, padrão para pendente
     var valColor=r.status==='vencido'?'#DC2626':r.status==='pago'?'#059669':'var(--text)';
+    // Bloco N — "Valor pendente": destaque visual diferente de qualquer
+    // valor numérico (inclusive R$0,00 real, que continua mostrando finFmt
+    // normalmente) — nunca finFmt(null), nunca confundido com "R$ 0,00".
+    var valorCel = r.valorPendente
+      ? '<span class="fin-badge" style="background:#FEF3C7;color:#92400E;border:1px solid #F59E0B;font-weight:800;white-space:nowrap" title="Valor ainda não informado para esta competência">⏳ Valor pendente</span>'
+      : finFmt(r.valor);
     // 3-dot menu
     var menuId='cpMenu_'+r.id;
     var menuItems='';
-    if(r.status!=='pago'){
+    if(r.valorPendente){
+      // não faz sentido "baixar pagamento" de um valor desconhecido —
+      // primeiro informa, só depois a ocorrência pode ser paga normalmente.
+      menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPInformarValorUI(\''+r.id+'\')">📝 Informar valor</button>';
+    } else if(r.status!=='pago'){
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPPagar(\''+r.id+'\')">✓ Baixar pagamento</button>';
     } else {
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEstornar(\''+r.id+'\')">↩ Estornar pagamento</button>';
@@ -16540,7 +16585,7 @@ function finCPRender() {
       +'<td>'+chk+'</td>'
       +'<td><strong>'+r.descricao+'</strong><div style="font-size:10px;color:var(--muted);margin-top:1px">'+(r.fornecedor||'Lançamento interno')+'</div></td>'
       +'<td>'+tipoBadge+' '+catBadge+'</td>'
-      +'<td style="font-weight:800;color:'+valColor+';font-size:13px">'+finFmt(r.valor)+'</td>'
+      +'<td style="font-weight:800;color:'+valColor+';font-size:13px">'+valorCel+'</td>'
       +'<td>'+r.vencimento+'</td>'
       +'<td>'+badge+'</td>'
       +'<td>'+dotMenu+'</td>'
@@ -16550,6 +16595,10 @@ function finCPRender() {
 
 function finCPPagar(id) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  // Bloco N — nunca dá para "baixar pagamento" de um valor ainda
+  // desconhecido (finFmt(null) quebraria o rótulo do modal, e pagar um
+  // valor não informado seria inventar um número). Informe primeiro.
+  if(r.valorPendente){ showToast('Informe o valor desta despesa antes de confirmar o pagamento','warn'); return; }
   var dtStr=new Date().toISOString().slice(0,10);
   var ov=document.getElementById('finBaixaOverlay');
   if(ov){
@@ -16604,6 +16653,25 @@ function finCPEncerrarRecorrenciaUI(recorrenciaId) {
     showToast('Recorrência encerrada — ocorrências já geradas foram preservadas','ok');
   });
 }
+// Bloco N — UI de "Informar valor" (recorrência variável). Reaproveita o
+// padrão já usado no arquivo (prompt() simples + função pura de domínio +
+// _finSaveCP() + re-render), igual a outras ações rápidas do Financeiro.
+// Aceita R$0,00 como resposta válida (mês sem custo real) — só rejeita
+// entrada não numérica ou negativa.
+function finCPInformarValorUI(cpId) {
+  var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
+  var raw = prompt('Informe o valor desta competência — '+r.descricao+' ('+r.vencimento+'):');
+  if(raw===null) return; // cancelado
+  var valor = parseFloat(String(raw).replace(',','.'));
+  if(isNaN(valor)||valor<0){ showToast('Valor inválido — informe um número maior ou igual a zero','warn'); return; }
+  var res = finCPInformarValor(cpId, valor);
+  if(!res.ok){ showToast(res.erro||'Não foi possível informar o valor','warn'); return; }
+  var p = _finSaveCP();
+  (p && typeof p.then==='function' ? p : Promise.resolve()).then(function(){
+    finCPRender(); finDashKPIs(); finDonutRender();
+    showToast('Valor informado: '+finFmt(valor),'ok');
+  });
+}
 
 function finCPFornSelect() {
   var sel=document.getElementById('finCPFornSel');
@@ -16628,12 +16696,18 @@ function finCPToggleRecorrenciaFields() {
   var recBox=document.getElementById('finCPRecorrenciaFields');
   var vencFg=document.getElementById('finCPVenc'); var vencWrap = vencFg && vencFg.closest ? vencFg.closest('.fg') : null;
   var statusFg=document.getElementById('finCPStatus'); var statusWrap = statusFg && statusFg.closest ? statusFg.closest('.fg') : null;
-  var isRec = tipo==='recorrente';
+  var valorFg=document.getElementById('finCPValor'); var valorWrap = valorFg && valorFg.closest ? valorFg.closest('.fg') : null;
+  var isRec = tipo==='recorrente' || tipo==='recorrente_variavel';
+  var isVariavel = tipo==='recorrente_variavel';
   if(recBox) recBox.style.display = isRec ? 'block' : 'none';
   // recorrente usa "dia do vencimento" (recorrência) em vez de uma data única,
   // e toda ocorrência nasce 'agendado' — nunca faz sentido pré-marcar como paga.
   if(vencWrap) vencWrap.style.display = isRec ? 'none' : '';
   if(statusWrap) statusWrap.style.display = isRec ? 'none' : '';
+  // Recorrência VARIÁVEL nunca pede um valor inicial — cada competência
+  // nasce "a informar" (nunca herda um valor digitado na criação da série).
+  if(valorFg) valorFg.required = false;
+  if(valorWrap) valorWrap.style.display = isVariavel ? 'none' : '';
 }
 function finCPNovoModal() {
   var t=new Date(), dd=String(t.getDate()).padStart(2,'0'),mm=String(t.getMonth()+1).padStart(2,'0'),yy=t.getFullYear();
@@ -16666,14 +16740,17 @@ function finCPSalvar(btnEl){
   var conta=(document.getElementById('finCPConta')||{}).value||'';
   var tipo=(document.getElementById('finCPTipo')||{}).value||'avulsa';
 
-  if(tipo==='recorrente'){
+  if(tipo==='recorrente' || tipo==='recorrente_variavel'){
+    var isVariavel = tipo==='recorrente_variavel';
     var dia=parseInt((document.getElementById('finCPRecDia')||{}).value,10)||1;
     var inicioRaw=(document.getElementById('finCPRecInicio')||{}).value||''; // "AAAA-MM"
     var fimRaw=(document.getElementById('finCPRecFim')||{}).value||'';
-    if(!desc||!valor||!inicioRaw){showToast('Preencha descrição, valor e início da recorrência','warn');return;}
+    // Recorrência variável NUNCA exige valor inicial — cada competência
+    // nasce "a informar" (finCPGerarOcorrencias cuida disso).
+    if(!desc||!inicioRaw||(!isVariavel&&!valor)){showToast(isVariavel?'Preencha descrição e início da recorrência':'Preencha descrição, valor e início da recorrência','warn');return;}
     _finCPSalvando = true;
     var _liberarRec = _btnBusy(btnEl, 'Salvando…');
-    var r = finCPCriarRecorrencia({descricao:desc, categoria:cat, valor:valor, fornecedor:forn, contaBancaria:conta, marca:marca, diaVencimento:dia, dataInicial:inicioRaw+'-01', dataFinal:fimRaw?(fimRaw+'-01'):null});
+    var r = finCPCriarRecorrencia({descricao:desc, categoria:cat, valor: isVariavel?null:valor, tipoRecorrencia: isVariavel?'variavel':'fixa', fornecedor:forn, contaBancaria:conta, marca:marca, diaVencimento:dia, dataInicial:inicioRaw+'-01', dataFinal:fimRaw?(fimRaw+'-01'):null});
     finCPOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
     var _saveRec = _finSaveCPRecorrencias(), _saveCP = _finSaveCP();
     var _pRec = Promise.all([
@@ -16744,6 +16821,14 @@ function finCPGerarOcorrencias(horizonteMeses) {
   var criadas = 0;
   FIN_CP_RECORRENCIAS.forEach(function (rec) {
     if (!rec.ativa) return;
+    // Bloco N (Sprint Pré-Go-Live) — recorrência 'variavel': cada competência
+    // nova nasce SEMPRE "a informar" (valor:null, valorPendente:true) —
+    // NUNCA herda o valor da ocorrência anterior da mesma série, mesmo que
+    // a competência anterior já tenha sido informada. rec.valor de uma
+    // série variável nunca é atualizado por finCPInformarValor() (que só
+    // toca o registro individual em FIN_CP), então esta linha nunca "vaza"
+    // um valor antigo para o mês seguinte.
+    var isVariavel = rec.tipoRecorrencia === 'variavel';
     finCPProximasCompetencias(rec, horizonteMeses || 3).forEach(function (c) {
       var compStr = finCPCompetenciaStr(c.ano, c.mes);
       if ((rec.competenciasCanceladas || []).indexOf(compStr) >= 0) return;
@@ -16752,7 +16837,9 @@ function finCPGerarOcorrencias(horizonteMeses) {
       var hoje = new Date();
       FIN_CP.push({
         id: 'cp_rec_' + rec.id + '_' + compStr,
-        descricao: rec.descricao, categoria: rec.categoria, valor: rec.valor,
+        descricao: rec.descricao, categoria: rec.categoria,
+        valor: isVariavel ? null : rec.valor,
+        valorPendente: isVariavel,
         vencimento: finCPVencimentoDaCompetencia(c.ano, c.mes, rec.diaVencimento),
         status: 'agendado', marca: rec.marca || 'vr',
         fornecedor: rec.fornecedor || '', contaBancaria: rec.contaBancaria || '',
@@ -16765,9 +16852,15 @@ function finCPGerarOcorrencias(horizonteMeses) {
   return criadas;
 }
 function finCPCriarRecorrencia(dados) {
+  // tipoRecorrencia: 'fixa' (padrão, comportamento original — cada ocorrência
+  // herda rec.valor) ou 'variavel' (Bloco N — nunca exige/copia valor; cada
+  // ocorrência nasce "a informar", ver finCPGerarOcorrencias()).
+  var tipoRecorrencia = dados.tipoRecorrencia === 'variavel' ? 'variavel' : 'fixa';
   var rec = {
     id: 'fcprec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    descricao: dados.descricao, categoria: dados.categoria, valor: dados.valor,
+    descricao: dados.descricao, categoria: dados.categoria,
+    valor: tipoRecorrencia === 'variavel' ? null : dados.valor,
+    tipoRecorrencia: tipoRecorrencia,
     fornecedor: dados.fornecedor || '', contaBancaria: dados.contaBancaria || '',
     marca: dados.marca || 'vr', frequencia: 'mensal',
     diaVencimento: dados.diaVencimento, dataInicial: dados.dataInicial,
@@ -16777,6 +16870,22 @@ function finCPCriarRecorrencia(dados) {
   FIN_CP_RECORRENCIAS.push(rec);
   var criadas = finCPGerarOcorrencias(3);
   return { ok: true, recorrenciaId: rec.id, ocorrenciasCriadas: criadas };
+}
+// Bloco N — informa o valor de uma ocorrência de recorrência VARIÁVEL que
+// nasceu "a informar" (valorPendente:true). R$0,00 é um valor válido aqui
+// (ex.: mês sem custo real) — o único critério de rejeição é valor
+// inválido (não numérico ou negativo), nunca "é zero". Depois de informado,
+// o registro volta a ser um FIN_CP normal (valorPendente:false) e passa a
+// contar em todos os totais/relatórios que já leem FIN_CP.valor.
+function finCPInformarValor(cpId, valor) {
+  var r = FIN_CP.find(function (x) { return x.id === cpId; });
+  if (!r) return { ok: false, erro: 'ocorrência não encontrada' };
+  var v = Number(valor);
+  if (typeof valor !== 'number' && typeof valor !== 'string') return { ok: false, erro: 'valor inválido' };
+  if (isNaN(v) || v < 0) return { ok: false, erro: 'valor inválido' };
+  r.valor = v;
+  r.valorPendente = false;
+  return { ok: true };
 }
 // Cancela SÓ esta ocorrência — a recorrência-mãe continua ativa, futuras
 // competências continuam sendo geradas normalmente. Nunca cancela paga.
@@ -17662,7 +17771,7 @@ function finCaixaTotaisDoDia(dtBR) {
   var entradas = FIN_CR.filter(function (r) { return r.status === 'recebido' && r.dataRecebimento === dtBR; });
   var totEnt = entradas.reduce(function (s, r) { return s + r.valor; }, 0);
   var saidas = FIN_CP.filter(function (c) { return c.status === 'pago' && c.dataPagamento === dtBR; });
-  var totSai = saidas.reduce(function (s, c) { return s + c.valor; }, 0);
+  var totSai = saidas.reduce(function (s, c) { return s + finCPValorNum(c); }, 0);
   return { totVendas: totVendas, totEnt: totEnt, totSai: totSai };
 }
 function finCaixaAjustesDoDia(dtBR) {
@@ -17773,7 +17882,7 @@ function relCaixaDiario() {
   var saidas=allCP.filter(function(c){return c.status==='pago'&&c.dataPagamento===dtBR;});
 
   var totEnt=entradas.reduce(function(s,r){return s+r.valor;},0);
-  var totSai=saidas.reduce(function(s,c){return s+c.valor;},0);
+  var totSai=saidas.reduce(function(s,c){return s+finCPValorNum(c);},0);
   // Ajustes extraordinários auditados lançados NESTE dia (seção 5) — somam/
   // subtraem do Saldo Final, nunca sobrescrevem o Caixa Anterior.
   var ajustesDia = (typeof finCaixaAjustesDoDia==='function') ? finCaixaAjustesDoDia(dtBR) : [];
@@ -17943,7 +18052,7 @@ function relMensal() {
     var ent=allCR.filter(function(r){return r.status==='recebido'&&r.dataRecebimento===dtBR;});
     var sai=allCP.filter(function(c){return c.status==='pago'&&c.dataPagamento===dtBR;});
     var totEnt=ent.reduce(function(s,r){return s+r.valor;},0);
-    var totSai=sai.reduce(function(s,c){return s+c.valor;},0);
+    var totSai=sai.reduce(function(s,c){return s+finCPValorNum(c);},0);
     if(totEnt===0&&totSai===0) continue;
     totEntMes+=totEnt; totSaiMes+=totSai;
     var saldoDia=totEnt-totSai;
@@ -18002,9 +18111,9 @@ function relContasPagas() {
   });
 
   var f=finFmt;
-  var total=lista.reduce(function(s,c){return s+c.valor;},0);
-  var totDesp=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='despesa';}).reduce(function(s,c){return s+c.valor;},0);
-  var totCusto=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='custo';}).reduce(function(s,c){return s+c.valor;},0);
+  var total=lista.reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var totDesp=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='despesa';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var totCusto=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='custo';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
 
   if(lista.length===0){
     el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">Nenhuma conta paga em '+mesesNome[mes]+' '+ano+'</div>';
@@ -18074,7 +18183,7 @@ function relAnual() {
     if(c.status!=='pago'||!c.dataPagamento) return;
     var p=c.dataPagamento.split('/'); if(p.length!==3) return;
     if(parseInt(p[2])!==ano) return;
-    porMes[parseInt(p[1])-1].saidas += c.valor;
+    porMes[parseInt(p[1])-1].saidas += finCPValorNum(c);
   });
 
   var totVendas=0, totReceb=0, totSaidas=0;
@@ -18135,7 +18244,7 @@ function relatoriosRender() {
   var cmvMat=_dre2.cmvMat, cmvMod=_dre2.cmvMod, cmv=_dre2.cmv, lucroBruto=_dre2.lucroBruto;
   var cpPessoal=_dre2.cpPessoal, cpOp=_dre2.cpOp, cpEmp=_dre2.cpEmp, cpImp=_dre2.cpImp, desp=_dre2.desp, lucroLiq=_dre2.lucroLiq;
   var totalReceber=crPend.reduce(function(s,r){return s+r.valor;},0);
-  var totalPagar=cpPend.reduce(function(s,r){return s+r.valor;},0);
+  var totalPagar=cpPend.reduce(function(s,r){return s+finCPValorNum(r);},0);
 
   var f=finFmt;
   var pct=function(v){return receitaBruta>0?' ('+( v/receitaBruta*100).toFixed(1)+'%)':'';}
@@ -30874,7 +30983,7 @@ function painelRender() {
   var crPend = cr.filter(function(r){return r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
   var crRec  = cr.filter(function(r){return r.status==='recebido';}).reduce(function(s,r){return s+r.valor;},0);
   var crVenc = cr.filter(function(r){return r.status==='vencido';});
-  var cpPend = cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).reduce(function(s,r){return s+r.valor;},0);
+  var cpPend = cp.filter(function(r){return r.status==='agendado'||r.status==='pendente';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var mesAtual = now.getMonth()+1;
   var orcMes = orcs.filter(function(o){
     return (o.data&&o.data.indexOf('/'+mesAtual+'/')!==-1)||(o.dataEnvio&&o.dataEnvio.indexOf('/'+mesAtual+'/')!==-1);
