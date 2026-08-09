@@ -934,12 +934,28 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
      concatenadas, nunca só a aba ativa. Sem essa regra, a impressão
      respeita o mesmo display:none/block inline que relTab() já mantém
      em tela — só a aba ativa aparece no papel. */
-  .rel-block,.caixa-card,.rel-table{break-inside:avoid}
+  .rel-block,.caixa-card{break-inside:avoid}
   .rel-block{border:1px solid #ccc;border-radius:0;box-shadow:none;margin-bottom:16pt}
   body{background:#fff;color:#000}
   .caixa-grid{grid-template-columns:repeat(5,1fr)}
   .caixa-saldo-pos{color:#059669!important}
   .caixa-saldo-neg{color:#DC2626!important}
+  /* SPRINT PRÉ-GO-LIVE, Bloco Q — achado real: `.rel-table{break-inside:
+     avoid}` tentava manter a tabela INTEIRA numa única página; um
+     relatório com dezenas de linhas (ex.: Fiscal) simplesmente estourava a
+     margem da página em vez de paginar de forma legível, e o cabeçalho não
+     repetia nas páginas seguintes. Trocado por: cada LINHA evita quebrar
+     no meio (nunca corta uma linha ao meio entre duas páginas) e o
+     cabeçalho (<thead>) repete no topo de cada página — comportamento
+     padrão de relatório tabular multi-página. */
+  .rel-table thead{display:table-header-group}
+  .rel-table tbody tr{break-inside:avoid;page-break-inside:avoid}
+  /* Relatório Fiscal (Bloco Q) — landscape aplicado via relImprimir()
+     (troca o @page dinamicamente só para esta aba); aqui só a largura e o
+     texto que precisam ocupar o espaço extra sem gerar rolagem horizontal
+     nem cortar colunas. */
+  .rel-fiscal-table{width:100%!important;table-layout:auto}
+  .rel-fiscal-table th,.rel-fiscal-table td{white-space:normal;word-break:break-word}
 }
 @keyframes painelPulse{0%,100%{opacity:1}50%{opacity:.3}}
 /* =========================================================
@@ -5384,7 +5400,7 @@ function _authFirebaseError(code){
         <button class="rel-tab-btn" id="relTabBtnNF" onclick="relTab('nf',this)">🧾 Relatório Fiscal</button>
         <button class="rel-tab-btn" id="relTabBtnHistorico" onclick="relTab('historico',this)">📈 Histórico</button>
         <div class="rel-tab-spacer"></div>
-        <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="window.print()">🖨️ Imprimir</button>
+        <button class="topbar-btn" style="background:var(--brand-mid);color:#fff;font-weight:800;font-size:11px" onclick="relImprimir()">🖨️ Imprimir</button>
       </div>
 
       <!-- ── Caixa Diário ───────────────────────────────────────────── -->
@@ -16994,6 +17010,36 @@ function finBaixaManual(marca) {
 // RELATÓRIOS FINANCEIROS — Central de Relatórios
 // ============================================================
 
+// SPRINT PRÉ-GO-LIVE, Bloco Q — o Relatório Fiscal tem colunas de mais
+// (Orçamento/Data/Cliente/Empresa/Venda/Recebido/NF/E-mail/Situação) para
+// caber legível em A4 retrato — achado real: colunas comprimidas, tabela
+// estreita, muito espaço em branco na página. As outras abas de Relatórios
+// (Caixa/Mensal/DRE/Contas/Histórico) continuam bem em retrato. Em vez de
+// mudar o @page global (afetaria TODAS as abas, inclusive as que já
+// funcionam bem em retrato), a impressão troca para A4 PAISAGEM só quando
+// a aba Fiscal está ativa no momento do clique — injeta uma folha de
+// estilo temporária (removida em 'afterprint', nunca deixa a página presa
+// em paisagem para as outras abas).
+function relImprimir() {
+  var landscape = _relActiveTab === 'nf';
+  var styleId = 'relPrintPageOverride';
+  var existing = document.getElementById(styleId);
+  if (existing) existing.remove();
+  if (landscape) {
+    var st = document.createElement('style');
+    st.id = styleId;
+    st.textContent = '@page{size:A4 landscape;margin:10mm 8mm}';
+    document.head.appendChild(st);
+    var limpar = function () {
+      var el = document.getElementById(styleId);
+      if (el) el.remove();
+      window.removeEventListener('afterprint', limpar);
+    };
+    window.addEventListener('afterprint', limpar);
+  }
+  window.print();
+}
+
 // ── Navegação entre abas de relatório ─────────────────────────────────────────
 var _relActiveTab = 'caixa';
 function relTab(t, el) {
@@ -17251,7 +17297,7 @@ function relFiscalRender() {
     +orcs.length+' NF(s) solicitada(s) &mdash; Total (venda): <strong style="color:#1D4ED8">'
     +finFmt(totalNF)+'</strong></div>'
     +'<div style="font-size:11px;margin-bottom:10px">'+resumoHtml+'</div>'
-    +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<table class="rel-table rel-fiscal-table" style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="color:var(--muted);border-bottom:2px solid var(--border)">'
     +'<th style="text-align:left;padding:6px 8px">Or\u00e7amento</th>'
     +'<th style="text-align:left;padding:6px 8px">Data</th>'
