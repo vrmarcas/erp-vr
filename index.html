@@ -19644,6 +19644,27 @@ function orcVRTemDadosPendentes(){
   var nome=(document.getElementById('orcClientNome')||{}).value||'';
   return !!nome.trim() || (typeof orcItemCount!=='undefined' && orcItemCount>0);
 }
+// SPRINT PRÉ-GO-LIVE, Bloco B (achado real: orçamento novo herdava taxa/
+// parcela/desconto PIX do orçamento anterior, só corrigido depois de
+// alternar Sim→Não→Sim manualmente) — o card "Resumo do Orçamento"
+// (orcParcToggle/orcDescCondToggle/orcPixDiscToggle) é COMPARTILHADO entre
+// os fluxos VR, Vitre e híbrido; o motor central (orcMotorPagamento) lê
+// esses campos direto do DOM, então limpar só um lado (ex.: reset do VR
+// mas não do Vitre) deixava o outro fluxo herdar o estado. Único lugar que
+// limpa esse card — chamado tanto por orcResetFormularioVR() quanto por
+// orcIniciarFluxoVitre().
+function orcResetCondicoesPagamentoCompartilhadas(){
+  var setV=function(id,v){ var el=document.getElementById(id); if(el) el.value=v; };
+  var descCondCb = document.getElementById('orcDescCondToggle');
+  if(descCondCb && descCondCb.checked){ descCondCb.checked=false; if(typeof orcToggleDescCond==='function') orcToggleDescCond(); }
+  setV('orcDescCond',''); setV('orcDescCondData','');
+  var parcCb = document.getElementById('orcParcToggle');
+  if(parcCb && parcCb.checked){ parcCb.checked=false; if(typeof orcToggleParc==='function') orcToggleParc(); }
+  var pixCb = document.getElementById('orcPixDiscToggle');
+  if(pixCb && pixCb.checked){ pixCb.checked=false; if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); }
+  setV('orcPixDiscPct','');
+  if(typeof _pgtoTipoAtual!=='undefined') _pgtoTipoAtual = null;
+}
 function orcResetFormularioVR(){
   var tbody=document.getElementById('orcItemBody');
   if(tbody) tbody.innerHTML='';
@@ -19669,6 +19690,7 @@ function orcResetFormularioVR(){
   var entRestoEl=document.getElementById('orcEntradaResto'); if(entRestoEl) entRestoEl.textContent='R$ —';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
+  orcResetCondicoesPagamentoCompartilhadas();
   window._orcSessaoAtualId = null;
   window._orcCalc = {};
   _orcClienteAprovado = false;
@@ -19690,6 +19712,11 @@ function orcIniciarFluxoVitre(manterEstado) {
   vitreOrcListenerInit();
   if (!manterEstado) {
     vitreOrcResetEstado();
+    // SPRINT PRÉ-GO-LIVE, Bloco B — o card de condições de pagamento
+    // (parcelamento/desconto condicional/PIX) é compartilhado com o fluxo
+    // VR; sem isto, um Vitre novo herdava taxa/parcela/PIX de um orçamento
+    // VR ou híbrido anterior.
+    if (typeof orcResetCondicoesPagamentoCompartilhadas === 'function') orcResetCondicoesPagamentoCompartilhadas();
     var vend = document.getElementById('vitreOrcVendedor');
     if (vend) vend.value = (typeof _currentSession !== 'undefined' && _currentSession && _currentSession.user) || '';
     var dt = document.getElementById('vitreOrcDataSolicitacao'); if (dt) dt.value = new Date().toLocaleDateString('pt-BR');
