@@ -17092,6 +17092,17 @@ function relSetMesAtualUmaVez() {
     var elSel=document.getElementById(id);
     if(elSel) elSel.value=mesAtual;
   });
+  // SPRINT PRÉ-GO-LIVE, Bloco P1 — achado real: o ANO dos filtros de
+  // Relatório Mensal/Contas Pagas vinha fixo em "2026" via `selected` no
+  // HTML (só o mês já era corrigido dinamicamente, acima). Corrigido para
+  // usar o ano corrente real — só aplica se existir uma <option> para esse
+  // ano no próprio select (nunca força um value inexistente, que o
+  // navegador silenciosamente ignora deixando o select no primeiro item).
+  var anoAtual = String(new Date().getFullYear());
+  ['relMensalAno','relContasAno'].forEach(function(id){
+    var elSel=document.getElementById(id);
+    if(elSel && elSel.querySelector('option[value="'+anoAtual+'"]')) elSel.value=anoAtual;
+  });
 }
 
 // ── Relatório Fiscal (NF) ──────────────────────────────────────────────────────
