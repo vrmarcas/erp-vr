@@ -6079,6 +6079,25 @@ function _authFirebaseError(code){
             <div id="planProdCamposErro" style="color:#DC2626;font-size:11px;padding-top:4px;display:none"></div>
           </div>
 
+          <!-- RODADA 6, seção 4 — Material vinculado à receita (opcional) -->
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🎨 Material vinculado à receita (opcional)</div>
+            <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
+              💡 Define o material sugerido ao escolher este produto no orçamento e, opcionalmente, restringe as opções
+              a uma lista específica. O preço nunca é duplicado aqui — sempre lido do cadastro de materiais.
+            </div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <div class="fg-s" style="min-width:220px">
+                <label>Material padrão</label>
+                <select id="planProdMatPadrao"><option value="">— nenhum —</option></select>
+              </div>
+              <div class="fg-s" style="min-width:260px;flex:1">
+                <label>Materiais permitidos (nenhum marcado = todos)</label>
+                <div id="planProdMatPermitidos" style="max-height:110px;overflow-y:auto;border:1px solid var(--border);border-radius:7px;padding:6px 8px;font-size:11px"></div>
+              </div>
+            </div>
+          </div>
+
           <!-- Botões -->
           <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px;border-top:1px solid var(--border)">
             <button class="topbar-btn ghost" onclick="planProdFechar()">Cancelar</button>
@@ -8469,29 +8488,68 @@ function orcEmpresaChange() {
 }
 function orcTipoChange(sel) { orcEmpresaChange(); }
 
+// RODADA 6, seção 4 — extrai a construção das opções de material (antes
+// inline dentro de orcAddItem) para reuso por orcAplicarMaterialReceita()
+// ao trocar de produto. `materiaisPermitidos` (array de matKeys "cfg_N")
+// filtra a lista quando a receita restringe; null/vazio = todos os
+// materiais cadastrados no Estoque (comportamento original, sem receita).
+function orcConstruirMatOpts(materiaisPermitidos) {
+  // Gerar opções de material APENAS da configuração do Firebase (nunca usar fallback padrão)
+  var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
+  var permitidos = (materiaisPermitidos && materiaisPermitidos.length) ? materiaisPermitidos : null;
+  if(!_cfgMats.length) return '<option value="pending">⏳ Carregando materiais...</option>';
+  var opts = [];
+  _cfgMats.forEach(function(m,i){
+    var matKey = 'cfg_'+i;
+    if(permitidos && permitidos.indexOf(matKey) < 0) return;
+    var _esp = m.esp || (function(){ var mm=String(m.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
+    var _rsm2 = m.rsm2||(m.comp&&m.larg&&m.custo?(m.custo/(m.comp*m.larg/10000)):0);
+    // Texto visível inclui espessura e preço/m² — antes só mostrava o nome
+    // cadastrado (cor/acabamento ficam embutidos em m.nome quando o usuário
+    // já os descreve lá; não há campo estruturado separado para eles hoje).
+    var _label = m.nome
+      + (String(m.nome||'').match(/\d+(?:\.\d+)?\s*mm/i) ? '' : (_esp ? ' — '+_esp+'mm' : ''))
+      + (_rsm2>0 ? ' — R$'+_rsm2.toFixed(2)+'/m²' : '');
+    // data-nome preserva o nome "limpo" (sem preço) para uso em documentos
+    // voltados ao cliente — o preço/m² é custo interno, não deve vazar ali.
+    opts.push('<option value="'+matKey+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'" data-nome="'+cfgEsc(m.nome)+'">'+_label+'</option>');
+  });
+  return opts.length ? opts.join('') : '<option value="pending">⏳ Carregando materiais...</option>';
+}
+// Lê os matKeys ("cfg_N") atualmente disponíveis no cadastro de materiais,
+// na mesma ordem/índice usada por orcConstruirMatOpts — necessário para
+// orcMaterialSelecaoResolver() decidir se um materialPadrao/permitido da
+// receita ainda existe no Estoque atual.
+function orcMatKeysDisponiveis() {
+  try {
+    var d = cfgLoad();
+    var mats = (d && d.materiais && d.materiais.length>5) ? d.materiais.filter(function(m){ return m.nome && m.nome!=='Novo material'; }) : [];
+    return mats.map(function(m,i){ return 'cfg_'+i; });
+  } catch(e) { return []; }
+}
+// Ao trocar o produto de uma linha do orçamento, aplica o material
+// padrão/permitido declarado na receita daquele produto — mas só quando a
+// receita de fato declara alguma dessas duas coisas (orcMaterialSelecaoResolver
+// devolve mudou=false e não mexe em nada quando não há o que aplicar), para
+// nunca atropelar uma seleção manual já feita pelo vendedor.
+function orcAplicarMaterialReceita(idx, prodNome) {
+  var matSel = document.getElementById('oi_mat_'+idx);
+  if(!matSel) return;
+  var receita = (planProdLoad()||[]).find(function(p){ return p.nome===prodNome; });
+  if(!receita || (!receita.materialPadrao && !(receita.materiaisPermitidos||[]).length)) return;
+  var resultado = orcMaterialSelecaoResolver(receita, matSel.value, orcMatKeysDisponiveis());
+  if(resultado.opcoes) matSel.innerHTML = orcConstruirMatOpts(receita.materiaisPermitidos);
+  if(resultado.valor !== matSel.value) matSel.value = resultado.valor;
+  orcMatChanged(idx);
+}
+
 function orcAddItem() {
   orcItemCount++;
   const tbody = document.getElementById('orcItemBody');
   const tr = document.createElement('tr');
   tr.id = 'oir_'+orcItemCount; tr.dataset.idx = orcItemCount;
   const prodOpts = orcProdutosCanonicos(planProdLoad(), ORC_PRODUTOS).map(p=>`<option>${p}</option>`).join('') + '<option value="__custom__">✏️ Personalizado...</option>';
-  // Gerar opções de material APENAS da configuração do Firebase (nunca usar fallback padrão)
-  var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
-  var matOpts = _cfgMats.length
-    ? _cfgMats.map(function(m,i){
-        var _esp = m.esp || (function(){ var mm=String(m.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
-        var _rsm2 = m.rsm2||(m.comp&&m.larg&&m.custo?(m.custo/(m.comp*m.larg/10000)):0);
-        // Texto visível inclui espessura e preço/m² — antes só mostrava o nome
-        // cadastrado (cor/acabamento ficam embutidos em m.nome quando o usuário
-        // já os descreve lá; não há campo estruturado separado para eles hoje).
-        var _label = m.nome
-          + (String(m.nome||'').match(/\d+(?:\.\d+)?\s*mm/i) ? '' : (_esp ? ' — '+_esp+'mm' : ''))
-          + (_rsm2>0 ? ' — R$'+_rsm2.toFixed(2)+'/m²' : '');
-        // data-nome preserva o nome "limpo" (sem preço) para uso em documentos
-        // voltados ao cliente — o preço/m² é custo interno, não deve vazar ali.
-        return '<option value="cfg_'+i+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'" data-nome="'+cfgEsc(m.nome)+'">'+_label+'</option>';
-      }).join('')
-    : '<option value="pending">⏳ Carregando materiais...</option>';
+  var matOpts = orcConstruirMatOpts(null);
   tr.innerHTML = `
     <td style="text-align:center;font-weight:700;color:var(--muted);width:22px">${orcItemCount}</td>
     <td><select id="oi_prod_${orcItemCount}" onchange="orcOnProdChange(this)">${prodOpts}</select></td>
@@ -8884,6 +8942,37 @@ function receitaCamposContexto(produto, valores) {
     else ctx[c.chave] = 0;
   });
   return { ctx: ctx, faltando: faltando };
+}
+
+// RODADA 6, seção 4 — material/espessura ligado à receita, sempre por ID
+// real do Estoque (matKey "cfg_N", nunca preço duplicado — o preço é lido
+// do cadastro de materiais no momento do cálculo, como já era). A receita
+// pode declarar materialPadrao (matKey sugerido) e/ou materiaisPermitidos
+// (lista de matKeys que restringe as opções do item de orçamento).
+function receitaMaterialValidar(materialPadrao, materiaisPermitidos) {
+  var permitidos = materiaisPermitidos || [];
+  if (materialPadrao && permitidos.length && permitidos.indexOf(materialPadrao) < 0) {
+    return { ok: false, erro: 'o material padrão precisa estar entre os materiais permitidos' };
+  }
+  return { ok: true };
+}
+// Decide, de forma pura (sem tocar DOM), qual deve ser a lista de opções
+// de material e o valor selecionado de um item de orçamento ao aplicar a
+// receita de um produto — usada tanto ao trocar o produto de uma linha
+// quanto ao reabrir um orçamento salvo. Nunca força uma seleção quando a
+// receita não define nem materialPadrao nem materiaisPermitidos, para não
+// atropelar uma escolha manual já feita pelo vendedor.
+function orcMaterialSelecaoResolver(receita, valorAnterior, matKeysDisponiveis) {
+  var permitidos = (receita && receita.materiaisPermitidos) || [];
+  var padrao = (receita && receita.materialPadrao) || null;
+  var disponiveis = matKeysDisponiveis || [];
+  var restringiu = permitidos.length > 0;
+  if (!restringiu && !padrao) return { opcoes: null, valor: valorAnterior, mudou: false };
+  var opcoesFiltradas = restringiu ? disponiveis.filter(function (k) { return permitidos.indexOf(k) >= 0; }) : disponiveis.slice();
+  var anteriorValido = opcoesFiltradas.indexOf(valorAnterior) >= 0;
+  var padraoValido = padrao && opcoesFiltradas.indexOf(padrao) >= 0;
+  var valor = anteriorValido ? valorAnterior : (padraoValido ? padrao : (opcoesFiltradas[0] || valorAnterior));
+  return { opcoes: opcoesFiltradas, valor: valor, mudou: valor !== valorAnterior };
 }
 // Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
 // item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
@@ -10477,7 +10566,11 @@ function orcOnProdChange(sel) {
     }
   }
   var prodNome = sel ? sel.options[sel.selectedIndex].text : '';
-  if(prodNome && sel.value !== '__custom__') orcSugerirPrazo(prodNome);
+  if(prodNome && sel.value !== '__custom__') {
+    orcSugerirPrazo(prodNome);
+    var _idx = sel.id ? sel.id.replace('oi_prod_','') : '';
+    if(_idx) orcAplicarMaterialReceita(_idx, prodNome);
+  }
 }
 
 function orcCalcDataEntrega() {
@@ -28712,6 +28805,7 @@ function planProdNovoOpen() {
   _planEspReset(null, null);
   planProdRenderPecas();
   planProdRenderCampos();
+  planProdRenderMaterial(null, []);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
 }
@@ -28730,6 +28824,7 @@ function planProdEditar(id) {
   _planEspReset(p.planificacoes||null, p.svg||null);
   planProdRenderPecas();
   planProdRenderCampos();
+  planProdRenderMaterial(p.materialPadrao||null, p.materiaisPermitidos||[]);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
 }
@@ -28872,6 +28967,36 @@ function planProdRenderCampos() {
   }).join('');
 }
 
+// RODADA 6, seção 4 — popula o select de material padrão e a lista de
+// checkboxes de materiais permitidos no modal Novo/Editar Produto, a
+// partir do cadastro real de materiais (mesma convenção matKey "cfg_N"
+// usada no item de orçamento) — nunca duplica preço, só referencia o ID.
+function planProdRenderMaterial(materialPadraoSalvo, materiaisPermitidosSalvos) {
+  var selPadrao = document.getElementById('planProdMatPadrao');
+  var wrapPermitidos = document.getElementById('planProdMatPermitidos');
+  if(!selPadrao || !wrapPermitidos) return;
+  var _cfgMats = [];
+  try { var d = cfgLoad(); _cfgMats = (d&&d.materiais&&d.materiais.length>5) ? d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }) : []; } catch(e){}
+  var permitidosSalvos = materiaisPermitidosSalvos || [];
+  selPadrao.innerHTML = '<option value="">— nenhum —</option>' + _cfgMats.map(function(m,i){
+    var matKey = 'cfg_'+i;
+    return '<option value="'+matKey+'"'+(matKey===materialPadraoSalvo?' selected':'')+'>'+cfgEsc(m.nome)+'</option>';
+  }).join('');
+  wrapPermitidos.innerHTML = _cfgMats.length ? _cfgMats.map(function(m,i){
+    var matKey = 'cfg_'+i;
+    var checked = permitidosSalvos.indexOf(matKey) >= 0 ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:5px;padding:2px 0"><input type="checkbox" data-mat-permitido="'+matKey+'"'+checked+'>'+cfgEsc(m.nome)+'</label>';
+  }).join('') : '<span style="color:var(--muted)">Nenhum material cadastrado no Estoque ainda.</span>';
+}
+function planProdLerMaterial() {
+  var selPadrao = document.getElementById('planProdMatPadrao');
+  var wrapPermitidos = document.getElementById('planProdMatPermitidos');
+  var materialPadrao = selPadrao ? (selPadrao.value || null) : null;
+  var materiaisPermitidos = [];
+  if(wrapPermitidos) wrapPermitidos.querySelectorAll('[data-mat-permitido]').forEach(function(el){ if(el.checked) materiaisPermitidos.push(el.dataset.matPermitido); });
+  return { materialPadrao: materialPadrao, materiaisPermitidos: materiaisPermitidos };
+}
+
 function planProdPrevCalc() {
   planProdReadPecas();
   var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
@@ -28922,6 +29047,11 @@ function planProdSalvar() {
     if(_erroEl){ _erroEl.textContent = '⚠️ '+_camposCheck.erro; _erroEl.style.display='block'; }
     return;
   }
+  // RODADA 6, seção 4 — bloqueia o save se o material padrão não estiver
+  // entre os materiais permitidos declarados (nunca uma combinação impossível).
+  var _material = planProdLerMaterial();
+  var _matCheck = receitaMaterialValidar(_material.materialPadrao, _material.materiaisPermitidos);
+  if(!_matCheck.ok) { showToast('Material inválido: '+_matCheck.erro,'err'); return; }
 
   var prods = planProdLoad();
   // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
@@ -28943,6 +29073,8 @@ function planProdSalvar() {
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
     pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',__src:p.__src||null}; }),
     campos: _planProdCampos.map(function(c){ return {chave:c.chave,label:c.label,tipo:c.tipo||'numero',unidade:c.unidade||'',obrigatorio:!!c.obrigatorio,min:c.min!==''?c.min:undefined,max:c.max!==''?c.max:undefined,default:c.default!==''?c.default:undefined}; }),
+    materialPadrao: _material.materialPadrao,
+    materiaisPermitidos: _material.materiaisPermitidos,
     planificacoes: _planifs,
     svg: _firstSvg || undefined
   };
