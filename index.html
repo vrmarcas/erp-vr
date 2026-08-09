@@ -6089,6 +6089,16 @@ function _authFirebaseError(code){
             <div id="planProdOperacoesBody" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
 
+          <!-- RODADA 6, seção 6 — Máquinas relacionadas à receita (opcional) -->
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🖨️ Máquinas relacionadas (opcional)</div>
+            <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
+              💡 Informa à Produção quais máquinas do cadastro este produto usa. O tempo de laser continua calculado
+              automaticamente pela planificação real, independente desta lista.
+            </div>
+            <div id="planProdMaquinas" style="max-height:110px;overflow-y:auto;border:1px solid var(--border);border-radius:7px;padding:6px 8px;font-size:11px"></div>
+          </div>
+
           <!-- RODADA 6, seção 4 — Material vinculado à receita (opcional) -->
           <div>
             <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🎨 Material vinculado à receita (opcional)</div>
@@ -9027,6 +9037,26 @@ function osChecklistDeOperacoes(produto, temMontagemPaga) {
     return op.chave === 'montagem' ? !!temMontagemPaga : true;
   }).map(function (op) { return op.label; });
 }
+
+// RODADA 6, seção 6 — máquinas relacionadas à receita, por ID real do
+// cadastro de máquinas (cfgLoad().maquinas, matKey "maq_N" — mesmo padrão
+// de referência por ID já usado para material na seção 4). Puramente
+// informativo para a Produção saber quais máquinas o produto usa; nunca
+// duplica custo/hora (isso já é resolvido pelos campos de máquina
+// existentes no orçamento). Referências a máquinas removidas do cadastro
+// são silenciosamente ignoradas — nunca quebram a receita.
+function receitaMaquinasEfetivas(produto, maquinasDisponiveis) {
+  var selecionadas = (produto && produto.maquinasRelacionadas) || [];
+  return (maquinasDisponiveis || []).filter(function (m) { return selecionadas.indexOf(m.chave) >= 0; });
+}
+// O tempo de laser já é calculado automaticamente a partir da
+// planificação real (RODADA MESTRE, seção P1 — ver orcAutoLaser()) e
+// preserva o ajuste manual do vendedor (window._orcLaserAjusteManual);
+// esta função só decide, de forma pura, os nomes de máquina a exibir na
+// OS para a Produção — nunca recalcula tempo/custo.
+function osMaquinasNecessarias(produto, maquinasDisponiveis) {
+  return receitaMaquinasEfetivas(produto, maquinasDisponiveis).map(function (m) { return m.nome; });
+}
 // Resolve as peças/fórmulas a usar num item de orçamento JÁ SALVO: se o
 // item tem recipeSnapshot, usa o snapshot congelado (nunca a receita
 // atual) — é isto que garante que um orçamento antigo nunca muda de
@@ -11387,6 +11417,11 @@ function kbOpen(id) {
     : (os.valor || '—');
   const _late = _entrega !== '—' && _entrega <= '10/07';
   document.getElementById('kbOsTit').textContent = _titulo;
+  // RODADA 6, seção 6 — máquinas relacionadas à receita, exibidas só quando
+  // a receita do item principal declara alguma (nunca inventa/duplica dado).
+  var _maquinasField = (os.maquinas && os.maquinas.length)
+    ? '<div class="kb-os-field"><div class="kb-os-field-lbl">Máquinas</div><div class="kb-os-field-val">'+os.maquinas.map(cfgEsc).join(', ')+'</div></div>'
+    : '';
   document.getElementById('kbGrid').innerHTML = `
     <div class="kb-os-field"><div class="kb-os-field-lbl">Cliente</div><div class="kb-os-field-val">${os.cliente||'—'}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Cidade</div><div class="kb-os-field-val">${_cidade}</div></div>
@@ -11394,6 +11429,7 @@ function kbOpen(id) {
     <div class="kb-os-field"><div class="kb-os-field-lbl">Medidas · Qtd</div><div class="kb-os-field-val">${_med} · ${_qty}un</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Entrega</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Valor Total</div><div class="kb-os-field-val" style="color:#059669;font-size:14px;font-weight:700">${_valorFmt}</div></div>
+    ${_maquinasField}
   `;
   kbRenderItensDetalhe(os);
 
@@ -22740,6 +22776,12 @@ function orcEnvGerarOS(){
     ? osChecklistDeOperacoes(_produtoPrincipalOp, _temMontagem)
     : (_temMontagem ? ['Corte','Gravação','Montagem','Acabamento','Embalagem'] : ['Corte','Gravação','Acabamento','Embalagem']);
   var _ckProducao = checksProducao.map(function(){ return false; });
+  // RODADA 6, seção 6 — máquinas relacionadas à receita do item principal,
+  // puramente informativo para a Produção (nunca custo/hora — isso
+  // continua vindo dos campos de máquina do próprio orçamento).
+  var _maquinasOS = (typeof osMaquinasNecessarias==='function')
+    ? osMaquinasNecessarias(_produtoPrincipalOp, (function(){ try{ var d=cfgLoad(); return (Array.isArray(d.maquinas)?d.maquinas:[]).map(function(m,i){ return {chave:'maq_'+i, nome:m.nome}; }); }catch(e){ return []; } })())
+    : [];
 
   function finalizar(sucesso, dados){
     if(btnGerar) btnGerar.disabled=false;
@@ -22774,7 +22816,7 @@ function orcEnvGerarOS(){
       material:matLabel,medidas:medidasStr,qty:qtyTotal,
       status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
       valor:valorTotal,prog:0,pronto:false,
-      checks:checksProducao,_ck:_ckProducao,
+      checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
       parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
       clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
       // RODADA 6, seção 13 — Produção nunca recebe custo/preço/margem: cada
@@ -22844,7 +22886,7 @@ function orcEnvGerarOS(){
           // `restante` calculado logo acima.
           status:restante>0?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
           prog:0,pronto:false,
-          checks:checksProducao,_ck:_ckProducao,
+          checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
           clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
           clientCidade:'—',vendedor:'',dataOS:dia,
           // RODADA 6, seção 13 — troca a lista negra (delete unit/total) por
@@ -28866,6 +28908,7 @@ function planProdNovoOpen() {
   planProdRenderPecas();
   planProdRenderCampos();
   planProdRenderOperacoes(null);
+  planProdRenderMaquinas(null);
   planProdRenderMaterial(null, []);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -28886,6 +28929,7 @@ function planProdEditar(id) {
   planProdRenderPecas();
   planProdRenderCampos();
   planProdRenderOperacoes(p.operacoes||null);
+  planProdRenderMaquinas(p.maquinasRelacionadas||[]);
   planProdRenderMaterial(p.materialPadrao||null, p.materiaisPermitidos||[]);
   planProdPrevCalc();
   document.getElementById('planProdOverlay').classList.add('open');
@@ -29090,6 +29134,29 @@ function planProdLerOperacoes() {
   return operacoes;
 }
 
+// RODADA 6, seção 6 — popula os checkboxes de máquinas relacionadas no
+// modal Novo/Editar Produto, a partir do cadastro real (cfgLoad().maquinas,
+// convenção matKey "maq_N" — mesmo padrão de referência por ID já usado
+// para material na seção 4).
+function planProdRenderMaquinas(maquinasSalvas) {
+  var wrap = document.getElementById('planProdMaquinas');
+  if(!wrap) return;
+  var _cfgMaqs = [];
+  try { var d = cfgLoad(); _cfgMaqs = Array.isArray(d.maquinas) ? d.maquinas : []; } catch(e){}
+  var selecionadas = maquinasSalvas || [];
+  wrap.innerHTML = _cfgMaqs.length ? _cfgMaqs.map(function(m,i){
+    var matKey = 'maq_'+i;
+    var checked = selecionadas.indexOf(matKey) >= 0 ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:5px;padding:2px 0"><input type="checkbox" data-maquina-chave="'+matKey+'"'+checked+'>'+cfgEsc(m.nome)+'</label>';
+  }).join('') : '<span style="color:var(--muted)">Nenhuma máquina cadastrada ainda.</span>';
+}
+function planProdLerMaquinas() {
+  var wrap = document.getElementById('planProdMaquinas');
+  var selecionadas = [];
+  if(wrap) wrap.querySelectorAll('[data-maquina-chave]').forEach(function(el){ if(el.checked) selecionadas.push(el.dataset.maquinaChave); });
+  return selecionadas;
+}
+
 function planProdPrevCalc() {
   planProdReadPecas();
   var L = parseFloat((document.getElementById('planPrevL')||{}).value)||60;
@@ -29151,6 +29218,7 @@ function planProdSalvar() {
   var _operacoes = planProdLerOperacoes();
   var _opCheck = receitaOperacoesValidar(_operacoes);
   if(!_opCheck.ok) { showToast('Operação inválida: '+_opCheck.erro,'err'); return; }
+  var _maquinasRelacionadas = planProdLerMaquinas();
 
   var prods = planProdLoad();
   // Salvar apenas espessuras que possuem SVG ou ao menos espessuraMm preenchida
@@ -29175,6 +29243,7 @@ function planProdSalvar() {
     materialPadrao: _material.materialPadrao,
     materiaisPermitidos: _material.materiaisPermitidos,
     operacoes: _operacoes,
+    maquinasRelacionadas: _maquinasRelacionadas,
     planificacoes: _planifs,
     svg: _firstSvg || undefined
   };
