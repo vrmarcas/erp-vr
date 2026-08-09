@@ -81,6 +81,23 @@ test('7. item sem produto resolvido (Vitre/legado) não quebra e não grava reci
   test('13. restaurar de undefined/null nunca quebra', mod.restaurar(undefined).prod, '');
 }
 
+// ── RODADA 6, seção 8/9 — L/A/P do modal + peças manuais na reabertura ──
+{
+  var itemComDimsESalvas = {
+    prod: 'Caixa', planArea: 1500,
+    planLarg: '500', planAlt: '300', planProf: '30',
+    pieces: [
+      { qty: 2, nome: 'Lateral', larg: 200, alt: 300, esp: '3', origem: 'AUTOMATICA' },
+      { qty: 1, nome: 'Reforço extra', larg: 50, alt: 50, esp: '3', origem: 'MANUAL' },
+    ],
+  };
+  var r = mod.restaurar(itemComDimsESalvas);
+  test('14. restaurar devolve planLarg/planAlt/planProf salvos (achado real: modal reabria em branco)', { planLarg: r.planLarg, planAlt: r.planAlt, planProf: r.planProf }, { planLarg: '500', planAlt: '300', planProf: '30' });
+  test('15. restaurar deriva planPecasManual a partir das peças com origem=MANUAL (sem novo campo salvo)', r.planPecasManual, [itemComDimsESalvas.pieces[1]]);
+  test('16. item sem nenhuma peça manual devolve planPecasManual vazio', mod.restaurar({ prod: 'X', pieces: [{ origem: 'AUTOMATICA' }] }).planPecasManual, []);
+  test('17. item sem planLarg/planAlt/planProf salvos (legado) devolve string vazia, nunca quebra', mod.restaurar({ prod: 'X' }).planLarg, '');
+}
+
 // ── CENÁRIO OBRIGATÓRIO seção 11 — reabertura fiel end-to-end ─────────
 {
   // 1. Receita Caixa v1. 2. Criar orçamento (item A usa v1).

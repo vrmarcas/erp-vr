@@ -9204,6 +9204,23 @@ function orcItemVRRestaurarDados(itemSalvo) {
     productId: itemSalvo.productId || null,
     camposExtras: itemSalvo.camposExtras || null,
     extras: itemSalvo.extras || null,
+    // RODADA 6, seção 8/9 — achado real: as dimensões L/A/P digitadas no
+    // MODAL de planificação (row.dataset.planLarg/planAlt/planProf) nunca
+    // eram persistidas no item salvo — só o resultado (planArea/pieces).
+    // Reabrir um orçamento e clicar "✏️ Editar" num item já planificado
+    // mostrava o modal com L/A/P em branco (planCalc() nunca disparava
+    // sozinho — ver planAbrir), obrigando o vendedor a redigitar tudo do
+    // zero para poder ajustar algo. Agora restauradas explicitamente.
+    planLarg: itemSalvo.planLarg || '',
+    planAlt: itemSalvo.planAlt || '',
+    planProf: itemSalvo.planProf || '',
+    // As peças manuais (planManualPieces, editáveis individualmente na
+    // seção "peças extras" do modal) já vinham dentro de `pieces` com
+    // origem:'MANUAL' (usadas corretamente no cálculo/exibição), mas a
+    // lista separada que repopula os campos EDITÁVEIS do modal nunca era
+    // restaurada — reabrir e editar apagava as peças manuais do item ao
+    // reaplicar. Derivada aqui do próprio `pieces` salvo, sem novo campo.
+    planPecasManual: (itemSalvo.pieces || []).filter(function (p) { return p && p.origem === 'MANUAL'; }),
   };
 }
 // Projeção operacional segura do item para a OS (seção 13): Produção
@@ -21845,6 +21862,13 @@ async function _orcSalvarOrcamentoImpl() {
       qty:   (document.getElementById('oi_qty_'+ri)||{}).value||'1',
       larg:  (document.getElementById('oi_larg_'+ri)||{}).value||'',
       alt:   (document.getElementById('oi_alt_'+ri)||{}).value||'',
+      // RODADA 6, seção 8/9 — dimensões digitadas no MODAL de planificação
+      // (distintas de oi_larg_/oi_alt_, que ficam ocultas e vazias para
+      // itens planificados) — sem isto, reabrir um orçamento e editar a
+      // planificação mostrava L/A/P em branco. Ver orcItemVRRestaurarDados.
+      planLarg: row.dataset.planLarg || '',
+      planAlt:  row.dataset.planAlt  || '',
+      planProf: row.dataset.planProf || '',
       matKey: matEl ? matEl.value : '',
       mat:   (matOpt&&matOpt.dataset&&matOpt.dataset.nome) ? matOpt.dataset.nome : (matOpt?matOpt.text:''),
       det:   (document.getElementById('oi_det_'+ri)||{}).value||'',
@@ -22558,6 +22582,15 @@ function orcEnvEditar(id) {
             if(_rd.recipeVersion) row.dataset.recipeVersion = String(_rd.recipeVersion);
             if(_rd.recipeSnapshot) row.dataset.recipeSnapshot = JSON.stringify(_rd.recipeSnapshot);
             if(_rd.camposExtras) row.dataset.planCamposExtras = JSON.stringify(_rd.camposExtras);
+            // RODADA 6, seção 8/9 — restaura as dimensões do MODAL de
+            // planificação (não as de oi_larg_/oi_alt_, que ficam ocultas
+            // para itens planificados) e as peças manuais, para que
+            // "✏️ Editar" reabra o modal com L/A/P preenchidos e as peças
+            // extras editáveis, em vez de um calculador em branco.
+            if(_rd.planLarg) row.dataset.planLarg = _rd.planLarg;
+            if(_rd.planAlt)  row.dataset.planAlt  = _rd.planAlt;
+            if(_rd.planProf) row.dataset.planProf = _rd.planProf;
+            if(_rd.planPecasManual && _rd.planPecasManual.length) row.dataset.planPecasManual = JSON.stringify(_rd.planPecasManual);
           }
           // Espelha o feedback visual de planAplicar(): esconde larg/alt,
           // mostra o badge 📐 e a tag de planificação — sem isso o operador
