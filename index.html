@@ -21129,6 +21129,13 @@ function orcMotorPagamento(baseReais, cond) {
   }
   var totalComTaxaCent = nParc>1 ? Math.round(afterPixCent * (1 + taxaPct/100)) : afterPixCent;
   var valorParcelaCent = nParc>1 ? Math.round(totalComTaxaCent / nParc) : totalComTaxaCent;
+  // SPRINT PRÉ-GO-LIVE, Bloco F — achado real: "3x de R$39,33" ao lado de
+  // "total: R$117,98" (39,33×3=117,99 ≠ 117,98) — cada valor era
+  // arredondado de forma independente. Corrigido tornando o total exibido
+  // sempre DERIVADO da parcela já arredondada (nParc × valorParcela) — a
+  // parcela vira a fonte da verdade, nunca duas contas em paralelo que
+  // podem divergir por 1 centavo.
+  if (nParc>1) totalComTaxaCent = valorParcelaCent * nParc;
   return {
     afterDescCond: afterDescCondCent/100,
     afterPix: afterPixCent/100,

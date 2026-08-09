@@ -99,8 +99,13 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 
   resetEls(1000, { n: 3, pxOn: true, pxPct: 5 });
   mod1.orcCalcParcelaDisplay();
-  test('4. achado real corrigido: desconto PIX de 5% também é aplicado (3x de R$316,67 = 950/3), nunca ignorado',
-    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 316,67 (total: R$ 950,00)');
+  // SPRINT PRÉ-GO-LIVE, Bloco F — o "total" exibido aqui é o desconto PIX
+  // aplicado (950,00) dividido por 3 e RE-multiplicado pela parcela já
+  // arredondada (316,67 × 3 = 950,01), nunca duas contas independentes que
+  // podem divergir por 1 centavo entre si (era o achado real: 950,00 ao
+  // lado de uma parcela que somava 950,01 — matemática impossível).
+  test('4. achado real corrigido: desconto PIX de 5% também é aplicado (3x de R$316,67), e o total exibido é sempre nParc×parcela — nunca duas contas que divergem entre si',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 316,67 (total: R$ 950,01)');
 }
 
 // ── 2. finAntecipar() — execução real, achado do unit-mismatch ─────────
