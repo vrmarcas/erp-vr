@@ -16506,6 +16506,25 @@ function finCPClearSel() { _finCPSel={}; finCPRender(); finCPUpdateBulkBar(); }
 function finCPBulkPagar() {
   var ids=Object.keys(_finCPSel).filter(function(id){return _finCPSel[id];});
   if(!ids.length){showToast('Selecione registros primeiro','warn');return;}
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.4 — bug real encontrado na
+  // auditoria: esta função chamava _finCPPagarConfirmar() direto, sem
+  // nenhum guard de valorPendente (o guard só existia em finCPPagar(),
+  // o caminho de pagamento individual) — permitia marcar como "pago"
+  // (com valor:null) uma competência de recorrência variável ainda "a
+  // informar", que então sumia silenciosamente dos totais de Caixa.
+  // Corrigido em duas camadas: (1) o guard agora mora também em
+  // _finCPPagarConfirmar(), o nível mais baixo usado por TODAS as rotas
+  // de pagamento — nunca mais contornável por um novo caller futuro;
+  // (2) aqui, o LOTE INTEIRO é bloqueado (não só a conta pendente) se
+  // qualquer selecionado tiver valor pendente — mais previsível
+  // financeiramente do que pagar parte e ignorar o resto silenciosamente.
+  var pendentes = ids.map(function(id){ return FIN_CP.find(function(x){return x.id===id;}); })
+    .filter(function(r){ return r && r.valorPendente; });
+  if(pendentes.length){
+    var nomes = pendentes.map(function(r){ return r.descricao; }).join(', ');
+    showToast('Há despesas com valor ainda não informado. Preencha os valores antes de dar baixa: '+nomes, 'warn');
+    return;
+  }
   var dtStr=new Date().toISOString().slice(0,10);
   ids.forEach(function(id){ var r=FIN_CP.find(function(x){return x.id===id;}); if(r&&r.status!=='pago') _finCPPagarConfirmar(id,dtStr); });
   _finCPSel={}; finCPRender(); finCPUpdateBulkBar();
@@ -16622,6 +16641,10 @@ function finCPPagar(id) {
 }
 function _finCPPagarConfirmar(id, dtISO) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  // P0.4 — guard no nível MAIS BAIXO usado por toda rota de pagamento
+  // (individual e em lote): nunca confirma baixa de uma competência cujo
+  // valor ainda não foi informado — nunca fica "pago" com valor:null.
+  if(r.valorPendente){ showToast('Informe o valor desta despesa antes de confirmar o pagamento','warn'); return; }
   if(r.status==='pago'){ showToast('Este pagamento já foi confirmado.','info'); return; }
   if(r._pagando){ showToast('Confirmação já em andamento — aguarde.','warn'); return; }
   r._pagando = true;
