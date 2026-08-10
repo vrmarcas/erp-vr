@@ -235,7 +235,12 @@ export function extractContext(body: Record<string, unknown>): CtxResult {
       messageId:      body["messageId"]      as string | undefined,
       agentId,
       organizationId,
-      channelPhone:   body["channelPhone"]   as string | undefined,
+      // O webhook real da ChatVolt envia o telefone do CLIENTE como
+      // `userPhoneNumber` (doc oficial, 2026) — channelPhone/phone ficam
+      // como aliases aceitos para tools configuradas manualmente.
+      channelPhone:   (body["channelPhone"]
+        ?? body["userPhoneNumber"]
+        ?? body["phone"]) as string | undefined,
     },
   };
 }

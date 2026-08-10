@@ -24,6 +24,7 @@ import { pipeline } from "./pipeline";
 import { withIdempotency, extractIdempotencyKey } from "./idempotency";
 import { evaluateQuoteEligibility } from "./pricing";
 import { ok, err, QUOTE_RESPONSES } from "./response";
+import { paraE164BR, encontrarPorTelefone } from "./telefone";
 
 import type {
   Cliente,
@@ -135,6 +136,17 @@ function normTel(tel: string): string {
   return (tel ?? "").replace(/\D/g, "");
 }
 
+// Matching robusto de identidade (Fase 0/1 Valéria×ChatVolt): E.164 canônico,
+// tolerante a legado com/sem +55, 0 de operadora e 9º dígito — ver telefone.ts.
+// A ordem exigida: telefone exato → normalizado → cliente → lead.
+
+/** Procura um lead no dict por telefone (exato → chave canônica BR). */
+function findLeadByTelefone(dict: CrmLeadDict, tel: string): { id: string; lead: CrmLead } | null {
+  const entries = Object.entries(dict);
+  const found = encontrarPorTelefone(tel, entries, ([, l]) => l.tel);
+  return found ? { id: found[0], lead: found[1] } : null;
+}
+
 function uid(prefix = "v"): string {
   return `${prefix}_${randomUUID()}`;
 }
@@ -161,12 +173,13 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         leadId    = d["leadId"]    ?? null;
       }
 
-      // Fallback por channelPhone (telefone do canal — confiável)
+      // Fallback por channelPhone (telefone do cliente vindo do WhatsApp) —
+      // matching robusto: exato → chave canônica E.164 BR (com/sem +55,
+      // com/sem 9º dígito), nunca aproximação além disso.
       let cliente: Cliente | null = null;
       if (!clienteId && ctx.channelPhone) {
         const clientes = await fsRead<Cliente[]>("clientes");
-        const t        = normTel(ctx.channelPhone);
-        cliente        = clientes?.find((c) => normTel(c.tel ?? "") === t) ?? null;
+        cliente        = clientes ? encontrarPorTelefone(ctx.channelPhone, clientes, (c) => c.tel) : null;
         if (cliente) clienteId = cliente.id;
       }
       if (clienteId && !cliente) {
@@ -175,18 +188,43 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       }
 
       let lead: CrmLead | null = null;
-      // Busca no dict unificado crm_leads (mesmo que o ERP Kanban lê)
+      // Busca no dict unificado crm_leads (mesmo que o ERP Kanban lê):
+      // 1º vínculo salvo (leadId), 2º conversationId, 3º telefone — assim um
+      // cliente que retorna pelo mesmo número em conversa nova é reconhecido
+      // e NUNCA vira lead duplicado.
       const leadsDict = await fsRead<CrmLeadDict>("crm_leads");
       if (leadId && leadsDict?.[leadId]) {
         lead = leadsDict[leadId];
-      } else if (!leadId) {
-        // Fallback: buscar por conversationId no dict
-        const found = leadsDict ? findLeadByConv(leadsDict, ctx.conversationId) : null;
-        if (found) lead = found.lead;
+      } else if (leadsDict) {
+        const porConv = findLeadByConv(leadsDict, ctx.conversationId);
+        if (porConv) lead = porConv.lead;
+        else if (ctx.channelPhone) {
+          const porTel = findLeadByTelefone(leadsDict, ctx.channelPhone);
+          if (porTel) lead = porTel.lead;
+        }
       }
 
+      // Memória estruturada da conversa: briefing progressivo + estágio do
+      // funil numa única chamada — a agente recupera TODO o estado sem
+      // depender da memória do LLM entre sessões.
+      const briefingDoc = await db.collection("valeria_briefings").doc(ctx.conversationId).get();
+      const briefing = briefingDoc.exists ? briefingDoc.data() : null;
+
+      const etapaValeria = lead?.valeria?.status ?? null;
+      const etapaKanban  = lead?.etapa ?? null;
+
       res.json(ok(
-        { conversationId: ctx.conversationId, cliente, lead },
+        {
+          conversationId: ctx.conversationId,
+          telefoneE164:   ctx.channelPhone ? paraE164BR(ctx.channelPhone) : null,
+          cliente,
+          lead,
+          briefing,
+          etapaValeria,
+          etapaKanban,
+          camposFaltando: (briefing as { camposFaltando?: string[] } | null)?.camposFaltando ?? null,
+          classificacao:  (briefing as { classificacao?: string } | null)?.classificacao ?? null,
+        },
         { communicableToCustomer: false, verified: !!cliente }
       ));
     } catch (e) {
@@ -213,49 +251,46 @@ export const valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) =>
     if (!tel)  { res.status(400).json(err("VALIDATION_ERROR", "channelPhone ou tel é obrigatório.", { missingFields: ["channelPhone"] })); return; }
 
     const idempKey = extractIdempotencyKey(req);
-    const result = await withIdempotency(
+    const result = await withIdempotency<{ acao: string; clienteId: string | null; cliente: Cliente | null; leadFirst?: boolean }>(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaUpsertCliente" },
       async () => {
         const clientes = (await fsRead<Cliente[]>("clientes")) ?? [];
-        const t        = normTel(tel);
-        const idx      = clientes.findIndex((c) => normTel(c.tel ?? "") === t);
+        // Matching robusto: exato → chave canônica E.164 BR (nunca cria
+        // duplicado por diferença de formato/9º dígito).
+        const encontrado = encontrarPorTelefone(tel, clientes, (c) => c.tel);
 
-        let cliente: Cliente;
-        let acao: string;
-
-        if (idx >= 0) {
-          Object.assign(clientes[idx], {
-            nome,
-            ...(body["email"]   !== undefined && { email:   body["email"]   }),
-            ...(body["cidade"]  !== undefined && { cidade:  body["cidade"]  }),
-            ...(body["tipo"]    !== undefined && { tipo:    body["tipo"]    }),
-            ...(body["doc"]     !== undefined && { doc:     body["doc"]     }),
-            ...(body["contato"] !== undefined && { contato: body["contato"] }),
-            ...(body["marca"]   !== undefined && { marca:   body["marca"]   }),
-          });
-          const ids = new Set(clientes[idx].conversationIds ?? []);
-          ids.add(ctx.conversationId);
-          clientes[idx].conversationIds = [...ids];
-          cliente = clientes[idx];
-          acao    = "atualizado";
-        } else {
-          cliente = {
-            id:              uid("c"),
-            nome,
-            tipo:            (body["tipo"]    as string) ?? "PF",
-            cidade:          (body["cidade"]  as string) ?? "—",
-            marca:           (body["marca"]   as string) ?? "vr",
-            tel,
-            email:           (body["email"]   as string) ?? "",
-            doc:             (body["doc"]     as string) ?? "",
-            contato:         (body["contato"] as string) ?? "",
-            ultimoPedido:    new Date().toISOString(),
-            os:              [],
-            conversationIds: [ctx.conversationId],
-          };
-          clientes.unshift(cliente);
-          acao = "criado";
+        if (!encontrado) {
+          // LEAD-FIRST (arquitetura Fase 0/1): a Valéria NUNCA cria um
+          // cliente definitivo sozinha. Contato novo vira LEAD via
+          // valeriaCriarOportunidade; a promoção lead → cliente é decisão
+          // humana no ERP. Resposta ok (não erro) para o agente seguir o
+          // fluxo correto sem retry.
+          return ok(
+            { acao: "nenhum_cliente_criado", clienteId: null, cliente: null, leadFirst: true },
+            {
+              communicableToCustomer: false,
+              verified: false,
+              warnings: [
+                "Nenhum cliente cadastrado com este telefone. Política lead-first: use valeriaCriarOportunidade para registrar o LEAD — a promoção a cliente é feita por um humano no ERP.",
+              ],
+            }
+          );
         }
+
+        const idx = clientes.indexOf(encontrado);
+        Object.assign(clientes[idx], {
+          nome,
+          ...(body["email"]   !== undefined && { email:   body["email"]   }),
+          ...(body["cidade"]  !== undefined && { cidade:  body["cidade"]  }),
+          ...(body["tipo"]    !== undefined && { tipo:    body["tipo"]    }),
+          ...(body["doc"]     !== undefined && { doc:     body["doc"]     }),
+          ...(body["contato"] !== undefined && { contato: body["contato"] }),
+          ...(body["marca"]   !== undefined && { marca:   body["marca"]   }),
+        });
+        const ids = new Set(clientes[idx].conversationIds ?? []);
+        ids.add(ctx.conversationId);
+        clientes[idx].conversationIds = [...ids];
+        const cliente = clientes[idx];
 
         await fsWrite("clientes", clientes);
         await admin.firestore().collection("valeria_conversations")
@@ -263,7 +298,7 @@ export const valeriaUpsertCliente = RUN_OPTS.https.onRequest(async (req, res) =>
           .set({ clienteId: cliente.id, agentId: ctx.agentId, updatedAt: Date.now() }, { merge: true });
 
         return ok(
-          { acao, clienteId: cliente.id, cliente },
+          { acao: "atualizado", clienteId: cliente.id, cliente },
           { communicableToCustomer: false, verified: true }
         );
       }
@@ -510,13 +545,11 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
         const dict: CrmLeadDict = (await fsRead<CrmLeadDict>("crm_leads")) ?? {};
         const now  = new Date().toISOString();
 
-        // Busca por conversationId no dict; fallback por telefone normalizado
+        // Busca por conversationId no dict; fallback por telefone com
+        // matching canônico E.164 (exato → com/sem +55/9º dígito) — cliente
+        // que retorna pelo mesmo número NUNCA vira lead duplicado.
         let found = findLeadByConv(dict, ctx.conversationId);
-        if (!found) {
-          const normT = normTel(tel);
-          const entry = Object.entries(dict).find(([, l]) => normTel(l.tel ?? "") === normT);
-          if (entry) found = { id: entry[0], lead: entry[1] };
-        }
+        if (!found) found = findLeadByTelefone(dict, tel);
 
         let lead: CrmLead;
         let acao: string;
