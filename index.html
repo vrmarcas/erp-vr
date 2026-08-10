@@ -16288,27 +16288,32 @@ function finNormCat(c){ return FIN_CAT_ALIAS[c]||c; }
 // nota fiscal emitida — a situação fiscal real da venda não afeta o DRE gerencial.
 var FIN_TAXA_IMPOSTO_DRE = 0.085;
 function finCalcularDRE(txFiltro, cpFiltro) {
-  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
-  var impostos=receitaBruta*FIN_TAXA_IMPOSTO_DRE;
-  var receitaLiq=receitaBruta-impostos;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.3 — todos os acumuladores
+  // internos em CENTAVOS INTEIROS (helpers de P0.2), convertidos para
+  // R$ somente no objeto de retorno. Nunca muda a classificação
+  // contábil (mesmas categorias/regras) — só a matemática de soma.
+  var receitaBrutaCents=sumCents(txFiltro, function(t){return t.valor;});
+  var impostosCents=Math.round(receitaBrutaCents*FIN_TAXA_IMPOSTO_DRE);
+  var receitaLiqCents=receitaBrutaCents-impostosCents;
   // CUSTO = diretamente ligado à produção (CMV)
   // finCPValorNum() (não c.valor direto): uma ocorrência de recorrência
   // variável ainda "a informar" (valorPendente:true) precisa contribuir 0
   // aqui — nunca NaN, nunca contada como se R$0,00 fosse o valor real.
   var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cmv=cmvMat+cmvMod;
-  var lucroBruto=receitaLiq-cmv;
+  var cmvMatCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}), function(c){return finCPValorNum(c);});
+  var cmvModCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}), function(c){return finCPValorNum(c);});
+  var cmvCents=cmvMatCents+cmvModCents;
+  var lucroBrutoCents=receitaLiqCents-cmvCents;
   // DESPESA = operacional/administrativo (independente do imposto automático sobre vendas)
-  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var desp=cpPessoal+cpOp+cpEmp+cpImp;
-  var lucroLiq=lucroBruto-desp;
-  return {receitaBruta:receitaBruta,impostos:impostos,receitaLiq:receitaLiq,cmvMat:cmvMat,cmvMod:cmvMod,cmv:cmv,
-    lucroBruto:lucroBruto,cpPessoal:cpPessoal,cpOp:cpOp,cpEmp:cpEmp,cpImp:cpImp,desp:desp,lucroLiq:lucroLiq};
+  var cpPessoalCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}), function(c){return finCPValorNum(c);});
+  var cpOpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}), function(c){return finCPValorNum(c);});
+  var cpEmpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}), function(c){return finCPValorNum(c);});
+  var cpImpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}), function(c){return finCPValorNum(c);});
+  var despCents=cpPessoalCents+cpOpCents+cpEmpCents+cpImpCents;
+  var lucroLiqCents=lucroBrutoCents-despCents;
+  return {receitaBruta:centsToMoney(receitaBrutaCents),impostos:centsToMoney(impostosCents),receitaLiq:centsToMoney(receitaLiqCents),
+    cmvMat:centsToMoney(cmvMatCents),cmvMod:centsToMoney(cmvModCents),cmv:centsToMoney(cmvCents),
+    lucroBruto:centsToMoney(lucroBrutoCents),cpPessoal:centsToMoney(cpPessoalCents),cpOp:centsToMoney(cpOpCents),cpEmp:centsToMoney(cpEmpCents),cpImp:centsToMoney(cpImpCents),desp:centsToMoney(despCents),lucroLiq:centsToMoney(lucroLiqCents)};
 }
 // ============================================================
 // AGENDA DE PAGAMENTOS — Calendário mensal
