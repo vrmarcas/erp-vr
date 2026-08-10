@@ -5159,6 +5159,17 @@ function _authFirebaseError(code){
               <div class="fin-cr-scard-val" id="finCPSumAgend">R$ 0</div>
             </div>
           </div>
+          <!-- SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.10 — contador de
+               competências de recorrência variável ainda sem valor
+               informado neste mês. Clicável: filtra a lista para mostrar
+               só essas. -->
+          <div class="fin-cr-scard" id="finCPSumPendenteValorCard" onclick="finCPToggleFiltroPendente()" style="cursor:pointer;background:#FEF3C7">
+            <div class="fin-cr-scard-ico">⏳</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Aguardando Valor (mês)</div>
+              <div class="fin-cr-scard-val" id="finCPSumPendenteValor">0</div>
+            </div>
+          </div>
         </div>
         <div class="card">
           <div class="card-h">
@@ -16299,12 +16310,31 @@ function finCRSalvar(){
 }
 
 // ── Contas a Pagar — Sumário ──────────────────────────────────────────────────
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.10 — competência do mês corrente,
+// no formato "YYYY-MM" já usado por FIN_CP_RECORRENCIAS/finCPGerarOcorrencias.
+function finCPCompetenciaAtualStr() {
+  var d = new Date();
+  return finCPCompetenciaStr(d.getFullYear(), d.getMonth() + 1);
+}
+function finCPContarPendentesMesAtual() {
+  var compAtual = finCPCompetenciaAtualStr();
+  return FIN_CP.filter(function (r) { return r.valorPendente && r.competencia === compAtual; }).length;
+}
+var _finCPFiltroSoPendentes = false;
+function finCPToggleFiltroPendente() {
+  _finCPFiltroSoPendentes = !_finCPFiltroSoPendentes;
+  var card = document.getElementById('finCPSumPendenteValorCard');
+  if (card) card.style.outline = _finCPFiltroSoPendentes ? '3px solid #D97706' : 'none';
+  finCPRender();
+}
 function finCPUpdateSummary() {
   var pend  = FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var pago  = FIN_CP.filter(function(r){return r.status==='pago';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var agend = FIN_CP.filter(function(r){return r.status==='agendado';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
   set('finCPSumPend',pend); set('finCPSumPago',pago); set('finCPSumAgend',agend);
+  var pendVal=document.getElementById('finCPSumPendenteValor');
+  if(pendVal) pendVal.textContent = String(finCPContarPendentesMesAtual());
 }
 
 // ── Contas a Pagar Render ─────────────────────────────────────────────────────
@@ -16612,6 +16642,7 @@ function finCPGarantirOcorrenciasAtuais() {
 }
 function finCPRender() {
   finCPGarantirOcorrenciasAtuais();
+  finCPUpdateSummary();
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
   if(!tbody) return;
@@ -16623,7 +16654,11 @@ function finCPRender() {
     var sOk=!stFlt||r.status===stFlt;
     var dRef=r.dataPagamento||r.vencimento||'';
     var pOk=finDateInPeriod(dRef);
-    return bOk&&cOk&&sOk&&pOk;
+    // P1.10 — quando o card "Aguardando Valor" está ativo, mostra só as
+    // competências ainda sem valor informado (nunca altera dado nenhum,
+    // só filtra a visão).
+    var pendOk=!_finCPFiltroSoPendentes||r.valorPendente;
+    return bOk&&cOk&&sOk&&pOk&&pendOk;
   });
   _finCPLastList=list;
   // finCPValorNum(): uma ocorrência "a informar" (valorPendente:true, Bloco
@@ -16663,9 +16698,15 @@ function finCPRender() {
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEstornar(\''+r.id+'\')">↩ Estornar pagamento</button>';
     }
     if(r.recorrenciaId){
-      // ocorrência de despesa recorrente — ações específicas de série, além
-      // das normais. "Editar só esta" já funciona pelo fluxo normal de edição
-      // (mutação direta no registro, sem tocar a recorrência-mãe).
+      // ocorrência de despesa recorrente — ações específicas de série.
+      // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.9 — "Editar só esta" e
+      // "Editar esta e próximas" agora têm ações reais no menu (a
+      // auditoria encontrou finCPEditarFuturas() sem nenhuma UI que a
+      // acionasse, e "editar só esta" só existia como comentário).
+      if(r.status!=='pago'){
+        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEditarUnicaUI(\''+r.id+'\')">✏️ Editar só esta</button>';
+        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEditarFuturasUI(\''+r.recorrenciaId+'\',\''+(r.competencia||'')+'\')">✏️ Editar esta e próximas</button>';
+      }
       if(r.status!=='pago') menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPCancelarOcorrenciaUI(\''+r.id+'\')">🚫 Cancelar só esta ocorrência</button>';
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEncerrarRecorrenciaUI(\''+r.recorrenciaId+'\')">⏹ Encerrar recorrência (série inteira)</button>';
     } else {
@@ -16749,14 +16790,77 @@ function finCPEncerrarRecorrenciaUI(recorrenciaId) {
     showToast('Recorrência encerrada — ocorrências já geradas foram preservadas','ok');
   });
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.9 — "Editar só esta": muda campos
+// não-financeiros de UMA competência específica (descrição/fornecedor),
+// sem tocar a recorrência-mãe nem o valor já informado/pendente. Nunca
+// permite editar uma competência já paga (histórico imutável).
+function finCPEditarUnicaUI(cpId) {
+  var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
+  if(r.status==='pago'){ showToast('Não é possível editar uma competência já paga.','warn'); return; }
+  var novaDesc = prompt('Descrição (só esta competência):', r.descricao||''); if(novaDesc===null) return;
+  var novoForn = prompt('Fornecedor (só esta competência):', r.fornecedor||''); if(novoForn===null) return;
+  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
+  r.descricao = novaDesc.trim();
+  r.fornecedor = novoForn.trim() || null;
+  var p = _finSaveCP();
+  (p && typeof p.then==='function' ? p : Promise.resolve()).then(function(){
+    finCPRender();
+    showToast('Competência atualizada — só este mês, a série continua igual.','ok');
+  });
+}
+// "Editar esta e próximas": encerra a série antiga na competência
+// anterior e cria uma nova a partir daqui (finCPEditarFuturas já
+// implementa isso — nunca toca competências já pagas nem o histórico).
+// Só pede os campos que fazem sentido para a série inteira (nunca valor
+// — recorrência variável nunca tem valor fixo por definição).
+function finCPEditarFuturasUI(recorrenciaId, apartirCompetencia) {
+  var rec = FIN_CP_RECORRENCIAS.find(function(x){return x.id===recorrenciaId;});
+  if(!rec){ showToast('Recorrência não encontrada.','warn'); return; }
+  if(!apartirCompetencia){ showToast('Competência de referência não encontrada.','warn'); return; }
+  if(!confirm('Isso encerra a série atual e cria uma nova a partir desta competência. Competências já pagas e o histórico nunca são alterados. Continuar?')) return;
+  var novaDesc = prompt('Descrição (esta e as próximas competências):', rec.descricao||''); if(novaDesc===null) return;
+  var novoForn = prompt('Fornecedor (esta e as próximas):', rec.fornecedor||''); if(novoForn===null) return;
+  var novaCat = prompt('Categoria (esta e as próximas):', rec.categoria||''); if(novaCat===null) return;
+  var novoDia = prompt('Dia de vencimento, 1-28 (esta e as próximas):', String(rec.diaVencimento||'')); if(novoDia===null) return;
+  var diaNum = parseInt(novoDia,10);
+  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
+  if(isNaN(diaNum)||diaNum<1||diaNum>28){ showToast('Dia de vencimento inválido — use um número de 1 a 28.','warn'); return; }
+  var novosValores = { descricao: novaDesc.trim(), fornecedor: novoForn.trim()||'', categoria: novaCat.trim()||rec.categoria, diaVencimento: diaNum };
+  var res = finCPEditarFuturas(recorrenciaId, apartirCompetencia, novosValores);
+  if(!res.ok){ showToast(res.erro||'Não foi possível editar a série','warn'); return; }
+  Promise.all([_finSaveCP(), _finSaveCPRecorrencias()].map(function(p){ return p&&p.then?p:Promise.resolve(); })).then(function(){
+    finCPRender();
+    showToast('Série atualizada a partir desta competência — pagas e histórico preservados.','ok');
+  });
+}
 // Bloco N — UI de "Informar valor" (recorrência variável). Reaproveita o
 // padrão já usado no arquivo (prompt() simples + função pura de domínio +
 // _finSaveCP() + re-render), igual a outras ações rápidas do Financeiro.
 // Aceita R$0,00 como resposta válida (mês sem custo real) — só rejeita
 // entrada não numérica ou negativa.
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.8 — referência (nunca preenchida
+// automaticamente) ao valor da competência anterior da MESMA
+// recorrência, para reduzir erro de digitação ao informar valores
+// mês a mês. Só considera competências com valor JÁ informado
+// (valorPendente!==true) — nunca mostra "R$0,00" de uma competência
+// ainda pendente como se fosse referência real.
+function finCPValorCompetenciaAnterior(cpId) {
+  var r = FIN_CP.find(function (x) { return x.id === cpId; });
+  if (!r || !r.recorrenciaId || !r.competencia) return null;
+  var anteriores = FIN_CP.filter(function (x) {
+    return x.recorrenciaId === r.recorrenciaId && x.id !== r.id
+      && x.competencia && x.competencia < r.competencia
+      && !x.valorPendente && x.valor != null;
+  }).sort(function (a, b) { return b.competencia.localeCompare(a.competencia); });
+  return anteriores.length ? anteriores[0].valor : null;
+}
 function finCPInformarValorUI(cpId) {
   var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
-  var raw = prompt('Informe o valor desta competência — '+r.descricao+' ('+r.vencimento+'):');
+  // P1.8 — referência discreta do mês anterior, só no texto do prompt
+  // (2º argumento de prompt() continua vazio — NUNCA pré-preenche).
+  var refAnterior = finCPValorCompetenciaAnterior(cpId);
+  var refTxt = refAnterior!=null ? ('\n\nÚltimo mês: '+finFmt(refAnterior)+' (apenas referência)') : '';
+  var raw = prompt('Informe o valor desta competência — '+r.descricao+' ('+r.vencimento+'):'+refTxt);
   if(raw===null) return; // cancelado
   var valor = parseFloat(String(raw).replace(',','.'));
   if(isNaN(valor)||valor<0){ showToast('Valor inválido — informe um número maior ou igual a zero','warn'); return; }
