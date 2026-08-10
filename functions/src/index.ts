@@ -75,17 +75,17 @@ export {
 } from "./vitre";
 
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
+// Fase 0/1 Valéria×ChatVolt (2026-08-09): das 10 Functions v1 deste módulo,
+// 8 foram SUPERSEDIDAS em produção pelas versões v2 do codebase "valeria"
+// (functions-valeria/, nodejs22 — auth Secret Manager timing-safe, allowlist
+// fail-closed, idempotência, rate limit). Exportá-las aqui de novo faria um
+// `firebase deploy` do codebase default COLIDIR com as funções do outro
+// codebase. Ficam só as 2 que o default ainda possui de fato em produção
+// (nodejs20). Não reintroduzir as demais — evoluções vão em
+// functions-valeria/.
 export {
   valeriaGetCliente,
-  valeriaUpsertCliente,
-  valeriaCatalogo,
-  valeriaCriarOrcamento,
-  valeriaCriarOportunidade,
-  valeriaRegistrarMensagem,
-  valeriaTransferirHumano,
-  valeriaProximaAcao,
   valeriaConsultarOS,
-  valeriaStatus,
 } from "./valeria";
 
 // ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO
