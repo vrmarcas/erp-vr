@@ -3585,7 +3585,12 @@ function _authFirebaseError(code){
                   </div>
                 </div>
                 <div class="fg"><label>Justificativa do acréscimo</label><input type="text" id="vitreOrcAcrescGlobalMotivo" placeholder="Ex: urgência, embalagem especial"></div>
-                <div class="fg"><label>Desconto (%)</label><input type="number" id="vitreOrcDesconto" value="0" min="0" max="100" oninput="vitreOrcRecalcular()"></div>
+                <div class="fg"><label>Desconto global</label>
+                  <div style="display:flex;gap:6px">
+                    <select id="vitreOrcDescontoTipo" style="max-width:90px" onchange="vitreOrcRecalcular()"><option value="">Nenhum</option><option value="fixo">R$ fixo</option><option value="pct" selected>%</option></select>
+                    <input type="number" id="vitreOrcDescontoValor" value="0" min="0" step="0.01" oninput="vitreOrcRecalcular()" style="flex:1">
+                  </div>
+                </div>
                 <div class="fg"><label>Frete (R$)</label><input type="number" id="vitreOrcFrete" value="0" min="0" step="0.01" oninput="vitreOrcRecalcular()"></div>
               </div>
 
@@ -20408,7 +20413,8 @@ function vitreOrcResetEstado() {
   ['vitreOrcClienteNome', 'vitreOrcClienteDoc', 'vitreOrcClienteTel', 'vitreOrcClienteEmail', 'vitreOrcClienteCidade', 'vitreOrcObservacoes', 'vitreOrcBusca'].forEach(function (id) {
     var el = document.getElementById(id); if (el) el.value = '';
   });
-  var desc = document.getElementById('vitreOrcDesconto'); if (desc) desc.value = 0;
+  var descTipo = document.getElementById('vitreOrcDescontoTipo'); if (descTipo) descTipo.value = 'pct';
+  var descVal = document.getElementById('vitreOrcDescontoValor'); if (descVal) descVal.value = 0;
   var frete = document.getElementById('vitreOrcFrete'); if (frete) frete.value = 0;
   var agt = document.getElementById('vitreOrcAcrescGlobalTipo'); if (agt) agt.value = '';
   var agv = document.getElementById('vitreOrcAcrescGlobalValor'); if (agv) agv.value = 0;
@@ -20661,22 +20667,29 @@ function vitreOrcRecalcular() {
   var globalTipo = globalTipoEl ? globalTipoEl.value : '';
   var globalValor = document.getElementById('vitreOrcAcrescGlobalValor') ? document.getElementById('vitreOrcAcrescGlobalValor').value : 0;
   var acrescGlobalC = vitreOrcCalcAcrescimoCentavos(subtotalC + acrescItensC, globalTipo, globalValor);
-  var descontoPct = Number((document.getElementById('vitreOrcDesconto') || {}).value) || 0;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.4 — Desconto Global agora aceita
+  // R$ fixo OU % (mesma dualidade já existente no Acréscimo Global),
+  // usando o MESMO helper cent-safe (vitreOrcCalcAcrescimoCentavos) —
+  // só o sinal muda (subtraído, não somado).
+  var descTipoEl = document.getElementById('vitreOrcDescontoTipo');
+  var descontoTipo = descTipoEl ? descTipoEl.value : 'pct';
+  var descontoValor = Number((document.getElementById('vitreOrcDescontoValor') || {}).value) || 0;
   var frete = Number((document.getElementById('vitreOrcFrete') || {}).value) || 0;
   var baseC = subtotalC + acrescItensC + acrescGlobalC;
-  var descC = Math.round(baseC * descontoPct / 100);
+  var descC = Math.min(vitreOrcCalcAcrescimoCentavos(baseC, descontoTipo, descontoValor), baseC);
   var freteC = vitreOrcToCentavos(frete);
   var totalC = Math.max(baseC - descC + freteC, 0);
+  var descLabel = descontoTipo === 'fixo' ? orcFmt(descontoValor) : (descontoValor + '%');
   var el = document.getElementById('vitreOrcResumo');
   if (el) {
     el.innerHTML = 'Subtotal dos produtos: <strong>' + orcFmt(subtotalC / 100) + '</strong><br>'
       + (acrescItensC ? 'Acréscimos de item: +' + orcFmt(acrescItensC / 100) + '<br>' : '')
       + (acrescGlobalC ? 'Acréscimo geral: +' + orcFmt(acrescGlobalC / 100) + '<br>' : '')
-      + 'Desconto (' + descontoPct + '%): -' + orcFmt(descC / 100) + '<br>'
+      + (descC ? 'Desconto (' + descLabel + '): -' + orcFmt(descC / 100) + '<br>' : '')
       + 'Frete: +' + orcFmt(freteC / 100) + '<br>'
       + '<span style="font-size:15px;font-weight:900;color:#1E7A86">Total: ' + orcFmt(totalC / 100) + '</span>';
   }
-  return { subtotalCentavos: subtotalC, acrescimosItensCentavos: acrescItensC, acrescimoGlobalCentavos: acrescGlobalC, descontoPct: descontoPct, valorDescontoCentavos: descC, freteCentavos: freteC, totalCentavos: totalC };
+  return { subtotalCentavos: subtotalC, acrescimosItensCentavos: acrescItensC, acrescimoGlobalCentavos: acrescGlobalC, descontoTipo: descontoTipo, descontoValor: descontoValor, descontoPct: descontoTipo === 'pct' ? descontoValor : 0, valorDescontoCentavos: descC, freteCentavos: freteC, totalCentavos: totalC };
 }
 
 // ── STEP 3: ENVIO AO CLIENTE — revisão completa antes de salvar/enviar. ──
@@ -20761,7 +20774,14 @@ function vitreOrcSalvar() {
   var itensPayload = VITRE_ORC_ITENS.map(function (it) {
     return { sku: it.sku, qtd: it.qtd, adicionais: (it.adicionais && it.adicionais.length) ? it.adicionais.map(function (a) { return { nome: a.nome }; }) : undefined, acrescimo: it.acrescimo || undefined };
   });
-  var descontoPct = Number(document.getElementById('vitreOrcDesconto').value) || 0;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.4 — envia o desconto como objeto
+  // {tipo,valor} (mesmo formato do acréscimo), nunca mais só um percentual
+  // escalar. O backend (vitre.ts) continua aceitando descontoPct isolado
+  // em documentos antigos, interpretando-o como percentual.
+  var descontoTipoSel = document.getElementById('vitreOrcDescontoTipo').value;
+  var descontoValorNum = Number(document.getElementById('vitreOrcDescontoValor').value) || 0;
+  var descontoGlobal = (descontoTipoSel && descontoValorNum > 0) ? { tipo: descontoTipoSel, valor: descontoValorNum } : undefined;
+  var descontoPct = descontoTipoSel === 'pct' ? descontoValorNum : 0; // compat: ainda gravado para leitura legada
   var frete = Number(document.getElementById('vitreOrcFrete').value) || 0;
   var prazoValidadeDias = Number(document.getElementById('vitreOrcValidade').value) || 7;
 
@@ -20769,10 +20789,10 @@ function vitreOrcSalvar() {
   // os itens/valores dele em vez de criar um orçamento novo.
   if (VITRE_ORC_ATUAL_ID && VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.status === 'rascunho') {
     firebase.functions().httpsCallable('vitreAtualizarOrcamento')({
-      id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+      id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoGlobal: descontoGlobal, frete: frete, acrescimoGlobal: acrescimoGlobal,
     }).then(function () {
       showToast('Rascunho atualizado — total ' + orcFmt(calc.totalCentavos / 100) + '.', 'ok');
-      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
+      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoGlobal: descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
       vitreOrcAtualizarEstadoAtual();
     }).catch(function (e) { showToast('Erro ao atualizar rascunho: ' + ((e && e.message) || ''), 'err'); });
     return;
@@ -20788,7 +20808,7 @@ function vitreOrcSalvar() {
     clienteExistenteId: VITRE_ORC_CLIENTE_EXISTENTE_ID || undefined,
     observacoes: document.getElementById('vitreOrcObservacoes').value.trim() || undefined,
     origemAtendimento: document.getElementById('vitreOrcOrigem').value,
-    itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+    itens: itensPayload, descontoGlobal: descontoGlobal, frete: frete, acrescimoGlobal: acrescimoGlobal,
     prazoValidadeDias: prazoValidadeDias, requestId: vitreCatReqId(),
   };
   firebase.functions().httpsCallable('vitreCriarOrcamento')(payload).then(function (res) {
@@ -20798,7 +20818,7 @@ function vitreOrcSalvar() {
       id: res.data.id, clienteNome: clienteNome, clienteTel: payload.clienteTel || '', itens: VITRE_ORC_ITENS.slice(),
       total: res.data.total || (calc.totalCentavos / 100), subtotal: calc.subtotalCentavos / 100,
       acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100,
-      descontoPct: payload.descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias,
+      descontoGlobal: payload.descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias,
     };
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
@@ -21074,14 +21094,23 @@ function vitreOrcAbrirRascunho(id) {
     document.getElementById('vitreOrcDataSolicitacao').value = o.criadoEm ? new Date(o.criadoEm).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
     // Snapshot original — NUNCA busca o preço atual do catálogo aqui.
     VITRE_ORC_ITENS = (o.itens || []).map(function (it) { return { sku: it.sku, nome: it.nomeSnapshot, precoVenda: it.precoSnapshot, qtd: it.qtd, adicionais: it.adicionais || [], acrescimo: it.acrescimo || null }; });
-    document.getElementById('vitreOrcDesconto').value = o.descontoPct || 0;
+    // P1.4 — reabertura: prioriza o objeto descontoGlobal{tipo,valor} novo;
+    // documentos antigos (só descontoPct) são interpretados como percentual
+    // — nunca perdem o valor salvo, nunca viram R$ por engano.
+    if (o.descontoGlobal && o.descontoGlobal.tipo) {
+      document.getElementById('vitreOrcDescontoTipo').value = o.descontoGlobal.tipo;
+      document.getElementById('vitreOrcDescontoValor').value = o.descontoGlobal.valor || 0;
+    } else {
+      document.getElementById('vitreOrcDescontoTipo').value = 'pct';
+      document.getElementById('vitreOrcDescontoValor').value = o.descontoPct || 0;
+    }
     document.getElementById('vitreOrcFrete').value = o.frete || 0;
     if (o.acrescimoGlobal) {
       document.getElementById('vitreOrcAcrescGlobalTipo').value = o.acrescimoGlobal.tipo || '';
       document.getElementById('vitreOrcAcrescGlobalValor').value = o.acrescimoGlobal.valor || 0;
       document.getElementById('vitreOrcAcrescGlobalMotivo').value = o.acrescimoGlobal.motivo || '';
     }
-    VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
+    VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoGlobal: o.descontoGlobal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
     VITRE_ORC_ATUAL = o;
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
@@ -21147,14 +21176,16 @@ function vitreOrcGerarPDF() {
       + '<td style="padding:12px 14px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right">R$ ' + it.precoVenda.toFixed(2) + '</td>'
       + '<td style="padding:12px 14px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right">R$ ' + (totalC / 100).toFixed(2) + '</td></tr>';
   }).join('');
-  var acrescLinha = (o.acrescimosItensTotal || o.acrescimoGlobalTotal) ? '<br><strong>Acréscimos:</strong> R$ ' + ((o.acrescimosItensTotal || 0) + (o.acrescimoGlobalTotal || 0)).toFixed(2) : '';
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.5 — desconto/acréscimo global são
+  // ajustes comerciais INTERNOS (mesma política já aplicada ao fluxo VR
+  // personalizado, ver ajusteComercialAudit): o cliente nunca vê essas
+  // linhas, só o preço final já incorporado. Continuam registrados
+  // internamente (VITRE_ORC_ULTIMO/Firestore) para auditoria — só pararam
+  // de ser impressos neste documento voltado ao cliente.
   // Parte 6.3/6.5 (2026-08-07): "Responsável" nunca aparecia neste PDF
   // (diferente do PDF do fluxo personalizado, que já usava
-  // orcGetResponsavel()) — cliente não sabia quem era o vendedor. Linhas
-  // de Desconto/Frete agora só aparecem quando há valor real (antes
-  // sempre imprimiam "Desconto: 0%"/"frete R$ 0,00 incluído").
+  // orcGetResponsavel()) — cliente não sabia quem era o vendedor.
   var responsavelPDFVitre = (typeof orcGetResponsavel === 'function') ? orcGetResponsavel(brand.nome) : '';
-  var descLinhaVitre = (o.descontoPct > 0) ? '<br><strong>Desconto:</strong> ' + o.descontoPct + '%' : '';
   var freteTxtVitre = (o.frete > 0) ? ' (frete R$ ' + o.frete.toFixed(2) + ' incluído)' : '';
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento Vitre — ' + o.clienteNome + '</title>'
     + '<style>*{margin:0;padding:0;box-sizing:border-box}'
@@ -21192,7 +21223,7 @@ function vitreOrcGerarPDF() {
     + '<div class="div-bar"></div>'
     + '<div class="client-grid"><div><div class="sec-lbl">Cliente</div><div class="cli-name">' + cfgEsc(o.clienteNome) + '</div>'
     + '<div class="cli-info">' + (o.clienteTel ? '📞 ' + cfgEsc(o.clienteTel) : '') + '</div></div>'
-    + '<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Responsável:</strong> ' + cfgEsc(responsavelPDFVitre) + '<br><strong>Produtos:</strong> Catálogo ' + brand.nome + ' (item pronto-cadastrado)' + descLinhaVitre + acrescLinha + '</div></div></div>'
+    + '<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Responsável:</strong> ' + cfgEsc(responsavelPDFVitre) + '<br><strong>Produtos:</strong> Catálogo ' + brand.nome + ' (item pronto-cadastrado)' + '</div></div></div>'
     + '<table><thead><tr><th>Produto</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + itensHtml + '</tbody></table>'
     + '<div class="total-row"><div class="total-lbl">Total Geral' + freteTxtVitre + '</div><div class="total-val">R$ ' + o.total.toFixed(2) + '</div></div>'
     + '<div style="flex:1"></div>'
@@ -21218,8 +21249,9 @@ function vitreOrcEnviarWhatsApp() {
   // Brasília — este catálogo não) e Desconto/Frete sempre apareciam
   // mesmo em 0.
   var saudacaoVitre = (typeof orcSaudacaoHorario === 'function') ? orcSaudacaoHorario() : 'Olá';
+  // P1.5 — desconto/acréscimo global são ajustes internos, nunca
+  // aparecem na mensagem enviada ao cliente (mesma política do PDF).
   var condLinhasVitre = '';
-  if (o.descontoPct > 0) condLinhasVitre += 'Desconto: ' + o.descontoPct + '%\n';
   if (o.frete > 0) condLinhasVitre += 'Frete: R$ ' + o.frete.toFixed(2) + '\n';
   var msg = saudacaoVitre + ', ' + o.clienteNome + '! Segue o orçamento *' + brand.nome + '*:\n\n'
     + itensTxt + '\n\n'
