@@ -12574,27 +12574,37 @@ function kbExcluirSelecionados() {
 // mesmo sem esse guard, o finCopy dela sempre sairia vazio (ela nunca
 // conseguiu ler o financeiro de ninguém para poder reescrevê-lo), então
 // isto é defesa em profundidade, não a única proteção.
+// HOTFIX recebimentos canônicos (2026-08-10) — achado real: kbSaveKbos() é
+// chamado por ~15 ações puramente OPERACIONAIS (drag&drop no Kanban,
+// checklist, observação, iniciar produção, marcar pronta, entregar, excluir
+// OS...) e SEMPRE regravava o documento kb_os_fin INTEIRO a partir do que
+// estivesse em KB_OS[k] na memória daquela aba naquele instante — nenhuma
+// dessas ações é um pagamento, nenhuma relê o servidor antes de gravar. Se
+// uma aba tivesse KB_OS[k].restante desatualizado (ex.: outra aba acabou de
+// confirmar um recebimento via transação e esta ainda não recebeu o
+// _cloudWatch), qualquer clique operacional nesta aba sobrescrevia de volta
+// o saldo correto para o valor antigo — uma causa raiz real e silenciosa de
+// "saldo divergente entre telas", independente do bug de _finCRBaixaConfirmar.
+// Fechado: kbSaveKbos() nunca mais escreve em kb_os_fin. Os campos
+// financeiros continuam sendo removidos de kbCopy (privacidade da Produção
+// intacta) — só que agora simplesmente descartados aqui, nunca
+// reescritos no documento financeiro. kb_os_fin só é gravado pela rotina
+// canônica de recebimento (finRegistrarRecebimento) e por orcEnvGerarOS,
+// sempre dentro de uma transação que relê o servidor primeiro.
 function kbSaveKbos() {
   if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
-  var kbCopy={}, finCopy={};
+  var kbCopy={};
   Object.keys(KB_OS).forEach(function(k){
     var o=Object.assign({},KB_OS[k]);
     delete o.planImg;
-    var fin={};
-    _KB_OS_FIN_FIELDS.forEach(function(f){ if(o[f]!==undefined){ fin[f]=o[f]; delete o[f]; } });
+    _KB_OS_FIN_FIELDS.forEach(function(f){ delete o[f]; });
     if(Array.isArray(o.itens)){
-      var temValores = o.itens.some(function(it){ return it && (it.unit!==undefined || it.total!==undefined); });
-      if(temValores) fin.itensValores = o.itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; });
       o.itens = o.itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; });
     }
     kbCopy[k]=o;
-    if(Object.keys(fin).length) finCopy[k]=fin;
   });
-  var ehProducao = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='producao';
-  var p1 = _cloudSave('kb_os', kbCopy);
-  var p2 = (ehProducao || !Object.keys(finCopy).length) ? Promise.resolve({ok:true}) : _cloudSave('kb_os_fin', finCopy);
-  return Promise.all([p1,p2]).then(function(results){
-    return {ok: !!(results[0]&&results[0].ok), kbOk: !!(results[0]&&results[0].ok), finOk: !!(results[1]&&results[1].ok)};
+  return _cloudSave('kb_os', kbCopy).then(function(res){
+    return {ok: !!(res&&res.ok), kbOk: !!(res&&res.ok), finOk: true};
   });
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────
@@ -13455,9 +13465,21 @@ function kbReceberSaldo() {
 // kbReceberSaldo() (só aparece em status='aguardando_saldo', só aceita
 // pagamento INTEGRAL, sempre reaproveitando a forma da entrada original).
 //
-// osRegistrarPagamentoSaldo() reaproveita a MESMA arquitetura de
-// kbReceberSaldo (transação atômica nos mesmos 4 documentos — kb_os,
-// kb_os_fin, fin_cr, fin_tx — nunca uma 5ª fonte de verdade nova), mas:
+// HOTFIX recebimentos canônicos (2026-08-10) — generalização: esta função
+// (então chamada osRegistrarPagamentoSaldo) resolvia corretamente o
+// pagamento do saldo pela OS, mas a tela genérica de Contas a Receber
+// (_finCRBaixaConfirmar/finCRBulkBaixar) tinha seu PRÓPRIO caminho de baixa,
+// que nunca tocava kb_os_fin — daí o bug real de produção (Orçamento
+// #000015/OS #6: histórico somava R$131,82 recebidos, mas a tela de OS
+// continuava mostrando saldo R$31,82, porque a baixa foi feita pela tela de
+// CR). finRegistrarRecebimento() é agora A ÚNICA rotina que aplica um
+// recebimento de venda a uma OS — "dar baixa pela OS" e "dar baixa pelo
+// Contas a Receber" são apenas duas INTERFACES para a mesma chamada; o
+// parâmetro `origem` é só para auditoria (nunca muda o efeito financeiro).
+//
+// Continua reaproveitando a MESMA arquitetura de kbReceberSaldo (transação
+// atômica nos mesmos 4-5 documentos — kb_os, kb_os_fin, fin_cr, fin_tx,
+// orcamentos — nunca uma 5ª fonte de verdade nova), mas:
 //   - aceita qualquer status operacional e NUNCA regride 'pronta' para
 //     'iniciada' (só o caminho legado aguardando_saldo→iniciada, quando
 //     quitado, é preservado — igual kbReceberSaldo sempre fez);
@@ -13470,10 +13492,13 @@ function kbReceberSaldo() {
 //     original — entrada em PIX, saldo em Cartão de Débito, etc.);
 //   - valida o valor pago contra o saldo relido DENTRO da transação
 //     (nunca confia no que a tela tinha ao abrir o modal — proteção
-//     real contra duas abas tentando quitar o mesmo saldo).
-// kbReceberSaldo() permanece 100% intocada (já testada/atômica) — esta é
-// uma função nova e independente, não uma reescrita.
-function osRegistrarPagamentoSaldo(id, valorPagoInput, forma, dataISOInput, obs) {
+//     real contra duas abas/duas TELAS tentando quitar o mesmo saldo,
+//     independente de qual tela cada uma usou).
+// kbReceberSaldo() permanece 100% intocada (já testada/atômica, cobre só o
+// caminho legado aguardando_saldo→integral) — esta é uma função
+// independente, não uma reescrita dela.
+function finRegistrarRecebimento(id, valorPagoInput, forma, dataISOInput, obs, origem) {
+  origem = origem || 'OS_SALDO';
   var os = KB_OS[id]; if (!os) return Promise.resolve(false);
   if (!_db) { showToast('Sem conexão — não é possível registrar o pagamento.','err'); return Promise.resolve(false); }
   if (os._pagandoSaldo) { showToast('Pagamento já em andamento — aguarde.','warn'); return Promise.resolve(false); }
@@ -13608,7 +13633,7 @@ function osRegistrarPagamentoSaldo(id, valorPagoInput, forma, dataISOInput, obs)
     if (r.orcPayload) { _ORC_ENVIADOS_DATA = r.orcArr; try { orcEnviadosRender(); } catch (e) {} }
     if (_btnSaldo) _btnSaldo.disabled = false;
     _refletirNaTela();
-    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento_saldo_os', (r.quitado ? 'Saldo quitado' : 'Pagamento parcial do saldo') + ' de ' + finFmt(r.valorPago) + ' — OS #' + _osNumSnap);
+    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento_saldo_os', (r.quitado ? 'Saldo quitado' : 'Pagamento parcial do saldo') + ' de ' + finFmt(r.valorPago) + ' — OS #' + _osNumSnap + ' — origem: ' + origem);
     showToast(r.quitado ? '✅ Saldo quitado!' : '✅ Pagamento parcial registrado — saldo restante: ' + finFmt(KB_OS[_osIdSnap].restante||0), 'ok');
     return true;
   }
@@ -13653,6 +13678,14 @@ function osRegistrarPagamentoSaldo(id, valorPagoInput, forma, dataISOInput, obs)
   }
 
   return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
+}
+
+// Compatibilidade — o botão "💰 Registrar pagamento do saldo" na OS chamava
+// osRegistrarPagamentoSaldo() diretamente (nome preservado para não quebrar
+// nenhum call site nem a suíte de testes já existente); ela agora é um
+// wrapper fino sobre a rotina canônica, com origem explícita para auditoria.
+function osRegistrarPagamentoSaldo(id, valorPagoInput, forma, dataISOInput, obs) {
+  return finRegistrarRecebimento(id, valorPagoInput, forma, dataISOInput, obs, 'OS_SALDO');
 }
 
 // HOTFIX pós-homologação (2026-08-10), P0.9 — modal de "Registrar
@@ -16464,6 +16497,22 @@ function finCRBaixa(id) {
     ov.dataset.id=id; ov.dataset.tipo='cr'; ov.classList.add('open');
   } else { _finCRBaixaConfirmar(id, dtStr); }
 }
+// HOTFIX recebimentos canônicos (2026-08-10) — causa raiz real de produção
+// (Orçamento #000015/OS #6): esta função dava baixa em FIN_CR + lançava
+// Caixa (fin_tx), mas NUNCA tocava kb_os_fin — mesmo quando o lançamento
+// tinha uma OS vinculada. Resultado: Contas a Receber e Dashboard mostravam
+// o recebimento como confirmado (fonte = FIN_CR), enquanto Todas as OS,
+// Kanban e Orçamentos Enviados continuavam mostrando o saldo antigo (fonte
+// = kb_os_fin.restante) — a mesma venda, dois saldos diferentes.
+// Corrigido: quando o CR tem uma OS real vinculada (finCRLinkedOS), a baixa
+// passa a chamar finRegistrarRecebimento() — a MESMA rotina canônica do
+// botão "Registrar pagamento do saldo" da OS — pagando exatamente o valor
+// desta linha do CR. "Dar baixa pela OS" e "Dar baixa pelo Contas a
+// Receber" agora produzem sempre o mesmo estado financeiro final; só a tela
+// de origem muda (ver origem='CONTAS_A_RECEBER' na auditoria).
+// Lançamentos SEM OS vinculada (conta avulsa, criada manualmente em
+// finCRSalvar — não existe kb_os_fin para sincronizar) preservam o caminho
+// direto original.
 function _finCRBaixaConfirmar(id, dtISO) {
   var r=FIN_CR.find(function(x){return x.id===id;}); if(!r) return;
   // Idempotência: sem esta guarda, clique duplo/reexecução lançava um segundo
@@ -16471,6 +16520,22 @@ function _finCRBaixaConfirmar(id, dtISO) {
   if(r.status==='recebido'){ showToast('Este recebimento já foi confirmado.','info'); return; }
   if(r._baixando){ showToast('Confirmação já em andamento — aguarde.','warn'); return; }
   r._baixando = true;
+
+  var linkedOS = (typeof finCRLinkedOS==='function') ? finCRLinkedOS(r) : null;
+  if (linkedOS && linkedOS.id) {
+    return finRegistrarRecebimento(linkedOS.id, r.valor, r.metodo, dtISO, '', 'CONTAS_A_RECEBER').then(function(ok){
+      r._baixando = false;
+      finCRRender(); finDashKPIs(); finBarChartRender();
+      return ok;
+    }).catch(function(e){
+      r._baixando = false;
+      finCRRender();
+      console.warn('[Fin] Erro ao confirmar recebimento (CR→OS):', e);
+      showToast('⚠️ Falha ao confirmar recebimento — nada foi perdido, tente novamente.','err');
+      return false;
+    });
+  }
+
   var _statusAnterior = r.status, _dataAnterior = r.dataRecebimento;
   var parts=dtISO.split('-'); var dtBR=parts[2]+'/'+parts[1]+'/'+parts[0];
   r.status='recebido'; r.dataRecebimento=dtBR;
@@ -16478,17 +16543,18 @@ function _finCRBaixaConfirmar(id, dtISO) {
   var _txEntry={data:dtBR,cliente:r.cliente,os:r.osRef||'—',marca:r.marca==='vitre'?'vit':r.marca,valor:r.valor,metodo:r.metodo,status:'recebido',dia:1,sem:1,mes:d.getMonth()+1};
   FIN_TX.unshift(_txEntry);
   finCRRender(); finDashKPIs(); finBarChartRender();
-  Promise.all([_cloudSave('fin_tx', FIN_TX), _finSaveCR()]).then(function(results){
+  return Promise.all([_cloudSave('fin_tx', FIN_TX), _finSaveCR()]).then(function(results){
     r._baixando = false;
     var _txRes=results[0], _crRes=results[1];
     if (_txRes.ok && _crRes.ok) {
       showToast('Recebimento de '+finFmt(r.valor)+' registrado!','ok');
-      return;
+      return true;
     }
     if (!_txRes.ok) { var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); }
     if (!_crRes.ok) { r.status=_statusAnterior; r.dataRecebimento=_dataAnterior; }
     finCRRender(); finDashKPIs(); finBarChartRender();
     showToast('⚠️ Falha ao confirmar recebimento — nada foi perdido, tente novamente.','err');
+    return false;
   });
 }
 function finCREstornar(id) {
@@ -16504,6 +16570,61 @@ function finCRDel(id) {
   FIN_CR=FIN_CR.filter(function(x){return x.id!==id;});
   _finSaveCR();
   finCRRender(); finDashKPIs();
+}
+
+// HOTFIX recebimentos canônicos (2026-08-10) — auditoria READ-ONLY. Nunca
+// grava nada em nenhuma coleção; só lê o estado já carregado em memória
+// (KB_OS/FIN_CR) e reporta onde a verdade financeira (soma dos
+// recebimentos confirmados em FIN_CR) diverge da projeção materializada em
+// kb_os_fin (os.restante). Uso: console do navegador, sessão Master
+// autenticada — `finAuditoriaDivergencias()`. Não expõe nada que a role
+// atual já não pudesse ler.
+//
+// Invariante testada por OS: contratadoCents - recebidoCRCents === restanteCents
+// (tolerância de 0 centavos — qualquer diferença é reportada).
+function finAuditoriaDivergencias() {
+  var porOS = {};
+  FIN_CR.forEach(function (r) {
+    var os = (typeof finCRLinkedOS === 'function') ? finCRLinkedOS(r) : null;
+    if (!os || !os.id) return; // conta avulsa sem OS — nada de kb_os_fin para comparar
+    if (!porOS[os.id]) porOS[os.id] = { os: os, recebidos: [], pendentes: [] };
+    if (r.status === 'recebido') porOS[os.id].recebidos.push(r);
+    else if (r.status === 'pendente') porOS[os.id].pendentes.push(r);
+  });
+
+  var divergencias = [];
+  Object.keys(porOS).forEach(function (osId) {
+    var grupo = porOS[osId];
+    var os = grupo.os;
+    var contratadoCents = moneyToCents(os.valor || os.totalGeral || 0);
+    var restanteMaterializadoCents = moneyToCents(os.restante || 0);
+    var recebidoCRCents = grupo.recebidos.reduce(function (s, r) { return s + moneyToCents(r.valor || 0); }, 0);
+    var saldoDerivadoCents = contratadoCents - recebidoCRCents;
+    var diffCents = saldoDerivadoCents - restanteMaterializadoCents;
+    if (diffCents === 0) return;
+
+    var provavelCausa = 'não identificada';
+    if (grupo.pendentes.length > 0 && restanteMaterializadoCents > 0 && diffCents < 0) {
+      provavelCausa = 'baixa via Contas a Receber não sincronizou kb_os_fin.restante (causa raiz corrigida nesta rodada)';
+    } else if (grupo.pendentes.length === 0 && restanteMaterializadoCents > 0) {
+      provavelCausa = 'kb_os_fin.restante desatualizado sem entrada pendente correspondente em FIN_CR (possível sobrescrita por kbSaveKbos — causa raiz corrigida nesta rodada)';
+    }
+
+    divergencias.push({
+      osId: osId,
+      osNum: os.num,
+      cliente: os.cliente,
+      contratadoCents: contratadoCents,
+      recebidoCRCents: recebidoCRCents,
+      saldoDerivadoCents: saldoDerivadoCents,
+      restanteMaterializadoCents: restanteMaterializadoCents,
+      diffCents: diffCents,
+      qtdRecebimentos: grupo.recebidos.length,
+      qtdPendentes: grupo.pendentes.length,
+      provavelCausa: provavelCausa
+    });
+  });
+  return divergencias;
 }
 
 // RODADA 4, seção 3 — resolve o clienteId real (CLIENTES_DATA) a partir do
@@ -24895,6 +25016,11 @@ function orcEnvGerarOS(){
       var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
       FIN_CR.unshift({id:'cr'+Date.now(),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newIdLocal,descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:dia});
       if(restante>0) FIN_CR.unshift({id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newIdLocal,descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+nLocal,dataCriacao:dia,dataRecebimento:null});
+      // HOTFIX recebimentos canônicos (2026-08-10) — a entrada é um
+      // recebimento real e precisa aparecer no Caixa, igual qualquer outro
+      // (achado real: orcEnvGerarOS nunca escrevia em fin_tx; a entrada
+      // ficava "recebida" no CR mas invisível no Caixa).
+      if(typeof FIN_TX!=='undefined') FIN_TX.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:String(nLocal),marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
     }
     finalizar(true, {num:nLocal});
     return;
@@ -24908,17 +25034,25 @@ function orcEnvGerarOS(){
   // um sem o outro.
   var refOSFin=_db.collection(_COL).doc('kb_os_fin');
   var refCR =_db.collection(_COL).doc('fin_cr');
+  // HOTFIX recebimentos canônicos (2026-08-10) — a entrada é um recebimento
+  // real e precisa aparecer no Caixa igual qualquer outro (achado real:
+  // esta transação nunca escrevia em fin_tx; a entrada ficava "recebida" no
+  // CR mas invisível no Caixa, mesmo bug de fundo que motivou toda esta
+  // rodada de hotfix — cada recebimento real deve gerar exatamente 1
+  // movimento de Caixa, nunca zero).
+  var refTx =_db.collection(_COL).doc('fin_tx');
   var refCnt=_db.collection(_COL).doc('erp_os_counter');
   var _newIdCaptured = null; // grupoPedidoId/kbOsRef para vínculo Vitre — capturado dentro da transação, usado depois que ela confirmar
 
   return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refCnt)])
+    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refTx), txn.get(refCnt)])
       .then(function(snaps){
-        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCR=snaps[3], docCnt=snaps[4];
+        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCR=snaps[3], docTx=snaps[4], docCnt=snaps[5];
         var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
         var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
         var objOSFin = (docOSFin.exists && docOSFin.data() && docOSFin.data().data) ? JSON.parse(docOSFin.data().data) : {};
         var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
+        var arrTx  = (docTx.exists  && docTx.data()  && docTx.data().data)  ? JSON.parse(docTx.data().data)  : [];
         var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
 
         var idxOrc = arrOrc.findIndex(function(x){ return x.id===o.id; });
@@ -24966,19 +25100,23 @@ function orcEnvGerarOS(){
         arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
         arrOrc[idxOrc].osRef = newId;
 
+        var txMutado = false;
         if(valorEntrada>0){
           var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
           arrCR.unshift({id:'cr'+Date.now()+'_'+n,cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newId,descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:dia});
           if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1)+'_'+n,cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newId,descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:null});
+          arrTx.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:String(n),marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+          txMutado = true;
         }
 
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
         txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
         txn.set(refOSFin, {data:JSON.stringify(objOSFin), ts:Date.now()});
         txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
+        if(txMutado) txn.set(refTx, {data:JSON.stringify(arrTx), ts:Date.now()});
         txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
 
-        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin, arrCR:arrCR};
+        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin, arrCR:arrCR, arrTx:arrTx, txMutado:txMutado};
       });
   }).then(function(resultado){
     // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
@@ -24992,11 +25130,13 @@ function orcEnvGerarOS(){
     _KB_OS_FIN_CACHE = resultado.objOSFin;
     if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
     FIN_CR = resultado.arrCR;
+    if(resultado.txMutado) FIN_TX = resultado.arrTx;
     _OS_COUNTER = resultado.num;
     _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
     _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
     _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
     _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
+    if(resultado.txMutado) _cloudLastPayload['fin_tx'] = JSON.stringify(resultado.arrTx);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
     // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas",
     // decisão do usuário): a OS/orçamento/financeiro VR (únicos) já estão
