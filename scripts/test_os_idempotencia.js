@@ -57,7 +57,13 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS'];
+var FN_NAMES = [
+  'orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS',
+  // HOTFIX pós-homologação (2026-08-10) — orcEnvConfirmarPgto() monta o
+  // caption do modal via orcCondicaoLabelPorTipo() (nunca mais o texto
+  // morto o.pgto).
+  'orcCondicaoLabelPorTipo',
+];
 var COL = 'erp_vr';
 var src = [
   'var _orcPagtoId = null;',

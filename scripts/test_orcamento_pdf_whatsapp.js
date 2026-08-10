@@ -64,6 +64,10 @@ var FN_NAMES = [
   // ReferenceError.
   'orcDistribuirParcelas', 'orcMotorComercial',
   'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
+  // HOTFIX pós-homologação (2026-08-10) — orcEnviarOrcamentoWA() não lê
+  // mais o texto morto de orcFormaPgto; usa orcCondicaoPagamentoAtual()
+  // (que por sua vez chama orcCondicaoLabelPorTipo()).
+  'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
   'orcEnviarOrcamentoWA'
 ];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
@@ -420,10 +424,16 @@ var urlGerada, textParam;
   await test('43. texto contém VALOR TOTAL igual ao finalPrice do fixture (R$ 3.450,00)', function () {
     assertTrue(textParam.indexOf('*VALOR TOTAL: R$ 3.450,00*') >= 0, textParam);
   });
-  await test('44. texto contém prazo, validade e forma de pagamento (mesma fonte do PDF)', function () {
+  // HOTFIX pós-homologação (2026-08-10), P0.1/P0.3 — a mensagem não lê
+  // mais o texto morto de #orcFormaPgto (sempre "PIX (100%)" por padrão
+  // de HTML nunca escrito por nenhuma tela); mostra "Condição de
+  // pagamento" com o padrão comercial real (50/50) via
+  // orcCondicaoPagamentoAtual(), já que este fixture não tem KB_OS/OS
+  // gerada — condição ainda não confirmada.
+  await test('44. texto contém prazo, validade e condição de pagamento (mesma fonte do PDF)', function () {
     assertTrue(textParam.indexOf('*Prazo de produção:* De 5 a 7 dias úteis após aprovação e comprovante de pagamento') >= 0);
     assertTrue(textParam.indexOf('*Validade do orçamento:* 10 dias') >= 0);
-    assertTrue(textParam.indexOf('*Forma de pagamento:* 50% de entrada, 50% na retirada do material') >= 0);
+    assertTrue(textParam.indexOf('*Condição de pagamento:* 50% no pedido e 50% na retirada do material') >= 0, textParam);
   });
   await test('45. texto assina com responsável e marca, sem nome fixo hardcoded', function () {
     assertTrue(textParam.indexOf('*Marcos Andrade*\n*VR Marcas*') >= 0);

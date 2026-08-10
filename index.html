@@ -22135,7 +22135,7 @@ async function orcEnviarOrcamentoWA() {
   var nomeCompleto = (document.getElementById('orcClientNome')||document.getElementById('orcClienteNome')||{}).value || '';
   var primeiroNome = nomeCompleto.trim().split(/\s+/)[0] || '';
   var marca = document.body.classList.contains('vitre') ? 'Vitre' : 'VR Marcas';
-  var responsavel = orcGetResponsavel(marca);
+  var responsavel = orcGetResponsavel(marca, _orcSalvoWA);
 
   // SPRINT PRÉ-GO-LIVE, Bloco I — "VALOR TOTAL" = preço no cartão
   // comercial padrão (1/2/3x sem juros, nova regra), só reduzido pelo
@@ -22157,8 +22157,12 @@ async function orcEnviarOrcamentoWA() {
     return n+'. '+item.desc+'\nQuantidade: '+item.qty+'\nValor unitário: '+fmtBRLWA(item.unit)+'\nSubtotal: '+fmtBRLWA(item.total);
   }).join('\n\n');
 
-  var pgtoSelWA = document.getElementById('orcFormaPgto');
-  var pgtoLabelWA = pgtoSelWA ? pgtoSelWA.options[pgtoSelWA.selectedIndex].text : 'A combinar';
+  // HOTFIX pós-homologação (2026-08-10), P0.1/P0.3 — nunca mais lido do
+  // <select id="orcFormaPgto"> oculto (texto morto, sempre "PIX (100%)"
+  // por padrão de HTML — ver orcCondicaoPagamentoAtual). A condição real
+  // é: a confirmada em kb_os_fin quando já há OS, ou o padrão comercial
+  // 50/50 enquanto o orçamento ainda não foi pago.
+  var condicaoLabelWA = orcCondicaoPagamentoAtual(_orcSalvoWA);
 
   // Ofertas condicionais (desconto por fechamento até uma data, desconto
   // Pix, parcelamento) são funcionalidade real e configurável do orçamento
@@ -22193,7 +22197,7 @@ async function orcEnviarOrcamentoWA() {
     +extrasStr+'\n\n'
     +'*Prazo de produção:* '+orcGetPrazoTexto()+'\n\n'
     +'*Validade do orçamento:* '+orcGetValidadeDias()+' dias\n\n'
-    +'*Forma de pagamento:* '+pgtoLabelWA+'\n\n'
+    +'*Condição de pagamento:* '+condicaoLabelWA+'\n\n'
     +'Caso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\n'
     +'Atenciosamente,\n\n'
     +'*'+responsavel+'*\n'
@@ -22332,9 +22336,104 @@ function orcGetPrazoTexto(){
 
 // Responsável pelo orçamento: vendedor cadastrado no passo 1 → "Equipe
 // {{marca}}" como último recurso (nunca um nome fixo no código).
-function orcGetResponsavel(marca){
+// HOTFIX pós-homologação (2026-08-10), P0.4/P0.23 — regressão real: PDF/
+// WhatsApp mostravam "Equipe VR Marcas" mesmo com vendedor real cadastrado
+// porque esta função só olhava o DOM ao vivo (#orcClientVendedor), que
+// pode estar vazio em telas que não são o wizard original (ex.: reabrir
+// só para reenviar PDF) ou antes da lista de vendedores terminar de
+// carregar. `docSalvo` é o documento do orçamento recém-persistido
+// (sempre disponível no PDF/WhatsApp, que salvam antes de gerar) — vem
+// primeiro porque é a fonte de verdade mais recente; o DOM ao vivo só
+// serve de complemento para telas que ainda não salvaram nada.
+function orcGetResponsavel(marca, docSalvo){
+  var vendedorSalvo = (docSalvo && docSalvo.vendedor) || '';
+  if(vendedorSalvo && vendedorSalvo!=='—') return vendedorSalvo;
   var vendedor = (document.getElementById('orcClientVendedor')||{}).value||'';
   return vendedor && vendedor!=='—' ? vendedor : 'Equipe '+marca;
+}
+
+// HOTFIX pós-homologação (2026-08-10), P0.1/P0.3/P0.19/P0.21/P0.22 —
+// CONDIÇÃO de pagamento (QUANDO o cliente paga — 50/50, integral, etc.)
+// nunca pode ser confundida com FORMA de pagamento (COMO cada recebimento
+// aconteceu — PIX/Cartão/Dinheiro). Bug real em produção: o PDF/WhatsApp
+// liam um <select id="orcFormaPgto"> oculto, nunca preenchido por
+// nenhuma tela ("seleção movida para o Step 5" — Step 5 não existe mais,
+// achado confirmado por grep: nada no código escreve nesse select), então
+// SEMPRE mostravam a 1ª option, "PIX (100%)", para todo orçamento novo.
+// A condição real só é decidida depois, no modal "Confirmar Pagamento"
+// (orcPagtoModal/orcEnvGerarOS), cujo botão "50/50" já é o padrão
+// correto (orcPagtoTipoSel, tipo='50-50') — esta função passa a ser a
+// ÚNICA fonte de texto de condição, tanto para o orçamento ainda não
+// aprovado (usa o padrão comercial 50/50) quanto para quando o
+// pagamento já foi confirmado (usa o tipo REAL gravado em kb_os_fin/
+// pagtoTipo, nunca o texto morto do select).
+function orcCondicaoLabelPorTipo(tipo, forma){
+  if(tipo==='integral'){
+    var formaLower = (forma||'').toLowerCase();
+    return formaLower.indexOf('pix')>=0
+      ? 'Pagamento integral à vista via PIX'
+      : 'Pagamento integral no pedido';
+  }
+  var MAPA = {
+    '50-50':  '50% no pedido e 50% na retirada do material',
+    'parcial':'Entrada no pedido e restante na retirada do material',
+    'futuro': 'A combinar — sem pagamento registrado no pedido'
+  };
+  return MAPA[tipo] || MAPA['50-50'];
+}
+function orcCondicaoPagamentoAtual(o){
+  // OS já gerada e pagamento já confirmado — a condição REAL é a que foi
+  // efetivamente escolhida em "Confirmar Pagamento", nunca uma intenção
+  // pré-aprovação. KB_OS[o.osRef] já vem mesclado com kb_os_fin
+  // (_kbMergeFinCache) para quem tem permissão de vê-lo.
+  if(o && o.osRef && typeof KB_OS!=='undefined' && KB_OS && KB_OS[o.osRef] && KB_OS[o.osRef].pagtoTipo){
+    var osFin = KB_OS[o.osRef];
+    return orcCondicaoLabelPorTipo(osFin.pagtoTipo, osFin.formaPgto);
+  }
+  // Ainda sem pagamento confirmado: condição comercial padrão da VR.
+  return orcCondicaoLabelPorTipo('50-50');
+}
+
+// HOTFIX pós-homologação (2026-08-10), P0.5/P0.6/P0.7 — bug real: o
+// detalhe de "Orçamentos Enviados" mostrava só o texto morto o.pgto e
+// NUNCA o financeiro de verdade (entrada já recebida sumia ao reabrir).
+// Fonte canônica única: KB_OS[o.osRef] (mesclado com kb_os_fin) para
+// total/saldo, e FIN_CR (status='recebido', vinculado por orcamentoId/
+// osId) para o histórico — os MESMOS documentos que orçamento/CR/Caixa
+// já usam, nunca um terceiro lugar novo para "recebimentos".
+function orcFinanceiroReal(o){
+  var totalCents = moneyToCents(o.valorFinal||0);
+  var osFin = (o && o.osRef && typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[o.osRef] : null;
+  var recebidoCents, saldoCents;
+  if(osFin && typeof osFin.restante!=='undefined'){
+    // OS já existe — saldo é o valor REAL vivo em kb_os_fin (mesclado),
+    // nunca recalculado a partir de um snapshot antigo do orçamento.
+    saldoCents = moneyToCents(osFin.restante||0);
+    recebidoCents = Math.max(0, totalCents - saldoCents);
+  } else {
+    // Orçamento ainda não confirmado/sem OS — nada foi recebido ainda.
+    recebidoCents = 0;
+    saldoCents = totalCents;
+  }
+  var historico = [];
+  if(typeof FIN_CR!=='undefined' && Array.isArray(FIN_CR) && o){
+    FIN_CR.filter(function(c){
+      return c.status==='recebido' && (c.orcamentoId===o.id || (o.osRef && c.osId===o.osRef));
+    }).forEach(function(c){
+      historico.push({ data: c.dataRecebimento||c.dataCriacao||'', valorCents: moneyToCents(c.valor||0), forma: c.metodo||'—', descricao: c.descricao||'' });
+    });
+    historico.sort(function(a,b){
+      var da=orcEnvParseDataSalvo(a.data), db=orcEnvParseDataSalvo(b.data);
+      return (da?da.getTime():0) - (db?db.getTime():0);
+    });
+  }
+  return {
+    totalCents: totalCents,
+    recebidoCents: recebidoCents,
+    saldoCents: saldoCents,
+    condicaoLabel: orcCondicaoPagamentoAtual(o),
+    historico: historico
+  };
 }
 
 // Fonte única de itens (descrição completa + qty + valor unitário + total),
@@ -22421,8 +22520,10 @@ async function orcImprimirOrcamentoPDF() {
   var email   = (document.getElementById('orcClientEmail')||{}).value|| '—';
   var doc     = (document.getElementById('orcClientDoc')||{}).value  || '';
   var cidade  = (document.getElementById('orcClientCidade')||{}).value|| '';
-  var pgtoSel = document.getElementById('orcFormaPgto');
-  var pgtoLabel = pgtoSel ? pgtoSel.options[pgtoSel.selectedIndex].text : 'A combinar';
+  // HOTFIX pós-homologação (2026-08-10), P0.1/P0.3 — ver
+  // orcCondicaoPagamentoAtual: nunca mais lido do <select id="orcFormaPgto">
+  // oculto (texto morto, sempre "PIX (100%)" por padrão de HTML).
+  var pgtoLabel = orcCondicaoPagamentoAtual(_orcSalvo);
   var prazoTxtPDF = orcGetPrazoTexto();
 
   // itens
@@ -22478,7 +22579,7 @@ async function orcImprimirOrcamentoPDF() {
   // janela about:blank própria (window.open + document.write), então uma
   // URL relativa dependeria de comportamento de base-URL do navegador.
   var _brandBase = location.origin + '/assets/brand/';
-  var responsavelPDF = orcGetResponsavel(marca);
+  var responsavelPDF = orcGetResponsavel(marca, _orcSalvo);
   // numeroPDF já foi reservado no topo da função (await orcObterNumeroOficial()).
   var validadeDiasPDF = orcGetValidadeDias();
 
@@ -22545,7 +22646,7 @@ async function orcImprimirOrcamentoPDF() {
     +'<div class="div1"></div>'
     +'<div class="client-grid">'
     +'<div><div class="sec-lbl">Cliente</div><div class="cli-name">'+nome+'</div><div class="cli-info">'+(doc?'Doc.: '+doc+'<br>':'')+(tel&&tel!='—'?'📞 '+tel+'<br>':'')+(email&&email!='—'?'✉️ '+email+'<br>':'')+(cidade?'📍 '+cidade:'')+'</div></div>'
-    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
+    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Condição de pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
@@ -22610,7 +22711,7 @@ async function orcImprimirOrcamentoPDF() {
     +'<div class="rainbow-bar"></div>'
     +'<div class="client-grid">'
     +'<div><div class="sec-lbl">Cliente</div><div class="cli-name">'+nome+'</div><div class="cli-info">'+(doc?'Doc.: '+doc+'<br>':'')+(tel&&tel!='—'?'📞 '+tel+'<br>':'')+(email&&email!='—'?'✉️ '+email+'<br>':'')+(cidade?'📍 '+cidade:'')+'</div></div>'
-    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Forma de Pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
+    +'<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Condição de pagamento:</strong> '+pgtoLabel+'<br><br><strong>Prazo de Produção:</strong> '+prazoTxtPDF+'</div></div>'
     +'</div>'
     +'<table><thead><tr><th>Produto</th><th class="r">Preço</th><th class="r" style="text-align:center">Qnt.</th><th class="r">Total</th></tr></thead><tbody>'+itensRows+'</tbody></table>'
     +'<div class="total-row"><div class="total-lbl">Total Geral</div><div class="total-val">'+totalFmt+'</div></div>'
@@ -23344,7 +23445,15 @@ async function _orcSalvarOrcamentoImpl() {
   var _nome  = (document.getElementById('orcClientNome')||{}).value||'';
   var _tel   = (document.getElementById('orcClientTel')||{}).value||'';
   var _email = (document.getElementById('orcClientEmail')||{}).value||'';
-  var _vendedor = (document.getElementById('orcClientVendedor')||{}).value||'';
+  // HOTFIX pós-homologação (2026-08-10), P0.4/P0.23 — regressão real:
+  // reabrir/reenviar um orçamento em telas que não recarregam o DOM do
+  // wizard (ou antes da lista de vendedores terminar de popular) fazia
+  // este save gravar vendedor='' por cima de um valor já correto,
+  // produzindo "Vendedor: —"/"Equipe VR Marcas" num orçamento que já
+  // tinha vendedor real. Uma leitura vazia do DOM NUNCA apaga um
+  // vendedor já persistido — só uma escolha explícita no select troca.
+  var _vendedorDom = (document.getElementById('orcClientVendedor')||{}).value||'';
+  var _vendedor = _vendedorDom || (orcExistente && orcExistente.vendedor) || '';
   var _pgtoEl = document.getElementById('orcFormaPgto');
   var _pgto = _pgtoEl ? _pgtoEl.options[_pgtoEl.selectedIndex].text : '';
   // Parâmetros de custo restauráveis em edição futura — nunca inclui
@@ -23900,6 +24009,31 @@ function orcEnvAbrir(id) {
     breakHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);font-size:10px;color:var(--muted)">📋 Registro legado — salvo antes do snapshot completo (sem composição detalhada).</div>';
   }
   var accent = isVR?'#983C8F':'#B85C28';
+  // HOTFIX pós-homologação (2026-08-10), P0.5/P0.6/P0.7 — financeiro REAL
+  // (nunca o texto morto o.pgto): total/recebido/saldo vêm de kb_os_fin
+  // (mesclado em KB_OS), histórico de recebimentos vem de FIN_CR — as
+  // MESMAS fontes que Contas a Receber/Caixa já usam.
+  var finReal = orcFinanceiroReal(o);
+  var historicoHtml = '';
+  if(finReal.historico.length){
+    historicoHtml = '<div style="margin-top:10px">'
+      +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Histórico de recebimentos</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      +finReal.historico.map(function(h){
+        return '<tr><td style="padding:3px 6px 3px 0;color:var(--muted)">'+(h.data||'—')+'</td>'
+          +'<td style="padding:3px 6px;font-weight:700">'+fmtVal(h.valorCents/100)+'</td>'
+          +'<td style="padding:3px 0;color:var(--muted)">'+h.forma+'</td></tr>';
+      }).join('')
+      +'</table></div>';
+  }
+  var financeiroHtml = '<div style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'
+    +'<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Valor contratado</div><div style="font-size:14px;font-weight:800">'+fmtVal(finReal.totalCents/100)+'</div></div>'
+    +'<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Recebido</div><div style="font-size:14px;font-weight:800;color:#059669">'+fmtVal(finReal.recebidoCents/100)+'</div></div>'
+    +'<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Saldo</div><div style="font-size:14px;font-weight:800;color:'+(finReal.saldoCents>0?'#D97706':'#059669')+'">'+fmtVal(finReal.saldoCents/100)+'</div></div>'
+    +'</div>'
+    +historicoHtml
+    +'</div>';
   var modal = document.getElementById('orcEnvModal');
   if(!modal){ modal=document.createElement('div'); modal.id='orcEnvModal';
     modal.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center';
@@ -23914,11 +24048,12 @@ function orcEnvAbrir(id) {
     +'<div><span style="color:var(--muted)">Cliente:</span> <strong>'+(o.cliente||'—')+'</strong></div>'
     +'<div><span style="color:var(--muted)">Telefone:</span> '+(o.tel||'—')+'</div>'
     +'<div><span style="color:var(--muted)">E-mail:</span> '+(o.email||'—')+'</div>'
-    +'<div><span style="color:var(--muted)">Pagamento:</span> '+(o.pgto||'A combinar')+'</div>'
+    +'<div><span style="color:var(--muted)">Condição:</span> '+finReal.condicaoLabel+'</div>'
     +'<div><span style="color:var(--muted)">Marca:</span> '+(isVR?'VR Marcas':'Vitre')+'</div>'
     +'<div><span style="color:var(--muted)">Vendedor:</span> '+(o.vendedor||'—')+'</div>'
     +'<div><span style="color:var(--muted)">Status:</span> '+o.status+'</div>'
     +'</div>'
+    +financeiroHtml
     +itensHtml
     +'<div style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">'
     +descHtml
@@ -24235,7 +24370,10 @@ function orcEnvConfirmarPgto(id) {
     +'<div style="text-align:center;padding:16px;background:var(--bg2);border-radius:12px;margin-bottom:16px">'
     +'<div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Valor do Orçamento</div>'
     +'<div style="font-size:28px;font-weight:900;color:#059669;margin:4px 0">'+fmtV(valorTotal)+'</div>'
-    +(o.pgto?'<div style="font-size:11px;color:var(--muted)">'+o.pgto+'</div>':'')
+    // HOTFIX pós-homologação (2026-08-10), P0.1 — nunca mais o texto morto
+    // de o.pgto ("PIX (100%)" default do select nunca preenchido); mostra
+    // a condição comercial padrão até o operador escolher o tipo abaixo.
+    +'<div style="font-size:11px;color:var(--muted)">'+orcCondicaoLabelPorTipo('50-50')+'</div>'
     +'</div>'
     // Tipo de pagamento
     +'<div style="margin-bottom:14px">'

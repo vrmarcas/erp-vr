@@ -188,7 +188,11 @@ console.log('='.repeat(72) + '\n');
     'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
     'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
     'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',
-    'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento', 'orcEnviarOrcamentoWA'
+    'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
+    // HOTFIX pós-homologação (2026-08-10) — orcEnviarOrcamentoWA() usa
+    // orcCondicaoPagamentoAtual() em vez do texto morto de orcFormaPgto.
+    'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
+    'orcEnviarOrcamentoWA'
   ];
   var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
   var modPath = path.join(__dirname, '_blocoEI_wa_extracted.tmp.js');
