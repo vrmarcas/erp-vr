@@ -13448,6 +13448,278 @@ function kbReceberSaldo() {
   return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
 }
 
+// HOTFIX pós-homologação (2026-08-10), P0.8-P0.11/P0.14-P0.17 — bug real:
+// OS "pronta" (produção concluída) com saldo pendente não tinha NENHUMA
+// ação para registrar esse pagamento antes da entrega — só existia
+// "Entregar mesmo assim" (osLiberar, exceção com justificativa) ou
+// kbReceberSaldo() (só aparece em status='aguardando_saldo', só aceita
+// pagamento INTEGRAL, sempre reaproveitando a forma da entrada original).
+//
+// osRegistrarPagamentoSaldo() reaproveita a MESMA arquitetura de
+// kbReceberSaldo (transação atômica nos mesmos 4 documentos — kb_os,
+// kb_os_fin, fin_cr, fin_tx — nunca uma 5ª fonte de verdade nova), mas:
+//   - aceita qualquer status operacional e NUNCA regride 'pronta' para
+//     'iniciada' (só o caminho legado aguardando_saldo→iniciada, quando
+//     quitado, é preservado — igual kbReceberSaldo sempre fez);
+//   - aceita pagamento PARCIAL: reduz o saldo pendente sem zerá-lo,
+//     nunca fecha a entrada de FIN_CR "Restante" como paga se ainda
+//     sobra valor;
+//   - o valor recebido AGORA sempre vira uma FIN_CR própria (histórico
+//     nunca funde dois pagamentos em um nem apaga a entrada anterior);
+//   - aceita a FORMA escolhida agora (pode divergir da forma da entrada
+//     original — entrada em PIX, saldo em Cartão de Débito, etc.);
+//   - valida o valor pago contra o saldo relido DENTRO da transação
+//     (nunca confia no que a tela tinha ao abrir o modal — proteção
+//     real contra duas abas tentando quitar o mesmo saldo).
+// kbReceberSaldo() permanece 100% intocada (já testada/atômica) — esta é
+// uma função nova e independente, não uma reescrita.
+function osRegistrarPagamentoSaldo(id, valorPagoInput, forma, dataISOInput, obs) {
+  var os = KB_OS[id]; if (!os) return Promise.resolve(false);
+  if (!_db) { showToast('Sem conexão — não é possível registrar o pagamento.','err'); return Promise.resolve(false); }
+  if (os._pagandoSaldo) { showToast('Pagamento já em andamento — aguarde.','warn'); return Promise.resolve(false); }
+  var valorPagoCents = moneyToCents(parseFloat(valorPagoInput) || 0);
+  if (valorPagoCents <= 0) { showToast('Informe um valor de pagamento maior que zero.','warn'); return Promise.resolve(false); }
+  os._pagandoSaldo = true;
+  var _osIdSnap = id;
+  var _osNumSnap = os.num;
+  var hoje = new Date();
+  var dia = dataISOInput ? finCaixaISOtoBR(dataISOInput) : (hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear());
+  if (!dia) dia = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+
+  var _btnSaldo = document.getElementById('osPgtoSaldoBtn');
+  if (_btnSaldo) _btnSaldo.disabled = true;
+
+  function _parsedDoc(snap) {
+    var raw = (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? snap.data().data : null;
+    if (raw === null) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function _tentar() {
+    var refKb = _db.collection(_COL).doc('kb_os');
+    var refKbFin = _db.collection(_COL).doc('kb_os_fin');
+    var refCr = _db.collection(_COL).doc('fin_cr');
+    var refTx = _db.collection(_COL).doc('fin_tx');
+    var refOrc = _db.collection(_COL).doc('orcamentos');
+    return _db.runTransaction(function (txn) {
+      return Promise.all([txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
+        var kbData = _parsedDoc(snaps[0]) || {};
+        var kbFinData = _parsedDoc(snaps[1]) || {};
+        var crArr = _parsedDoc(snaps[2]) || [];
+        var txArr = _parsedDoc(snaps[3]) || [];
+        var orcArr = _parsedDoc(snaps[4]);
+
+        var osServidor = kbData[_osIdSnap];
+        var finServidor = kbFinData[_osIdSnap] || {};
+        if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
+        var restanteServidorCents = moneyToCents(finServidor.restante || 0);
+        if (restanteServidorCents <= 0) {
+          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = Object.assign({}, osServidor, finServidor); throw eJa;
+        }
+        // P0.16 — reler o saldo real dentro da própria transação, nunca
+        // confiar no valor que a tela tinha ao abrir o modal.
+        if (valorPagoCents > restanteServidorCents) {
+          var eExc = new Error('VALOR_MAIOR_QUE_SALDO'); eExc.code = 'VALOR_MAIOR_QUE_SALDO'; eExc.restanteServidor = centsToMoney(restanteServidorCents); throw eExc;
+        }
+
+        var novoRestanteCents = restanteServidorCents - valorPagoCents;
+        var quitado = novoRestanteCents <= 0;
+
+        // Status operacional: só o caminho legado aguardando_saldo→iniciada
+        // é preservado; qualquer outro status (ex.: "pronta") NUNCA regride
+        // — pagar o saldo não pode mandar uma OS pronta de volta à produção.
+        if (quitado && osServidor.status === 'aguardando_saldo') {
+          osServidor.status = 'iniciada';
+        }
+        finServidor.restante = centsToMoney(novoRestanteCents);
+        kbData[_osIdSnap] = osServidor;
+        kbFinData[_osIdSnap] = finServidor;
+
+        var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+        if (crEntry) {
+          if (quitado) {
+            // Quitado — a entrada "Restante" pendente é ABSORVIDA pela nova
+            // entrada "recebido" criada abaixo (nunca as duas ficam
+            // 'recebido' ao mesmo tempo, senão o histórico contaria o
+            // mesmo dinheiro duas vezes).
+            crArr = crArr.filter(function (c) { return c !== crEntry; });
+          } else {
+            // Pagamento parcial — reduz o valor ainda pendente, NUNCA apaga
+            // a entrada (ela continua representando o restante real).
+            crEntry.valor = centsToMoney(novoRestanteCents);
+          }
+        }
+        // O recebimento de agora vira sua PRÓPRIA entrada em FIN_CR — o
+        // histórico nunca funde dois pagamentos num só nem apaga a entrada
+        // anterior (entrada original preservada, ver orcFinanceiroReal).
+        var descBase = (quitado ? 'Pagamento do saldo' : 'Pagamento parcial do saldo') + ' — OS #' + osServidor.num;
+        var novoRecebimento = {
+          id: 'cr' + Date.now() + '_pgtosaldo',
+          cliente: osServidor.cliente, clienteId: '',
+          orcamentoId: osServidor.orcRef || null, osId: _osIdSnap,
+          descricao: descBase + (obs ? ' — ' + obs : ''),
+          valor: centsToMoney(valorPagoCents), vencimento: dia, status: 'recebido',
+          marca: osServidor.mk || 'vr', metodo: forma || 'PIX', osRef: 'OS #' + osServidor.num,
+          dataCriacao: dia, dataRecebimento: dia,
+        };
+        crArr = [novoRecebimento].concat(crArr);
+
+        var novaTx = { data: dia.slice(0,5), cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: centsToMoney(valorPagoCents), metodo: forma || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
+        txArr = [novaTx].concat(txArr);
+
+        var orcMutado = false;
+        if (quitado && osServidor.orcRef && Array.isArray(orcArr)) {
+          var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+          if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+        }
+
+        var kbPayload = JSON.stringify(kbData), kbFinPayload = JSON.stringify(kbFinData), txPayload = JSON.stringify(txArr), crPayload = JSON.stringify(crArr);
+        var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
+
+        txn.set(refKb, { data: kbPayload, ts: Date.now() });
+        txn.set(refKbFin, { data: kbFinPayload, ts: Date.now() });
+        txn.set(refTx, { data: txPayload, ts: Date.now() });
+        txn.set(refCr, { data: crPayload, ts: Date.now() });
+        if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
+
+        return { osServidor: Object.assign({}, osServidor, finServidor), valorPago: centsToMoney(valorPagoCents), quitado: quitado, kbPayload: kbPayload, kbFinPayload: kbFinPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
+      });
+    });
+  }
+
+  function _refletirNaTela() {
+    try { finRender(); } catch (e) {}
+    var stg = document.getElementById('kstag-' + _osIdSnap);
+    if (stg && KB_OS[_osIdSnap]) { var sm0 = _kbStatusMap[KB_OS[_osIdSnap].status] || { cls: 'si', txt: KB_OS[_osIdSnap].status }; stg.className = 'stag ' + sm0.cls; stg.textContent = sm0.txt; }
+    if (String(_kbOsId) === String(_osIdSnap) && typeof kbOpen === 'function') kbOpen(_osIdSnap);
+    kbSyncCounts(); renderOsTable(); syncSidebarBadges();
+  }
+
+  function _finalizarSucesso(r) {
+    os._pagandoSaldo = false;
+    _cloudLastPayload['kb_os'] = r.kbPayload;
+    _cloudLastPayload['kb_os_fin'] = r.kbFinPayload;
+    _cloudLastPayload['fin_tx'] = r.txPayload;
+    _cloudLastPayload['fin_cr'] = r.crPayload;
+    if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
+    KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
+    FIN_CR = r.crArr;
+    FIN_TX = r.txArr;
+    if (r.orcPayload) { _ORC_ENVIADOS_DATA = r.orcArr; try { orcEnviadosRender(); } catch (e) {} }
+    if (_btnSaldo) _btnSaldo.disabled = false;
+    _refletirNaTela();
+    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento_saldo_os', (r.quitado ? 'Saldo quitado' : 'Pagamento parcial do saldo') + ' de ' + finFmt(r.valorPago) + ' — OS #' + _osNumSnap);
+    showToast(r.quitado ? '✅ Saldo quitado!' : '✅ Pagamento parcial registrado — saldo restante: ' + finFmt(KB_OS[_osIdSnap].restante||0), 'ok');
+    return true;
+  }
+
+  function _tratarErro(e, jaRenovouToken) {
+    if (e && e.code === 'SALDO_JA_QUITADO') {
+      os._pagandoSaldo = false;
+      KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], e.osServidor);
+      if (_btnSaldo) _btnSaldo.disabled = false;
+      _refletirNaTela();
+      showToast('ℹ️ Este saldo já havia sido quitado em outra sessão — tela atualizada.', 'info');
+      return true;
+    }
+    if (e && e.code === 'VALOR_MAIOR_QUE_SALDO') {
+      os._pagandoSaldo = false;
+      if (_btnSaldo) _btnSaldo.disabled = false;
+      showToast('⚠️ O saldo real é ' + finFmt(e.restanteServidor) + ' (atualizado por outra sessão) — revise o valor.', 'err');
+      return false;
+    }
+    if (e && e.code === 'OS_NAO_ENCONTRADA') {
+      os._pagandoSaldo = false;
+      if (_btnSaldo) _btnSaldo.disabled = false;
+      showToast('⚠️ OS não encontrada no servidor — atualize a página.', 'err');
+      return false;
+    }
+    var ehErroDeAuth = e && (e.code === 'permission-denied' || e.code === 'unauthenticated' || (e.message || '').indexOf('PERMISSION_DENIED') >= 0);
+    if (ehErroDeAuth && !jaRenovouToken && typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+      return firebase.auth().currentUser.getIdToken(true).then(function () {
+        return _tentar().then(_finalizarSucesso).catch(function (e2) { return _tratarErro(e2, true); });
+      }).catch(function () {
+        os._pagandoSaldo = false;
+        if (_btnSaldo) _btnSaldo.disabled = false;
+        showToast('🔒 Sessão expirada — não foi possível registrar o pagamento. Desbloqueie novamente para continuar.', 'err');
+        return false;
+      });
+    }
+    os._pagandoSaldo = false;
+    if (_btnSaldo) _btnSaldo.disabled = false;
+    console.warn('[Fin] Erro ao registrar pagamento de saldo:', e);
+    showToast('⚠️ Não foi possível registrar o pagamento — nada foi salvo, tente novamente.', 'err');
+    return false;
+  }
+
+  return _tentar().then(_finalizarSucesso).catch(function (e) { return _tratarErro(e, false); });
+}
+
+// HOTFIX pós-homologação (2026-08-10), P0.9 — modal de "Registrar
+// pagamento do saldo": total/recebido/saldo em destaque, valor
+// pré-preenchido com o saldo total (editável para pagamento parcial —
+// P0.14), forma de pagamento (reaproveita as mesmas opções do modal
+// "Confirmar Pagamento", nunca um enum novo), data e observação opcional.
+function osAbrirPagamentoSaldoModal(id) {
+  var os = KB_OS[id]; if (!os) return;
+  var saldoAtual = os.restante || 0;
+  if (saldoAtual <= 0) { showToast('Esta OS não tem saldo pendente.', 'info'); return; }
+  var recebidoAtual = Math.max(0, (os.valor||os.totalGeral||0) - saldoAtual);
+  var fmtV = function (v) { return 'R$ ' + (v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+
+  var modal = document.getElementById('osPgtoSaldoModal');
+  if (!modal) {
+    modal = document.createElement('div'); modal.id = 'osPgtoSaldoModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center';
+    modal.onclick = function (e) { if (e.target === modal) modal.style.display = 'none'; };
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:24px;width:min(440px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+    + '<div style="font-size:15px;font-weight:900">💰 Registrar pagamento do saldo</div>'
+    + '<button onclick="document.getElementById(\'osPgtoSaldoModal\').style.display=\'none\'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted)">×</button>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">OS #' + os.num + ' · ' + (os.cliente||'—') + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;background:var(--bg2);border-radius:10px;padding:10px;margin-bottom:16px">'
+    + '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Total</div><div style="font-size:13px;font-weight:800">' + fmtV(os.valor||os.totalGeral||0) + '</div></div>'
+    + '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Recebido</div><div style="font-size:13px;font-weight:800;color:#059669">' + fmtV(recebidoAtual) + '</div></div>'
+    + '<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Saldo</div><div style="font-size:13px;font-weight:800;color:#D97706">' + fmtV(saldoAtual) + '</div></div>'
+    + '</div>'
+    + '<div style="margin-bottom:12px">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Valor recebido agora</div>'
+    + '<input type="number" id="osPgtoSaldoValor" value="' + saldoAtual.toFixed(2) + '" min="0.01" max="' + saldoAtual.toFixed(2) + '" step="0.01" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:700">'
+    + '<div style="font-size:10px;color:var(--muted);margin-top:4px">Pode ser menor que o saldo total (pagamento parcial) — o restante continua pendente.</div>'
+    + '</div>'
+    + '<div style="margin-bottom:12px">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Forma de pagamento</div>'
+    + '<select id="osPgtoSaldoForma" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px">'
+    + '<option>PIX</option><option>Cartão de Crédito</option><option>Cartão de Débito</option><option>Dinheiro</option><option>Boleto</option><option>Transferência</option>'
+    + '</select></div>'
+    + '<div style="margin-bottom:12px">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Data do recebimento</div>'
+    + '<input type="date" id="osPgtoSaldoData" value="' + new Date().toISOString().slice(0,10) + '" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px">'
+    + '</div>'
+    + '<div style="margin-bottom:18px">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:6px">Observação (opcional)</div>'
+    + '<input type="text" id="osPgtoSaldoObs" placeholder="Ex: quitação na retirada" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px">'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="topbar-btn ghost" onclick="document.getElementById(\'osPgtoSaldoModal\').style.display=\'none\'">Cancelar</button>'
+    + '<button id="osPgtoSaldoBtn" onclick="osPgtoSaldoConfirmar(\'' + id + '\')" style="background:linear-gradient(90deg,#D97706,#B45309);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:800;cursor:pointer">Confirmar pagamento</button>'
+    + '</div></div>';
+  modal.style.display = 'flex';
+}
+function osPgtoSaldoConfirmar(id) {
+  var valorEl = document.getElementById('osPgtoSaldoValor');
+  var formaEl = document.getElementById('osPgtoSaldoForma');
+  var dataEl = document.getElementById('osPgtoSaldoData');
+  var obsEl = document.getElementById('osPgtoSaldoObs');
+  var valor = parseFloat(valorEl && valorEl.value) || 0;
+  if (valor <= 0) { showToast('Informe um valor de pagamento maior que zero.', 'warn'); return; }
+  osRegistrarPagamentoSaldo(id, valor, formaEl ? formaEl.value : 'PIX', dataEl ? dataEl.value : '', obsEl ? obsEl.value : '')
+    .then(function (ok) { if (ok) { var m = document.getElementById('osPgtoSaldoModal'); if (m) m.style.display = 'none'; } });
+}
+
 // Corrigido 2026-08-07 (Rodada Mestre, seção 24) — a mensagem de "OS
 // pronta" tinha emojis (😊🎉📋📦🔢🙏) que prejudicam legibilidade e
 // compatibilidade em alguns dispositivos/leitores — pedido explícito para
@@ -14796,8 +15068,19 @@ function renderOsTable() {
     btnVer.onclick=function(){kbOpen(id);};
     actTd.appendChild(btnVer);
     if(os.status==='pronta'){
+      // HOTFIX pós-homologação (2026-08-10), P0.8/UX — quando há saldo, o
+      // CTA principal passa a ser "Registrar pagamento", antes do
+      // "Entregar" (que nesse caso vira a exceção, não o caminho normal).
+      var _temSaldoTabela = (os.restante||0)>0;
+      if(_temSaldoTabela){
+        var btnPgto=document.createElement('button');
+        btnPgto.textContent='💰 Pagamento'; btnPgto.style.cssText='padding:3px 7px;border:1px solid #D97706;background:#D97706;color:#fff;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;margin-right:3px';
+        btnPgto.onclick=function(e){e.stopPropagation();osAbrirPagamentoSaldoModal(id);};
+        actTd.appendChild(btnPgto);
+      }
       var btnEnt=document.createElement('button');
-      btnEnt.textContent='Entregar'; btnEnt.style.cssText='padding:3px 7px;border:1px solid #059669;background:transparent;color:#059669;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
+      btnEnt.textContent=_temSaldoTabela?'Entregar (saldo pendente)':'Entregar';
+      btnEnt.style.cssText='padding:3px 7px;border:1px solid #059669;background:transparent;color:#059669;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
       btnEnt.onclick=function(e){e.stopPropagation();osLiberar(id);};
       actTd.appendChild(btnEnt);
     }
