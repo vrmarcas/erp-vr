@@ -15817,27 +15817,35 @@ function finDashKPIs() {
   // Saldo disponível é um saldo acumulado (estilo extrato bancário) — precisa somar
   // TODO o histórico recebido/pago, não só o mês atual. Antes, a receita era filtrada
   // pelo mês corrente e a despesa somava todos os tempos, gerando saldos incoerentes.
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P2.1 — a auditoria classificou os
+  // KPIs de CR/Caixa deste painel como "mistura centavos com float"
+  // (finDashKPIs soma o histórico inteiro em float). Hardening gradual:
+  // todos os acumuladores abaixo agora somam em CENTAVOS INTEIROS
+  // (helpers de P0.2), convertendo para R$ só na hora de montar
+  // saldoImediato/totalReceber/cartaoComp/totalPagar/projetado. Nenhuma
+  // regra de negócio mudou — só a matemática de soma.
   var txTudo=FIN_TX.filter(function(t){return t.status==='recebido';});
   var cpPago=FIN_CP.filter(function(c){return c.status==='pago';});
 
   // ── Card 1: Saldo Disponível Imediato (somente PIX + Dinheiro, acumulado) ──
   var metImediato = ['PIX','Dinheiro','pix','dinheiro'];
-  var saldoImediato = txTudo.filter(function(t){
+  var recebidoImediatoCents = sumCents(txTudo.filter(function(t){
     return metImediato.some(function(m){ return (t.metodo||'').toLowerCase().indexOf(m.toLowerCase())>=0; });
-  }).reduce(function(s,t){return s+t.valor;},0)
-  - cpPago.reduce(function(s,c){return s+finCPValorNum(c);},0);
+  }), function(t){ return t.valor; });
+  var pagoCents = sumCents(cpPago, function(c){ return finCPValorNum(c); });
+  var saldoImediato = centsToMoney(recebidoImediatoCents - pagoCents);
 
   // ── Card 2: A Receber + A Compensar (Cartão < 30 dias) ────────────────
   var crPend   = FIN_CR.filter(function(c){return c.status==='pendente';});
-  var totalReceber = crPend.reduce(function(s,c){return s+c.valor;},0);
+  var totalReceber = centsToMoney(sumCents(crPend, function(c){ return c.valor; }));
   var hoje = new Date();
-  var cartaoComp = crPend.filter(function(c){
+  var cartaoComp = centsToMoney(sumCents(crPend.filter(function(c){
     return (c.metodo||'').toLowerCase().indexOf('cart')>=0;
-  }).reduce(function(s,c){return s+c.valor;},0);
+  }), function(c){ return c.valor; }));
 
   // ── Card 3: A Pagar + Vencidos ────────────────────────────────────────
   var cpPend = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
-  var totalPagar = cpPend.reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var totalPagar = centsToMoney(sumCents(cpPend, function(c){ return finCPValorNum(c); }));
   var vencidas = FIN_CP.filter(function(c){
     if(c.status==='pago') return false;
     if(!c.vencimento) return false;
@@ -15848,7 +15856,7 @@ function finDashKPIs() {
   });
 
   // ── Card 4: Projetado ─────────────────────────────────────────────────
-  var projetado = saldoImediato + totalReceber - totalPagar;
+  var projetado = centsToMoney(moneyToCents(saldoImediato) + moneyToCents(totalReceber) - moneyToCents(totalPagar));
 
   function setEl(id,v,cls){var el=document.getElementById(id);if(el){el.textContent=typeof v==='string'?v:finFmt(v);if(cls)el.style.color=cls;}}
   setEl('finKpiCaixa', saldoImediato, saldoImediato>=0?'#059669':'#DC2626');
@@ -17215,12 +17223,16 @@ function finCartaoGarantirFaturas() {
   });
   return criadas;
 }
+// P2.2 — soma em centavos (helper de P0.2) em vez de acumular floats das
+// parcelas e arredondar só no fim; o resultado é idêntico nos casos já
+// cobertos pelos testes existentes, mas nunca mais arrisca desvio em
+// faturas com muitas parcelas.
 function finCartaoValorFatura(faturaId) {
-  var total = 0;
+  var totalCents = 0;
   FIN_CARTAO_COMPRAS.forEach(function (compra) {
-    (compra.parcelasDetalhe || []).forEach(function (parc) { if (parc.faturaId === faturaId) total += parc.valor; });
+    totalCents += sumCents((compra.parcelasDetalhe || []).filter(function (parc) { return parc.faturaId === faturaId; }), function (parc) { return parc.valor; });
   });
-  return Math.round(total * 100) / 100;
+  return centsToMoney(totalCents);
 }
 function finCartaoComprasDaFatura(faturaId) {
   var out = [];

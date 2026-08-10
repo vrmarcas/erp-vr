@@ -31,6 +31,9 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P2.2 — finCartaoValorFatura() agora
+  // soma via helpers cent-safe.
+  'moneyToCents', 'centsToMoney', 'sumCents',
   'finCPCompetenciaStr', 'finCPParseISO', 'finCPVencimentoDaCompetencia',
   'finCartaoCompetenciaFatura', 'finCartaoGerarParcelas', 'finCartaoRegistrarCompra',
   'finCartaoGarantirFaturas', 'finCartaoValorFatura', 'finCartaoComprasDaFatura',
