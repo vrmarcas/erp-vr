@@ -362,6 +362,44 @@ function validarEAplicarAcrescimo(baseCentavos: number, input: unknown, callerRo
   return { centavos, snapshot: { tipo, valor, motivo: motivo || null, visivelCliente: a.visivelCliente !== false } };
 }
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.4 — a auditoria encontrou que o
+// Desconto Global do orçamento Vitre só aceitava percentual (o Acréscimo
+// Global, ao lado, já tinha a dualidade R$ fixo/% desde o hotfix). Nunca
+// confiar em cálculo feito pelo browser — validado/recalculado aqui,
+// nunca só no frontend.
+export function normalizarDescontoGlobal(descontoGlobalInput: unknown, legacyDescontoPct: number): { tipo: "fixo" | "pct"; valor: number } {
+  if (descontoGlobalInput && typeof descontoGlobalInput === "object") {
+    const d = descontoGlobalInput as { tipo?: unknown; valor?: unknown };
+    const tipo = d.tipo;
+    const valor = Number(d.valor);
+    if (tipo !== "fixo" && tipo !== "pct") {
+      throw new functions.https.HttpsError("invalid-argument", "Tipo de desconto inválido — use \"fixo\" ou \"pct\".");
+    }
+    if (!Number.isFinite(valor) || valor < 0) {
+      throw new functions.https.HttpsError("invalid-argument", "Valor de desconto inválido ou negativo.");
+    }
+    if (tipo === "pct" && valor > 100) {
+      throw new functions.https.HttpsError("invalid-argument", "Percentual de desconto não pode passar de 100%.");
+    }
+    return { tipo, valor };
+  }
+  // Compatibilidade retroativa — documentos/chamadas antigas só mandam
+  // descontoPct escalar: sempre interpretado como percentual (nunca R$),
+  // exatamente o comportamento anterior a este sprint.
+  const pct = Number(legacyDescontoPct) || 0;
+  if (pct < 0 || pct > 100) throw new functions.https.HttpsError("invalid-argument", "descontoPct inválido.");
+  return { tipo: "pct", valor: pct };
+}
+// 0 <= descontoCentavos <= baseCentavos sempre — nunca um desconto fixo
+// maior que a própria base (o motivo de existir esta checagem separada
+// de validarEAplicarAcrescimo: desconto SUBTRAI, então precisa de um teto
+// que o acréscimo não tem).
+export function calcularDescontoCentavos(baseCentavos: number, desconto: { tipo: "fixo" | "pct"; valor: number }): number {
+  const cents = desconto.tipo === "fixo" ? toCentavos(desconto.valor) : Math.round(baseCentavos * desconto.valor / 100);
+  if (cents > baseCentavos) throw new functions.https.HttpsError("invalid-argument", "DESCONTO_MAIOR_QUE_BASE");
+  return cents;
+}
+
 /** Valida um plano de pagamento (condição, nunca cobrança real — o hotfix
  * de wizard NÃO está autorizado a emitir cobrança/pagamento real, só a
  * registrar a condição combinada). Garante soma das parcelas === total,
@@ -397,7 +435,7 @@ async function resolverItensEValores(
   db: FirebaseFirestore.Firestore,
   itensInput: unknown[],
   acrescimoGlobalInput: unknown,
-  descontoPct: number,
+  descontoGlobal: { tipo: "fixo" | "pct"; valor: number },
   frete: number,
   callerRole: string
 ): Promise<{
@@ -443,7 +481,7 @@ async function resolverItensEValores(
   const { centavos: acrescimoGlobalCentavos, snapshot: acrescimoGlobalSnapshot } =
     validarEAplicarAcrescimo(subtotalProdutosCentavos + acrescimosItensCentavos, acrescimoGlobalInput, callerRole);
   const baseCentavos = subtotalProdutosCentavos + acrescimosItensCentavos + acrescimoGlobalCentavos;
-  const valorDescontoCentavos = Math.round(baseCentavos * descontoPct / 100);
+  const valorDescontoCentavos = calcularDescontoCentavos(baseCentavos, descontoGlobal);
   const freteCentavos = toCentavos(frete);
   const totalCentavos = baseCentavos - valorDescontoCentavos + freteCentavos;
   if (totalCentavos < 0) throw new functions.https.HttpsError("invalid-argument", "TOTAL_NEGATIVO");
@@ -465,14 +503,13 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
   const observacoes = data?.observacoes ? String(data.observacoes).trim() : null;
   const origemAtendimento = data?.origemAtendimento ? String(data.origemAtendimento).trim() : "manual";
   const itensInput = Array.isArray(data?.itens) ? data.itens : [];
-  const descontoPct = Number(data?.descontoPct) || 0;
+  const descontoGlobal = normalizarDescontoGlobal(data?.descontoGlobal, Number(data?.descontoPct) || 0);
   const frete = Number(data?.frete) || 0;
   const prazoValidadeDias = Number(data?.prazoValidadeDias) || 7;
   const requestId = String(data?.requestId || "");
   if (!clienteNome) throw new functions.https.HttpsError("invalid-argument", "clienteNome obrigatório.");
   if (!itensInput.length) throw new functions.https.HttpsError("invalid-argument", "Ao menos um item é obrigatório.");
   if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
-  if (descontoPct < 0 || descontoPct > 100) throw new functions.https.HttpsError("invalid-argument", "descontoPct inválido.");
   if (frete < 0) throw new functions.https.HttpsError("invalid-argument", "Frete não pode ser negativo.");
 
   const idemKey = `orc_criar:${requestId}`;
@@ -486,7 +523,7 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
   const {
     itensSnapshot, subtotalProdutosCentavos, acrescimosItensCentavos, acrescimoGlobalCentavos,
     acrescimoGlobalSnapshot, valorDescontoCentavos, freteCentavos, totalCentavos,
-  } = await resolverItensEValores(db, itensInput, data?.acrescimoGlobal, descontoPct, frete, caller.role);
+  } = await resolverItensEValores(db, itensInput, data?.acrescimoGlobal, descontoGlobal, frete, caller.role);
 
   const docRef = db.collection(COL_ORC).doc();
   const registro = {
@@ -494,7 +531,11 @@ export const vitreCriarOrcamento = functions.https.onCall(async (data, context) 
     clienteNome, clienteTipo, clienteDocumento, clienteEmail, clienteTel, clienteCidade, clienteExistenteId,
     observacoes, origemAtendimento,
     itens: itensSnapshot,
-    descontoPct,
+    // descontoGlobal{tipo,valor} é a fonte de verdade nova; descontoPct
+    // continua gravado (derivado) só para telas/leituras legadas que
+    // ainda esperam o escalar percentual.
+    descontoGlobal,
+    descontoPct: descontoGlobal.tipo === "pct" ? descontoGlobal.valor : 0,
     acrescimoGlobal: acrescimoGlobalSnapshot,
     // Campos decimais — mantidos por compatibilidade com PDF/WhatsApp/telas
     // existentes; sempre DERIVADOS dos campos *Centavos abaixo.
@@ -532,13 +573,13 @@ export const vitreAtualizarOrcamento = functions.https.onCall(async (data, conte
   // preço do produto não — se mudar entre a leitura e o commit, o próximo
   // "salvar" já traz o preço atualizado).
   let itensCalc: Awaited<ReturnType<typeof resolverItensEValores>> | null = null;
+  let descontoGlobalNovo: { tipo: "fixo" | "pct"; valor: number } | null = null;
   if (Array.isArray(data?.itens)) {
-    const descontoPctNovo = Number(data?.descontoPct) || 0;
+    descontoGlobalNovo = normalizarDescontoGlobal(data?.descontoGlobal, Number(data?.descontoPct) || 0);
     const freteNovo = Number(data?.frete) || 0;
     if (!data.itens.length) throw new functions.https.HttpsError("invalid-argument", "Ao menos um item é obrigatório.");
-    if (descontoPctNovo < 0 || descontoPctNovo > 100) throw new functions.https.HttpsError("invalid-argument", "descontoPct inválido.");
     if (freteNovo < 0) throw new functions.https.HttpsError("invalid-argument", "Frete não pode ser negativo.");
-    itensCalc = await resolverItensEValores(db, data.itens, data?.acrescimoGlobal, descontoPctNovo, freteNovo, caller.role);
+    itensCalc = await resolverItensEValores(db, data.itens, data?.acrescimoGlobal, descontoGlobalNovo, freteNovo, caller.role);
   }
 
   const resultado = await db.runTransaction(async (tx) => {
@@ -551,7 +592,9 @@ export const vitreAtualizarOrcamento = functions.https.onCall(async (data, conte
     if (itensCalc) {
       if (cur.status !== "rascunho") throw new functions.https.HttpsError("failed-precondition", "SO_PODE_EDITAR_ITENS_EM_RASCUNHO:" + cur.status);
       Object.assign(update, {
-        itens: itensCalc.itensSnapshot, descontoPct: Number(data.descontoPct) || 0,
+        itens: itensCalc.itensSnapshot,
+        descontoGlobal: descontoGlobalNovo,
+        descontoPct: descontoGlobalNovo && descontoGlobalNovo.tipo === "pct" ? descontoGlobalNovo.valor : 0,
         acrescimoGlobal: itensCalc.acrescimoGlobalSnapshot,
         subtotal: centavosParaReais(itensCalc.subtotalProdutosCentavos),
         acrescimosItensTotal: centavosParaReais(itensCalc.acrescimosItensCentavos),

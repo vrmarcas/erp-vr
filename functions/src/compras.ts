@@ -55,6 +55,25 @@ const TRANSICOES: Record<StatusCompra, StatusCompra[]> = {
   cancelada:         [],
 };
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.3 — a auditoria encontrou que cada
+// parcela de um documento de Compras era arredondada de forma
+// INDEPENDENTE (Math.round((valorTotal/nParcelas)*100)/100), sem garantir
+// que a soma das parcelas batesse com o total (ex.: R$100/3 podia virar
+// 3×R$33,33 = R$99,99, faltando R$0,01). O motor de orçamento
+// (orcDistribuirParcelas, index.html) já resolve isso com a técnica de
+// "a primeira parcela absorve o resto" — replicada aqui, em TypeScript,
+// como fonte única server-side. Sempre em CENTAVOS inteiros.
+export function distribuirParcelasCentavos(totalCents: number, n: number): number[] {
+  const total = Math.round(totalCents || 0);
+  const nParc = n > 0 ? Math.round(n) : 1;
+  const base = Math.floor(total / nParc);
+  const resto = total - base * nParc;
+  const parcelas: number[] = [];
+  for (let i = 0; i < nParc; i++) parcelas.push(base);
+  parcelas[0] += resto;
+  return parcelas;
+}
+
 function normalizeRole(value: unknown): Role | null {
   if (typeof value !== "string") return null;
   const r = value.trim().toLowerCase();
@@ -345,8 +364,12 @@ export const comprasAdicionarDocumento = functions.https.onCall(async (data, con
       criadoPorUid: caller.uid, criadoEm: Date.now(),
     });
 
-    const valorParcela = Math.round((valorTotal / nParcelas) * 100) / 100;
+    // P1.3 — parcelas centavo-exatas: soma(parcelas) === valorTotal sempre,
+    // nunca cada parcela arredondada isoladamente (ver distribuirParcelasCentavos).
+    const valorTotalCents = Math.round(valorTotal * 100);
+    const parcelasCents = distribuirParcelasCentavos(valorTotalCents, nParcelas);
     for (let i = 0; i < nParcelas; i++) {
+      const valorParcela = parcelasCents[i] / 100;
       const parcelaRef = db.collection(COL_PARCELAS).doc();
       tx.set(parcelaRef, {
         id: parcelaRef.id, documentoId: docRef.id, compraId,

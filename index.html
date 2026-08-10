@@ -2835,6 +2835,14 @@ function _authFirebaseError(code){
         <div class="card-h">
           <div class="card-h-left">📄 Todas as Ordens de Serviço <span id="osTableCount" style="font-size:11px;font-weight:500;color:var(--muted)"></span></div>
         </div>
+        <!-- SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.7 — KPIs no topo da própria
+             tela "Todas as OS" (a auditoria encontrou que só existia a
+             contagem da aba atual, #osTableCount, nunca um painel
+             consolidado). Acompanham o filtro de marca (fm), nunca a busca
+             textual nem a aba selecionada — sempre um retrato global. Saldo
+             a Receber lê de os.restante (kb_os_fin, mesclado só para
+             perfis autorizados — nunca kb_os puro) e some para Produção. -->
+        <div id="osKpiBar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px"></div>
         <!-- Bloco M (Sprint Pré-Go-Live, 2026-08-09) — 4 abas: Ativas / Prontas /
              Entregues Recentes / Histórico. Histórico é a fonte completa (nunca
              corta por tempo); Entregues Recentes é só um recorte de conveniência. -->
@@ -3585,7 +3593,12 @@ function _authFirebaseError(code){
                   </div>
                 </div>
                 <div class="fg"><label>Justificativa do acréscimo</label><input type="text" id="vitreOrcAcrescGlobalMotivo" placeholder="Ex: urgência, embalagem especial"></div>
-                <div class="fg"><label>Desconto (%)</label><input type="number" id="vitreOrcDesconto" value="0" min="0" max="100" oninput="vitreOrcRecalcular()"></div>
+                <div class="fg"><label>Desconto global</label>
+                  <div style="display:flex;gap:6px">
+                    <select id="vitreOrcDescontoTipo" style="max-width:90px" onchange="vitreOrcRecalcular()"><option value="">Nenhum</option><option value="fixo">R$ fixo</option><option value="pct" selected>%</option></select>
+                    <input type="number" id="vitreOrcDescontoValor" value="0" min="0" step="0.01" oninput="vitreOrcRecalcular()" style="flex:1">
+                  </div>
+                </div>
                 <div class="fg"><label>Frete (R$)</label><input type="number" id="vitreOrcFrete" value="0" min="0" step="0.01" oninput="vitreOrcRecalcular()"></div>
               </div>
 
@@ -5144,6 +5157,17 @@ function _authFirebaseError(code){
             <div>
               <div class="fin-cr-scard-lbl">Agendado</div>
               <div class="fin-cr-scard-val" id="finCPSumAgend">R$ 0</div>
+            </div>
+          </div>
+          <!-- SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.10 — contador de
+               competências de recorrência variável ainda sem valor
+               informado neste mês. Clicável: filtra a lista para mostrar
+               só essas. -->
+          <div class="fin-cr-scard" id="finCPSumPendenteValorCard" onclick="finCPToggleFiltroPendente()" style="cursor:pointer;background:#FEF3C7">
+            <div class="fin-cr-scard-ico">⏳</div>
+            <div>
+              <div class="fin-cr-scard-lbl">Aguardando Valor (mês)</div>
+              <div class="fin-cr-scard-val" id="finCPSumPendenteValor">0</div>
             </div>
           </div>
         </div>
@@ -14653,6 +14677,48 @@ function osFiltrarPorAba(tab, list, agora) {
   return list.filter(function(os){ return _OS_ATIVOS_STATUS.indexOf(os.status) >= 0; });
 }
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.7 — 4 KPIs consolidados no topo de
+// "Todas as OS": OS Ativas, OS Prontas, Entregues Recentes, Saldo a
+// Receber. Acompanham o filtro de marca (documentado: fm), NUNCA a busca
+// textual nem a aba selecionada. Saldo a Receber usa exclusivamente
+// os.restante — campo financeiro que só chega a KB_OS via
+// _kbMergeFinCache() para perfis autorizados (nunca kb_os puro, nunca
+// lido por Produção) — e o próprio KPI é omitido por completo para a
+// role Produção, não apenas zerado.
+function osCalcularKPIs(fm) {
+  var mkNorm=function(m){return m==='VR Marcas'?'vr':m==='Vitre'?'vit':m;};
+  var todas = Object.values(KB_OS).filter(function(os){ return !fm || mkNorm(os.marca)===fm; });
+  var podeVerFinanceiro = !(typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='producao');
+  var saldoReais = null;
+  if (podeVerFinanceiro) {
+    var saldoCents = 0;
+    todas.forEach(function(os){
+      var restante = Number(os.restante);
+      if (isFinite(restante) && restante>0) saldoCents += (typeof moneyToCents==='function' ? moneyToCents(restante) : Math.round(restante*100));
+    });
+    saldoReais = (typeof centsToMoney==='function' ? centsToMoney(saldoCents) : saldoCents/100);
+  }
+  return {
+    ativas: osFiltrarPorAba('ativas', todas).length,
+    prontas: osFiltrarPorAba('prontas', todas).length,
+    recentes: osFiltrarPorAba('recentes', todas).length,
+    saldoReais: saldoReais
+  };
+}
+function osRenderKPIs() {
+  var wrap = document.getElementById('osKpiBar'); if (!wrap) return;
+  var fm=(document.getElementById('osFilterMarca')||{}).value||'';
+  var k = osCalcularKPIs(fm);
+  var card = function(label, val, color){
+    return '<div style="background:var(--bg2);border-radius:10px;padding:10px 12px;border-left:3px solid '+color+'">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">'+label+'</div>'
+      + '<div style="font-size:18px;font-weight:900;color:'+color+'">'+val+'</div></div>';
+  };
+  wrap.innerHTML = card('🔧 OS Ativas', k.ativas, '#D97706')
+    + card('✅ OS Prontas', k.prontas, '#059669')
+    + card('📦 Entregues Recentes', k.recentes, '#1EB8D8')
+    + (k.saldoReais!==null ? card('💰 Saldo a Receber', 'R$ '+k.saldoReais.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}), '#983C8F') : '');
+}
 function osListTab(t, el) {
   _osListTab = t;
   ['Ativas','Prontas','Recentes','Historico'].forEach(function(k){
@@ -14670,6 +14736,7 @@ function osListTab(t, el) {
 
 function renderOsTable() {
   var tbody=document.getElementById('osTableBody'); if(!tbody) return;
+  osRenderKPIs();
   var tab = _osListTab || 'ativas';
   var q=(document.getElementById('osSearchInput')||{}).value||'';
   var fs=(tab==='ativas') ? ((document.getElementById('osFilterStatus')||{}).value||'') : '';
@@ -14680,7 +14747,11 @@ function renderOsTable() {
   var base = osFiltrarPorAba(tab, Object.values(KB_OS));
   var rows=base.filter(function(os){
     var mk=mkNorm(os.marca);
-    var _tit=os.titulo||os.prod||''; var txtOk=!q||(os.cliente+os.num+_tit).toLowerCase().includes(q.toLowerCase());
+    // P1.6 — busca no Histórico (e nas demais abas) agora também localiza
+    // pelo número do orçamento de origem (os.orcNum/os.orcRef), campos
+    // reais já gravados na OS (orcEnvGerarOS) — antes só cliente/OS/produto.
+    var _tit=os.titulo||os.prod||''; var _orcTxt=(os.orcNum!=null?String(os.orcNum):'')+(os.orcRef||'');
+    var txtOk=!q||(os.cliente+os.num+_tit+_orcTxt).toLowerCase().includes(q.toLowerCase());
     var stOk=!fs||os.status===fs;
     var mkOk=!fm||mk===fm;
     var dtOk=true;
@@ -15746,27 +15817,35 @@ function finDashKPIs() {
   // Saldo disponível é um saldo acumulado (estilo extrato bancário) — precisa somar
   // TODO o histórico recebido/pago, não só o mês atual. Antes, a receita era filtrada
   // pelo mês corrente e a despesa somava todos os tempos, gerando saldos incoerentes.
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P2.1 — a auditoria classificou os
+  // KPIs de CR/Caixa deste painel como "mistura centavos com float"
+  // (finDashKPIs soma o histórico inteiro em float). Hardening gradual:
+  // todos os acumuladores abaixo agora somam em CENTAVOS INTEIROS
+  // (helpers de P0.2), convertendo para R$ só na hora de montar
+  // saldoImediato/totalReceber/cartaoComp/totalPagar/projetado. Nenhuma
+  // regra de negócio mudou — só a matemática de soma.
   var txTudo=FIN_TX.filter(function(t){return t.status==='recebido';});
   var cpPago=FIN_CP.filter(function(c){return c.status==='pago';});
 
   // ── Card 1: Saldo Disponível Imediato (somente PIX + Dinheiro, acumulado) ──
   var metImediato = ['PIX','Dinheiro','pix','dinheiro'];
-  var saldoImediato = txTudo.filter(function(t){
+  var recebidoImediatoCents = sumCents(txTudo.filter(function(t){
     return metImediato.some(function(m){ return (t.metodo||'').toLowerCase().indexOf(m.toLowerCase())>=0; });
-  }).reduce(function(s,t){return s+t.valor;},0)
-  - cpPago.reduce(function(s,c){return s+finCPValorNum(c);},0);
+  }), function(t){ return t.valor; });
+  var pagoCents = sumCents(cpPago, function(c){ return finCPValorNum(c); });
+  var saldoImediato = centsToMoney(recebidoImediatoCents - pagoCents);
 
   // ── Card 2: A Receber + A Compensar (Cartão < 30 dias) ────────────────
   var crPend   = FIN_CR.filter(function(c){return c.status==='pendente';});
-  var totalReceber = crPend.reduce(function(s,c){return s+c.valor;},0);
+  var totalReceber = centsToMoney(sumCents(crPend, function(c){ return c.valor; }));
   var hoje = new Date();
-  var cartaoComp = crPend.filter(function(c){
+  var cartaoComp = centsToMoney(sumCents(crPend.filter(function(c){
     return (c.metodo||'').toLowerCase().indexOf('cart')>=0;
-  }).reduce(function(s,c){return s+c.valor;},0);
+  }), function(c){ return c.valor; }));
 
   // ── Card 3: A Pagar + Vencidos ────────────────────────────────────────
   var cpPend = FIN_CP.filter(function(c){return c.status==='agendado'||c.status==='vencido';});
-  var totalPagar = cpPend.reduce(function(s,c){return s+finCPValorNum(c);},0);
+  var totalPagar = centsToMoney(sumCents(cpPend, function(c){ return finCPValorNum(c); }));
   var vencidas = FIN_CP.filter(function(c){
     if(c.status==='pago') return false;
     if(!c.vencimento) return false;
@@ -15777,7 +15856,7 @@ function finDashKPIs() {
   });
 
   // ── Card 4: Projetado ─────────────────────────────────────────────────
-  var projetado = saldoImediato + totalReceber - totalPagar;
+  var projetado = centsToMoney(moneyToCents(saldoImediato) + moneyToCents(totalReceber) - moneyToCents(totalPagar));
 
   function setEl(id,v,cls){var el=document.getElementById(id);if(el){el.textContent=typeof v==='string'?v:finFmt(v);if(cls)el.style.color=cls;}}
   setEl('finKpiCaixa', saldoImediato, saldoImediato>=0?'#059669':'#DC2626');
@@ -16239,12 +16318,31 @@ function finCRSalvar(){
 }
 
 // ── Contas a Pagar — Sumário ──────────────────────────────────────────────────
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.10 — competência do mês corrente,
+// no formato "YYYY-MM" já usado por FIN_CP_RECORRENCIAS/finCPGerarOcorrencias.
+function finCPCompetenciaAtualStr() {
+  var d = new Date();
+  return finCPCompetenciaStr(d.getFullYear(), d.getMonth() + 1);
+}
+function finCPContarPendentesMesAtual() {
+  var compAtual = finCPCompetenciaAtualStr();
+  return FIN_CP.filter(function (r) { return r.valorPendente && r.competencia === compAtual; }).length;
+}
+var _finCPFiltroSoPendentes = false;
+function finCPToggleFiltroPendente() {
+  _finCPFiltroSoPendentes = !_finCPFiltroSoPendentes;
+  var card = document.getElementById('finCPSumPendenteValorCard');
+  if (card) card.style.outline = _finCPFiltroSoPendentes ? '3px solid #D97706' : 'none';
+  finCPRender();
+}
 function finCPUpdateSummary() {
   var pend  = FIN_CP.filter(function(r){return r.status==='agendado'||r.status==='vencido';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var pago  = FIN_CP.filter(function(r){return r.status==='pago';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var agend = FIN_CP.filter(function(r){return r.status==='agendado';}).reduce(function(s,r){return s+finCPValorNum(r);},0);
   var set=function(id,v){var el=document.getElementById(id);if(el)el.textContent=finFmt(v);};
   set('finCPSumPend',pend); set('finCPSumPago',pago); set('finCPSumAgend',agend);
+  var pendVal=document.getElementById('finCPSumPendenteValor');
+  if(pendVal) pendVal.textContent = String(finCPContarPendentesMesAtual());
 }
 
 // ── Contas a Pagar Render ─────────────────────────────────────────────────────
@@ -16288,27 +16386,32 @@ function finNormCat(c){ return FIN_CAT_ALIAS[c]||c; }
 // nota fiscal emitida — a situação fiscal real da venda não afeta o DRE gerencial.
 var FIN_TAXA_IMPOSTO_DRE = 0.085;
 function finCalcularDRE(txFiltro, cpFiltro) {
-  var receitaBruta=txFiltro.reduce(function(s,t){return s+t.valor;},0);
-  var impostos=receitaBruta*FIN_TAXA_IMPOSTO_DRE;
-  var receitaLiq=receitaBruta-impostos;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.3 — todos os acumuladores
+  // internos em CENTAVOS INTEIROS (helpers de P0.2), convertidos para
+  // R$ somente no objeto de retorno. Nunca muda a classificação
+  // contábil (mesmas categorias/regras) — só a matemática de soma.
+  var receitaBrutaCents=sumCents(txFiltro, function(t){return t.valor;});
+  var impostosCents=Math.round(receitaBrutaCents*FIN_TAXA_IMPOSTO_DRE);
+  var receitaLiqCents=receitaBrutaCents-impostosCents;
   // CUSTO = diretamente ligado à produção (CMV)
   // finCPValorNum() (não c.valor direto): uma ocorrência de recorrência
   // variável ainda "a informar" (valorPendente:true) precisa contribuir 0
   // aqui — nunca NaN, nunca contada como se R$0,00 fosse o valor real.
   var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMat=cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cmvMod=cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cmv=cmvMat+cmvMod;
-  var lucroBruto=receitaLiq-cmv;
+  var cmvMatCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}), function(c){return finCPValorNum(c);});
+  var cmvModCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}), function(c){return finCPValorNum(c);});
+  var cmvCents=cmvMatCents+cmvModCents;
+  var lucroBrutoCents=receitaLiqCents-cmvCents;
   // DESPESA = operacional/administrativo (independente do imposto automático sobre vendas)
-  var cpPessoal=cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpOp=cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpEmp=cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var cpImp=cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var desp=cpPessoal+cpOp+cpEmp+cpImp;
-  var lucroLiq=lucroBruto-desp;
-  return {receitaBruta:receitaBruta,impostos:impostos,receitaLiq:receitaLiq,cmvMat:cmvMat,cmvMod:cmvMod,cmv:cmv,
-    lucroBruto:lucroBruto,cpPessoal:cpPessoal,cpOp:cpOp,cpEmp:cpEmp,cpImp:cpImp,desp:desp,lucroLiq:lucroLiq};
+  var cpPessoalCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}), function(c){return finCPValorNum(c);});
+  var cpOpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}), function(c){return finCPValorNum(c);});
+  var cpEmpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}), function(c){return finCPValorNum(c);});
+  var cpImpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}), function(c){return finCPValorNum(c);});
+  var despCents=cpPessoalCents+cpOpCents+cpEmpCents+cpImpCents;
+  var lucroLiqCents=lucroBrutoCents-despCents;
+  return {receitaBruta:centsToMoney(receitaBrutaCents),impostos:centsToMoney(impostosCents),receitaLiq:centsToMoney(receitaLiqCents),
+    cmvMat:centsToMoney(cmvMatCents),cmvMod:centsToMoney(cmvModCents),cmv:centsToMoney(cmvCents),
+    lucroBruto:centsToMoney(lucroBrutoCents),cpPessoal:centsToMoney(cpPessoalCents),cpOp:centsToMoney(cpOpCents),cpEmp:centsToMoney(cpEmpCents),cpImp:centsToMoney(cpImpCents),desp:centsToMoney(despCents),lucroLiq:centsToMoney(lucroLiqCents)};
 }
 // ============================================================
 // AGENDA DE PAGAMENTOS — Calendário mensal
@@ -16501,6 +16604,25 @@ function finCPClearSel() { _finCPSel={}; finCPRender(); finCPUpdateBulkBar(); }
 function finCPBulkPagar() {
   var ids=Object.keys(_finCPSel).filter(function(id){return _finCPSel[id];});
   if(!ids.length){showToast('Selecione registros primeiro','warn');return;}
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.4 — bug real encontrado na
+  // auditoria: esta função chamava _finCPPagarConfirmar() direto, sem
+  // nenhum guard de valorPendente (o guard só existia em finCPPagar(),
+  // o caminho de pagamento individual) — permitia marcar como "pago"
+  // (com valor:null) uma competência de recorrência variável ainda "a
+  // informar", que então sumia silenciosamente dos totais de Caixa.
+  // Corrigido em duas camadas: (1) o guard agora mora também em
+  // _finCPPagarConfirmar(), o nível mais baixo usado por TODAS as rotas
+  // de pagamento — nunca mais contornável por um novo caller futuro;
+  // (2) aqui, o LOTE INTEIRO é bloqueado (não só a conta pendente) se
+  // qualquer selecionado tiver valor pendente — mais previsível
+  // financeiramente do que pagar parte e ignorar o resto silenciosamente.
+  var pendentes = ids.map(function(id){ return FIN_CP.find(function(x){return x.id===id;}); })
+    .filter(function(r){ return r && r.valorPendente; });
+  if(pendentes.length){
+    var nomes = pendentes.map(function(r){ return r.descricao; }).join(', ');
+    showToast('Há despesas com valor ainda não informado. Preencha os valores antes de dar baixa: '+nomes, 'warn');
+    return;
+  }
   var dtStr=new Date().toISOString().slice(0,10);
   ids.forEach(function(id){ var r=FIN_CP.find(function(x){return x.id===id;}); if(r&&r.status!=='pago') _finCPPagarConfirmar(id,dtStr); });
   _finCPSel={}; finCPRender(); finCPUpdateBulkBar();
@@ -16528,6 +16650,7 @@ function finCPGarantirOcorrenciasAtuais() {
 }
 function finCPRender() {
   finCPGarantirOcorrenciasAtuais();
+  finCPUpdateSummary();
   var tbody=document.getElementById('finCPBody');
   var cnt=document.getElementById('finCPCount');
   if(!tbody) return;
@@ -16539,7 +16662,11 @@ function finCPRender() {
     var sOk=!stFlt||r.status===stFlt;
     var dRef=r.dataPagamento||r.vencimento||'';
     var pOk=finDateInPeriod(dRef);
-    return bOk&&cOk&&sOk&&pOk;
+    // P1.10 — quando o card "Aguardando Valor" está ativo, mostra só as
+    // competências ainda sem valor informado (nunca altera dado nenhum,
+    // só filtra a visão).
+    var pendOk=!_finCPFiltroSoPendentes||r.valorPendente;
+    return bOk&&cOk&&sOk&&pOk&&pendOk;
   });
   _finCPLastList=list;
   // finCPValorNum(): uma ocorrência "a informar" (valorPendente:true, Bloco
@@ -16579,9 +16706,15 @@ function finCPRender() {
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEstornar(\''+r.id+'\')">↩ Estornar pagamento</button>';
     }
     if(r.recorrenciaId){
-      // ocorrência de despesa recorrente — ações específicas de série, além
-      // das normais. "Editar só esta" já funciona pelo fluxo normal de edição
-      // (mutação direta no registro, sem tocar a recorrência-mãe).
+      // ocorrência de despesa recorrente — ações específicas de série.
+      // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.9 — "Editar só esta" e
+      // "Editar esta e próximas" agora têm ações reais no menu (a
+      // auditoria encontrou finCPEditarFuturas() sem nenhuma UI que a
+      // acionasse, e "editar só esta" só existia como comentário).
+      if(r.status!=='pago'){
+        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEditarUnicaUI(\''+r.id+'\')">✏️ Editar só esta</button>';
+        menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEditarFuturasUI(\''+r.recorrenciaId+'\',\''+(r.competencia||'')+'\')">✏️ Editar esta e próximas</button>';
+      }
       if(r.status!=='pago') menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPCancelarOcorrenciaUI(\''+r.id+'\')">🚫 Cancelar só esta ocorrência</button>';
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCPEncerrarRecorrenciaUI(\''+r.recorrenciaId+'\')">⏹ Encerrar recorrência (série inteira)</button>';
     } else {
@@ -16617,6 +16750,10 @@ function finCPPagar(id) {
 }
 function _finCPPagarConfirmar(id, dtISO) {
   var r=FIN_CP.find(function(x){return x.id===id;}); if(!r) return;
+  // P0.4 — guard no nível MAIS BAIXO usado por toda rota de pagamento
+  // (individual e em lote): nunca confirma baixa de uma competência cujo
+  // valor ainda não foi informado — nunca fica "pago" com valor:null.
+  if(r.valorPendente){ showToast('Informe o valor desta despesa antes de confirmar o pagamento','warn'); return; }
   if(r.status==='pago'){ showToast('Este pagamento já foi confirmado.','info'); return; }
   if(r._pagando){ showToast('Confirmação já em andamento — aguarde.','warn'); return; }
   r._pagando = true;
@@ -16661,14 +16798,77 @@ function finCPEncerrarRecorrenciaUI(recorrenciaId) {
     showToast('Recorrência encerrada — ocorrências já geradas foram preservadas','ok');
   });
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.9 — "Editar só esta": muda campos
+// não-financeiros de UMA competência específica (descrição/fornecedor),
+// sem tocar a recorrência-mãe nem o valor já informado/pendente. Nunca
+// permite editar uma competência já paga (histórico imutável).
+function finCPEditarUnicaUI(cpId) {
+  var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
+  if(r.status==='pago'){ showToast('Não é possível editar uma competência já paga.','warn'); return; }
+  var novaDesc = prompt('Descrição (só esta competência):', r.descricao||''); if(novaDesc===null) return;
+  var novoForn = prompt('Fornecedor (só esta competência):', r.fornecedor||''); if(novoForn===null) return;
+  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
+  r.descricao = novaDesc.trim();
+  r.fornecedor = novoForn.trim() || null;
+  var p = _finSaveCP();
+  (p && typeof p.then==='function' ? p : Promise.resolve()).then(function(){
+    finCPRender();
+    showToast('Competência atualizada — só este mês, a série continua igual.','ok');
+  });
+}
+// "Editar esta e próximas": encerra a série antiga na competência
+// anterior e cria uma nova a partir daqui (finCPEditarFuturas já
+// implementa isso — nunca toca competências já pagas nem o histórico).
+// Só pede os campos que fazem sentido para a série inteira (nunca valor
+// — recorrência variável nunca tem valor fixo por definição).
+function finCPEditarFuturasUI(recorrenciaId, apartirCompetencia) {
+  var rec = FIN_CP_RECORRENCIAS.find(function(x){return x.id===recorrenciaId;});
+  if(!rec){ showToast('Recorrência não encontrada.','warn'); return; }
+  if(!apartirCompetencia){ showToast('Competência de referência não encontrada.','warn'); return; }
+  if(!confirm('Isso encerra a série atual e cria uma nova a partir desta competência. Competências já pagas e o histórico nunca são alterados. Continuar?')) return;
+  var novaDesc = prompt('Descrição (esta e as próximas competências):', rec.descricao||''); if(novaDesc===null) return;
+  var novoForn = prompt('Fornecedor (esta e as próximas):', rec.fornecedor||''); if(novoForn===null) return;
+  var novaCat = prompt('Categoria (esta e as próximas):', rec.categoria||''); if(novaCat===null) return;
+  var novoDia = prompt('Dia de vencimento, 1-28 (esta e as próximas):', String(rec.diaVencimento||'')); if(novoDia===null) return;
+  var diaNum = parseInt(novoDia,10);
+  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
+  if(isNaN(diaNum)||diaNum<1||diaNum>28){ showToast('Dia de vencimento inválido — use um número de 1 a 28.','warn'); return; }
+  var novosValores = { descricao: novaDesc.trim(), fornecedor: novoForn.trim()||'', categoria: novaCat.trim()||rec.categoria, diaVencimento: diaNum };
+  var res = finCPEditarFuturas(recorrenciaId, apartirCompetencia, novosValores);
+  if(!res.ok){ showToast(res.erro||'Não foi possível editar a série','warn'); return; }
+  Promise.all([_finSaveCP(), _finSaveCPRecorrencias()].map(function(p){ return p&&p.then?p:Promise.resolve(); })).then(function(){
+    finCPRender();
+    showToast('Série atualizada a partir desta competência — pagas e histórico preservados.','ok');
+  });
+}
 // Bloco N — UI de "Informar valor" (recorrência variável). Reaproveita o
 // padrão já usado no arquivo (prompt() simples + função pura de domínio +
 // _finSaveCP() + re-render), igual a outras ações rápidas do Financeiro.
 // Aceita R$0,00 como resposta válida (mês sem custo real) — só rejeita
 // entrada não numérica ou negativa.
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.8 — referência (nunca preenchida
+// automaticamente) ao valor da competência anterior da MESMA
+// recorrência, para reduzir erro de digitação ao informar valores
+// mês a mês. Só considera competências com valor JÁ informado
+// (valorPendente!==true) — nunca mostra "R$0,00" de uma competência
+// ainda pendente como se fosse referência real.
+function finCPValorCompetenciaAnterior(cpId) {
+  var r = FIN_CP.find(function (x) { return x.id === cpId; });
+  if (!r || !r.recorrenciaId || !r.competencia) return null;
+  var anteriores = FIN_CP.filter(function (x) {
+    return x.recorrenciaId === r.recorrenciaId && x.id !== r.id
+      && x.competencia && x.competencia < r.competencia
+      && !x.valorPendente && x.valor != null;
+  }).sort(function (a, b) { return b.competencia.localeCompare(a.competencia); });
+  return anteriores.length ? anteriores[0].valor : null;
+}
 function finCPInformarValorUI(cpId) {
   var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
-  var raw = prompt('Informe o valor desta competência — '+r.descricao+' ('+r.vencimento+'):');
+  // P1.8 — referência discreta do mês anterior, só no texto do prompt
+  // (2º argumento de prompt() continua vazio — NUNCA pré-preenche).
+  var refAnterior = finCPValorCompetenciaAnterior(cpId);
+  var refTxt = refAnterior!=null ? ('\n\nÚltimo mês: '+finFmt(refAnterior)+' (apenas referência)') : '';
+  var raw = prompt('Informe o valor desta competência — '+r.descricao+' ('+r.vencimento+'):'+refTxt);
   if(raw===null) return; // cancelado
   var valor = parseFloat(String(raw).replace(',','.'));
   if(isNaN(valor)||valor<0){ showToast('Valor inválido — informe um número maior ou igual a zero','warn'); return; }
@@ -17023,12 +17223,16 @@ function finCartaoGarantirFaturas() {
   });
   return criadas;
 }
+// P2.2 — soma em centavos (helper de P0.2) em vez de acumular floats das
+// parcelas e arredondar só no fim; o resultado é idêntico nos casos já
+// cobertos pelos testes existentes, mas nunca mais arrisca desvio em
+// faturas com muitas parcelas.
 function finCartaoValorFatura(faturaId) {
-  var total = 0;
+  var totalCents = 0;
   FIN_CARTAO_COMPRAS.forEach(function (compra) {
-    (compra.parcelasDetalhe || []).forEach(function (parc) { if (parc.faturaId === faturaId) total += parc.valor; });
+    totalCents += sumCents((compra.parcelasDetalhe || []).filter(function (parc) { return parc.faturaId === faturaId; }), function (parc) { return parc.valor; });
   });
-  return Math.round(total * 100) / 100;
+  return centsToMoney(totalCents);
 }
 function finCartaoComprasDaFatura(faturaId) {
   var out = [];
@@ -17386,21 +17590,31 @@ function finAntecipar(osRef, valor) {
   );
 }
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.2 — a auditoria encontrou que
+// finBaixaManual() não tinha NENHUMA proteção contra duplo clique/
+// reentrância (nem flag, nem _btnBusy, nem dedupe) — cada chamada grava
+// um novo movimento direto em FIN_TX. Guard síncrono no nível mais baixo
+// (mesmo padrão de _orcSalvarEmVoo/os._marcandoPronto já usado no resto
+// do app): a segunda chamada, enquanto a primeira ainda está em voo,
+// nunca cria um segundo movimento.
+var _finBaixaManualEmVoo = false;
 function finBaixaManual(marca) {
+  if(_finBaixaManualEmVoo){ showToast('Baixa manual já em andamento — aguarde.','warn'); return; }
   var val=prompt('Valor da baixa manual (R$):');
   if(!val||isNaN(parseFloat(val))) return;
+  _finBaixaManualEmVoo = true;
   var v=parseFloat(val), hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
   var m=marca||(confirm('VR Marcas? (OK=VR, Cancelar=Vitre)')?'vr':'vit');
   var _txEntry={data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
   FIN_TX.unshift(_txEntry);
-  _confirmarAposSalvar(
+  return _confirmarAposSalvar(
     _cloudSave('fin_tx', FIN_TX),
     function(){ var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); },
     function(){ finRender(); finDashKPIs(); },
     'Baixa de '+finFmt(v)+' registrada!',
     'Não foi possível registrar a baixa manual'
-  );
+  ).then(function(res){ _finBaixaManualEmVoo = false; return res; });
 }
 
 // ============================================================
@@ -17773,20 +17987,32 @@ function finCaixaAddDiaISO(iso, n) {
 }
 // Totais BRUTOS do dia (sem Caixa Anterior) — mesma regra já usada na tela:
 // Entradas = FIN_CR recebido NAQUELE dia; Saídas = FIN_CP pago NAQUELE dia.
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.2/P0.3 — helpers cent-safe,
+// reutilizados por Caixa, DRE e (P2) demais acumuladores financeiros.
+// NUNCA migram o schema de persistência — os documentos continuam com
+// Number em reais (compatibilidade total com dados antigos); só
+// garantem que toda SOMA aconteça em centavos inteiros, convertendo
+// para R$ somente na saída/apresentação. Sem isso, somas encadeadas de
+// muitos valores em float acumulam erro de arredondamento binário.
+function moneyToCents(value) { return Math.round((Number(value) || 0) * 100); }
+function centsToMoney(cents) { return (Number(cents) || 0) / 100; }
+function sumCents(arr, getter) {
+  return (arr || []).reduce(function (acc, item) { return acc + moneyToCents(getter ? getter(item) : item); }, 0);
+}
 function finCaixaTotaisDoDia(dtBR) {
   var vendasDia = FIN_CR.filter(function (r) { return r.dataCriacao === dtBR; });
-  var totVendas = vendasDia.reduce(function (s, r) { return s + r.valor; }, 0);
+  var totVendasCents = sumCents(vendasDia, function (r) { return r.valor; });
   var entradas = FIN_CR.filter(function (r) { return r.status === 'recebido' && r.dataRecebimento === dtBR; });
-  var totEnt = entradas.reduce(function (s, r) { return s + r.valor; }, 0);
+  var totEntCents = sumCents(entradas, function (r) { return r.valor; });
   var saidas = FIN_CP.filter(function (c) { return c.status === 'pago' && c.dataPagamento === dtBR; });
-  var totSai = saidas.reduce(function (s, c) { return s + finCPValorNum(c); }, 0);
-  return { totVendas: totVendas, totEnt: totEnt, totSai: totSai };
+  var totSaiCents = sumCents(saidas, function (c) { return finCPValorNum(c); });
+  return { totVendas: centsToMoney(totVendasCents), totEnt: centsToMoney(totEntCents), totSai: centsToMoney(totSaiCents) };
 }
 function finCaixaAjustesDoDia(dtBR) {
   return FIN_CAIXA_AJUSTES.filter(function (a) { return a.data === dtBR; });
 }
 function finCaixaAjusteTotalDoDia(dtBR) {
-  return finCaixaAjustesDoDia(dtBR).reduce(function (s, a) { return s + a.valor; }, 0);
+  return centsToMoney(sumCents(finCaixaAjustesDoDia(dtBR), function (a) { return a.valor; }));
 }
 // Primeiro dia com QUALQUER atividade financeira real (venda/entrada/saída/
 // ajuste) — antes dele o Saldo Final é considerado 0 (não há dado).
@@ -17811,17 +18037,21 @@ function finCaixaSaldoFinal(dtBR) {
   if (!genesisISO) return 0;
   var alvoISO = finCaixaBRtoISO(dtBR);
   if (!alvoISO || alvoISO < genesisISO) return 0;
-  var saldo = 0;
+  // P0.2 — acumulador em CENTAVOS inteiros (nunca soma float encadeada):
+  // saldoFinalCents = saldoAnteriorCents + entradasCents - saidasCents +
+  // ajustesCents, dia após dia, desde o genesis. Convertido para R$
+  // somente no retorno.
+  var saldoCents = 0;
   var cursorISO = genesisISO;
   var guard = 0;
   while (cursorISO <= alvoISO && guard < 20000) {
     var cursorBR = finCaixaISOtoBR(cursorISO);
     var dia = finCaixaTotaisDoDia(cursorBR);
-    saldo += dia.totEnt - dia.totSai + finCaixaAjusteTotalDoDia(cursorBR);
+    saldoCents += moneyToCents(dia.totEnt) - moneyToCents(dia.totSai) + moneyToCents(finCaixaAjusteTotalDoDia(cursorBR));
     cursorISO = finCaixaAddDiaISO(cursorISO, 1);
     guard++;
   }
-  return saldo;
+  return centsToMoney(saldoCents);
 }
 // Caixa Anterior de `dtBR` = Saldo Final do dia anterior — nunca digitado.
 function finCaixaAnteriorAuto(dtBR) {
@@ -17842,7 +18072,11 @@ function finCaixaRegistrarAjuste(input) {
   if (!valor || isNaN(valor)) return { ok: false, erro: 'VALOR_INVALIDO' };
   if (!motivo) return { ok: false, erro: 'MOTIVO_OBRIGATORIO' };
   if (!usuario) return { ok: false, erro: 'USUARIO_OBRIGATORIO' };
-  var ajuste = { id: 'cxadj' + Date.now(), data: data, valor: valor, motivo: motivo, usuario: usuario, ts: Date.now() };
+  // P1.1 — id nunca só Date.now() (cliques na mesma milissegundo colidiam
+  // em teoria); componente aleatório elimina a colisão residual mesmo que
+  // o guard síncrono de finCaixaAjusteSalvar() seja contornado de algum
+  // jeito não previsto.
+  var ajuste = { id: 'cxadj' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), data: data, valor: valor, motivo: motivo, usuario: usuario, ts: Date.now() };
   FIN_CAIXA_AJUSTES.unshift(ajuste);
   return { ok: true, ajuste: ajuste };
 }
@@ -18011,7 +18245,15 @@ function finCaixaAjusteModal() {
   var mEl=document.getElementById('finCaixaAjusteMotivo'); if(mEl) mEl.value='';
   document.getElementById('finCaixaAjusteOverlay').classList.add('open');
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.1 — a auditoria encontrou que o
+// _btnBusy() só era chamado DEPOIS das validações e que, mesmo assim,
+// nada impedia a própria função de prosseguir caso _btnBusy retornasse
+// null (ex.: botão não veio como argumento) — não havia flag booleana de
+// guarda síncrona ANTES de qualquer coisa, como já é padrão no resto do
+// app (_orcSalvarEmVoo, os._marcandoPronto, os._liberando).
+var _finCaixaAjustandoEmVoo = false;
 function finCaixaAjusteSalvar(btnEl) {
+  if(_finCaixaAjustandoEmVoo){ showToast('Ajuste já em andamento — aguarde.','warn'); return; }
   var dEl=document.getElementById('finCaixaAjusteData');
   var vEl=document.getElementById('finCaixaAjusteValor');
   var mEl=document.getElementById('finCaixaAjusteMotivo');
@@ -18020,8 +18262,10 @@ function finCaixaAjusteSalvar(btnEl) {
   var usuario = (typeof firebase!=='undefined' && firebase.auth && firebase.auth().currentUser)
     ? (firebase.auth().currentUser.email||firebase.auth().currentUser.uid||'—') : '—';
   var release = (typeof _btnBusy==='function') ? _btnBusy(btnEl,'Salvando...') : null;
+  _finCaixaAjustandoEmVoo = true;
   var r = finCaixaRegistrarAjuste({ data: dataBR, valor: (vEl&&vEl.value), motivo: (mEl&&mEl.value), usuario: usuario });
   if(!r.ok){
+    _finCaixaAjustandoEmVoo = false;
     if(release) release();
     var msgs={DATA_INVALIDA:'Data inválida',VALOR_INVALIDO:'Informe um valor diferente de zero',MOTIVO_OBRIGATORIO:'O motivo é obrigatório para auditoria',USUARIO_OBRIGATORIO:'Usuário não identificado — faça login novamente'};
     showToast(msgs[r.erro]||'Não foi possível registrar o ajuste','warn');
@@ -18037,7 +18281,7 @@ function finCaixaAjusteSalvar(btnEl) {
     },
     'Ajuste extraordinário registrado para '+dataBR,
     'Não foi possível registrar o ajuste — nada foi salvo'
-  );
+  ).then(function(res){ _finCaixaAjustandoEmVoo = false; return res; });
 }
 
 // ── RELATÓRIO MENSAL ──────────────────────────────────────────────────────────
@@ -20340,7 +20584,8 @@ function vitreOrcResetEstado() {
   ['vitreOrcClienteNome', 'vitreOrcClienteDoc', 'vitreOrcClienteTel', 'vitreOrcClienteEmail', 'vitreOrcClienteCidade', 'vitreOrcObservacoes', 'vitreOrcBusca'].forEach(function (id) {
     var el = document.getElementById(id); if (el) el.value = '';
   });
-  var desc = document.getElementById('vitreOrcDesconto'); if (desc) desc.value = 0;
+  var descTipo = document.getElementById('vitreOrcDescontoTipo'); if (descTipo) descTipo.value = 'pct';
+  var descVal = document.getElementById('vitreOrcDescontoValor'); if (descVal) descVal.value = 0;
   var frete = document.getElementById('vitreOrcFrete'); if (frete) frete.value = 0;
   var agt = document.getElementById('vitreOrcAcrescGlobalTipo'); if (agt) agt.value = '';
   var agv = document.getElementById('vitreOrcAcrescGlobalValor'); if (agv) agv.value = 0;
@@ -20593,22 +20838,29 @@ function vitreOrcRecalcular() {
   var globalTipo = globalTipoEl ? globalTipoEl.value : '';
   var globalValor = document.getElementById('vitreOrcAcrescGlobalValor') ? document.getElementById('vitreOrcAcrescGlobalValor').value : 0;
   var acrescGlobalC = vitreOrcCalcAcrescimoCentavos(subtotalC + acrescItensC, globalTipo, globalValor);
-  var descontoPct = Number((document.getElementById('vitreOrcDesconto') || {}).value) || 0;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.4 — Desconto Global agora aceita
+  // R$ fixo OU % (mesma dualidade já existente no Acréscimo Global),
+  // usando o MESMO helper cent-safe (vitreOrcCalcAcrescimoCentavos) —
+  // só o sinal muda (subtraído, não somado).
+  var descTipoEl = document.getElementById('vitreOrcDescontoTipo');
+  var descontoTipo = descTipoEl ? descTipoEl.value : 'pct';
+  var descontoValor = Number((document.getElementById('vitreOrcDescontoValor') || {}).value) || 0;
   var frete = Number((document.getElementById('vitreOrcFrete') || {}).value) || 0;
   var baseC = subtotalC + acrescItensC + acrescGlobalC;
-  var descC = Math.round(baseC * descontoPct / 100);
+  var descC = Math.min(vitreOrcCalcAcrescimoCentavos(baseC, descontoTipo, descontoValor), baseC);
   var freteC = vitreOrcToCentavos(frete);
   var totalC = Math.max(baseC - descC + freteC, 0);
+  var descLabel = descontoTipo === 'fixo' ? orcFmt(descontoValor) : (descontoValor + '%');
   var el = document.getElementById('vitreOrcResumo');
   if (el) {
     el.innerHTML = 'Subtotal dos produtos: <strong>' + orcFmt(subtotalC / 100) + '</strong><br>'
       + (acrescItensC ? 'Acréscimos de item: +' + orcFmt(acrescItensC / 100) + '<br>' : '')
       + (acrescGlobalC ? 'Acréscimo geral: +' + orcFmt(acrescGlobalC / 100) + '<br>' : '')
-      + 'Desconto (' + descontoPct + '%): -' + orcFmt(descC / 100) + '<br>'
+      + (descC ? 'Desconto (' + descLabel + '): -' + orcFmt(descC / 100) + '<br>' : '')
       + 'Frete: +' + orcFmt(freteC / 100) + '<br>'
       + '<span style="font-size:15px;font-weight:900;color:#1E7A86">Total: ' + orcFmt(totalC / 100) + '</span>';
   }
-  return { subtotalCentavos: subtotalC, acrescimosItensCentavos: acrescItensC, acrescimoGlobalCentavos: acrescGlobalC, descontoPct: descontoPct, valorDescontoCentavos: descC, freteCentavos: freteC, totalCentavos: totalC };
+  return { subtotalCentavos: subtotalC, acrescimosItensCentavos: acrescItensC, acrescimoGlobalCentavos: acrescGlobalC, descontoTipo: descontoTipo, descontoValor: descontoValor, descontoPct: descontoTipo === 'pct' ? descontoValor : 0, valorDescontoCentavos: descC, freteCentavos: freteC, totalCentavos: totalC };
 }
 
 // ── STEP 3: ENVIO AO CLIENTE — revisão completa antes de salvar/enviar. ──
@@ -20693,7 +20945,14 @@ function vitreOrcSalvar() {
   var itensPayload = VITRE_ORC_ITENS.map(function (it) {
     return { sku: it.sku, qtd: it.qtd, adicionais: (it.adicionais && it.adicionais.length) ? it.adicionais.map(function (a) { return { nome: a.nome }; }) : undefined, acrescimo: it.acrescimo || undefined };
   });
-  var descontoPct = Number(document.getElementById('vitreOrcDesconto').value) || 0;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.4 — envia o desconto como objeto
+  // {tipo,valor} (mesmo formato do acréscimo), nunca mais só um percentual
+  // escalar. O backend (vitre.ts) continua aceitando descontoPct isolado
+  // em documentos antigos, interpretando-o como percentual.
+  var descontoTipoSel = document.getElementById('vitreOrcDescontoTipo').value;
+  var descontoValorNum = Number(document.getElementById('vitreOrcDescontoValor').value) || 0;
+  var descontoGlobal = (descontoTipoSel && descontoValorNum > 0) ? { tipo: descontoTipoSel, valor: descontoValorNum } : undefined;
+  var descontoPct = descontoTipoSel === 'pct' ? descontoValorNum : 0; // compat: ainda gravado para leitura legada
   var frete = Number(document.getElementById('vitreOrcFrete').value) || 0;
   var prazoValidadeDias = Number(document.getElementById('vitreOrcValidade').value) || 7;
 
@@ -20701,10 +20960,10 @@ function vitreOrcSalvar() {
   // os itens/valores dele em vez de criar um orçamento novo.
   if (VITRE_ORC_ATUAL_ID && VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.status === 'rascunho') {
     firebase.functions().httpsCallable('vitreAtualizarOrcamento')({
-      id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+      id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoGlobal: descontoGlobal, frete: frete, acrescimoGlobal: acrescimoGlobal,
     }).then(function () {
       showToast('Rascunho atualizado — total ' + orcFmt(calc.totalCentavos / 100) + '.', 'ok');
-      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
+      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoGlobal: descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
       vitreOrcAtualizarEstadoAtual();
     }).catch(function (e) { showToast('Erro ao atualizar rascunho: ' + ((e && e.message) || ''), 'err'); });
     return;
@@ -20720,7 +20979,7 @@ function vitreOrcSalvar() {
     clienteExistenteId: VITRE_ORC_CLIENTE_EXISTENTE_ID || undefined,
     observacoes: document.getElementById('vitreOrcObservacoes').value.trim() || undefined,
     origemAtendimento: document.getElementById('vitreOrcOrigem').value,
-    itens: itensPayload, descontoPct: descontoPct, frete: frete, acrescimoGlobal: acrescimoGlobal,
+    itens: itensPayload, descontoGlobal: descontoGlobal, frete: frete, acrescimoGlobal: acrescimoGlobal,
     prazoValidadeDias: prazoValidadeDias, requestId: vitreCatReqId(),
   };
   firebase.functions().httpsCallable('vitreCriarOrcamento')(payload).then(function (res) {
@@ -20730,7 +20989,7 @@ function vitreOrcSalvar() {
       id: res.data.id, clienteNome: clienteNome, clienteTel: payload.clienteTel || '', itens: VITRE_ORC_ITENS.slice(),
       total: res.data.total || (calc.totalCentavos / 100), subtotal: calc.subtotalCentavos / 100,
       acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100,
-      descontoPct: payload.descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias,
+      descontoGlobal: payload.descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias,
     };
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
@@ -21006,14 +21265,23 @@ function vitreOrcAbrirRascunho(id) {
     document.getElementById('vitreOrcDataSolicitacao').value = o.criadoEm ? new Date(o.criadoEm).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
     // Snapshot original — NUNCA busca o preço atual do catálogo aqui.
     VITRE_ORC_ITENS = (o.itens || []).map(function (it) { return { sku: it.sku, nome: it.nomeSnapshot, precoVenda: it.precoSnapshot, qtd: it.qtd, adicionais: it.adicionais || [], acrescimo: it.acrescimo || null }; });
-    document.getElementById('vitreOrcDesconto').value = o.descontoPct || 0;
+    // P1.4 — reabertura: prioriza o objeto descontoGlobal{tipo,valor} novo;
+    // documentos antigos (só descontoPct) são interpretados como percentual
+    // — nunca perdem o valor salvo, nunca viram R$ por engano.
+    if (o.descontoGlobal && o.descontoGlobal.tipo) {
+      document.getElementById('vitreOrcDescontoTipo').value = o.descontoGlobal.tipo;
+      document.getElementById('vitreOrcDescontoValor').value = o.descontoGlobal.valor || 0;
+    } else {
+      document.getElementById('vitreOrcDescontoTipo').value = 'pct';
+      document.getElementById('vitreOrcDescontoValor').value = o.descontoPct || 0;
+    }
     document.getElementById('vitreOrcFrete').value = o.frete || 0;
     if (o.acrescimoGlobal) {
       document.getElementById('vitreOrcAcrescGlobalTipo').value = o.acrescimoGlobal.tipo || '';
       document.getElementById('vitreOrcAcrescGlobalValor').value = o.acrescimoGlobal.valor || 0;
       document.getElementById('vitreOrcAcrescGlobalMotivo').value = o.acrescimoGlobal.motivo || '';
     }
-    VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
+    VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoGlobal: o.descontoGlobal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
     VITRE_ORC_ATUAL = o;
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
@@ -21079,14 +21347,16 @@ function vitreOrcGerarPDF() {
       + '<td style="padding:12px 14px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right">R$ ' + it.precoVenda.toFixed(2) + '</td>'
       + '<td style="padding:12px 14px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right">R$ ' + (totalC / 100).toFixed(2) + '</td></tr>';
   }).join('');
-  var acrescLinha = (o.acrescimosItensTotal || o.acrescimoGlobalTotal) ? '<br><strong>Acréscimos:</strong> R$ ' + ((o.acrescimosItensTotal || 0) + (o.acrescimoGlobalTotal || 0)).toFixed(2) : '';
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.5 — desconto/acréscimo global são
+  // ajustes comerciais INTERNOS (mesma política já aplicada ao fluxo VR
+  // personalizado, ver ajusteComercialAudit): o cliente nunca vê essas
+  // linhas, só o preço final já incorporado. Continuam registrados
+  // internamente (VITRE_ORC_ULTIMO/Firestore) para auditoria — só pararam
+  // de ser impressos neste documento voltado ao cliente.
   // Parte 6.3/6.5 (2026-08-07): "Responsável" nunca aparecia neste PDF
   // (diferente do PDF do fluxo personalizado, que já usava
-  // orcGetResponsavel()) — cliente não sabia quem era o vendedor. Linhas
-  // de Desconto/Frete agora só aparecem quando há valor real (antes
-  // sempre imprimiam "Desconto: 0%"/"frete R$ 0,00 incluído").
+  // orcGetResponsavel()) — cliente não sabia quem era o vendedor.
   var responsavelPDFVitre = (typeof orcGetResponsavel === 'function') ? orcGetResponsavel(brand.nome) : '';
-  var descLinhaVitre = (o.descontoPct > 0) ? '<br><strong>Desconto:</strong> ' + o.descontoPct + '%' : '';
   var freteTxtVitre = (o.frete > 0) ? ' (frete R$ ' + o.frete.toFixed(2) + ' incluído)' : '';
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Orçamento Vitre — ' + o.clienteNome + '</title>'
     + '<style>*{margin:0;padding:0;box-sizing:border-box}'
@@ -21124,7 +21394,7 @@ function vitreOrcGerarPDF() {
     + '<div class="div-bar"></div>'
     + '<div class="client-grid"><div><div class="sec-lbl">Cliente</div><div class="cli-name">' + cfgEsc(o.clienteNome) + '</div>'
     + '<div class="cli-info">' + (o.clienteTel ? '📞 ' + cfgEsc(o.clienteTel) : '') + '</div></div>'
-    + '<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Responsável:</strong> ' + cfgEsc(responsavelPDFVitre) + '<br><strong>Produtos:</strong> Catálogo ' + brand.nome + ' (item pronto-cadastrado)' + descLinhaVitre + acrescLinha + '</div></div></div>'
+    + '<div><div class="sec-lbl">Condições</div><div class="cli-info"><strong>Responsável:</strong> ' + cfgEsc(responsavelPDFVitre) + '<br><strong>Produtos:</strong> Catálogo ' + brand.nome + ' (item pronto-cadastrado)' + '</div></div></div>'
     + '<table><thead><tr><th>Produto</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>' + itensHtml + '</tbody></table>'
     + '<div class="total-row"><div class="total-lbl">Total Geral' + freteTxtVitre + '</div><div class="total-val">R$ ' + o.total.toFixed(2) + '</div></div>'
     + '<div style="flex:1"></div>'
@@ -21150,8 +21420,9 @@ function vitreOrcEnviarWhatsApp() {
   // Brasília — este catálogo não) e Desconto/Frete sempre apareciam
   // mesmo em 0.
   var saudacaoVitre = (typeof orcSaudacaoHorario === 'function') ? orcSaudacaoHorario() : 'Olá';
+  // P1.5 — desconto/acréscimo global são ajustes internos, nunca
+  // aparecem na mensagem enviada ao cliente (mesma política do PDF).
   var condLinhasVitre = '';
-  if (o.descontoPct > 0) condLinhasVitre += 'Desconto: ' + o.descontoPct + '%\n';
   if (o.frete > 0) condLinhasVitre += 'Frete: R$ ' + o.frete.toFixed(2) + '\n';
   var msg = saudacaoVitre + ', ' + o.clienteNome + '! Segue o orçamento *' + brand.nome + '*:\n\n'
     + itensTxt + '\n\n'
@@ -22893,6 +23164,59 @@ function orcSalvarOrcamento() {
   _orcSalvarEmVoo = _orcSalvarOrcamentoImpl().finally(function(){ _orcSalvarEmVoo = null; });
   return _orcSalvarEmVoo;
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — decide se editar o valor de um
+// orçamento já existente precisa virar uma REVISÃO explícita (nunca
+// sobrescrever silenciosamente um orçamento aprovado/com CR). Pura: recebe
+// os valores já em CENTAVOS (evita erro de ponto flutuante na comparação)
+// e o "recebido" já calculado pelo chamador (relFiscalRecebidoDoOrc), para
+// poder ser testada sem DOM/Firestore.
+function orcAvaliarRevisaoFinanceira(orcExistente, valorFinalNovoCents, recebidoCents) {
+  if (!orcExistente) return { precisaRevisao: false };
+  var temExposicaoFinanceira = orcExistente.status === 'aprovado' || !!orcExistente.crId;
+  if (!temExposicaoFinanceira) return { precisaRevisao: false };
+  var _fmtCents = function(cents){ return (cents/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var valorFinalAnteriorCents = Math.round((orcExistente.valorFinal || 0) * 100);
+  if (valorFinalNovoCents === valorFinalAnteriorCents) return { precisaRevisao: false };
+  var saldoAnteriorCents = valorFinalAnteriorCents - recebidoCents;
+  var saldoNovoCents = valorFinalNovoCents - recebidoCents;
+  if (saldoNovoCents < 0) {
+    return {
+      precisaRevisao: true, bloqueado: true,
+      motivoBloqueio: 'O valor já recebido (R$ ' + _fmtCents(recebidoCents) + ') é maior que o novo total (R$ ' + _fmtCents(valorFinalNovoCents) + '). Ajuste o valor ou trate o excedente manualmente antes de revisar este orçamento.',
+      recebidoCents: recebidoCents, saldoAnteriorCents: saldoAnteriorCents, valorFinalAnteriorCents: valorFinalAnteriorCents
+    };
+  }
+  return {
+    precisaRevisao: true, bloqueado: false,
+    recebidoCents: recebidoCents,
+    saldoAnteriorCents: saldoAnteriorCents,
+    saldoNovoCents: saldoNovoCents,
+    valorFinalAnteriorCents: valorFinalAnteriorCents
+  };
+}
+// Histórico de revisões (P0.1) — orc.versoes[] deixa de ser trilha morta:
+// renderiza cada entrada gravada por _orcSalvarOrcamentoImpl para exibição
+// no detalhe do orçamento (orcEnvAbrir). Somente leitura.
+function orcRenderHistoricoRevisoesHtml(versoes) {
+  if (!versoes || !versoes.length) return '';
+  var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var linhas = versoes.slice().reverse().map(function(v){
+    var dt = v.ts ? new Date(v.ts).toLocaleString('pt-BR') : '—';
+    var isRevisao = v.acao === 'revisao_financeira';
+    var titulo = isRevisao ? '💰 Revisão financeira' : 'Atualização';
+    var detalhe = '<div style="font-size:11px;color:var(--muted)">'+dt+' · '+(v.usuario||'—')+'</div>'
+      + '<div style="font-size:11px;margin-top:2px">Valor anterior: <strong>'+fmtV(v.valorFinalAnterior)+'</strong></div>';
+    if (isRevisao) {
+      detalhe += '<div style="font-size:11px">Recebido no momento: '+fmtV((v.recebidoNoMomento||0))+'</div>'
+        + '<div style="font-size:11px">Saldo anterior → novo: '+fmtV(v.saldoAnterior)+' → '+fmtV(v.saldoNovo)+'</div>'
+        + (v.motivo ? '<div style="font-size:11px;font-style:italic">Motivo: '+v.motivo+'</div>' : '');
+    }
+    return '<div style="padding:8px;border-left:3px solid var(--border);margin-bottom:6px;background:var(--bg2);border-radius:0 6px 6px 0">'
+      + '<div style="font-size:11px;font-weight:800">'+titulo+'</div>' + detalhe + '</div>';
+  }).join('');
+  return '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;font-weight:800;color:var(--muted)">📜 Histórico de revisões ('+versoes.length+')</summary>'
+    + '<div style="margin-top:8px">' + linhas + '</div></details>';
+}
 async function _orcSalvarOrcamentoImpl() {
   var c = window._orcCalc||{};
   if(!c.finalPrice){ showToast('Calcule o orçamento (Passo 3) antes de salvar','warn'); return null; }
@@ -22927,6 +23251,31 @@ async function _orcSalvarOrcamentoImpl() {
   // sempre descontado, mesmo quando o cliente nem escolheu pagar via PIX).
   var baseAposCondSalvar = dcOn ? c.finalPrice*(1-dcPct/100) : (c.finalPrice||0);
   var afterDisc = orcMotorComercial(baseAposCondSalvar, {}).baseCents/100;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — nunca sobrescrever
+  // silenciosamente o valor de um orçamento já aprovado/com CR criado.
+  // Ver orcAvaliarRevisaoFinanceira(). orcExistente já foi resolvido acima.
+  var _revisaoFin = null;
+  if (orcExistente) {
+    var _valorNovoCents = Math.round(afterDisc * 100);
+    var _recebidoCents = Math.round((typeof relFiscalRecebidoDoOrc === 'function' ? relFiscalRecebidoDoOrc(orcExistente) : 0) * 100);
+    _revisaoFin = orcAvaliarRevisaoFinanceira(orcExistente, _valorNovoCents, _recebidoCents);
+    if (_revisaoFin.precisaRevisao) {
+      if (_revisaoFin.bloqueado) {
+        showToast(_revisaoFin.motivoBloqueio, 'err');
+        return null;
+      }
+      var _fmtR$ = function(v){ return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var _msgConf = 'Este orçamento já foi aprovado' + (_revisaoFin.recebidoCents>0 ? ' e tem R$ '+_fmtR$(_revisaoFin.recebidoCents/100)+' já recebido' : '') + '.\n\n'
+        + 'Valor anterior: R$ ' + _fmtR$(_revisaoFin.valorFinalAnteriorCents/100) + '\n'
+        + 'Valor novo: R$ ' + _fmtR$(afterDisc) + '\n'
+        + 'Novo saldo a receber: R$ ' + _fmtR$(_revisaoFin.saldoNovoCents/100) + '\n\n'
+        + 'Isso vai criar uma REVISÃO explícita — o valor anterior fica preservado no histórico e o CR/pagamento já recebido NUNCA é recriado ou duplicado. Confirmar revisão?';
+      if (!confirm(_msgConf)) return null;
+      var _motivoRevisao = prompt('Motivo da revisão de valor (obrigatório):', '');
+      if (!_motivoRevisao || !_motivoRevisao.trim()) { showToast('Motivo obrigatório para revisar valor de um orçamento já aprovado.','warn'); return null; }
+      _revisaoFin.motivo = _motivoRevisao.trim();
+    }
+  }
   // Snapshot COMPLETO de itens — chave real do material (matKey) + área/
   // extras planificados + extras por item (ORC_ITEM_EXTRAS), não só os
   // campos exibidos em tela.
@@ -23084,10 +23433,28 @@ async function _orcSalvarOrcamentoImpl() {
     // Atualização in-place — preserva vínculos operacionais já gravados
     // (OS/Contas a Receber) e arquiva o estado anterior no histórico.
     orc.osRef = orcExistente.osRef; orc.crId = orcExistente.crId;
-    orc.versoes = orc.versoes.concat([{
-      ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'atualizacao',
-      valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase
-    }]);
+    if (_revisaoFin && _revisaoFin.precisaRevisao) {
+      // P0.1 — revisão financeira explícita: nunca sobrescreve o CR já
+      // criado (ele continua intacto, com o valor/recebimento originais —
+      // só o orçamento passa a refletir o novo total/saldo). Se ainda não
+      // existe OS gerada, volta para 'aguardando' para exigir nova
+      // aprovação comercial; se já existe OS, mantém o status (o pedido já
+      // está em produção/entrega — a OS técnica não é tocada aqui).
+      orc.versoes = orc.versoes.concat([{
+        ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'revisao_financeira',
+        valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase,
+        recebidoNoMomento: _revisaoFin.recebidoCents/100,
+        saldoAnterior: _revisaoFin.saldoAnteriorCents/100,
+        saldoNovo: _revisaoFin.saldoNovoCents/100,
+        motivo: _revisaoFin.motivo||''
+      }]);
+      if (!orc.osRef) orc.status = 'aguardando';
+    } else {
+      orc.versoes = orc.versoes.concat([{
+        ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'atualizacao',
+        valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase
+      }]);
+    }
     lista[orcExistenteIdx] = orc;
   } else {
     lista.unshift(orc);
@@ -23559,6 +23926,7 @@ function orcEnvAbrir(id) {
     +(o.valorFinal<o.valorBase?'<div style="font-size:10px;color:var(--muted)">Valor base: '+fmtVal(o.valorBase)+'</div>':'')
     +breakHtml
     +'</div>'
+    +orcRenderHistoricoRevisoesHtml(o.versoes)
     +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'">Fechar</button>'
     +'<button class="topbar-btn ghost" style="color:#983C8F;border-color:#983C8F" onclick="orcEnvEditar(\''+ o.id +'\')" >✏️ Editar</button>'

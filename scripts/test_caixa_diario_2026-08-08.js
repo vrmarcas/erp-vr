@@ -37,6 +37,9 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.2 — finCaixaTotaisDoDia/
+  // finCaixaSaldoFinal agora somam via helpers cent-safe.
+  'moneyToCents', 'centsToMoney', 'sumCents',
   'finCPValorNum',
   'finCaixaBRtoISO', 'finCaixaISOtoBR', 'finCaixaAddDiaISO', 'finCaixaTotaisDoDia',
   'finCaixaAjustesDoDia', 'finCaixaAjusteTotalDoDia', 'finCaixaGenesisISO',
