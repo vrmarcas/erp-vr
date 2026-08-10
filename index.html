@@ -1849,9 +1849,13 @@ function _cloudLoadAll() {
     if(d&&typeof d==='object'&&Object.keys(d).length){
       CRM_LEADS=d;
     } else {
-      // Firebase empty — seed with defaults and save
-      CRM_LEADS = Object.assign({}, CRM_LEADS_DEFAULT);
-      if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('crm_leads', CRM_LEADS);
+      // HOTFIX saneamento (2026-08-10) — causa raiz do "Total Pipeline"
+      // fictício em produção: este ramo gravava CRM_LEADS_DEFAULT (10
+      // leads de demonstração, incluindo um de R$5,2 milhões) direto no
+      // Firestore só porque a coleção estava vazia na primeira carga.
+      // Coleção vazia agora significa CRM vazio de verdade — nunca mais
+      // seed automático como dado operacional.
+      CRM_LEADS = {};
     }
     // Re-render if CRM page is already open
     try{
@@ -4302,7 +4306,7 @@ function _authFirebaseError(code){
         </button>
         <button id="crmTabPipeline" onclick="crmSetBrand('pipeline')"
           style="padding:9px 18px;border:none;background:none;font-size:12px;font-weight:700;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--muted);display:flex;align-items:center;gap:6px">
-          🎯 Pipeline / Kanban
+          🎯 Funil Comercial
         </button>
         <div style="margin-left:auto;display:flex;gap:6px;padding-bottom:8px;flex-wrap:wrap">
           <button class="topbar-btn ghost" style="font-size:11px" onclick="crmSimLeadIA()">Simular IA</button>
@@ -11410,6 +11414,14 @@ async function orcConfirmarPagtoWizard() {
 // CRM INTELIGENTE
 // ============================================================
 
+// HOTFIX saneamento (2026-08-10) — marcação canônica de dado de teste.
+// Qualquer registro (lead, orçamento, OS, fixture) com isTest===true ou
+// environment==='test' nunca deve entrar em KPI/dashboard/pipeline
+// operacional. Fixtures/E2E/seed novos devem nascer marcados com isso;
+// preferir sempre o Emulator para automação — isTest é a rede de
+// segurança para o que ainda assim acabar em produção.
+function _isTestRecord(o){ return !!(o && (o.isTest === true || o.environment === 'test')); }
+
 // CRM_LEADS — carregado do Firebase (fonte de dados única)
 let CRM_LEADS_DEFAULT = (function(){
   var now = new Date();
@@ -11427,7 +11439,11 @@ let CRM_LEADS_DEFAULT = (function(){
     'lead_010':{ _id:'lead_010', nome:'VIVO',             sub:'M. Silva - Gerente',        etapa:'fechado',     marca:'vr',    origem:'manual',    valor_potencial:'R$ 5.200.000', score:95, temp:'quente', data_retorno:null,  horas_sem_resposta:0,  cor:'#065F46', tel:'(16)99000-0010', email:'gerente2@vivo.com.br' }
   };
 })();
-let CRM_LEADS = Object.assign({}, CRM_LEADS_DEFAULT);
+// HOTFIX saneamento (2026-08-10) — CRM_LEADS_DEFAULT é só um exemplo
+// para telas de demonstração/onboarding; nunca deve começar como o
+// estado real do CRM (isso é o que gravava o "seed" no Firestore como
+// se fosse operacional — ver correção em _cloudLoad('crm_leads', ...)).
+let CRM_LEADS = {};
 
 let crmLeadIdCounter = 100;
 
@@ -11763,9 +11779,11 @@ function crmSimLeadIA() {
   simIdx++;
   const id = 'sim_' + (++crmLeadIdCounter);
 
-  // Registra na base
+  // Registra na base — isTest:true (HOTFIX saneamento 2026-08-10): este é
+  // um botão de demonstração, os cards gerados nunca podem ser
+  // indistinguíveis de um lead real depois de salvos.
   CRM_LEADS[id] = {
-    ...sim, cor:'#1EB8D8', origem:'ia',
+    ...sim, cor:'#1EB8D8', origem:'ia', isTest:true,
     contato: sim.tipo==='B2B' ? 'Decisor identificado pela IA' : sim.nome,
     tel: sim.tipo==='B2C' ? sim.sub.replace('WhatsApp: ','') : '(via IA — enriquecendo...)',
     email: '—', etapa:'ia_novo', tempo:'agora', dores:[]
@@ -14132,8 +14150,10 @@ function dashRender() {
     return true;
   }
 
+  // HOTFIX saneamento (2026-08-10) — Dashboard principal nunca conta OS
+  // de teste em Taxa de conversão nem Ticket Médio.
   var allOS  = Object.values(KB_OS);
-  var osList = allOS.filter(function(o){ return matchBrand(o.mk || o.marca); });
+  var osList = allOS.filter(function(o){ return matchBrand(o.mk || o.marca) && !_isTestRecord(o); });
 
   var txAll = FIN_TX.filter(function(t){
     var bOk = matchBrand(t.marca);
@@ -14544,8 +14564,8 @@ function comercialRender() {
     return true;
   }
 
-  // ── CRM leads ──────────────────────────────────────────────────────────
-  var leads = Object.values(CRM_LEADS).filter(function(l){ return matchBrand(l.marca||l.mk); });
+  // ── CRM leads ── HOTFIX saneamento (2026-08-10): nunca contar isTest ────
+  var leads = Object.values(CRM_LEADS).filter(function(l){ return matchBrand(l.marca||l.mk) && !_isTestRecord(l); });
   var etapas = [
     {key:'ia_novo',      label:'IA / Novos'},
     {key:'qualificando', label:'Qualificando'},
@@ -14588,8 +14608,10 @@ function comercialRender() {
   var comCvrBar = document.getElementById('comCvrBar');
   if(comCvrBar){ comCvrBar.style.width=cvrPct+'%'; comCvrBar.style.background=cvrPct>=30?'#059669':'#D97706'; }
 
-  var txVR  = FIN_TX.filter(function(t){return t.marca==='vr'  && t.status==='recebido';});
-  var txVit = FIN_TX.filter(function(t){return t.marca==='vit' && t.status==='recebido';});
+  // HOTFIX saneamento (2026-08-10) — Ticket Médio nunca soma lançamento
+  // de teste/fixture (isTest) no cálculo.
+  var txVR  = FIN_TX.filter(function(t){return t.marca==='vr'  && t.status==='recebido' && !_isTestRecord(t);});
+  var txVit = FIN_TX.filter(function(t){return t.marca==='vit' && t.status==='recebido' && !_isTestRecord(t);});
   var tkVR  = txVR.length  ? txVR.reduce(function(s,t){return s+t.valor;},0)/txVR.length   : 0;
   var tkVit = txVit.length ? txVit.reduce(function(s,t){return s+t.valor;},0)/txVit.length : 0;
   var maxTk = Math.max(tkVR, tkVit, 1);
@@ -23325,7 +23347,10 @@ var _chatvoltFase    = 'ia_novo';
 var _SHOPIFY_CFG = {};
 var SITE_LEADS = [];
 var _ORC_ENVIADOS_DATA = [];
-function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }
+// HOTFIX saneamento (2026-08-10) — ponto único de leitura de orçamentos
+// enviados; filtrar isTest aqui protege de uma vez Orçamentos Enviados,
+// Dashboard Comercial e Dashboard principal (todos leem por aqui).
+function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return !_isTestRecord(o); }); }
 function orcSetEnviados(arr){
   _ORC_ENVIADOS_DATA=arr; // otimista — mantém a tela responsiva, igual ao comportamento anterior
   if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'nuvem-nao-pronta'});
@@ -29364,7 +29389,7 @@ function tarefasAtualizarBadge() {
 
 function crmLeadsFor(marca) {
   return Object.entries(CRM_LEADS)
-    .filter(function(e){ return e[1].marca === marca; })
+    .filter(function(e){ return e[1].marca === marca && !_isTestRecord(e[1]); })
     .map(function(e){ return Object.assign({_id: e[0]}, e[1]); });
 }
 
@@ -29442,7 +29467,10 @@ function crmRenderKpi(marca) {
     return false;
   }).length;
   var parsVal=_parsVal;
-  var valTot = leads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
+  // HOTFIX saneamento (2026-08-10) — "Valor Total Pipeline" nunca inclui
+  // negócio já fechado/perdido, mesma regra de crmRenderHeroBar().
+  var pipelineLeads = leads.filter(function(l){ return l.etapa!=='fechado' && l.etapa!=='congelado'; });
+  var valTot = pipelineLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
   var valOrc = orcLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
   function fmtK(v){ return v>=1000?'R$'+Math.round(v/1000)+'k':'R$'+Math.round(v); }
   var suf = marca==='vr' ? 'VR' : 'VT';
@@ -29474,7 +29502,8 @@ function crmRenderKpi(marca) {
 
 
 function crmRenderDia() {
-  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id; });
+  // HOTFIX saneamento (2026-08-10) — agenda do dia nunca mistura lead de teste.
+  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id && !_isTestRecord(l); });
   var hoje = new Date(); hoje.setHours(0,0,0,0);
   var amanha = new Date(hoje); amanha.setDate(amanha.getDate()+1);
 
@@ -29562,10 +29591,14 @@ function crmRenderDia() {
 }
 
 function crmRenderHeroBar() {
-  // Aggregate all leads across both brands
-  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id; });
+  // Aggregate all leads across both brands — HOTFIX saneamento (2026-08-10):
+  // nunca somar isTest, e o Total Pipeline (dinheiro em jogo) nunca soma
+  // negócio já 'fechado' (ganho) nem 'congelado' (perdido) — pipeline é só
+  // o que ainda está ativo e em aberto (P7 do saneamento).
+  var allLeads = Object.values(CRM_LEADS).filter(function(l){ return l && l._id && !_isTestRecord(l); });
   var parsVal=_parsVal;
-  var pipeline = allLeads.reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
+  var pipelineAtivos = allLeads.filter(function(l){ return l.etapa!=='fechado' && l.etapa!=='congelado'; });
+  var pipeline = pipelineAtivos.reduce(function(s,l){ return s+parsVal(l.valor_potencial||'0'); },0);
   var fechados = allLeads.filter(function(l){ return l.etapa==='fechado'; }).length;
   var total = allLeads.length;
   var winRate = (total > 0) ? Math.round(fechados / (total) * 100) : 0;
