@@ -110,9 +110,16 @@ export async function withIdempotency<T>(
   }
 
   // 3. Atualizar o placeholder com o resultado real
+  // BUG corrigido (Fase 0/1, achado pelo cenário 6 do E2E): ApiResponse
+  // frequentemente carrega chaves com valor `undefined` (warnings,
+  // missingFields, data.X opcionais) e o Firestore REJEITA o documento
+  // inteiro — a operação de negócio já tinha rodado, mas o registro
+  // idempotente falhava e o retry via "IDEMPOTENT_PROCESSING" travava a
+  // chave. O round-trip JSON remove todos os undefined antes de persistir.
+  const resultLimpo = JSON.parse(JSON.stringify(result)) as ApiResponse<T>;
   await ref.set({
     status: "done",
-    result,
+    result: resultLimpo,
     createdAt: now,
     expiresAt: now + TTL_MS,
     functionName,

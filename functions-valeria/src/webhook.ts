@@ -202,7 +202,11 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       });
 
       // ── 2. Log leve de interação em valeria_msgs ───────────────────────────
-      await db.collection("valeria_msgs").add({
+      // BUG corrigido (Fase 0/1, achado pelo cenário 6): anexosMeta/
+      // bloqueioInfo como `undefined` faziam o Firestore rejeitar o
+      // documento INTEIRO — toda mensagem de texto puro (sem anexo)
+      // falhava. Campos opcionais agora são OMITIDOS, nunca undefined.
+      const msgDoc: Record<string, unknown> = {
         conversationId:      ctx.conversationId,
         agentId:             ctx.agentId,
         organizationId:      ctx.organizationId,
@@ -213,11 +217,12 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         origem:              "chatvolt",
         statusProcessamento: "pendente",
         eventType,
-        anexosMeta:          anexos.length > 0 ? anexos : undefined,
-        bloqueioInfo,
         ts:                  now,
         createdAt:           nowIso,
-      });
+      };
+      if (anexos.length > 0) msgDoc["anexosMeta"] = anexos;
+      if (bloqueioInfo)      msgDoc["bloqueioInfo"] = bloqueioInfo;
+      await db.collection("valeria_msgs").add(msgDoc);
 
       return ok(
         {
