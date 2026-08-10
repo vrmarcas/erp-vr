@@ -32,6 +32,14 @@ let _agentsCache: AuthorizedAgent[] | null = null;
 let _agentsCacheAt = 0;
 const AGENTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
+/** Somente para testes — o cache de 5 min impede que um teste que semeia o
+ *  documento de agentes veja o resultado de outro teste que rodou com a
+ *  lista vazia (fail-closed). Nunca chamado em produção. */
+export function _resetAgentsCacheForTests(): void {
+  _agentsCache = null;
+  _agentsCacheAt = 0;
+}
+
 async function loadAuthorizedAgents(): Promise<AuthorizedAgent[]> {
   const now = Date.now();
   if (_agentsCache !== null && now - _agentsCacheAt < AGENTS_CACHE_TTL) {

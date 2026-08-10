@@ -94,11 +94,19 @@ jest.mock("firebase-admin", () => ({
 // IMPORTS (após jest.mock)
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { validateBearer, validateAgent, extractContext } from "../auth";
+import { validateBearer, validateAgent, extractContext, _resetAgentsCacheForTests } from "../auth";
 import { buildIdempKey }                                 from "../idempotency";
 import { evaluateQuoteEligibility }                      from "../pricing";
 import { ok as buildOk, err as buildErr }               from "../response";
 import { checkPayloadSize }                              from "../ratelimit";
+
+// v2.1 (Gen 1 + runWith secrets): auth.ts lê os secrets de process.env, não
+// mais de defineSecret() — o mock de firebase-functions/params acima fica
+// apenas por compatibilidade histórica.
+beforeAll(() => {
+  process.env["VALERIA_BEARER_SECRET"]      = FAKE_SECRET_CURRENT;
+  process.env["VALERIA_BEARER_SECRET_PREV"] = FAKE_SECRET_PREVIOUS;
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // HELPER — Fake Response (evita dependência de Express/Firebase Request)
@@ -178,8 +186,16 @@ describe("AUTH — validateBearer", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("AGENT — validateAgent", () => {
-  test("7. agentId ausente → 400 com missingFields: ['agentId']", () => {
-    const r = validateAgent(undefined, FAKE_ORG_ID, "fn");
+  // v2.1: validateAgent virou async (lê erp_vr/valeria_authorized_agents do
+  // Firestore) e FAIL-CLOSED — lista vazia/ausente bloqueia TUDO. O antigo
+  // "modo homologação permissivo" foi removido de propósito (audit ponto 1).
+  beforeEach(() => {
+    _resetAgentsCacheForTests();
+    delete _firestoreData["valeria_authorized_agents"];
+  });
+
+  test("7. agentId ausente → 400 com missingFields: ['agentId']", async () => {
+    const r = await validateAgent(undefined, FAKE_ORG_ID, "fn");
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(400);
@@ -187,8 +203,8 @@ describe("AGENT — validateAgent", () => {
     }
   });
 
-  test("8. organizationId ausente → 400 com missingFields: ['organizationId']", () => {
-    const r = validateAgent(FAKE_AGENT_ID, undefined, "fn");
+  test("8. organizationId ausente → 400 com missingFields: ['organizationId']", async () => {
+    const r = await validateAgent(FAKE_AGENT_ID, undefined, "fn");
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.status).toBe(400);
@@ -196,10 +212,38 @@ describe("AGENT — validateAgent", () => {
     }
   });
 
-  test("9. agentId + organizationId presentes (modo homologação) → ok: true", () => {
-    // AUTHORIZED_AGENTS vazio = homologação, aceita qualquer agente com aviso
-    const r = validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "fn");
+  test("9. Lista de agentes NÃO configurada → 403 FAIL-CLOSED (nunca modo permissivo)", async () => {
+    const r = await validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "fn");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(403);
+  });
+
+  test("9b. Agente presente na allowlist do Firestore → ok: true", async () => {
+    _firestoreData["valeria_authorized_agents"] = {
+      agents: [{ agentId: FAKE_AGENT_ID, organizationId: FAKE_ORG_ID }],
+    };
+    const r = await validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "fn");
     expect(r.ok).toBe(true);
+  });
+
+  test("9c. Agente fora da allowlist → 403", async () => {
+    _firestoreData["valeria_authorized_agents"] = {
+      agents: [{ agentId: "agent_outro", organizationId: "org_outra" }],
+    };
+    const r = await validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "fn");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.status).toBe(403);
+  });
+
+  test("9d. allowedFunctions restringe por função → 403 fora da lista, ok dentro", async () => {
+    _firestoreData["valeria_authorized_agents"] = {
+      agents: [{ agentId: FAKE_AGENT_ID, organizationId: FAKE_ORG_ID, allowedFunctions: ["valeriaGetContexto"] }],
+    };
+    const negado = await validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "valeriaCriarOrcamento");
+    expect(negado.ok).toBe(false);
+    _resetAgentsCacheForTests();
+    const permitido = await validateAgent(FAKE_AGENT_ID, FAKE_ORG_ID, "valeriaGetContexto");
+    expect(permitido.ok).toBe(true);
   });
 });
 
@@ -268,7 +312,7 @@ describe("IDEMPOTENCY — buildIdempKey", () => {
 describe("PRICING — evaluateQuoteEligibility", () => {
   beforeEach(() => {
     // Config financeira fictícia, compatível com ErpConfig
-    _firestoreData["cfg"] = {
+    _firestoreData["erp_config"] = {
       data: JSON.stringify({
         financeiro: { overhead: 41.16, vrml: 20, impostos: 0 },
         materiais: [
@@ -295,7 +339,7 @@ describe("PRICING — evaluateQuoteEligibility", () => {
   });
 
   test("19. Config financeira ausente no Firestore → HUMAN_VALIDATION_REQUIRED", async () => {
-    _firestoreData["cfg"] = { data: JSON.stringify({}) }; // sem financeiro
+    _firestoreData["erp_config"] = { data: JSON.stringify({}) }; // sem financeiro
     const r = await evaluateQuoteEligibility([{ larg: 100, alt: 100, qty: 1 }]);
     expect(r.eligibility).toBe("HUMAN_VALIDATION_REQUIRED");
   });
@@ -471,7 +515,7 @@ describe("ISOLATION — conversationId isola dados entre clientes", () => {
   });
 
   test("36. Motor recalcula do zero — finalPrice é numérico e > 0", async () => {
-    _firestoreData["cfg"] = {
+    _firestoreData["erp_config"] = {
       data: JSON.stringify({
         financeiro: { overhead: 41.16, vrml: 20, impostos: 0 },
         materiais: [{ comp: 183, larg: 122, preco: 180 }],
