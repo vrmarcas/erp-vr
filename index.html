@@ -17414,21 +17414,31 @@ function finAntecipar(osRef, valor) {
   );
 }
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.2 — a auditoria encontrou que
+// finBaixaManual() não tinha NENHUMA proteção contra duplo clique/
+// reentrância (nem flag, nem _btnBusy, nem dedupe) — cada chamada grava
+// um novo movimento direto em FIN_TX. Guard síncrono no nível mais baixo
+// (mesmo padrão de _orcSalvarEmVoo/os._marcandoPronto já usado no resto
+// do app): a segunda chamada, enquanto a primeira ainda está em voo,
+// nunca cria um segundo movimento.
+var _finBaixaManualEmVoo = false;
 function finBaixaManual(marca) {
+  if(_finBaixaManualEmVoo){ showToast('Baixa manual já em andamento — aguarde.','warn'); return; }
   var val=prompt('Valor da baixa manual (R$):');
   if(!val||isNaN(parseFloat(val))) return;
+  _finBaixaManualEmVoo = true;
   var v=parseFloat(val), hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0');
   var m=marca||(confirm('VR Marcas? (OK=VR, Cancelar=Vitre)')?'vr':'vit');
   var _txEntry={data:dia,cliente:'Baixa Manual',os:'—',marca:m==='vitre'?'vit':m,valor:v,metodo:'Dinheiro',status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1};
   FIN_TX.unshift(_txEntry);
-  _confirmarAposSalvar(
+  return _confirmarAposSalvar(
     _cloudSave('fin_tx', FIN_TX),
     function(){ var _ix=FIN_TX.indexOf(_txEntry); if(_ix>=0) FIN_TX.splice(_ix,1); },
     function(){ finRender(); finDashKPIs(); },
     'Baixa de '+finFmt(v)+' registrada!',
     'Não foi possível registrar a baixa manual'
-  );
+  ).then(function(res){ _finBaixaManualEmVoo = false; return res; });
 }
 
 // ============================================================
@@ -17886,7 +17896,11 @@ function finCaixaRegistrarAjuste(input) {
   if (!valor || isNaN(valor)) return { ok: false, erro: 'VALOR_INVALIDO' };
   if (!motivo) return { ok: false, erro: 'MOTIVO_OBRIGATORIO' };
   if (!usuario) return { ok: false, erro: 'USUARIO_OBRIGATORIO' };
-  var ajuste = { id: 'cxadj' + Date.now(), data: data, valor: valor, motivo: motivo, usuario: usuario, ts: Date.now() };
+  // P1.1 — id nunca só Date.now() (cliques na mesma milissegundo colidiam
+  // em teoria); componente aleatório elimina a colisão residual mesmo que
+  // o guard síncrono de finCaixaAjusteSalvar() seja contornado de algum
+  // jeito não previsto.
+  var ajuste = { id: 'cxadj' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), data: data, valor: valor, motivo: motivo, usuario: usuario, ts: Date.now() };
   FIN_CAIXA_AJUSTES.unshift(ajuste);
   return { ok: true, ajuste: ajuste };
 }
@@ -18055,7 +18069,15 @@ function finCaixaAjusteModal() {
   var mEl=document.getElementById('finCaixaAjusteMotivo'); if(mEl) mEl.value='';
   document.getElementById('finCaixaAjusteOverlay').classList.add('open');
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.1 — a auditoria encontrou que o
+// _btnBusy() só era chamado DEPOIS das validações e que, mesmo assim,
+// nada impedia a própria função de prosseguir caso _btnBusy retornasse
+// null (ex.: botão não veio como argumento) — não havia flag booleana de
+// guarda síncrona ANTES de qualquer coisa, como já é padrão no resto do
+// app (_orcSalvarEmVoo, os._marcandoPronto, os._liberando).
+var _finCaixaAjustandoEmVoo = false;
 function finCaixaAjusteSalvar(btnEl) {
+  if(_finCaixaAjustandoEmVoo){ showToast('Ajuste já em andamento — aguarde.','warn'); return; }
   var dEl=document.getElementById('finCaixaAjusteData');
   var vEl=document.getElementById('finCaixaAjusteValor');
   var mEl=document.getElementById('finCaixaAjusteMotivo');
@@ -18064,8 +18086,10 @@ function finCaixaAjusteSalvar(btnEl) {
   var usuario = (typeof firebase!=='undefined' && firebase.auth && firebase.auth().currentUser)
     ? (firebase.auth().currentUser.email||firebase.auth().currentUser.uid||'—') : '—';
   var release = (typeof _btnBusy==='function') ? _btnBusy(btnEl,'Salvando...') : null;
+  _finCaixaAjustandoEmVoo = true;
   var r = finCaixaRegistrarAjuste({ data: dataBR, valor: (vEl&&vEl.value), motivo: (mEl&&mEl.value), usuario: usuario });
   if(!r.ok){
+    _finCaixaAjustandoEmVoo = false;
     if(release) release();
     var msgs={DATA_INVALIDA:'Data inválida',VALOR_INVALIDO:'Informe um valor diferente de zero',MOTIVO_OBRIGATORIO:'O motivo é obrigatório para auditoria',USUARIO_OBRIGATORIO:'Usuário não identificado — faça login novamente'};
     showToast(msgs[r.erro]||'Não foi possível registrar o ajuste','warn');
@@ -18081,7 +18105,7 @@ function finCaixaAjusteSalvar(btnEl) {
     },
     'Ajuste extraordinário registrado para '+dataBR,
     'Não foi possível registrar o ajuste — nada foi salvo'
-  );
+  ).then(function(res){ _finCaixaAjustandoEmVoo = false; return res; });
 }
 
 // ── RELATÓRIO MENSAL ──────────────────────────────────────────────────────────
