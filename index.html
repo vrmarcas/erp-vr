@@ -17773,20 +17773,32 @@ function finCaixaAddDiaISO(iso, n) {
 }
 // Totais BRUTOS do dia (sem Caixa Anterior) — mesma regra já usada na tela:
 // Entradas = FIN_CR recebido NAQUELE dia; Saídas = FIN_CP pago NAQUELE dia.
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.2/P0.3 — helpers cent-safe,
+// reutilizados por Caixa, DRE e (P2) demais acumuladores financeiros.
+// NUNCA migram o schema de persistência — os documentos continuam com
+// Number em reais (compatibilidade total com dados antigos); só
+// garantem que toda SOMA aconteça em centavos inteiros, convertendo
+// para R$ somente na saída/apresentação. Sem isso, somas encadeadas de
+// muitos valores em float acumulam erro de arredondamento binário.
+function moneyToCents(value) { return Math.round((Number(value) || 0) * 100); }
+function centsToMoney(cents) { return (Number(cents) || 0) / 100; }
+function sumCents(arr, getter) {
+  return (arr || []).reduce(function (acc, item) { return acc + moneyToCents(getter ? getter(item) : item); }, 0);
+}
 function finCaixaTotaisDoDia(dtBR) {
   var vendasDia = FIN_CR.filter(function (r) { return r.dataCriacao === dtBR; });
-  var totVendas = vendasDia.reduce(function (s, r) { return s + r.valor; }, 0);
+  var totVendasCents = sumCents(vendasDia, function (r) { return r.valor; });
   var entradas = FIN_CR.filter(function (r) { return r.status === 'recebido' && r.dataRecebimento === dtBR; });
-  var totEnt = entradas.reduce(function (s, r) { return s + r.valor; }, 0);
+  var totEntCents = sumCents(entradas, function (r) { return r.valor; });
   var saidas = FIN_CP.filter(function (c) { return c.status === 'pago' && c.dataPagamento === dtBR; });
-  var totSai = saidas.reduce(function (s, c) { return s + finCPValorNum(c); }, 0);
-  return { totVendas: totVendas, totEnt: totEnt, totSai: totSai };
+  var totSaiCents = sumCents(saidas, function (c) { return finCPValorNum(c); });
+  return { totVendas: centsToMoney(totVendasCents), totEnt: centsToMoney(totEntCents), totSai: centsToMoney(totSaiCents) };
 }
 function finCaixaAjustesDoDia(dtBR) {
   return FIN_CAIXA_AJUSTES.filter(function (a) { return a.data === dtBR; });
 }
 function finCaixaAjusteTotalDoDia(dtBR) {
-  return finCaixaAjustesDoDia(dtBR).reduce(function (s, a) { return s + a.valor; }, 0);
+  return centsToMoney(sumCents(finCaixaAjustesDoDia(dtBR), function (a) { return a.valor; }));
 }
 // Primeiro dia com QUALQUER atividade financeira real (venda/entrada/saída/
 // ajuste) — antes dele o Saldo Final é considerado 0 (não há dado).
@@ -17811,17 +17823,21 @@ function finCaixaSaldoFinal(dtBR) {
   if (!genesisISO) return 0;
   var alvoISO = finCaixaBRtoISO(dtBR);
   if (!alvoISO || alvoISO < genesisISO) return 0;
-  var saldo = 0;
+  // P0.2 — acumulador em CENTAVOS inteiros (nunca soma float encadeada):
+  // saldoFinalCents = saldoAnteriorCents + entradasCents - saidasCents +
+  // ajustesCents, dia após dia, desde o genesis. Convertido para R$
+  // somente no retorno.
+  var saldoCents = 0;
   var cursorISO = genesisISO;
   var guard = 0;
   while (cursorISO <= alvoISO && guard < 20000) {
     var cursorBR = finCaixaISOtoBR(cursorISO);
     var dia = finCaixaTotaisDoDia(cursorBR);
-    saldo += dia.totEnt - dia.totSai + finCaixaAjusteTotalDoDia(cursorBR);
+    saldoCents += moneyToCents(dia.totEnt) - moneyToCents(dia.totSai) + moneyToCents(finCaixaAjusteTotalDoDia(cursorBR));
     cursorISO = finCaixaAddDiaISO(cursorISO, 1);
     guard++;
   }
-  return saldo;
+  return centsToMoney(saldoCents);
 }
 // Caixa Anterior de `dtBR` = Saldo Final do dia anterior — nunca digitado.
 function finCaixaAnteriorAuto(dtBR) {
