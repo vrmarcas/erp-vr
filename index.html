@@ -2835,6 +2835,14 @@ function _authFirebaseError(code){
         <div class="card-h">
           <div class="card-h-left">📄 Todas as Ordens de Serviço <span id="osTableCount" style="font-size:11px;font-weight:500;color:var(--muted)"></span></div>
         </div>
+        <!-- SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.7 — KPIs no topo da própria
+             tela "Todas as OS" (a auditoria encontrou que só existia a
+             contagem da aba atual, #osTableCount, nunca um painel
+             consolidado). Acompanham o filtro de marca (fm), nunca a busca
+             textual nem a aba selecionada — sempre um retrato global. Saldo
+             a Receber lê de os.restante (kb_os_fin, mesclado só para
+             perfis autorizados — nunca kb_os puro) e some para Produção. -->
+        <div id="osKpiBar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px"></div>
         <!-- Bloco M (Sprint Pré-Go-Live, 2026-08-09) — 4 abas: Ativas / Prontas /
              Entregues Recentes / Histórico. Histórico é a fonte completa (nunca
              corta por tempo); Entregues Recentes é só um recorte de conveniência. -->
@@ -14658,6 +14666,48 @@ function osFiltrarPorAba(tab, list, agora) {
   return list.filter(function(os){ return _OS_ATIVOS_STATUS.indexOf(os.status) >= 0; });
 }
 
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.7 — 4 KPIs consolidados no topo de
+// "Todas as OS": OS Ativas, OS Prontas, Entregues Recentes, Saldo a
+// Receber. Acompanham o filtro de marca (documentado: fm), NUNCA a busca
+// textual nem a aba selecionada. Saldo a Receber usa exclusivamente
+// os.restante — campo financeiro que só chega a KB_OS via
+// _kbMergeFinCache() para perfis autorizados (nunca kb_os puro, nunca
+// lido por Produção) — e o próprio KPI é omitido por completo para a
+// role Produção, não apenas zerado.
+function osCalcularKPIs(fm) {
+  var mkNorm=function(m){return m==='VR Marcas'?'vr':m==='Vitre'?'vit':m;};
+  var todas = Object.values(KB_OS).filter(function(os){ return !fm || mkNorm(os.marca)===fm; });
+  var podeVerFinanceiro = !(typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='producao');
+  var saldoReais = null;
+  if (podeVerFinanceiro) {
+    var saldoCents = 0;
+    todas.forEach(function(os){
+      var restante = Number(os.restante);
+      if (isFinite(restante) && restante>0) saldoCents += (typeof moneyToCents==='function' ? moneyToCents(restante) : Math.round(restante*100));
+    });
+    saldoReais = (typeof centsToMoney==='function' ? centsToMoney(saldoCents) : saldoCents/100);
+  }
+  return {
+    ativas: osFiltrarPorAba('ativas', todas).length,
+    prontas: osFiltrarPorAba('prontas', todas).length,
+    recentes: osFiltrarPorAba('recentes', todas).length,
+    saldoReais: saldoReais
+  };
+}
+function osRenderKPIs() {
+  var wrap = document.getElementById('osKpiBar'); if (!wrap) return;
+  var fm=(document.getElementById('osFilterMarca')||{}).value||'';
+  var k = osCalcularKPIs(fm);
+  var card = function(label, val, color){
+    return '<div style="background:var(--bg2);border-radius:10px;padding:10px 12px;border-left:3px solid '+color+'">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px">'+label+'</div>'
+      + '<div style="font-size:18px;font-weight:900;color:'+color+'">'+val+'</div></div>';
+  };
+  wrap.innerHTML = card('🔧 OS Ativas', k.ativas, '#D97706')
+    + card('✅ OS Prontas', k.prontas, '#059669')
+    + card('📦 Entregues Recentes', k.recentes, '#1EB8D8')
+    + (k.saldoReais!==null ? card('💰 Saldo a Receber', 'R$ '+k.saldoReais.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}), '#983C8F') : '');
+}
 function osListTab(t, el) {
   _osListTab = t;
   ['Ativas','Prontas','Recentes','Historico'].forEach(function(k){
@@ -14675,6 +14725,7 @@ function osListTab(t, el) {
 
 function renderOsTable() {
   var tbody=document.getElementById('osTableBody'); if(!tbody) return;
+  osRenderKPIs();
   var tab = _osListTab || 'ativas';
   var q=(document.getElementById('osSearchInput')||{}).value||'';
   var fs=(tab==='ativas') ? ((document.getElementById('osFilterStatus')||{}).value||'') : '';
@@ -14685,7 +14736,11 @@ function renderOsTable() {
   var base = osFiltrarPorAba(tab, Object.values(KB_OS));
   var rows=base.filter(function(os){
     var mk=mkNorm(os.marca);
-    var _tit=os.titulo||os.prod||''; var txtOk=!q||(os.cliente+os.num+_tit).toLowerCase().includes(q.toLowerCase());
+    // P1.6 — busca no Histórico (e nas demais abas) agora também localiza
+    // pelo número do orçamento de origem (os.orcNum/os.orcRef), campos
+    // reais já gravados na OS (orcEnvGerarOS) — antes só cliente/OS/produto.
+    var _tit=os.titulo||os.prod||''; var _orcTxt=(os.orcNum!=null?String(os.orcNum):'')+(os.orcRef||'');
+    var txtOk=!q||(os.cliente+os.num+_tit+_orcTxt).toLowerCase().includes(q.toLowerCase());
     var stOk=!fs||os.status===fs;
     var mkOk=!fm||mk===fm;
     var dtOk=true;
