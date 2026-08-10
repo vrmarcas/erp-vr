@@ -11,6 +11,7 @@
  * Retorna { ctx, tokenKey } em caso de sucesso, ou null (já respondeu com erro).
  */
 
+import { randomUUID } from "crypto";
 import type { Request as FnRequest } from "express";
 import type { Response as FnResponse } from "express";
 import {
@@ -23,12 +24,47 @@ import { checkRateLimit } from "./ratelimit";
 import type { ConversationContext } from "./types";
 
 const CORS_ORIGIN = "https://app.chatvolt.ai";
+const API_LOG_COL = "valeria_api_log";
+
+/**
+ * Observabilidade (Fase 0/1): toda chamada autenticada ChatVolt → ERP gera
+ * um registro { requestId, conversationId, action, ts, resultado (HTTP),
+ * sucesso, latenciaMs }. NUNCA loga token, headers, corpo de mensagem ou
+ * qualquer conteúdo do cliente — só metadados técnicos. Fire-and-forget:
+ * falha de log jamais derruba a chamada de negócio.
+ */
+function attachApiLog(res: FnResponse, functionName: string, ctx: ConversationContext): string {
+  const requestId = randomUUID();
+  const inicio    = Date.now();
+  res.on("finish", () => {
+    void (async () => {
+      try {
+        const admin = await import("firebase-admin");
+        await admin.default.firestore().collection(API_LOG_COL).add({
+          requestId,
+          action:         functionName,
+          conversationId: ctx.conversationId,
+          agentId:        ctx.agentId,
+          organizationId: ctx.organizationId,
+          resultado:      res.statusCode,
+          sucesso:        res.statusCode >= 200 && res.statusCode < 400,
+          latenciaMs:     Date.now() - inicio,
+          ts:             inicio,
+          createdAt:      new Date(inicio).toISOString(),
+        });
+      } catch (e) {
+        console.error(`[api_log:${functionName}]`, (e as Error).message);
+      }
+    })();
+  });
+  return requestId;
+}
 
 export async function pipeline(
   req: FnRequest,
   res: FnResponse,
   functionName: string
-): Promise<{ ctx: ConversationContext; tokenKey: string } | null> {
+): Promise<{ ctx: ConversationContext; tokenKey: string; requestId: string } | null> {
   // CORS
   res.set("Access-Control-Allow-Origin",  CORS_ORIGIN);
   res.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, X-Idempotency-Key");
@@ -59,5 +95,8 @@ export async function pipeline(
   });
   if (!allowed) return null;
 
-  return { ctx, tokenKey };
+  // 5. Observabilidade — só chamadas autenticadas e autorizadas geram log
+  const requestId = attachApiLog(res, functionName, ctx);
+
+  return { ctx, tokenKey, requestId };
 }
