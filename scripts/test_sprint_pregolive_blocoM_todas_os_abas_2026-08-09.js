@@ -197,11 +197,17 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco M — "Todas as OS" em 4 abas + au
 {
   var srcRender = extractFn('renderOsTable');
   var srcFiltrar = extractFn('osFiltrarPorAba');
-  var CAMPOS_FIN_PROTEGIDOS = ['totalGeral', 'parcelas', 'formaPgto', 'pagtoTipo', 'valorEntrada', 'restante'];
+  // os.restante saiu da lista de "vazamento": a partir do hotfix de pagamento
+  // do saldo (P0.8), renderOsTable() passou a ler os.restante para decidir se
+  // mostra o botão "💰 Pagamento" — exatamente a mesma proteção de os.valor
+  // (ambos só chegam populados via _kbMergeFinCache(), que nunca roda para o
+  // papel Produção). Não é um novo vazamento, é o mesmo modelo de proteção
+  // aplicado a mais um campo já existente em kb_os_fin.
+  var CAMPOS_FIN_PROTEGIDOS = ['totalGeral', 'parcelas', 'formaPgto', 'pagtoTipo', 'valorEntrada'];
   var vazou = CAMPOS_FIN_PROTEGIDOS.filter(function(f) {
     return srcRender.indexOf('os.' + f) >= 0 || srcFiltrar.indexOf('os.' + f) >= 0;
   });
-  test('19. nem renderOsTable() nem osFiltrarPorAba() leem nenhum campo financeiro além de os.valor (já protegido pelo split kb_os_fin existente)',
+  test('19. nem renderOsTable() nem osFiltrarPorAba() leem campo financeiro sensível além de os.valor/os.restante (ambos protegidos pelo mesmo split kb_os_fin existente)',
     vazou, []);
 
   // Execução real: sem os.valor populado (cenário Produção — Rules nunca

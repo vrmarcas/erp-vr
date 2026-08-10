@@ -48,7 +48,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'kbReceberSaldo'];
+var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'kbReceberSaldo', 'orcCondicaoLabelPorTipo'];
 var COL = 'erp_vr';
 var src = [
   'var _orcPagtoId = null;',
