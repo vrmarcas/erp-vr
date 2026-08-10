@@ -22893,6 +22893,59 @@ function orcSalvarOrcamento() {
   _orcSalvarEmVoo = _orcSalvarOrcamentoImpl().finally(function(){ _orcSalvarEmVoo = null; });
   return _orcSalvarEmVoo;
 }
+// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — decide se editar o valor de um
+// orçamento já existente precisa virar uma REVISÃO explícita (nunca
+// sobrescrever silenciosamente um orçamento aprovado/com CR). Pura: recebe
+// os valores já em CENTAVOS (evita erro de ponto flutuante na comparação)
+// e o "recebido" já calculado pelo chamador (relFiscalRecebidoDoOrc), para
+// poder ser testada sem DOM/Firestore.
+function orcAvaliarRevisaoFinanceira(orcExistente, valorFinalNovoCents, recebidoCents) {
+  if (!orcExistente) return { precisaRevisao: false };
+  var temExposicaoFinanceira = orcExistente.status === 'aprovado' || !!orcExistente.crId;
+  if (!temExposicaoFinanceira) return { precisaRevisao: false };
+  var _fmtCents = function(cents){ return (cents/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var valorFinalAnteriorCents = Math.round((orcExistente.valorFinal || 0) * 100);
+  if (valorFinalNovoCents === valorFinalAnteriorCents) return { precisaRevisao: false };
+  var saldoAnteriorCents = valorFinalAnteriorCents - recebidoCents;
+  var saldoNovoCents = valorFinalNovoCents - recebidoCents;
+  if (saldoNovoCents < 0) {
+    return {
+      precisaRevisao: true, bloqueado: true,
+      motivoBloqueio: 'O valor já recebido (R$ ' + _fmtCents(recebidoCents) + ') é maior que o novo total (R$ ' + _fmtCents(valorFinalNovoCents) + '). Ajuste o valor ou trate o excedente manualmente antes de revisar este orçamento.',
+      recebidoCents: recebidoCents, saldoAnteriorCents: saldoAnteriorCents, valorFinalAnteriorCents: valorFinalAnteriorCents
+    };
+  }
+  return {
+    precisaRevisao: true, bloqueado: false,
+    recebidoCents: recebidoCents,
+    saldoAnteriorCents: saldoAnteriorCents,
+    saldoNovoCents: saldoNovoCents,
+    valorFinalAnteriorCents: valorFinalAnteriorCents
+  };
+}
+// Histórico de revisões (P0.1) — orc.versoes[] deixa de ser trilha morta:
+// renderiza cada entrada gravada por _orcSalvarOrcamentoImpl para exibição
+// no detalhe do orçamento (orcEnvAbrir). Somente leitura.
+function orcRenderHistoricoRevisoesHtml(versoes) {
+  if (!versoes || !versoes.length) return '';
+  var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var linhas = versoes.slice().reverse().map(function(v){
+    var dt = v.ts ? new Date(v.ts).toLocaleString('pt-BR') : '—';
+    var isRevisao = v.acao === 'revisao_financeira';
+    var titulo = isRevisao ? '💰 Revisão financeira' : 'Atualização';
+    var detalhe = '<div style="font-size:11px;color:var(--muted)">'+dt+' · '+(v.usuario||'—')+'</div>'
+      + '<div style="font-size:11px;margin-top:2px">Valor anterior: <strong>'+fmtV(v.valorFinalAnterior)+'</strong></div>';
+    if (isRevisao) {
+      detalhe += '<div style="font-size:11px">Recebido no momento: '+fmtV((v.recebidoNoMomento||0))+'</div>'
+        + '<div style="font-size:11px">Saldo anterior → novo: '+fmtV(v.saldoAnterior)+' → '+fmtV(v.saldoNovo)+'</div>'
+        + (v.motivo ? '<div style="font-size:11px;font-style:italic">Motivo: '+v.motivo+'</div>' : '');
+    }
+    return '<div style="padding:8px;border-left:3px solid var(--border);margin-bottom:6px;background:var(--bg2);border-radius:0 6px 6px 0">'
+      + '<div style="font-size:11px;font-weight:800">'+titulo+'</div>' + detalhe + '</div>';
+  }).join('');
+  return '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;font-weight:800;color:var(--muted)">📜 Histórico de revisões ('+versoes.length+')</summary>'
+    + '<div style="margin-top:8px">' + linhas + '</div></details>';
+}
 async function _orcSalvarOrcamentoImpl() {
   var c = window._orcCalc||{};
   if(!c.finalPrice){ showToast('Calcule o orçamento (Passo 3) antes de salvar','warn'); return null; }
@@ -22927,6 +22980,31 @@ async function _orcSalvarOrcamentoImpl() {
   // sempre descontado, mesmo quando o cliente nem escolheu pagar via PIX).
   var baseAposCondSalvar = dcOn ? c.finalPrice*(1-dcPct/100) : (c.finalPrice||0);
   var afterDisc = orcMotorComercial(baseAposCondSalvar, {}).baseCents/100;
+  // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — nunca sobrescrever
+  // silenciosamente o valor de um orçamento já aprovado/com CR criado.
+  // Ver orcAvaliarRevisaoFinanceira(). orcExistente já foi resolvido acima.
+  var _revisaoFin = null;
+  if (orcExistente) {
+    var _valorNovoCents = Math.round(afterDisc * 100);
+    var _recebidoCents = Math.round((typeof relFiscalRecebidoDoOrc === 'function' ? relFiscalRecebidoDoOrc(orcExistente) : 0) * 100);
+    _revisaoFin = orcAvaliarRevisaoFinanceira(orcExistente, _valorNovoCents, _recebidoCents);
+    if (_revisaoFin.precisaRevisao) {
+      if (_revisaoFin.bloqueado) {
+        showToast(_revisaoFin.motivoBloqueio, 'err');
+        return null;
+      }
+      var _fmtR$ = function(v){ return v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var _msgConf = 'Este orçamento já foi aprovado' + (_revisaoFin.recebidoCents>0 ? ' e tem R$ '+_fmtR$(_revisaoFin.recebidoCents/100)+' já recebido' : '') + '.\n\n'
+        + 'Valor anterior: R$ ' + _fmtR$(_revisaoFin.valorFinalAnteriorCents/100) + '\n'
+        + 'Valor novo: R$ ' + _fmtR$(afterDisc) + '\n'
+        + 'Novo saldo a receber: R$ ' + _fmtR$(_revisaoFin.saldoNovoCents/100) + '\n\n'
+        + 'Isso vai criar uma REVISÃO explícita — o valor anterior fica preservado no histórico e o CR/pagamento já recebido NUNCA é recriado ou duplicado. Confirmar revisão?';
+      if (!confirm(_msgConf)) return null;
+      var _motivoRevisao = prompt('Motivo da revisão de valor (obrigatório):', '');
+      if (!_motivoRevisao || !_motivoRevisao.trim()) { showToast('Motivo obrigatório para revisar valor de um orçamento já aprovado.','warn'); return null; }
+      _revisaoFin.motivo = _motivoRevisao.trim();
+    }
+  }
   // Snapshot COMPLETO de itens — chave real do material (matKey) + área/
   // extras planificados + extras por item (ORC_ITEM_EXTRAS), não só os
   // campos exibidos em tela.
@@ -23084,10 +23162,28 @@ async function _orcSalvarOrcamentoImpl() {
     // Atualização in-place — preserva vínculos operacionais já gravados
     // (OS/Contas a Receber) e arquiva o estado anterior no histórico.
     orc.osRef = orcExistente.osRef; orc.crId = orcExistente.crId;
-    orc.versoes = orc.versoes.concat([{
-      ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'atualizacao',
-      valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase
-    }]);
+    if (_revisaoFin && _revisaoFin.precisaRevisao) {
+      // P0.1 — revisão financeira explícita: nunca sobrescreve o CR já
+      // criado (ele continua intacto, com o valor/recebimento originais —
+      // só o orçamento passa a refletir o novo total/saldo). Se ainda não
+      // existe OS gerada, volta para 'aguardando' para exigir nova
+      // aprovação comercial; se já existe OS, mantém o status (o pedido já
+      // está em produção/entrega — a OS técnica não é tocada aqui).
+      orc.versoes = orc.versoes.concat([{
+        ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'revisao_financeira',
+        valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase,
+        recebidoNoMomento: _revisaoFin.recebidoCents/100,
+        saldoAnterior: _revisaoFin.saldoAnteriorCents/100,
+        saldoNovo: _revisaoFin.saldoNovoCents/100,
+        motivo: _revisaoFin.motivo||''
+      }]);
+      if (!orc.osRef) orc.status = 'aguardando';
+    } else {
+      orc.versoes = orc.versoes.concat([{
+        ts: Date.now(), usuario: (_currentSession&&_currentSession.email)||'—', acao: 'atualizacao',
+        valorFinalAnterior: orcExistente.valorFinal, valorBaseAnterior: orcExistente.valorBase
+      }]);
+    }
     lista[orcExistenteIdx] = orc;
   } else {
     lista.unshift(orc);
@@ -23559,6 +23655,7 @@ function orcEnvAbrir(id) {
     +(o.valorFinal<o.valorBase?'<div style="font-size:10px;color:var(--muted)">Valor base: '+fmtVal(o.valorBase)+'</div>':'')
     +breakHtml
     +'</div>'
+    +orcRenderHistoricoRevisoesHtml(o.versoes)
     +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
     +'<button class="topbar-btn ghost" onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'">Fechar</button>'
     +'<button class="topbar-btn ghost" style="color:#983C8F;border-color:#983C8F" onclick="orcEnvEditar(\''+ o.id +'\')" >✏️ Editar</button>'
