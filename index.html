@@ -3301,10 +3301,8 @@ function _authFirebaseError(code){
                 <button id="orcBtnSalvar" class="topbar-btn" style="font-size:11px;color:#fff;background:var(--brand-mid);border-color:var(--brand-mid);font-weight:700" onclick="(function(btn){ var done=_btnBusy(btn,'Salvando…'); orcSalvarOrcamento().finally(function(){ if(done) done(); }); })(this)">💾 Salvar Orçamento</button>
                 <button id="orcBtnWA" class="topbar-btn" style="background:#25D366;color:#fff;font-size:11px;font-weight:700" onclick="_btnBusy(this,'Enviando…',6000); orcEnviarOrcamentoWA()">📱 WhatsApp</button>
                 <button id="orcBtnPDF" class="topbar-btn" style="font-size:11px;background:#059669;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); orcImprimirOrcamentoPDF()">📄 Imprimir PDF</button>
-                <button id="orcBtnEmail" class="topbar-btn ghost" style="font-size:11px" onclick="showToast('E-mail enviado com orçamento em PDF!','ok')">📧 E-mail</button>
-                <button id="orcBtnLinkPgto" class="topbar-btn ghost" style="font-size:11px;color:#1EB8D8;border-color:#1EB8D8" onclick="_btnBusy(this,'Gerando…',6000); orcGerarLinkPagamento()">🔗 Link Pgto</button>
               </div>
-              <div id="orcEnvioAvisoSalvar" style="font-size:10px;color:#B45309;margin-top:7px;font-weight:700">Salve o orçamento para liberar WhatsApp, PDF, E-mail e Link de Pagamento.</div>
+              <div id="orcEnvioAvisoSalvar" style="font-size:10px;color:#B45309;margin-top:7px;font-weight:700">Salve o orçamento para liberar WhatsApp e PDF.</div>
               <div id="orcEnvioAvisoOk" style="font-size:10px;color:var(--muted);margin-top:7px;display:none">Orçamento salvo — envie ao cliente antes de confirmar o pagamento.</div>
             </div>
 
@@ -3464,15 +3462,16 @@ function _authFirebaseError(code){
                   <div id="orcEntradaResto" style="padding:8px 10px;background:var(--bg2);border-radius:7px;font-size:13px;font-weight:700;color:#D97706">R$ —</div>
                 </div>
               </div>
-              <!-- Corrigido 2026-08-07 (Rodada 2, P0.3) — este botão só gera
-                   o recibo de verdade se já existir um pagamento de entrada
-                   CONFIRMADO (OS gerada com valorEntrada>0 via "Confirmar
-                   Pagamento e Gerar OS"); o campo acima é só uma simulação
-                   para conferir o saldo antes de confirmar. -->
-              <button class="topbar-btn" style="width:100%;background:#D97706;font-size:12px;padding:9px;justify-content:center" onclick="orcGerarReciboEntrada()">
-                🖨️ Gerar Recibo de Entrada
-              </button>
-              <div style="font-size:10px;color:var(--muted);margin-top:6px">O recibo só é liberado depois que o pagamento de entrada for confirmado em "Confirmar Pagamento e Gerar OS" (Orçamentos Enviados).</div>
+              <!-- GO-LIVE 2026-08-11, seção 9 — botão "Gerar Recibo de
+                   Entrada" removido desta tela (pré-confirmação): não faz
+                   sentido gerar recibo antes do pagamento existir de
+                   verdade. O campo acima continua só como simulação de
+                   saldo (orcCalcEntradaResto). O recibo real passou a
+                   viver exclusivamente no modal de sucesso pós-pagamento
+                   (orcPagtoSucessoModal) e no detalhe do orçamento salvo
+                   (Orçamentos Enviados → 🧾 Recibo de Entrada), ambos já
+                   gated por orcObterConfirmacaoEntrada() — nunca a partir
+                   de um valor solto na tela. -->
             </div>
 
             <button id="orcBtnConfirmar" class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcConfirmarPagtoWizard()">
@@ -8538,14 +8537,15 @@ function orcStep(n) {
 }
 
 // RODADA 2, P0.2 — antes do 1º salvamento o único botão ativo na etapa
-// "Envio ao Cliente" é Salvar Orçamento; WhatsApp/PDF/E-mail/Link de
-// Pagamento ficam desabilitados (nunca disparam envio de um orçamento
-// que não existe ainda no Firestore). Depois que window._orcSessaoAtualId
-// é atribuído (1º save bem-sucedido, ver _orcSalvarOrcamentoImpl), os
-// canais são liberados e continuam liberados nas edições seguintes.
+// "Envio ao Cliente" é Salvar Orçamento; WhatsApp/PDF ficam desabilitados
+// (nunca disparam envio de um orçamento que não existe ainda no
+// Firestore). Depois que window._orcSessaoAtualId é atribuído (1º save
+// bem-sucedido, ver _orcSalvarOrcamentoImpl), os canais são liberados e
+// continuam liberados nas edições seguintes. GO-LIVE 2026-08-11 seção 6 —
+// E-mail/Link Pgto removidos da lista (botões não existem mais).
 function _orcAtualizarVisibilidadeEnvio() {
   var salvo = !!window._orcSessaoAtualId;
-  ['orcBtnWA','orcBtnPDF','orcBtnEmail','orcBtnLinkPgto'].forEach(function(id){
+  ['orcBtnWA','orcBtnPDF'].forEach(function(id){
     var btn = document.getElementById(id);
     if(!btn) return;
     btn.disabled = !salvo;
@@ -10889,45 +10889,10 @@ function orcGetItemExtrasTotal(){
   },0);
 }
 
-function orcGerarLinkPagamento(){
-  var c2=window._orcCalc||{};
-  if(!c2.finalPrice){ showToast('Calcule o orçamento primeiro (Passo 3)','warn'); return; }
-  var nome=(document.getElementById('orcClientNome')||{}).value||'cliente';
-  var tel =(document.getElementById('orcClientTel')||{}).value||'';
-  var marca=document.body.classList.contains('vitre')?'Vitre':'VR Marcas';
-  var valor=c2.finalPrice||0;
-  var valorFmt='R$ '+valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  // Get PIX key from bank config (empresa selecionada no orçamento)
-  var _orcEmp = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
-  var _orcBanco = orcGetBancoPrincipal ? orcGetBancoPrincipal(_orcEmp) : null;
-  var pixKey = (_orcBanco && (_orcBanco.pix||_orcBanco.chavePix)) || '';
-  // Fallback: chave exibida no box
-  if(!pixKey){ var _pixEl=document.getElementById('orcPixChave'); if(_pixEl&&_pixEl.textContent&&_pixEl.textContent.indexOf('Cadastre')<0) pixKey=_pixEl.textContent.trim(); }
-  var pixInfo=pixKey?('\n\n💠 *Chave PIX:* '+pixKey):'';
-  var items=[];
-  document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
-    var ri=row.dataset.idx;
-    var p=(document.getElementById('oi_prod_'+ri)||{}).value||'';
-    var q=(document.getElementById('oi_qty_'+ri)||{}).value||'1';
-    if(p) items.push(q+'× '+p);
-  });
-  var msg='Olá, *'+nome+'*! 👋\n\n'
-    +'Segue seu orçamento da *'+marca+'*:\n\n'
-    +(items.length?'📦 *Pedido:*\n'+items.map(function(i){return '• '+i;}).join('\n')+'\n\n':'')
-    +'💰 *Valor Total: '+valorFmt+'*'
-    +pixInfo
-    +'\n\n✅ Para confirmar, basta efetuar o pagamento e enviar o comprovante por aqui.\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
-  var telNum=tel.replace(/\D/g,'');
-  var url='https://wa.me/'+(telNum?'55'+telNum:'')+'?text='+encodeURIComponent(msg);
-  window.open(url,'_blank');
-  // Also copy PIX key to clipboard if available
-  if(pixKey){
-    try{ navigator.clipboard.writeText(pixKey).then(function(){ showToast('Chave PIX copiada e mensagem WhatsApp aberta!','ok'); }); }
-    catch(e){ showToast('Mensagem WhatsApp aberta!','ok'); }
-  } else {
-    showToast('Mensagem WhatsApp com link de pagamento aberta!','ok');
-  }
-}
+// GO-LIVE 2026-08-11, seção 6 — orcGerarLinkPagamento() removida por
+// completo (era chamada só pelo botão "Link Pgto", removido junto com
+// "E-mail" da tela Enviar Orçamento ao Cliente — nenhuma integração real
+// de e-mail/link de pagamento existia, ambos só simulavam sucesso).
 
 function orcSoCorteChange(){
   var on = !!(document.getElementById('orcSoCorte')?.checked);
@@ -20991,7 +20956,19 @@ function orcResetFormularioVR(){
   if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
 }
 function orcIniciarFluxoVR() {
-  if(orcVRTemDadosPendentes() && !_e2eDlgConfirm('Os dados deste orçamento ainda não foram salvos. Iniciar um novo orçamento agora vai descartá-los. Continuar?')) return;
+  // GO-LIVE 2026-08-11, seção 4 — modal real com opção de salvar antes de
+  // descartar (substituiu o window.confirm() só-descarta/cancela). Em
+  // modo E2E (_e2eDlgQueue ativa) mantém o comportamento antigo síncrono
+  // via _e2eDlgConfirm, para não quebrar cenários E2E existentes que não
+  // sabem lidar com o modal assíncrono.
+  if(orcVRTemDadosPendentes()){
+    if(typeof _e2eDlgQueue!=='undefined' && _e2eDlgQueue && _e2eDlgQueue.length){
+      if(!_e2eDlgConfirm('Os dados deste orçamento ainda não foram salvos. Iniciar um novo orçamento agora vai descartá-los. Continuar?')) return;
+    } else {
+      orcNovoOrcamentoModal();
+      return;
+    }
+  }
   orcResetFormularioVR();
   ORC_TIPO = null; orcStep(1);
 }
@@ -23675,6 +23652,45 @@ function orcRascunhoEscolherDescartar(){
   window._orcRascunhoPendente = null;
 }
 
+// GO-LIVE 2026-08-11, seção 4 — segundo modal: dados NÃO salvos digitados
+// agora na tela (orcVRTemDadosPendentes()) e o operador clicou em "Novo
+// Orçamento" — antes só existia window.confirm() nativo (OK=descarta,
+// Cancelar=continua), sem opção de salvar o que já foi preenchido.
+function orcNovoOrcamentoFecharModal(){
+  var el = document.getElementById('orcNovoOrcModal');
+  if(el) el.remove();
+}
+function orcNovoOrcamentoModal(){
+  orcNovoOrcamentoFecharModal();
+  var html = ''
+    +'<div id="orcNovoOrcModal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center">'
+    +'<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:360px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">Você possui um orçamento ainda não salvo</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:14px">O que deseja fazer com os dados preenchidos na tela?</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'
+    +'<button onclick="orcNovoOrcamentoEscolherSalvar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">Salvar e iniciar novo</button>'
+    +'<button onclick="orcNovoOrcamentoFecharModal()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Continuar editando</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">Descartar e iniciar novo</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+function orcNovoOrcamentoEscolherSalvar(){
+  orcNovoOrcamentoFecharModal();
+  var done = (typeof _btnBusy==='function') ? null : null;
+  orcSalvarOrcamento().then(function(res){
+    if(res && res.ok !== false){
+      orcResetFormularioVR(); ORC_TIPO = null; orcStep(1);
+      if(typeof showToast==='function') showToast('Orçamento salvo — novo orçamento iniciado','ok');
+    }
+    // res falho: orcSalvarOrcamento() já mostrou o toast de erro — o
+    // operador continua na tela com os dados intactos, nunca perde nada.
+  });
+}
+function orcNovoOrcamentoEscolherDescartar(){
+  orcNovoOrcamentoFecharModal();
+  orcResetFormularioVR(); ORC_TIPO = null; orcStep(1);
+}
+
 // Achado real: o <select> de Validade (passo 1) nunca teve id — PDF e
 // WhatsApp sempre mostravam "10 dias" fixo, não importa o que o usuário
 // selecionasse ali. Fonte única agora usada pelos dois.
@@ -24946,6 +24962,44 @@ function orcPagtoTipoSel(btn){
 // interface — orcEnvConfirmarPgto() já barra o formulário quando
 // o.osRef existe (ver acima), e o botão fica desabilitado durante a
 // operação; (2) dados — a criação da OS + atualização do orçamento +
+// GO-LIVE 2026-08-11, seção 10 — modal de sucesso real pós-pagamento/OS,
+// substitui o toast + navegação automática ao Kanban de antes.
+function orcPagtoSucessoFechar(){
+  var el = document.getElementById('orcPagtoSucessoModal');
+  if(el) el.remove();
+}
+function orcPagtoSucessoModal(o, osId, osNum){
+  orcPagtoSucessoFechar();
+  var html = ''
+    +'<div id="orcPagtoSucessoModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10001;display:flex;align-items:center;justify-content:center">'
+    +'<div style="background:var(--surface);border-radius:16px;padding:26px;max-width:380px;width:92%;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center">'
+    +'<div style="font-size:36px;margin-bottom:8px">🎉</div>'
+    +'<div style="font-size:13px;color:#059669;font-weight:800;margin-bottom:2px">✅ Pagamento registrado</div>'
+    +'<div style="font-size:13px;color:#059669;font-weight:800;margin-bottom:14px">✅ OS #'+cfgEsc(String(osNum))+' criada</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Orçamento <strong>#'+cfgEsc(String(o.num))+'</strong> · '+cfgEsc(o.cliente||'Cliente')+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;text-align:left">'
+    +'<button onclick="orcGerarReciboEntrada(\''+o.id+'\')" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">🖨️ Gerar Recibo de Entrada</button>'
+    +'<button onclick="orcPagtoSucessoFechar(); nav(\'kanban\'); setTimeout(function(){ if(typeof kbOpen===\'function\') kbOpen(\''+osId+'\'); },300);" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">📋 Ver OS</button>'
+    +'<button onclick="orcPagtoSucessoFechar(); nav(\'kanban\');" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">🏭 Abrir no Kanban</button>'
+    +'<button onclick="orcPagtoSucessoWhatsApp(\''+o.id+'\')" style="padding:10px;border:none;border-radius:8px;background:#25D366;color:#fff;font-weight:700;font-size:12px;cursor:pointer">💬 Enviar via WhatsApp</button>'
+    +'<button onclick="orcPagtoSucessoFechar(); if(typeof orcIniciarFluxoVR===\'function\') orcIniciarFluxoVR();" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">➕ Novo Orçamento</button>'
+    +'<button onclick="orcPagtoSucessoFechar(); nav(\'kanban\'); setTimeout(function(){ if(typeof kbOpen===\'function\') kbOpen(\''+osId+'\'); },300); showToast(\'Defina o prazo de entrega na OS aberta\',\'info\');" style="padding:10px;border:none;border-radius:8px;background:transparent;color:var(--muted);font-weight:700;font-size:11px;cursor:pointer">📅 Definir prazo de entrega</button>'
+    +'</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+// Mensagem simples de confirmação — não reaproveita orcEnviarOrcamentoWA()
+// (lê estado do wizard, que pode não estar mais na tela neste ponto do
+// fluxo — este disparo vem sempre do registro já persistido em `o`).
+function orcPagtoSucessoWhatsApp(orcId){
+  var lista = orcGetEnviados();
+  var o = lista.find(function(x){ return x.id===orcId; });
+  if(!o){ showToast('Orçamento não encontrado','warn'); return; }
+  var marca = o.marca==='vitre' ? 'Vitre' : 'VR Marcas';
+  var msg = 'Olá, *'+(o.cliente||'cliente')+'*! 👋\n\nSeu pagamento foi confirmado e a produção do seu pedido na *'+marca+'* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
+  var telNum = (o.tel||'').replace(/\D/g,'');
+  window.open('https://wa.me/'+(telNum?'55'+telNum:'')+'?text='+encodeURIComponent(msg), '_blank');
+}
+
 // lançamento financeiro + contador agora rodam dentro de UMA transação
 // Firestore que RELÊ os documentos diretamente do banco e recusa
 // prosseguir se já existir osRef ou qualquer OS vinculada a este
@@ -25046,8 +25100,13 @@ function orcEnvGerarOS(){
     try{kbRender();}catch(e){}
     var pm3=document.getElementById('orcPagtoModal'); if(pm3) pm3.style.display='none';
     orcEnviadosRender();
-    showToast('OS #'+dados.num+' criada no Kanban! 🎉','ok');
-    setTimeout(function(){ nav('kanban'); },800);
+    // GO-LIVE 2026-08-11, seção 10 — antes só mostrava um toast e navegava
+    // sozinho pro Kanban depois de 800ms; agora abre o modal de sucesso
+    // real com as ações pedidas (Recibo/Ver OS/Kanban/WhatsApp/Novo
+    // Orçamento/Definir Prazo), sem navegar sozinho.
+    var osId = dados.osId || _newIdCaptured || o.osRef;
+    if(typeof orcPagtoSucessoModal==='function') orcPagtoSucessoModal(o, osId, dados.num);
+    else showToast('OS #'+dados.num+' criada no Kanban! 🎉','ok');
   }
 
   if(!(typeof _db!=='undefined' && _db && typeof _db.runTransaction==='function')){
@@ -25089,7 +25148,7 @@ function orcEnvGerarOS(){
       // ficava "recebida" no CR mas invisível no Caixa).
       if(typeof FIN_TX!=='undefined') FIN_TX.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:String(nLocal),marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
     }
-    finalizar(true, {num:nLocal});
+    finalizar(true, {num:nLocal, osId:newIdLocal});
     return;
   }
 
