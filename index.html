@@ -11453,6 +11453,62 @@ function crmSaveLeads() {
   return _cloudSave('crm_leads', CRM_LEADS);
 }
 
+// GO-LIVE 2026-08-11, seção 25-26 — todo orçamento REAL salvo deve
+// conversar automaticamente com o Funil Comercial, criando OU
+// atualizando a MESMA oportunidade (nunca duplicar). Chave de vínculo
+// estável: orc.crmLeadId (gravado de volta no próprio orçamento, ver
+// chamador em _orcSalvarOrcamentoImpl). Substitui o dedupe antigo por
+// nome+marca (frágil: bloqueava um 2º orçamento legítimo do mesmo
+// cliente, e nunca atualizava o card numa edição). isTest nunca cria
+// lead aqui (mesmo filtro canônico usado no resto do KPI/CRM).
+function crmUpsertLeadPorOrcamento(orc, num) {
+  if (!orc || _isTestRecord(orc)) return false;
+  var nome = orc.cliente;
+  if (!nome || nome === '(não informado)') return false;
+  var criouAgora = false;
+  var lid = orc.crmLeadId;
+  if (!lid || !CRM_LEADS[lid]) {
+    lid = 'orc_' + (++crmLeadIdCounter);
+    orc.crmLeadId = lid;
+    criouAgora = true;
+  }
+  var existente = CRM_LEADS[lid];
+  // Nunca sobrescreve uma etapa mais avançada (ex.: já 'fechado' por
+  // orcEnvGerarOS) com 'orc_emitido' só porque o vendedor reabriu e
+  // salvou o mesmo orçamento de novo.
+  var etapaAtual = (existente && existente.etapa) || 'orc_emitido';
+  CRM_LEADS[lid] = {
+    nome: nome, tipo: orc.marca==='vr'?'B2B':'B2C', marca: orc.marca,
+    sub: 'ORC-'+num+' · '+(orc.produto||''),
+    contato: nome, tel: orc.tel||'—', email: orc.email||'—',
+    temp: (existente && existente.temp) || 'quente',
+    score: (existente && existente.score) || 65,
+    resumo_ia: 'Orçamento #'+num+' — '+(existente?'atualizado':'emitido')+' pelo ERP.',
+    valor_potencial: 'R$ '+orcFmt(orc.valorFinal||orc.valorBase||0),
+    cor: (existente && existente.cor) || '#FCA5A5',
+    origem: 'orcamento', etapa: etapaAtual, tempo: 'agora',
+    dores: orc.produto?[orc.produto]:[],
+    intencao: {produto:orc.produto||'—', material:'—', medidas:'—', quantidade:'—'},
+    orcamentoId: orc.id, clienteId: orc.clienteId || null
+  };
+  if (typeof crmSaveLeads === 'function') crmSaveLeads();
+  try { if (document.getElementById('pg-crm') && document.getElementById('pg-crm').style.display!=='none') crmSetBrand(crmActiveBrand||'vr'); } catch(ex) {}
+  return criouAgora;
+}
+// Avança a oportunidade para 'fechado' quando pagamento é confirmado e a
+// OS é gerada de verdade (orcEnvGerarOS) — nunca criada do zero aqui
+// (só avança um lead que já existe; se por algum motivo não existir
+// ainda, cria via crmUpsertLeadPorOrcamento com etapa já 'fechado').
+function crmMarcarOrcamentoFechado(orc, num) {
+  if (!orc || _isTestRecord(orc)) return;
+  var criou = (typeof crmUpsertLeadPorOrcamento === 'function') ? crmUpsertLeadPorOrcamento(orc, num) : false;
+  if (orc.crmLeadId && CRM_LEADS[orc.crmLeadId]) {
+    CRM_LEADS[orc.crmLeadId].etapa = 'fechado';
+    if (typeof crmSaveLeads === 'function') crmSaveLeads();
+  }
+  return criou;
+}
+
 function crmOpenCard(id) {
   const d = CRM_LEADS[id]; if(!d) return;
   window._crmCurrentId = id;
@@ -24240,32 +24296,15 @@ async function _orcSalvarOrcamentoImpl() {
   orcLinkClienteOrcamento(orc);
   // Auto-cadastra cliente se ainda não existir
   orcAutoSalvarCliente(orc);
-  // Auto-cria lead no CRM com etapa 'orc_emitido' (se ainda não existir para este cliente/marca)
-  (function(){
-    var _marcaOrc = orc.marca;
-    var _nomeOrc  = orc.cliente;
-    if(!_nomeOrc || _nomeOrc==='(não informado)') return;
-    var _jaExiste = Object.keys(CRM_LEADS).some(function(k){
-      var l=CRM_LEADS[k];
-      return l && l.nome && l.nome.toLowerCase()===_nomeOrc.toLowerCase() && l.marca===_marcaOrc;
-    });
-    if(!_jaExiste) {
-      var _lid = 'orc_' + (++crmLeadIdCounter);
-      CRM_LEADS[_lid] = {
-        nome:_nomeOrc, tipo:_marcaOrc==='vr'?'B2B':'B2C', marca:_marcaOrc,
-        sub:'ORC-'+num+' · '+orc.produto,
-        contato:_nomeOrc, tel:orc.tel||'—', email:orc.email||'—',
-        temp:'quente', score:65,
-        resumo_ia:'Orçamento #'+num+' emitido pelo ERP.',
-        valor_potencial:'R$ '+orcFmt(orc.valorFinal||orc.valorBase||0),
-        cor:'#FCA5A5', origem:'orcamento', etapa:'orc_emitido', tempo:'agora',
-        dores:orc.produto?[orc.produto]:[],
-        intencao:{produto:orc.produto||'—',material:'—',medidas:'—',quantidade:'—'}
-      };
-      if(typeof crmSaveLeads==='function') crmSaveLeads();
-      try{ if(document.getElementById('pg-crm')&&document.getElementById('pg-crm').style.display!=='none') crmSetBrand(crmActiveBrand||'vr'); }catch(ex){}
-    }
-  })();
+  // GO-LIVE 2026-08-11, seção 25-26 — substituído o bloco antigo (dedupe
+  // frágil por nome+marca, sem chave de vínculo, sem atualizar o card em
+  // edições seguintes) por crmUpsertLeadPorOrcamento(): cria 1 vez, grava
+  // orc.crmLeadId, e nas próximas chamadas SEMPRE atualiza o MESMO card
+  // (nunca duplica, nunca fica congelado no snapshot da 1ª gravação).
+  if (typeof crmUpsertLeadPorOrcamento === 'function') {
+    var _crmLeadCriadoAgora = crmUpsertLeadPorOrcamento(orc, num);
+    if (_crmLeadCriadoAgora) orcSetEnviados(lista); // persiste orc.crmLeadId gravado no upsert
+  }
   if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
   showToast((orcExistente?'Orçamento #'+num+' atualizado!':'Orçamento #'+num+' salvo!')+' Veja em "Orçamentos Enviados".','ok');
   if(!orcExistente){
@@ -25271,6 +25310,9 @@ function orcEnvGerarOS(){
       return;
     }
     try{kbRender();}catch(e){}
+    // GO-LIVE 2026-08-11, seção 25-26 — pagamento confirmado + OS gerada
+    // avança a oportunidade do Funil Comercial para "Fechado".
+    if (typeof crmMarcarOrcamentoFechado === 'function') { try { crmMarcarOrcamentoFechado(o, o.num); } catch(eCrm) {} }
     var pm3=document.getElementById('orcPagtoModal'); if(pm3) pm3.style.display='none';
     orcEnviadosRender();
     // GO-LIVE 2026-08-11, seção 10 — antes só mostrava um toast e navegava
