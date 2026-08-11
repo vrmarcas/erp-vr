@@ -13084,22 +13084,72 @@ function kbCalcAreaOS(os) {
   return total; // m²
 }
 function kbParseDimsArea(dimsStr) {
+  var d = kbParseDimsWH(dimsStr);
+  return d ? (d.w * d.h) / 10000 : 0; // cm → m²
+}
+// GO-LIVE 2026-08-11, P0 seção 19 — extrai largura×altura separadas (não
+// só a área) para permitir checagem geométrica real, e não apenas m².
+function kbParseDimsWH(dimsStr) {
   var m = String(dimsStr || '').match(/(\d+(?:[.,]\d+)?)\s*[×xX]\s*(\d+(?:[.,]\d+)?)/);
-  if (!m) return 0;
-  var w = parseFloat(m[1].replace(',', '.')), h = parseFloat(m[2].replace(',', '.'));
-  return (w * h) / 10000; // cm → m²
+  if (!m) return null;
+  return { w: parseFloat(m[1].replace(',', '.')), h: parseFloat(m[2].replace(',', '.')) };
+}
+// GO-LIVE 2026-08-11, P0 seção 19 — margem de segurança de corte,
+// configurável (Config → Produção), começando com +5cm por padrão
+// quando aplicável à peça necessária — nunca hardcoded para sempre.
+function kbMargemSegurancaRetalhoCm() {
+  try {
+    var cfg = (typeof cfgLoad === 'function') ? cfgLoad() : null;
+    var v = cfg && cfg.producao && cfg.producao.margemSegurancaRetalhoCm;
+    return (v != null && !isNaN(v)) ? parseFloat(v) : 5;
+  } catch (e) { return 5; }
+}
+// GO-LIVE 2026-08-11, P0 seção 19 — checagem geométrica real (largura×
+// altura da peça necessária, com margem de segurança, cabendo dentro das
+// dimensões do retalho — nas duas orientações, já que a peça pode ser
+// girada 90°) quando a OS tem dimensões de peça conhecidas (item único
+// com planLarg/planAlt ou larg/alt); cai para comparação por área (como
+// antes) quando a OS tem múltiplos itens/peças e não dá pra isolar uma
+// única dimensão necessária de forma segura — nunca finge certeza que
+// não tem.
+function kbNecessidadeDimsOS(os) {
+  var itens = (os.itens || []).filter(function (it) { return it && it.prod; });
+  if (itens.length !== 1) return null; // múltiplos itens — sem dimensão única segura
+  var it = itens[0];
+  var l = parseFloat(it.planLarg || it.larg) || 0, a = parseFloat(it.planAlt || it.alt) || 0;
+  if (l <= 0 || a <= 0) return null;
+  return { w: l, h: a };
+}
+function kbRetalhoCabeGeometricamente(dimsNecessarias, dimsRetalho, margemCm) {
+  var nw = dimsNecessarias.w + margemCm, nh = dimsNecessarias.h + margemCm;
+  return (dimsRetalho.w >= nw && dimsRetalho.h >= nh) || (dimsRetalho.w >= nh && dimsRetalho.h >= nw);
 }
 function kbSugerirMaterial(os, matKey) {
   var areaNecessaria = kbCalcAreaOS(os);
   if (!areaNecessaria || !matKey || !STOCK[matKey]) return null;
-  // Retalhos compatíveis: mesmo material E área grande o bastante para a
-  // peça planificada (encaixe) — pequena tolerância de 2% para arredondamento.
+  var margemCm = kbMargemSegurancaRetalhoCm();
+  var dimsNecessarias = kbNecessidadeDimsOS(os);
+  // Retalhos compatíveis: mesmo material E compatível com a necessidade.
+  // Com dimensões de peça conhecidas (item único), exige encaixe
+  // geométrico real (largura×altura + margem de segurança) — nunca só
+  // área. Sem dimensões conhecidas (múltiplos itens), mantém a
+  // comparação por área com pequena tolerância de 2% (comportamento
+  // anterior, ainda válido como aproximação quando não há como isolar
+  // uma dimensão única).
   var rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
-    return r.qty > 0 && r.mat === matKey && kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
+    if (r.qty <= 0 || r.mat !== matKey) return false;
+    if (dimsNecessarias) {
+      var dr = kbParseDimsWH(r.dims);
+      return dr && kbRetalhoCabeGeometricamente(dimsNecessarias, dr, margemCm);
+    }
+    return kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
   }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); }); // menor retalho que ainda serve, primeiro
   if (rCompativeis.length) {
     var r = rCompativeis[0];
-    return { tipo: 'retalho', retalho: r, texto: '💡 Sugestão: usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm (cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²).' };
+    var motivoTxt = dimsNecessarias
+      ? ('cabe a peça de ' + dimsNecessarias.w + '×' + dimsNecessarias.h + ' cm + ' + margemCm + 'cm de margem')
+      : ('cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²');
+    return { tipo: 'retalho', retalho: r, texto: '💡 Sugestão: usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm (' + motivoTxt + ').' };
   }
   var s = STOCK[matKey];
   var areaChapa = (s.chapLarg && s.chapComp) ? (s.chapLarg * s.chapComp / 10000) : 0;
@@ -13236,7 +13286,14 @@ function kbProdCheckStock() {
   var msg = ok
     ? '✅ Estoque: ' + s.qty + ' chapas. Serão retiradas ' + chapasInteiras + '. Restarão ' + (s.qty - chapasInteiras) + '.'
     : '⚠️ Estoque insuficiente: só há ' + s.qty + ' chapa(s).';
-  if (ok && sobra > 0.01) msg += ' Sobra de ' + sobra.toFixed(2) + ' → salva como retalho.';
+  // GO-LIVE 2026-08-11, P0 seção 21 — mensagem corrigida: a Function de
+  // produção (producaoIniciarOuEditar) NUNCA gerava um retalho real a
+  // partir dessa sobra (só grava a fração numérica no log) — o sistema
+  // não conhece a forma física real do que sobra do corte, então nunca
+  // inventa dimensões de retalho a partir de aritmética. Orienta o
+  // funcionário a medir e cadastrar o retalho de verdade em Estoque
+  // depois de cortar (fluxo manual já existente, com dimensões reais).
+  if (ok && sobra > 0.01) msg += ' Sobra estimada de ' + sobra.toFixed(2) + ' chapa — meça e cadastre o retalho real em Estoque depois do corte.';
 
   html += '<div style="background:'+bg+';border:1px solid '+brd+';border-radius:6px;padding:7px 10px;color:'+col+';font-size:12px">'+msg+'</div>';
 
