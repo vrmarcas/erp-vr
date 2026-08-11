@@ -134,14 +134,19 @@ function montarAmbiente(finalPrice) {
 }
 
 {
-  // Trocar de volta para Dinheiro nunca deve aplicar o desconto PIX.
+  // GO-LIVE 2026-08-11, P0 seção 7 — regra de negócio invertida: PREÇO À
+  // VISTA = PIX = DINHEIRO. Dinheiro agora precisa aplicar o MESMO
+  // desconto à vista configurado para PIX (antes desta rodada, Dinheiro
+  // caía no mesmo ramo de Cartão/Link e mostrava o valor cheio — bug real
+  // reproduzido em produção: Cartão R$131,82, PIX R$123,25, Dinheiro
+  // R$131,82 — corrigido para Dinheiro = R$123,25).
   var amb4 = montarAmbiente(117.98);
   amb4.els.orcPixDiscToggle.checked = true;
   amb4.els.orcPixDiscPct.value = '10';
   amb4.els.orcSimMetodo.value = 'dinheiro';
   amb4.mod.orcPgtoAtualizarValorReceber();
-  test('8. achado adicional prevenido: selecionar "Dinheiro" nunca aplica o desconto PIX configurado (mesmo com o toggle ligado) — mostra o valor cheio',
-    amb4.els.orcPgtoValorDisplay.textContent, 'R$ 117,98');
+  test('8. PREÇO À VISTA = PIX = DINHEIRO: selecionar "Dinheiro" aplica o MESMO desconto à vista configurado para PIX',
+    amb4.els.orcPgtoValorDisplay.textContent, 'R$ 106,18');
 }
 
 try { fs.unlinkSync(modPath); } catch (e) {}
