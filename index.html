@@ -16527,6 +16527,20 @@ function finDonutRender() {
     'Outros':             {color:'#10B981',total:0}
   };
   FIN_CP.filter(function(c){return c.status==='pago';}).forEach(function(c){
+    // CP de fatura de cartão nunca tem `categoria` própria (é uma única
+    // obrigação financeira que pode cobrir várias categorias econômicas) —
+    // a composição real vive em `composicaoCategorias` (mesma fonte usada
+    // por relContasPagas/finCalcularDRE). Sem isso, toda fatura de cartão
+    // caía silenciosamente em "Sem categoria" neste donut.
+    if(c.composicaoCategorias){
+      Object.keys(c.composicaoCategorias).forEach(function(catKey){
+        var cv=c.composicaoCategorias[catKey];
+        var cat=finNormCat(catKey);
+        if(cats[cat]) cats[cat].total+=cv;
+        else cats['Outros'].total+=cv;
+      });
+      return;
+    }
     var cv=finCPValorNum(c);
     if(!c.categoria) { cats['Sem categoria'].total+=cv; return; }
     var cat=finNormCat(c.categoria);
@@ -19427,7 +19441,7 @@ function relatoriosRender() {
     {lbl:'(−) Impostos Operacionais',    val:-cpImp,      bold:false,tipo:'despesa'},
     {lbl:'(−) Outros',                   val:-cpOutros,   bold:false,tipo:'despesa'},
     {lbl:'(=) Total Despesas',           val:-desp,       bold:true,tipo:'subtotal'},
-    {lbl:'LUCRO LÍQUIDO DO PERÍODO',     val:lucroLiq,    bold:true,tipo:lucroLiq>=0?'positivo':'negativo'}
+    {lbl:lucroLiq>=0?'LUCRO LÍQUIDO DO PERÍODO':'PREJUÍZO DO PERÍODO', val:lucroLiq, bold:true,tipo:lucroLiq>=0?'positivo':'negativo'}
   ];
 
   var dreHtml=dreRows.map(function(r){
