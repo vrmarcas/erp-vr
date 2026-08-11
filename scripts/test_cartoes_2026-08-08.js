@@ -38,9 +38,19 @@ var FN_NAMES = [
   'finCartaoCompetenciaFatura', 'finCartaoGerarParcelas', 'finCartaoRegistrarCompra',
   'finCartaoGarantirFaturas', 'finCartaoValorFatura', 'finCartaoComprasDaFatura',
   'finCartaoPagarFatura', 'finCartaoAtualizarStatusFaturas',
+  // GO-LIVE 2026-08-11, seção 42-50 — Cartões passou a sincronizar/pagar via
+  // Contas a Pagar (finCartaoSincronizarCPFatura/_finCPPagarConfirmar).
+  'finNormCat', 'finCartaoCategoriaSlug', 'finCartaoFaturaPorCategoria',
+  'finCartaoSincronizarCPFatura', '_finCPPagarConfirmar', '_confirmarAposSalvar',
 ];
 var src = [
-  'var FIN_CARTOES = []; var FIN_CARTAO_COMPRAS = []; var FIN_FATURAS = [];',
+  'var FIN_CARTOES = []; var FIN_CARTAO_COMPRAS = []; var FIN_FATURAS = []; var FIN_CP = [];',
+  "var FIN_CAT_ALIAS={'Matéria-prima':'Matéria-Prima','Pessoal':'Pessoal Admin'};",
+  "var FIN_CARTAO_CAT_SLUG={'Matéria-Prima':'materia_prima','Mão de Obra Direta':'mod','Pessoal Admin':'pessoal_admin','Operacional':'operacional','Impostos':'impostos','Empréstimos':'emprestimos','Outros':'outros'};",
+  "function _cloudSave(k,v){ return Promise.resolve({ok:true}); }",
+  "function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }",
+  "function finCPRender(){} function finDashKPIs(){} function finDonutRender(){}",
+  "function showToast(){}",
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = {',
   '  registrarCompra: finCartaoRegistrarCompra, valorFatura: finCartaoValorFatura,',
@@ -49,6 +59,7 @@ var src = [
   '  getCartoes: function(){ return FIN_CARTOES; }, setCartoes: function(v){ FIN_CARTOES = v; },',
   '  getCompras: function(){ return FIN_CARTAO_COMPRAS; }, setCompras: function(v){ FIN_CARTAO_COMPRAS = v; },',
   '  getFaturas: function(){ return FIN_FATURAS; }, setFaturas: function(v){ FIN_FATURAS = v; },',
+  '  getCP: function(){ return FIN_CP; }, setCP: function(v){ FIN_CP = v; },',
   '};'
 ].join('\n\n');
 var modPath = path.join(__dirname, '_cartoes_extracted.tmp.js');
@@ -59,7 +70,7 @@ var mod = require(modPath);
 console.log('\n=== RODADA 4 — Cartões de Crédito e Faturas (funções reais extraídas) ===\n');
 
 var CARTAO = { id: 'cartao1', nome: 'Itaú Empresarial', emissor: 'Itaú', diaFechamento: 10, diaVencimento: 20, contaBancaria: 'itau', ativo: true };
-function reset() { mod.setCartoes([CARTAO]); mod.setCompras([]); mod.setFaturas([]); }
+function reset() { mod.setCartoes([CARTAO]); mod.setCompras([]); mod.setFaturas([]); mod.setCP([]); }
 
 // ── compra ANTES do fechamento (dia 08, fechamento dia 10) ────────────────
 reset();

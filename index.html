@@ -7228,7 +7228,7 @@ function _authFirebaseError(code){
       <div class="fg"><label>Descrição</label><input type="text" id="finCCDesc" placeholder="Ex: Material de escritório"></div>
       <div class="fg2">
         <div class="fg"><label>Fornecedor</label><input type="text" id="finCCForn" placeholder="Opcional"></div>
-        <div class="fg"><label>Categoria</label><select id="finCCCat"><option value="Operacional">⚙️ Operacional</option><option value="Matéria-Prima">🪵 Matéria-Prima</option><option value="Outros">📌 Outros</option></select></div>
+        <div class="fg"><label>Categoria</label><select id="finCCCat"><option value="Operacional">⚙️ Operacional</option><option value="Matéria-Prima">🪵 Matéria-Prima</option><option value="Mão de Obra Direta">🛠️ Mão de Obra Direta</option><option value="Pessoal Admin">👤 Pessoal Admin</option><option value="Impostos">🧾 Impostos</option><option value="Empréstimos">🏦 Empréstimos</option><option value="Outros">📌 Outros</option></select></div>
       </div>
       <div class="fg2">
         <div class="fg"><label>Data da compra</label><input type="date" id="finCCData"></div>
@@ -17939,6 +17939,7 @@ function finCartaoRegistrarCompra(dados) {
 // existir (id determinístico); sempre revincula parcelas à fatura certa.
 function finCartaoGarantirFaturas() {
   var criadas = 0;
+  var faturasAfetadas = {};
   FIN_CARTAO_COMPRAS.forEach(function (compra) {
     var cartao = FIN_CARTOES.find(function (c) { return c.id === compra.cartaoId; });
     if (!cartao) return;
@@ -17957,9 +17958,67 @@ function finCartaoGarantirFaturas() {
         criadas++;
       }
       parc.faturaId = fatura.id;
+      faturasAfetadas[fatura.id] = true;
     });
   });
+  // GO-LIVE 2026-08-11, seção 42-50 — toda fatura em aberto precisa ter seu(s)
+  // lançamento(s) em Contas a Pagar sempre sincronizados com as compras nela
+  // agrupadas por categoria (nunca só na hora de pagar a fatura).
+  Object.keys(faturasAfetadas).forEach(function (fid) { finCartaoSincronizarCPFatura(fid); });
   return criadas;
+}
+// Categorias econômicas do cartão são as MESMAS 6 reconhecidas pelo DRE
+// (mesmas chaves de FIN_CAT_COLORS) — nunca uma lista paralela que deixaria
+// a despesa do cartão cair em 'Outros' por acidente/divergência de nome.
+var FIN_CARTAO_CAT_SLUG = {
+  'Matéria-Prima': 'materia_prima', 'Mão de Obra Direta': 'mod', 'Pessoal Admin': 'pessoal_admin',
+  'Operacional': 'operacional', 'Impostos': 'impostos', 'Empréstimos': 'emprestimos', 'Outros': 'outros'
+};
+function finCartaoCategoriaSlug(cat) { return FIN_CARTAO_CAT_SLUG[finNormCat(cat)] || 'outros'; }
+// Agrupa as parcelas de uma fatura por categoria econômica (cents-safe) —
+// cada categoria vira exatamente 1 lançamento em Contas a Pagar. Guarda
+// também a marca predominante do grupo (campo cosmético em FIN_CP, nunca
+// usado para filtrar o DRE).
+function finCartaoFaturaPorCategoria(faturaId) {
+  var porCat = {};
+  finCartaoComprasDaFatura(faturaId).forEach(function (cp) {
+    var cat = finNormCat(cp.compra.categoria || 'Outros');
+    if (!porCat[cat]) porCat[cat] = { parcelas: [], marca: cp.compra.marca || 'vr' };
+    porCat[cat].parcelas.push(cp.parcela);
+  });
+  var out = {};
+  Object.keys(porCat).forEach(function (cat) {
+    out[cat] = { valor: centsToMoney(sumCents(porCat[cat].parcelas, function (p) { return p.valor; })), marca: porCat[cat].marca };
+  });
+  return out;
+}
+// Cria/atualiza em Contas a Pagar exatamente 1 lançamento por (fatura,
+// categoria) — id determinístico 'cpcartao_<faturaId>_<categoriaSlug>',
+// mesmo padrão de idempotência já usado pelo módulo Compras
+// (cppar_<parcelaId>). Reexecutar sempre reconcilia o MESMO documento —
+// nunca duplica. Nunca mexe num CP já pago (fatura paga é histórico
+// fechado; a rota de pagamento é sempre _finCPPagarConfirmar).
+function finCartaoSincronizarCPFatura(faturaId) {
+  var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
+  if (!fatura || fatura.pago) return;
+  var cartao = FIN_CARTOES.find(function (c) { return c.id === fatura.cartaoId; });
+  var porCat = finCartaoFaturaPorCategoria(faturaId);
+  Object.keys(porCat).forEach(function (cat) {
+    var valor = porCat[cat].valor;
+    var cpId = 'cpcartao_' + faturaId + '_' + finCartaoCategoriaSlug(cat);
+    var existente = FIN_CP.find(function (c) { return c.id === cpId; });
+    if (existente) {
+      if (existente.status !== 'pago') existente.valor = valor; // sincroniza — nunca duplica
+    } else if (valor > 0) {
+      FIN_CP.unshift({
+        id: cpId, descricao: 'Fatura cartão' + (cartao ? ' ' + cartao.nome : '') + ' (' + fatura.competencia + ') — ' + cat,
+        categoria: cat, valor: valor, vencimento: fatura.dataVencimento,
+        status: 'agendado', marca: porCat[cat].marca, fornecedor: cartao ? cartao.nome : '',
+        formaPgto: 'Cartão', dataCriacao: new Date().toLocaleDateString('pt-BR'), dataPagamento: null,
+        origemFaturaId: faturaId, origemCartaoId: fatura.cartaoId
+      });
+    }
+  });
 }
 // P2.2 — soma em centavos (helper de P0.2) em vez de acumular floats das
 // parcelas e arredondar só no fim; o resultado é idêntico nos casos já
@@ -17981,13 +18040,21 @@ function finCartaoComprasDaFatura(faturaId) {
   });
   return out;
 }
-// Pagar a fatura gera a SAÍDA financeira real (o pagamento em si) — nunca
-// duplica a despesa, que já foi registrada no momento de cada compra.
+// Pagar a fatura paga o(s) lançamento(s) de Contas a Pagar já vinculados a
+// ela (1 por categoria, mantidos sincronizados por finCartaoSincronizarCPFatura)
+// através da MESMA rotina canônica usada por qualquer outra despesa
+// (_finCPPagarConfirmar) — assim Caixa Diário/Contas Pagas/Relatório
+// Mensal/Anual/DRE enxergam a saída automaticamente, sem nenhum código
+// novo, e a despesa nunca é contada duas vezes (registrada 1x na compra,
+// paga 1x na fatura).
 function finCartaoPagarFatura(faturaId, dataPagamentoISO, contaBancaria) {
   var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
   if (!fatura) return { ok: false, erro: 'fatura não encontrada' };
   if (fatura.pago) return { ok: false, erro: 'fatura já paga' };
+  finCartaoSincronizarCPFatura(faturaId); // garante que todo valor recém-lançado entrou no CP antes de pagar
   var valor = finCartaoValorFatura(faturaId);
+  var cpsDaFatura = FIN_CP.filter(function (c) { return c.origemFaturaId === faturaId; });
+  cpsDaFatura.forEach(function (c) { if (c.status !== 'pago') _finCPPagarConfirmar(c.id, dataPagamentoISO); });
   fatura.status = 'paga'; fatura.pago = true; fatura.dataPagamento = dataPagamentoISO; fatura.contaBancariaPagamento = contaBancaria;
   FIN_CARTAO_COMPRAS.forEach(function (compra) {
     (compra.parcelasDetalhe || []).forEach(function (parc) { if (parc.faturaId === faturaId) parc.status = 'pago'; });
@@ -18067,8 +18134,12 @@ function finCartaoCompraSalvar(btnEl) {
   if (!r.ok) { showToast(r.erro || 'Não foi possível registrar a compra', 'err'); _finCCSalvando = false; if (_liberar) _liberar(); return; }
   document.getElementById('finCartaoCompraOverlay').classList.remove('open');
   finCartoesRender();
-  var _saveC = _finSaveCartaoCompras(), _saveF = _finSaveFaturas();
-  var _p = Promise.all([_saveC && _saveC.then ? _saveC : Promise.resolve(), _saveF && _saveF.then ? _saveF : Promise.resolve()]);
+  // GO-LIVE 2026-08-11, seção 42-50 — registrar a compra também sincroniza
+  // (não paga) o(s) lançamento(s) de FIN_CP da fatura do ciclo, então
+  // FIN_CP precisa ser persistido junto, senão a Conta a Pagar recém-criada
+  // fica só na memória e some no próximo carregamento.
+  var _saveC = _finSaveCartaoCompras(), _saveF = _finSaveFaturas(), _saveCP = _finSaveCP();
+  var _p = Promise.all([_saveC, _saveF, _saveCP].map(function (p) { return p && p.then ? p : Promise.resolve(); }));
   showToast('Compra registrada — ' + parcelas + 'x de ' + finFmt(r.parcelas[0].valor), 'ok');
   _p.then(function () { _finCCSalvando = false; if (_liberar) _liberar(); });
 }
