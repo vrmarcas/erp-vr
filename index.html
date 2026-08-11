@@ -19881,6 +19881,19 @@ var _lastOsId = null;
 // ============================================================
 // IMPRESSÃO DE OS — PDF via window.print()
 // ============================================================
+// GO-LIVE 2026-08-11, P0 seção 23-24 — reescrita completa. Bugs reais
+// corrigidos:
+// (1) it.cod/it.descricao nunca existiam no schema real do item da OS
+// (osProjecaoOperacionalItem só grava `prod`/`mat`/`det`) — imprimia a
+// string literal "undefined" em toda linha de item de qualquer OS real.
+// (2) vazava valor unitário/total/geral e forma de pagamento com
+// parcelas — dado financeiro nunca pode estar num documento que circula
+// fisicamente na oficina, mesmo para quem tem permissão de vê-lo na
+// tela; a OS mostra só um status resumido (Pendente/Parcial/Concluído),
+// nunca números, exatamente como a Produção já não recebe kb_os_fin.
+// (3) logo/endereço fixos em "VR MARCAS" mesmo para OS Vitre — corrigido
+// para resolver por os.mk/os.marca, com imagem real (mesmo asset usado
+// no resto do sistema), não mais texto/CSS.
 function osImprimirPDF(id) {
   var os = id ? KB_OS[id] : null;
   var osNum = os ? os.num : '----';
@@ -19890,22 +19903,38 @@ function osImprimirPDF(id) {
   var emailCliente = os ? (os.clientEmail||'') : '';
   var cidadeCliente = os ? (os.clientCidade||'') : '';
   var vendedor = os ? (os.vendedor||'') : '';
-  var formaPgto = os ? (os.formaPgto||'PIX') : 'PIX';
   var dataOS = os ? (os.dataOS||'') : '';
   var obs = os ? (os.obs||'') : '';
-  var totalGeral = os ? (os.totalGeral||os.valor||0) : 0;
   var itens = os && os.itens && os.itens.length ? os.itens : [];
-
-  // Se não tem itens detalhados, gera linha genérica
-  if(!itens.length) {
-    var desc = os ? (os.prod||'Produto personalizado')+(os.material?' — '+os.material:'')+(os.medidas?' ('+os.medidas+')':'') : 'Produto personalizado';
-    itens = [{cod:'P01', descricao:desc, qty:os?(os.qty||1):1, unit:totalGeral, total:totalGeral}];
+  var isVt = os && (os.mk==='vit' || os.marca==='Vitre');
+  var _brandBaseOs = location.origin + '/assets/brand/';
+  var logoSrc = _brandBaseOs + (isVt ? 'vitre-logo.png' : 'vr-marcas-logo.png');
+  var nomeEmpresa = isVt ? 'Vitre' : 'VR Marcas';
+  var enderecoEmpresa = isVt
+    ? 'Fone: (62) 3941-6787 · vitre@email.com · vitre.com.br'
+    : 'Rua Francisca da Costa Cunha, Qd. 69-A Lt 17, Nº 39, Setor Aeroporto — Goiânia/GO<br>Fone: (62) 3941-6787 · vrmarcas@hotmail.com · www.vrmarcas.com';
+  // Status financeiro RESUMIDO — nunca números. Só aparece quando o
+  // campo (não-monetário) de status de pagamento está disponível; a
+  // Produção não recebe kb_os_fin, então esses campos simplesmente não
+  // existem em `os` para ela — não há nada a esconder aqui, o dado nunca
+  // chega (mesma arquitetura de kbSaveKbos()/_KB_OS_FIN_FIELDS).
+  var statusPgtoTxt = 'Status de pagamento não disponível';
+  if (os && os.restante != null) {
+    statusPgtoTxt = (os.restante > 0)
+      ? ((os.valorEntrada > 0) ? 'Pagamento parcial' : 'Pagamento pendente')
+      : 'Pagamento concluído';
   }
 
-  var fmt = function(v){ return 'R$ '+parseFloat(v||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.'); };
+  // Se não tem itens detalhados, gera linha genérica — sem nenhum campo
+  // financeiro (nunca existiu unit/total no schema real do item da OS).
+  if(!itens.length) {
+    var desc = os ? (os.prod||'Produto personalizado')+(os.material?' — '+os.material:'')+(os.medidas?' ('+os.medidas+')':'') : 'Produto personalizado';
+    itens = [{prod:desc, qty:os?(os.qty||1):1, mat:os?(os.material||''):''}];
+  }
 
   var linhasItens = itens.map(function(it,i){
-    return '<tr><td style="text-align:center">'+it.cod+'</td><td style="text-align:center">'+it.qty+'</td><td>'+it.descricao+'</td><td style="text-align:right">'+fmt(it.unit)+'</td><td style="text-align:right">'+fmt(it.total)+'</td></tr>';
+    var medidas = (it.larg && it.alt) ? (it.larg+'×'+it.alt+' cm') : '—';
+    return '<tr><td style="text-align:center">'+(i+1)+'</td><td style="text-align:center">'+(it.qty!=null?it.qty:1)+'</td><td>'+cfgEsc(it.prod||'—')+'</td><td>'+cfgEsc(it.mat||'—')+'</td><td>'+medidas+'</td></tr>';
   }).join('');
 
   // Preenche linhas vazias até 8 no mínimo
@@ -19955,10 +19984,10 @@ function osImprimirPDF(id) {
   // Botão imprimir (só tela)
   html += '<div class="no-print" style="background:#983C8F;color:#fff;padding:8px 16px;text-align:center;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:10px" onclick="window.print()">🖨️ Clique aqui para imprimir / salvar como PDF</div>';
 
-  // Header
+  // Header — logo real por marca (não mais texto/CSS fixo em "VR MARCAS")
   html += '<div class="hdr">';
-  html += '<div class="logo-box">VR MARCAS<span class="logo-sub">acrílicos personalizados</span></div>';
-  html += '<div class="hdr-info"><div class="os-num">OS #0'+osNum+'</div><div class="hdr-addr">Rua Francisca da Costa Cunha, Qd. 69-A Lt 17, Nº 39, Setor Aeroporto — Goiânia/GO<br>Fone: (62) 3941-6787 · vrmarcas@hotmail.com · www.vrmarcas.com</div></div>';
+  html += '<img src="'+logoSrc+'" alt="'+nomeEmpresa+'" style="height:44px;width:auto;object-fit:contain">';
+  html += '<div class="hdr-info"><div class="os-num">OS #0'+osNum+'</div><div class="hdr-addr">'+enderecoEmpresa+'</div></div>';
   html += '<div style="text-align:right;font-size:9.5px;color:#555"><div style="font-size:8px;font-weight:700;text-transform:uppercase;color:#777">Data de emissão</div><div style="font-size:13px;font-weight:700;color:#333">'+dataOS+'</div><br><div style="font-size:8px;font-weight:700;text-transform:uppercase;color:#777">Previsão de entrega</div><div style="font-size:13px;font-weight:700;color:#333">____/____</div></div>';
   html += '</div>';
 
@@ -19979,35 +20008,24 @@ function osImprimirPDF(id) {
   html += '<div class="field"><span class="flabel">Bairro / CEP</span><div class="fval"></div></div>';
   html += '</div></div>';
 
-  // Tabela de itens
-  html += '<div class="section"><div class="section-title">Discriminação do Orçamento</div>';
-  html += '<table class="itens"><thead><tr><th style="width:50px;text-align:center">Código</th><th style="width:40px;text-align:center">Qtd</th><th>Descrição do Produto / Material</th><th style="width:90px;text-align:right">Valor Unit.</th><th style="width:90px;text-align:right">Valor Total</th></tr></thead><tbody>';
+  // Tabela de itens — GO-LIVE seção 23: sem nenhuma coluna financeira,
+  // sem it.cod/it.descricao inexistentes (usa prod/mat/medidas reais).
+  html += '<div class="section"><div class="section-title">Itens do Pedido</div>';
+  html += '<table class="itens"><thead><tr><th style="width:30px;text-align:center">#</th><th style="width:40px;text-align:center">Qtd</th><th>Produto</th><th>Material</th><th style="width:100px">Medidas</th></tr></thead><tbody>';
   html += linhasItens;
   html += '</tbody></table>';
-  html += '<div class="fiscal">ESSE ORÇAMENTO NÃO TEM VALOR FISCAL</div>';
-  html += '<div class="total-row"><span style="font-size:11px;font-weight:700">VALOR TOTAL GERAL:</span><span class="total-box">'+fmt(totalGeral)+'</span></div>';
+  html += '<div class="fiscal">ESTE DOCUMENTO NÃO TEM VALOR FISCAL</div>';
   html += '</div>';
 
-  // Forma de pagamento
-  html += '<div class="section" style="margin-top:8px"><div class="section-title">Forma de Pagamento</div>';
-  html += '<div class="pgto-grid">';
-  var parcelasOS=os&&os.parcelas&&os.parcelas>1?os.parcelas:1;
-  html += '<div class="pgto-item"><span class="pgto-label">Método</span><strong>'+formaPgto+(parcelasOS>1?' — '+parcelasOS+'× parcelas':'')+'</strong></div>';
-  html += '<div class="pgto-item"><span class="pgto-label">Entrada (R$)</span><div class="fval"></div></div>';
-  html += '<div class="pgto-item"><span class="pgto-label">Restante (R$)</span><div class="fval"></div></div>';
-  html += '<div class="pgto-item"><span class="pgto-label">Vendedor</span><strong>'+vendedor+'</strong></div>';
+  // Status de pagamento — GO-LIVE seção 23: SOMENTE o resumo (Pendente/
+  // Parcial/Concluído), nunca valores. Nunca imprime forma de pagamento
+  // com parcelas nem entrada/restante em R$.
+  html += '<div class="section" style="margin-top:8px"><div class="section-title">Status de Pagamento</div>';
+  html += '<div class="pgto-grid" style="grid-template-columns:1fr 1fr">';
+  html += '<div class="pgto-item"><span class="pgto-label">Situação</span><strong>'+cfgEsc(statusPgtoTxt)+'</strong></div>';
+  html += '<div class="pgto-item"><span class="pgto-label">Vendedor</span><strong>'+cfgEsc(vendedor)+'</strong></div>';
   html += '</div>';
-  html += '<div style="display:flex;gap:20px;margin-top:5px;flex-wrap:wrap">';
-  html += '<div class="check-row"><div class="chk"></div> À Vista</div>';
-  html += '<div class="check-row"><div class="chk"></div> PIX Pessoa Física</div>';
-  html += '<div class="check-row"><div class="chk"></div> PIX Pessoa Jurídica</div>';
-  html += '<div class="check-row"><div class="chk"></div> PIX Caixa</div>';
-  html += '<div class="check-row"><div class="chk"></div> Cartão Débito</div>';
-  html += '<div class="check-row"><div class="chk"></div> Cartão Crédito</div>';
-  html += '<div class="check-row"><div class="chk"></div> Entrada Paga</div>';
-  html += '<div class="check-row"><div class="chk"></div> Pago Integral</div>';
-  html += '</div>';
-  if(obs) html += '<div style="margin-top:5px"><span class="flabel">Observações</span><div class="fval">'+obs+'</div></div>';
+  if(obs) html += '<div style="margin-top:5px"><span class="flabel">Observações</span><div class="fval">'+cfgEsc(obs)+'</div></div>';
   html += '</div>';
 
   // Assinaturas
@@ -20017,17 +20035,18 @@ function osImprimirPDF(id) {
   html += '</div>';
   html += '<div style="text-align:center;font-size:8px;font-weight:700;color:#983C8F;margin-top:6px;letter-spacing:0.5px">NECESSÁRIO APRESENTAR ESTE DOCUMENTO PARA RETIRAR O MATERIAL — ESTE DOCUMENTO NÃO TEM VALOR FISCAL</div>';
 
-  // Canhoto
+  // Canhoto — GO-LIVE seção 23: logo real por marca, sem forma de
+  // pagamento (dado financeiro não pertence a este documento).
   html += '<div class="canhoto"><div style="text-align:center;font-size:8px;color:#777;margin-bottom:4px">✂ ─ ─ ─ ─ ─ ─ DESTAQUE E GUARDE SEU COMPROVANTE ─ ─ ─ ─ ─ ─ ✂</div>';
   html += '<div class="canhoto-inner">';
-  html += '<div class="canhoto-logo">VR<br>MARCAS<br><span style="font-size:7px;font-weight:400">acrílicos</span></div>';
+  html += '<img src="'+logoSrc+'" alt="'+nomeEmpresa+'" style="height:32px;width:auto;object-fit:contain;flex-shrink:0">';
   html += '<div class="canhoto-data">';
   html += '<div><span class="pgto-label">OS Nº</span><strong>#0'+osNum+'</strong></div>';
-  html += '<div><span class="pgto-label">Cliente</span>'+nomeCliente+'</div>';
-  html += '<div><span class="pgto-label">Forma de Pgto</span>'+formaPgto+'</div>';
+  html += '<div><span class="pgto-label">Cliente</span>'+cfgEsc(nomeCliente)+'</div>';
+  html += '<div><span class="pgto-label">Status</span>'+cfgEsc(statusPgtoTxt)+'</div>';
   html += '<div><span class="pgto-label">Previsão Entrega</span>____/____</div>';
   html += '</div></div>';
-  html += '<div class="canhoto-footer">www.vrmarcas.com · vrmarcas@hotmail.com · (62) 3941-6787 · Rua Francisca da Costa Cunha, Qd. 69-A Lt 17 Nº 39 — Setor Aeroporto — Goiânia/GO</div>';
+  html += '<div class="canhoto-footer">'+enderecoEmpresa.replace(/<br>/g,' · ')+'</div>';
   html += '</div>';
 
   var win = window.open('','_blank','width=900,height=1200');
