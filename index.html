@@ -7246,6 +7246,25 @@ function _authFirebaseError(code){
   </div>
 </div>
 
+<!-- MODAL: Detalhe da Fatura do Cartão (compras + composição por categoria) -->
+<div class="gen-overlay" id="finCartaoFaturaDetalheOverlay" onclick="if(event.target===this)document.getElementById('finCartaoFaturaDetalheOverlay').classList.remove('open')">
+  <div class="gen-modal" style="width:560px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#7C3AED,#A78BFA);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff">💳 Detalhe da Fatura — <span id="finCartaoFaturaDetalheTitulo"></span></div>
+      <button class="gen-close" onclick="document.getElementById('finCartaoFaturaDetalheOverlay').classList.remove('open')" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px">COMPRAS DESTA FATURA</div>
+      <table class="rel-table" style="margin-bottom:14px">
+        <thead><tr><th>Fornecedor</th><th>Descrição</th><th>Categoria</th><th>Parcela</th><th style="text-align:right">Valor</th></tr></thead>
+        <tbody id="finCartaoFaturaDetalheCompras"></tbody>
+      </table>
+      <div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px">COMPOSIÇÃO POR CATEGORIA ECONÔMICA (uso interno / DRE — a obrigação com o banco é ÚNICA)</div>
+      <div id="finCartaoFaturaDetalheCategorias"></div>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: Ajuste Extraordinário do Caixa (RODADA 4, seção 5) — auditado, nunca sobrescreve Caixa Anterior -->
 <div class="gen-overlay" id="finCaixaAjusteOverlay" onclick="if(event.target===this)document.getElementById('finCaixaAjusteOverlay').classList.remove('open')">
   <div class="gen-modal" style="width:440px">
@@ -17029,16 +17048,39 @@ function finCalcularDRE(txFiltro, cpFiltro) {
   // finCPValorNum() (não c.valor direto): uma ocorrência de recorrência
   // variável ainda "a informar" (valorPendente:true) precisa contribuir 0
   // aqui — nunca NaN, nunca contada como se R$0,00 fosse o valor real.
-  var cpFiltroNorm=cpFiltro.map(function(c){return Object.assign({},c,{_cat:finNormCat(c.categoria)});});
-  var cmvMatCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}), function(c){return finCPValorNum(c);});
-  var cmvModCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}), function(c){return finCPValorNum(c);});
+  // GO-LIVE 2026-08-11, correção pós-relatório — a fatura do cartão vira UMA
+  // ÚNICA obrigação financeira em FIN_CP (ver finCartaoSincronizarCPFatura),
+  // mas pode conter mais de uma categoria econômica internamente
+  // (composicaoCategorias). Para o DRE, cada categoria da composição entra
+  // separadamente na classificação de custo/despesa — nunca a fatura
+  // inteira numa categoria só (perderia a distinção CMV×despesa) e nunca
+  // como obrigações financeiras extras (é só reclassificação contábil do
+  // MESMO pagamento, que ainda soma 1x em Caixa/Contas Pagas/Mensal/Anual).
+  var cpFiltroNorm=[];
+  cpFiltro.forEach(function(c){
+    if(c.composicaoCategorias){
+      Object.keys(c.composicaoCategorias).forEach(function(cat){
+        cpFiltroNorm.push({_cat:finNormCat(cat), _valor:c.composicaoCategorias[cat]});
+      });
+    } else {
+      cpFiltroNorm.push(Object.assign({},c,{_cat:finNormCat(c.categoria)}));
+    }
+  });
+  // finCPValorNum() (não c.valor direto): uma ocorrência de recorrência
+  // variável ainda "a informar" (valorPendente:true) precisa contribuir 0
+  // aqui — nunca NaN, nunca contada como se R$0,00 fosse o valor real.
+  // Entradas vindas de composicaoCategorias (_valor) já são valores
+  // resolvidos — nunca passam por valorPendente.
+  var _valorContrib=function(c){ return c._valor!=null ? c._valor : finCPValorNum(c); };
+  var cmvMatCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Matéria-Prima';}), _valorContrib);
+  var cmvModCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Mão de Obra Direta';}), _valorContrib);
   var cmvCents=cmvMatCents+cmvModCents;
   var lucroBrutoCents=receitaLiqCents-cmvCents;
   // DESPESA = operacional/administrativo (independente do imposto automático sobre vendas)
-  var cpPessoalCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}), function(c){return finCPValorNum(c);});
-  var cpOpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}), function(c){return finCPValorNum(c);});
-  var cpEmpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}), function(c){return finCPValorNum(c);});
-  var cpImpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}), function(c){return finCPValorNum(c);});
+  var cpPessoalCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Pessoal Admin';}), _valorContrib);
+  var cpOpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}), _valorContrib);
+  var cpEmpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}), _valorContrib);
+  var cpImpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}), _valorContrib);
   // GO-LIVE 2026-08-11, seção 51-58 — BUG REAL encontrado e corrigido:
   // categoria 'Outros' (e qualquer categoria fora das 6 conhecidas —
   // nunca inventamos que algo some silenciosamente) nunca entrava em
@@ -17050,7 +17092,7 @@ function finCalcularDRE(txFiltro, cpFiltro) {
   // lugar do DRE — nunca desaparecer.
   var cpOutrosCents=sumCents(cpFiltroNorm.filter(function(c){
     return c._cat!=='Matéria-Prima' && c._cat!=='Mão de Obra Direta' && c._cat!=='Pessoal Admin' && c._cat!=='Operacional' && c._cat!=='Empréstimos' && c._cat!=='Impostos';
-  }), function(c){return finCPValorNum(c);});
+  }), _valorContrib);
   var despCents=cpPessoalCents+cpOpCents+cpEmpCents+cpImpCents+cpOutrosCents;
   var lucroLiqCents=lucroBrutoCents-despCents;
   return {receitaBruta:centsToMoney(receitaBrutaCents),impostos:centsToMoney(impostosCents),receitaLiq:centsToMoney(receitaLiqCents),
@@ -17967,18 +18009,11 @@ function finCartaoGarantirFaturas() {
   Object.keys(faturasAfetadas).forEach(function (fid) { finCartaoSincronizarCPFatura(fid); });
   return criadas;
 }
-// Categorias econômicas do cartão são as MESMAS 6 reconhecidas pelo DRE
-// (mesmas chaves de FIN_CAT_COLORS) — nunca uma lista paralela que deixaria
-// a despesa do cartão cair em 'Outros' por acidente/divergência de nome.
-var FIN_CARTAO_CAT_SLUG = {
-  'Matéria-Prima': 'materia_prima', 'Mão de Obra Direta': 'mod', 'Pessoal Admin': 'pessoal_admin',
-  'Operacional': 'operacional', 'Impostos': 'impostos', 'Empréstimos': 'emprestimos', 'Outros': 'outros'
-};
-function finCartaoCategoriaSlug(cat) { return FIN_CARTAO_CAT_SLUG[finNormCat(cat)] || 'outros'; }
 // Agrupa as parcelas de uma fatura por categoria econômica (cents-safe) —
-// cada categoria vira exatamente 1 lançamento em Contas a Pagar. Guarda
-// também a marca predominante do grupo (campo cosmético em FIN_CP, nunca
-// usado para filtrar o DRE).
+// vira a COMPOSIÇÃO INTERNA da fatura (nunca obrigações financeiras
+// separadas: a dívida com o banco é UMA só, ver finCartaoSincronizarCPFatura).
+// Guarda também a marca predominante do grupo (campo cosmético, nunca usado
+// para filtrar o DRE).
 function finCartaoFaturaPorCategoria(faturaId) {
   var porCat = {};
   finCartaoComprasDaFatura(faturaId).forEach(function (cp) {
@@ -17992,33 +18027,40 @@ function finCartaoFaturaPorCategoria(faturaId) {
   });
   return out;
 }
-// Cria/atualiza em Contas a Pagar exatamente 1 lançamento por (fatura,
-// categoria) — id determinístico 'cpcartao_<faturaId>_<categoriaSlug>',
-// mesmo padrão de idempotência já usado pelo módulo Compras
-// (cppar_<parcelaId>). Reexecutar sempre reconcilia o MESMO documento —
-// nunca duplica. Nunca mexe num CP já pago (fatura paga é histórico
-// fechado; a rota de pagamento é sempre _finCPPagarConfirmar).
+// GO-LIVE 2026-08-11, correção pós-relatório — achado real do usuário: a
+// versão anterior criava 1 CP POR CATEGORIA dentro da mesma fatura, o que
+// fragmentava a dívida com o banco em várias linhas em Contas a Pagar.
+// Regra de negócio correta: para cada (cartão, competência) existe UMA
+// ÚNICA obrigação financeira — id determinístico 'cpcartao_<faturaId>'
+// (idempotente, reexecutar sempre reconcilia o MESMO documento, nunca
+// duplica). As categorias econômicas das compras entram como
+// composicaoCategorias (composição interna, usada só para classificar
+// custo/despesa no DRE — finCalcularDRE) — nunca como obrigações
+// separadas. Nunca mexe num CP já pago (fatura paga é histórico fechado;
+// a rota de pagamento é sempre _finCPPagarConfirmar).
 function finCartaoSincronizarCPFatura(faturaId) {
   var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
   if (!fatura || fatura.pago) return;
   var cartao = FIN_CARTOES.find(function (c) { return c.id === fatura.cartaoId; });
   var porCat = finCartaoFaturaPorCategoria(faturaId);
-  Object.keys(porCat).forEach(function (cat) {
-    var valor = porCat[cat].valor;
-    var cpId = 'cpcartao_' + faturaId + '_' + finCartaoCategoriaSlug(cat);
-    var existente = FIN_CP.find(function (c) { return c.id === cpId; });
-    if (existente) {
-      if (existente.status !== 'pago') existente.valor = valor; // sincroniza — nunca duplica
-    } else if (valor > 0) {
-      FIN_CP.unshift({
-        id: cpId, descricao: 'Fatura cartão' + (cartao ? ' ' + cartao.nome : '') + ' (' + fatura.competencia + ') — ' + cat,
-        categoria: cat, valor: valor, vencimento: fatura.dataVencimento,
-        status: 'agendado', marca: porCat[cat].marca, fornecedor: cartao ? cartao.nome : '',
-        formaPgto: 'Cartão', dataCriacao: new Date().toLocaleDateString('pt-BR'), dataPagamento: null,
-        origemFaturaId: faturaId, origemCartaoId: fatura.cartaoId
-      });
-    }
-  });
+  var composicao = {};
+  Object.keys(porCat).forEach(function (cat) { composicao[cat] = porCat[cat].valor; });
+  var total = finCartaoValorFatura(faturaId);
+  var compras = finCartaoComprasDaFatura(faturaId);
+  var marca = (compras[0] && compras[0].compra.marca) || 'vr';
+  var cpId = 'cpcartao_' + faturaId;
+  var existente = FIN_CP.find(function (c) { return c.id === cpId; });
+  if (existente) {
+    if (existente.status !== 'pago') { existente.valor = total; existente.composicaoCategorias = composicao; } // sincroniza — nunca duplica
+  } else if (total > 0) {
+    FIN_CP.unshift({
+      id: cpId, descricao: 'Fatura cartão' + (cartao ? ' ' + cartao.nome : '') + ' (' + fatura.competencia + ')',
+      categoria: null, composicaoCategorias: composicao, valor: total, vencimento: fatura.dataVencimento,
+      status: 'agendado', marca: marca, fornecedor: cartao ? cartao.nome : '',
+      formaPgto: 'Cartão', dataCriacao: new Date().toLocaleDateString('pt-BR'), dataPagamento: null,
+      origemFaturaId: faturaId, origemCartaoId: fatura.cartaoId
+    });
+  }
 }
 // P2.2 — soma em centavos (helper de P0.2) em vez de acumular floats das
 // parcelas e arredondar só no fim; o resultado é idêntico nos casos já
@@ -18040,13 +18082,13 @@ function finCartaoComprasDaFatura(faturaId) {
   });
   return out;
 }
-// Pagar a fatura paga o(s) lançamento(s) de Contas a Pagar já vinculados a
-// ela (1 por categoria, mantidos sincronizados por finCartaoSincronizarCPFatura)
-// através da MESMA rotina canônica usada por qualquer outra despesa
-// (_finCPPagarConfirmar) — assim Caixa Diário/Contas Pagas/Relatório
-// Mensal/Anual/DRE enxergam a saída automaticamente, sem nenhum código
-// novo, e a despesa nunca é contada duas vezes (registrada 1x na compra,
-// paga 1x na fatura).
+// Pagar a fatura paga o ÚNICO lançamento de Contas a Pagar vinculado a ela
+// (mantido sincronizado por finCartaoSincronizarCPFatura) através da MESMA
+// rotina canônica usada por qualquer outra despesa (_finCPPagarConfirmar)
+// — assim Caixa Diário/Contas Pagas/Relatório Mensal/Anual/DRE enxergam a
+// saída automaticamente, sem nenhum código novo, e a obrigação financeira
+// nunca é contada duas vezes. O filtro por origemFaturaId (em vez de um id
+// fixo) é só defesa extra — nunca deve haver mais de 1 resultado.
 function finCartaoPagarFatura(faturaId, dataPagamentoISO, contaBancaria) {
   var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
   if (!fatura) return { ok: false, erro: 'fatura não encontrada' };
@@ -18185,9 +18227,41 @@ function finCartoesRender() {
   tbody.innerHTML = faturasOrdenadas.map(function (f) {
     var cartao = FIN_CARTOES.find(function (c) { return c.id === f.cartaoId; });
     var valor = finCartaoValorFatura(f.id);
-    var acao = f.pago ? '—' : '<button class="topbar-btn" style="font-size:10px;padding:4px 10px" onclick="finCartaoPagarFaturaUI(\'' + f.id + '\')">Pagar</button>';
+    var acao = '<button class="topbar-btn ghost" style="font-size:10px;padding:4px 10px" onclick="finCartaoVerFaturaDetalhe(\'' + f.id + '\')">Ver</button>'
+      + (f.pago ? '' : ' <button class="topbar-btn" style="font-size:10px;padding:4px 10px" onclick="finCartaoPagarFaturaUI(\'' + f.id + '\')">Pagar</button>');
     return '<tr><td>' + (cartao ? cartao.nome : '—') + '</td><td>' + f.competencia + '</td><td>' + (STATUS_LABEL[f.status] || f.status) + '</td><td style="font-weight:800">' + finFmt(valor) + '</td><td>' + f.dataVencimento + '</td><td>' + acao + '</td></tr>';
   }).join('');
+}
+// Correção pós-relatório do usuário (2026-08-11) — "abrir a fatura mostra
+// as 5 compras e a decomposição por categoria": a dívida com o banco é UMA
+// (1 CP), mas o usuário precisa enxergar as compras individuais e a
+// composição por categoria econômica que formam esse total — nunca
+// obrigado a inferir isso a partir de Contas a Pagar.
+function finCartaoVerFaturaDetalhe(faturaId) {
+  var fatura = FIN_FATURAS.find(function (f) { return f.id === faturaId; });
+  if (!fatura) return;
+  var cartao = FIN_CARTOES.find(function (c) { return c.id === fatura.cartaoId; });
+  var compras = finCartaoComprasDaFatura(faturaId);
+  var porCat = finCartaoFaturaPorCategoria(faturaId);
+  var total = finCartaoValorFatura(faturaId);
+  var titleEl = document.getElementById('finCartaoFaturaDetalheTitulo');
+  if (titleEl) titleEl.textContent = (cartao ? cartao.nome : '') + ' — ' + fatura.competencia + ' — ' + finFmt(total);
+  var comprasEl = document.getElementById('finCartaoFaturaDetalheCompras');
+  if (comprasEl) {
+    comprasEl.innerHTML = compras.length ? compras.map(function (item) {
+      return '<tr><td>' + item.compra.fornecedor + '</td><td>' + item.compra.descricao + '</td><td>' + item.compra.categoria + '</td>'
+        + '<td>' + item.parcela.numero + '/' + item.parcela.totalParcelas + '</td>'
+        + '<td style="text-align:right">' + finFmt(item.parcela.valor) + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Nenhuma compra nesta fatura</td></tr>';
+  }
+  var catEl = document.getElementById('finCartaoFaturaDetalheCategorias');
+  if (catEl) {
+    catEl.innerHTML = Object.keys(porCat).map(function (cat) {
+      return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border)"><span>' + cat + '</span><strong>' + finFmt(porCat[cat].valor) + '</strong></div>';
+    }).join('') + '<div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;font-weight:800"><span>Total da fatura</span><span>' + finFmt(total) + '</span></div>';
+  }
+  var ov = document.getElementById('finCartaoFaturaDetalheOverlay');
+  if (ov) ov.classList.add('open');
 }
 
 // ── DRE — Regime de Caixa vs Competência ────────────────────────────────────
@@ -19174,8 +19248,21 @@ function relContasPagas() {
 
   var f=finFmt;
   var total=lista.reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var totDesp=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='despesa';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
-  var totCusto=lista.filter(function(c){return FIN_TIPO_MAP[finNormCat(c.categoria)]==='custo';}).reduce(function(s,c){return s+finCPValorNum(c);},0);
+  // GO-LIVE 2026-08-11, correção pós-relatório — uma fatura de cartão agora
+  // é 1 único FIN_CP com composicaoCategorias (várias categorias dentro da
+  // MESMA obrigação). Custo×Despesa precisa decompor por composição, senão
+  // essas faturas somem do breakdown mesmo aparecendo corretamente no Total
+  // Pago (que soma c.valor bruto, nunca por categoria).
+  var contribsCategoria=[];
+  lista.forEach(function(c){
+    if(c.composicaoCategorias){
+      Object.keys(c.composicaoCategorias).forEach(function(cat){ contribsCategoria.push({_cat:finNormCat(cat), valor:c.composicaoCategorias[cat]}); });
+    } else {
+      contribsCategoria.push({_cat:finNormCat(c.categoria), valor:finCPValorNum(c)});
+    }
+  });
+  var totDesp=contribsCategoria.filter(function(x){return FIN_TIPO_MAP[x._cat]==='despesa';}).reduce(function(s,x){return s+x.valor;},0);
+  var totCusto=contribsCategoria.filter(function(x){return FIN_TIPO_MAP[x._cat]==='custo';}).reduce(function(s,x){return s+x.valor;},0);
 
   if(lista.length===0){
     el.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">Nenhuma conta paga em '+mesesNome[mes]+' '+ano+'</div>';
@@ -19183,12 +19270,19 @@ function relContasPagas() {
   }
 
   var rows=lista.map(function(c,i){
-    var tipo=FIN_TIPO_MAP[finNormCat(c.categoria)]||'despesa';
-    var tipoBadge='<span class="fin-tipo-'+tipo+' fin-badge">'+( tipo==='custo'?'Custo':'Despesa')+'</span>';
+    var tipoBadge, catCell;
+    if(c.composicaoCategorias){
+      tipoBadge='<span class="fin-badge">Fatura (multi-categoria)</span>';
+      catCell=Object.keys(c.composicaoCategorias).map(function(cat){ return cat+' '+f(c.composicaoCategorias[cat]); }).join(' · ');
+    } else {
+      var tipo=FIN_TIPO_MAP[finNormCat(c.categoria)]||'despesa';
+      tipoBadge='<span class="fin-tipo-'+tipo+' fin-badge">'+( tipo==='custo'?'Custo':'Despesa')+'</span>';
+      catCell=c.categoria||'—';
+    }
     return '<tr><td style="color:var(--muted);font-size:11px">'+c.vencimento+'</td>'
       +'<td style="font-weight:700">'+c.dataPagamento+'</td>'
       +'<td>'+c.descricao+'</td>'
-      +'<td>'+tipoBadge+' '+(c.categoria||'—')+'</td>'
+      +'<td>'+tipoBadge+' '+catCell+'</td>'
       +'<td>'+relMetodoBadge(c.formaPgto||'Banco')+'</td>'
       +'<td style="text-align:right;color:#DC2626;font-weight:800">'+f(c.valor)+'</td></tr>';
   }).join('');

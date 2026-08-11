@@ -1,26 +1,31 @@
 /**
  * test_cartao_cp_dre_2026-08-11.js
  *
- * GO-LIVE 2026-08-11, FASE D — seção 42-50: Cartões → Parcelas → Faturas →
- * Contas a Pagar → pagamento → Caixa → DRE, sem duplicar despesa.
+ * GO-LIVE 2026-08-11, FASE D — seção 42-50 (CORREÇÃO PÓS-RELATÓRIO): Cartões
+ * → Fatura → Contas a Pagar → Caixa → DRE, com a regra de negócio CORRETA
+ * confirmada pelo usuário:
  *
- * Antes desta rodada o módulo de Cartões era um silo 100% isolado: registrar
- * uma compra no cartão e pagar a fatura nunca criava nem pagava nada em
- * FIN_CP — a despesa nunca chegava a Caixa Diário/Contas Pagas/Relatório
- * Mensal/Anual/DRE. Este arquivo prova, com as funções REAIS extraídas de
- * index.html, que:
- *   1) registrar uma compra no cartão NÃO afeta o DRE ainda (só agenda);
- *   2) o ciclo/fatura cria exatamente 1 lançamento em FIN_CP por categoria
- *      (nunca 1 por compra — categorias diferentes na mesma fatura não se
- *      misturam);
- *   3) reexecutar a sincronização da fatura (2ª compra no mesmo ciclo,
- *      re-render, etc.) NUNCA duplica o lançamento — sempre reconcilia o
- *      MESMO documento (id determinístico);
- *   4) pagar a fatura paga o(s) CP(s) vinculados pela MESMA rotina canônica
- *      usada em qualquer outra despesa (_finCPPagarConfirmar) — a despesa
- *      aparece exatamente 1 vez no DRE (nunca 2x: nem na compra nem na
- *      fatura em duplicidade);
- *   5) um CP de cartão já pago nunca é remexido por uma nova sincronização.
+ *   Para cada (cartão, competência) existe UMA ÚNICA obrigação em Contas a
+ *   Pagar, representando o valor TOTAL da fatura. As categorias econômicas
+ *   das compras individuais permanecem como COMPOSIÇÃO INTERNA dessa
+ *   obrigação (usada só para classificar custo/despesa no DRE) — nunca como
+ *   obrigações financeiras separadas. A dívida com o banco é UMA.
+ *
+ * (A versão anterior deste arquivo testava — incorretamente — 1 CP POR
+ * CATEGORIA dentro da mesma fatura; foi substituída por completo por este
+ * arquivo, que testa a arquitetura corrigida.)
+ *
+ * Este arquivo prova, com as funções REAIS extraídas de index.html, os 9
+ * cenários explicitamente pedidos pelo usuário:
+ *   1) Bradesco/agosto com 5 compras e 3 categorias → 1 CP no total da fatura.
+ *   2) Abrir a fatura mostra as 5 compras e a decomposição por categoria.
+ *   3) Soma da composição = total da fatura = valor da CP.
+ *   4) Nova compra antes do fechamento atualiza a mesma fatura e a mesma CP.
+ *   5) Nenhuma segunda CP por categoria.
+ *   6) DRE preserva as categorias econômicas das compras.
+ *   7) Pagamento da fatura não duplica despesa/custo no DRE.
+ *   8) Pagamento gera a saída financeira exatamente uma vez.
+ *   9) Retry/double-click não duplica saída.
  *
  * Uso: node scripts/test_cartao_cp_dre_2026-08-11.js
  */
@@ -53,16 +58,15 @@ function extractFn(name) {
 var FN_NAMES = [
   'finCPValorNum', 'finNormCat', 'finCPCompetenciaStr', 'finCPParseISO', 'finCPVencimentoDaCompetencia',
   'finCartaoCompetenciaFatura', 'finCartaoGerarParcelas', 'finCartaoRegistrarCompra',
-  'finCartaoGarantirFaturas', 'finCartaoCategoriaSlug', 'finCartaoFaturaPorCategoria',
+  'finCartaoGarantirFaturas', 'finCartaoFaturaPorCategoria',
   'finCartaoSincronizarCPFatura', 'finCartaoValorFatura', 'finCartaoComprasDaFatura',
   'finCartaoPagarFatura', 'sumCents', 'centsToMoney', 'moneyToCents', 'finCalcularDRE',
   '_finCPPagarConfirmar', '_confirmarAposSalvar',
 ];
 var src = [
   "var FIN_CARTOES=[], FIN_CARTAO_COMPRAS=[], FIN_FATURAS=[], FIN_CP=[];",
-  "var FIN_TAXA_IMPOSTO_DRE=0.085;",
   "var FIN_CAT_ALIAS={'Matéria-prima':'Matéria-Prima','Pessoal':'Pessoal Admin'};",
-  "var FIN_CARTAO_CAT_SLUG={'Matéria-Prima':'materia_prima','Mão de Obra Direta':'mod','Pessoal Admin':'pessoal_admin','Operacional':'operacional','Impostos':'impostos','Empréstimos':'emprestimos','Outros':'outros'};",
+  "var FIN_TAXA_IMPOSTO_DRE=0.085;",
   "var _cloudSaveCalls=[]; function _cloudSave(k,v){ _cloudSaveCalls.push(k); return Promise.resolve({ok:true}); }",
   "function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }",
   "function finCPRender(){} function finDashKPIs(){} function finDonutRender(){}",
@@ -72,7 +76,6 @@ var src = [
     'module.exports = {',
     '  registrarCompra: finCartaoRegistrarCompra,',
     '  garantirFaturas: finCartaoGarantirFaturas,',
-    '  categoriaSlug: finCartaoCategoriaSlug,',
     '  faturaPorCategoria: finCartaoFaturaPorCategoria,',
     '  sincronizarCPFatura: finCartaoSincronizarCPFatura,',
     '  valorFatura: finCartaoValorFatura,',
@@ -82,6 +85,7 @@ var src = [
     '  pagarConfirmar: _finCPPagarConfirmar,',
     '  state: function () { return { FIN_CARTOES: FIN_CARTOES, FIN_CARTAO_COMPRAS: FIN_CARTAO_COMPRAS, FIN_FATURAS: FIN_FATURAS, FIN_CP: FIN_CP }; },',
     '  setCartoes: function (arr) { FIN_CARTOES.length = 0; FIN_CARTOES.push.apply(FIN_CARTOES, arr); },',
+    '  cpsDaFatura: function (faturaId) { return FIN_CP.filter(function(c){ return c.origemFaturaId===faturaId; }); },',
     '};',
   ].join('\n'),
 ].join('\n\n');
@@ -89,100 +93,115 @@ var modPath = path.join(__dirname, '_cartao_cp_dre_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 delete require.cache[require.resolve(modPath)];
 
-console.log('\n=== GO-LIVE FASE D — Cartões → CP → Caixa → DRE sem duplicidade (seção 42-50) ===\n');
+console.log('\n=== GO-LIVE FASE D (correção pós-relatório) — Cartões → 1 CP por fatura → Caixa → DRE ===\n');
 
 function novoAmbiente() {
   delete require.cache[require.resolve(modPath)];
   var mod = require(modPath);
-  mod.setCartoes([{ id: 'fcartao_1', nome: 'Nubank Empresarial', emissor: 'Nubank', diaFechamento: 10, diaVencimento: 20, contaBancaria: 'banco_principal', ativo: true }]);
+  mod.setCartoes([{ id: 'fcartao_bradesco', nome: 'Bradesco', emissor: 'Bradesco', diaFechamento: 10, diaVencimento: 20, contaBancaria: 'banco_principal', ativo: true }]);
   return mod;
 }
 
-// ── 1. Registrar compra não afeta o DRE ainda (só agenda) ──────────────────
+// ── 1/2/3. Bradesco/agosto, 5 compras, 3 categorias → 1 CP no total ────────
+// (cenários 1, 2 e 3 do usuário, no mesmo bloco por compartilharem a fixture)
+var mod1, faturaId1;
 {
   var mod = novoAmbiente();
-  var r = mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-05', fornecedor: 'Loja X', descricao: 'Material de escritório', categoria: 'Operacional', valorTotal: 300, parcelas: 1, marca: 'vr' });
-  testTrue('1. compra registrada com sucesso', r.ok === true);
-  var dreVazio = mod.calcularDRE([], []);
-  test('2. DRE calculado só com FIN_TX/FIN_CP explicitamente "pagos" (nenhum ainda) não vê a compra recém-registrada', dreVazio.cpOp, 0);
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-03', fornecedor: 'Loja A', descricao: 'Papel', categoria: 'Operacional', valorTotal: 100, parcelas: 1, marca: 'vr' });
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-04', fornecedor: 'Loja B', descricao: 'Toner', categoria: 'Operacional', valorTotal: 50, parcelas: 1, marca: 'vr' });
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-05', fornecedor: 'Fornecedor Chapas', descricao: 'Acrílico', categoria: 'Matéria-Prima', valorTotal: 220, parcelas: 1, marca: 'vr' });
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-06', fornecedor: 'Contador', descricao: 'Honorários', categoria: 'Impostos', valorTotal: 60, parcelas: 1, marca: 'vr' });
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-07', fornecedor: 'Ferragista', descricao: 'Parafusos', categoria: 'Matéria-Prima', valorTotal: 7000, parcelas: 1, marca: 'vr' });
   var st = mod.state();
-  testTrue('3. a compra criou o FIN_CP da fatura do ciclo, mas ainda status=agendado (não pago, não entra no DRE em regime de caixa)', st.FIN_CP.length === 1 && st.FIN_CP[0].status === 'agendado');
+  faturaId1 = st.FIN_FATURAS[0].id;
+  mod1 = mod;
+
+  test('1. Bradesco/agosto: 5 compras em 3 categorias diferentes viram EXATAMENTE 1 lançamento em FIN_CP (a dívida com o banco é UMA)', st.FIN_CP.length, 1);
+  test('1b. o valor da ÚNICA CP é o total da fatura (100+50+220+60+7000=7430,00)', st.FIN_CP[0].valor, 7430);
+  testTrue('1c. o id da CP é determinístico por (cartão, competência) — nunca por categoria', st.FIN_CP[0].id === 'cpcartao_' + faturaId1);
+
+  var compras = mod.comprasDaFatura(faturaId1);
+  test('2. abrir a fatura mostra as 5 compras vinculadas', compras.length, 5);
+  var porCat = mod.faturaPorCategoria(faturaId1);
+  test('2b. abrir a fatura mostra a decomposição em exatamente as 3 categorias usadas', Object.keys(porCat).sort(), ['Impostos', 'Matéria-Prima', 'Operacional']);
+  test('2c. a composição de Operacional soma as 2 compras dessa categoria (100+50=150)', porCat['Operacional'].valor, 150);
+  test('2d. a composição de Matéria-Prima soma as 2 compras dessa categoria (220+7000=7220)', porCat['Matéria-Prima'].valor, 7220);
+  test('2e. a composição de Impostos reflete a única compra dessa categoria (60)', porCat['Impostos'].valor, 60);
+
+  var somaComposicao = Object.keys(porCat).reduce(function (s, cat) { return s + porCat[cat].valor; }, 0);
+  var totalFatura = mod.valorFatura(faturaId1);
+  var valorCP = st.FIN_CP[0].valor;
+  test('3. soma da composição (150+7220+60=7430) = total da fatura = valor da CP — os 3 números batem exatos', [Math.round(somaComposicao * 100), Math.round(totalFatura * 100), Math.round(valorCP * 100)], [743000, 743000, 743000]);
 }
 
-// ── 2. Fatura agrupa por categoria — 1 CP por (fatura, categoria) ──────────
+// ── 4. Nova compra antes do fechamento atualiza a MESMA fatura e a MESMA CP ─
+{
+  var stAntes = mod1.state();
+  var cpIdAntes = stAntes.FIN_CP[0].id;
+  mod1.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-08', fornecedor: 'Loja C', descricao: 'Canetas', categoria: 'Operacional', valorTotal: 70, parcelas: 1, marca: 'vr' });
+  var stDepois = mod1.state();
+  test('4. nova compra ANTES do fechamento (dia 8, fecha dia 10) atualiza a MESMA CP (mesmo id) — nunca cria uma 2ª', stDepois.FIN_CP.map(function (c) { return c.id; }), [cpIdAntes]);
+  test('4b. o valor da CP atualizada reflete a nova compra (7430+70=7500)', stDepois.FIN_CP[0].valor, 7500);
+  var porCatDepois = mod1.faturaPorCategoria(faturaId1);
+  test('4c. a composição de Operacional também foi atualizada (150+70=220)', porCatDepois['Operacional'].valor, 220);
+}
+
+// ── 5. Nenhuma segunda CP por categoria, mesmo reexecutando a sincronização ─
+{
+  mod1.sincronizarCPFatura(faturaId1);
+  mod1.sincronizarCPFatura(faturaId1);
+  mod1.sincronizarCPFatura(faturaId1);
+  var st = mod1.state();
+  test('5. reexecutar a sincronização 3x NUNCA cria uma 2ª CP (nem por categoria, nem por fatura) — continua exatamente 1', st.FIN_CP.length, 1);
+}
+
+// ── 6/7/8. DRE preserva categorias das compras; pagamento não duplica ──────
+{
+  var stAntes = mod1.state();
+  var dreAntesPagar = mod1.calcularDRE([], stAntes.FIN_CP.filter(function (c) { return c.status === 'pago'; }));
+  test('7a. ANTES de pagar a fatura, DRE em regime de caixa (só status=pago) não vê nenhuma das compras do cartão', [dreAntesPagar.cpOp, dreAntesPagar.cmvMat, dreAntesPagar.cpImp], [0, 0, 0]);
+
+  var pag = mod1.pagarFatura(faturaId1, '2026-08-20', 'banco_principal');
+  testTrue('8. pagar a fatura retorna ok=true com o valor total pago (7500,00)', pag.ok === true && pag.valorPago === 7500);
+
+  var stDepois = mod1.state();
+  testTrue('8b. pagar a fatura marca a ÚNICA CP como paga (não sobra nenhuma CP pendente vinculada a esta fatura)', stDepois.FIN_CP.filter(function (c) { return c.origemFaturaId === faturaId1; }).every(function (c) { return c.status === 'pago'; }));
+  test('8c. continua existindo exatamente 1 CP vinculado a esta fatura depois de paga (pagamento não cria uma 2ª obrigação)', mod1.cpsDaFatura(faturaId1).length, 1);
+
+  var dreDepoisPagar = mod1.calcularDRE([], stDepois.FIN_CP.filter(function (c) { return c.status === 'pago'; }));
+  test('6. DRE preserva as categorias econômicas das compras que formaram a fatura: Operacional=220, Matéria-Prima(CMV)=7220, Impostos=60 — cada uma na sua classificação, mesmo vindo de 1 único CP', [dreDepoisPagar.cpOp, dreDepoisPagar.cmvMat, dreDepoisPagar.cpImp], [220, 7220, 60]);
+  test('6b. nenhuma das categorias reais caiu em cpOutros por engano', dreDepoisPagar.cpOutros, 0);
+  test('7. pagamento da fatura NÃO duplica: comparando com o DRE que seria obtido somando as compras originais direto (150+70=220 Op / 7220 MatPrima / 60 Impostos) — bate exato, cada valor aparece 1x', [dreDepoisPagar.cpOp, dreDepoisPagar.cmvMat, dreDepoisPagar.cpImp], [220, 7220, 60]);
+}
+
+// ── 9. Retry / duplo clique no pagamento não duplica a saída financeira ────
+{
+  var stAntes = mod1.state();
+  var cpAntes = mod1.cpsDaFatura(faturaId1)[0];
+  var dataPagamentoAntes = cpAntes.dataPagamento;
+
+  // Retry 1: chamar pagarFatura de novo na fatura já paga (ex.: duplo clique no botão "Pagar")
+  var retry1 = mod1.pagarFatura(faturaId1, '2026-08-21', 'banco_principal');
+  testTrue('9a. reexecutar pagarFatura numa fatura já paga é bloqueado (fatura já paga)', retry1.ok === false);
+
+  // Retry 2: chamar a rotina canônica de pagamento direto no mesmo id de CP (defesa na camada mais baixa)
+  mod1.pagarConfirmar(cpAntes.id, '2026-08-22');
+  var stDepois = mod1.state();
+  var cpDepois = stDepois.FIN_CP.find(function (c) { return c.id === cpAntes.id; });
+  test('9b. retry direto em _finCPPagarConfirmar no mesmo id nunca reabre nem reprocessa um pagamento já confirmado — data de pagamento não muda', cpDepois.dataPagamento, dataPagamentoAntes);
+  test('9c. continua existindo exatamente 1 CP para esta fatura depois dos retries — nenhuma saída duplicada', mod1.cpsDaFatura(faturaId1).length, 1);
+  var dreFinal = mod1.calcularDRE([], stDepois.FIN_CP.filter(function (c) { return c.status === 'pago'; }));
+  test('9d. o DRE depois dos retries continua idêntico ao original (220/7220/60) — nenhum valor foi somado 2x', [dreFinal.cpOp, dreFinal.cmvMat, dreFinal.cpImp], [220, 7220, 60]);
+}
+
+// ── Cenário adicional — parcelamento continua íntegro sob o novo modelo ────
 {
   var mod = novoAmbiente();
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-03', fornecedor: 'Loja A', descricao: 'Papel', categoria: 'Operacional', valorTotal: 100, parcelas: 1, marca: 'vr' });
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-04', fornecedor: 'Loja B', descricao: 'Toner', categoria: 'Operacional', valorTotal: 50, parcelas: 1, marca: 'vr' });
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-06', fornecedor: 'Fornecedor Chapas', descricao: 'Acrílico', categoria: 'Matéria-Prima', valorTotal: 220, parcelas: 1, marca: 'vr' });
+  mod.registrarCompra({ cartaoId: 'fcartao_bradesco', data: '2026-08-05', fornecedor: 'Loja X', descricao: 'Equipamento', categoria: 'Operacional', valorTotal: 300, parcelas: 3, marca: 'vr' });
   var st = mod.state();
-  test('4. 2 compras Operacional + 1 Matéria-Prima na MESMA fatura viram exatamente 2 lançamentos em FIN_CP (1 por categoria, nunca 1 por compra)', st.FIN_CP.length, 2);
-  var faturaId = st.FIN_FATURAS[0].id;
-  var cpOp = st.FIN_CP.find(function (c) { return c.categoria === 'Operacional'; });
-  var cpMat = st.FIN_CP.find(function (c) { return c.categoria === 'Matéria-Prima'; });
-  test('5. o CP de Operacional soma as 2 compras dessa categoria (100+50=150), nunca uma delas isolada', cpOp.valor, 150);
-  test('6. o CP de Matéria-Prima reflete só a compra dessa categoria (220), sem misturar com Operacional', cpMat.valor, 220);
-  testTrue('7. os ids dos CPs de cartão são determinísticos por (fatura, categoria)', cpOp.id === 'cpcartao_' + faturaId + '_operacional' && cpMat.id === 'cpcartao_' + faturaId + '_materia_prima');
-}
-
-// ── 3. Reexecutar a sincronização nunca duplica ─────────────────────────────
-{
-  var mod = novoAmbiente();
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-03', fornecedor: 'Loja A', descricao: 'Papel', categoria: 'Operacional', valorTotal: 100, parcelas: 1, marca: 'vr' });
-  var st1 = mod.state();
-  var faturaId = st1.FIN_FATURAS[0].id;
-  // reexecuta a sincronização várias vezes (simula reabrir a tela de Cartões) — nunca duplica
-  mod.sincronizarCPFatura(faturaId); mod.sincronizarCPFatura(faturaId); mod.sincronizarCPFatura(faturaId);
-  var st2 = mod.state();
-  test('8. reexecutar a sincronização da mesma fatura 3x nunca cria um 2º lançamento', st2.FIN_CP.length, 1);
-  // registra MAIS uma compra Operacional no mesmo ciclo — o CP existente deve ser atualizado, não duplicado
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-07', fornecedor: 'Loja C', descricao: 'Canetas', categoria: 'Operacional', valorTotal: 30, parcelas: 1, marca: 'vr' });
-  var st3 = mod.state();
-  test('9. uma nova compra na mesma categoria/ciclo ATUALIZA o CP existente (100+30=130), nunca cria um novo', [st3.FIN_CP.length, st3.FIN_CP[0].valor], [1, 130]);
-}
-
-// ── 4. Pagar a fatura paga o(s) CP(s) pela rotina canônica — DRE reflete 1x ─
-{
-  var mod = novoAmbiente();
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-03', fornecedor: 'Loja A', descricao: 'Papel', categoria: 'Operacional', valorTotal: 100, parcelas: 1, marca: 'vr' });
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-06', fornecedor: 'Fornecedor Chapas', descricao: 'Acrílico', categoria: 'Matéria-Prima', valorTotal: 220, parcelas: 1, marca: 'vr' });
-  var st0 = mod.state();
-  var faturaId = st0.FIN_FATURAS[0].id;
-  var dreAntes = mod.calcularDRE([], st0.FIN_CP.filter(function (c) { return c.status === 'pago'; }));
-  test('10. antes de pagar a fatura, DRE em regime de caixa (só status=pago) não vê nenhuma das 2 despesas', [dreAntes.cpOp, dreAntes.cmvMat], [0, 0]);
-  var pag = mod.pagarFatura(faturaId, '2026-08-20', 'banco_principal');
-  testTrue('11. pagar a fatura retorna ok=true com o valor total pago (100+220=320)', pag.ok === true && pag.valorPago === 320);
-  var st1 = mod.state();
-  testTrue('12. pagar a fatura marca AMBOS os CPs vinculados (Operacional e Matéria-Prima) como pago — mesma rotina canônica de qualquer outra despesa', st1.FIN_CP.every(function (c) { return c.status === 'pago'; }));
-  testTrue('13. a fatura em si fica marcada como paga', st1.FIN_FATURAS[0].pago === true && st1.FIN_FATURAS[0].status === 'paga');
-  var dreDepois = mod.calcularDRE([], st1.FIN_CP.filter(function (c) { return c.status === 'pago'; }));
-  test('14. depois de paga, o DRE (regime de caixa) reflete a despesa Operacional exatamente 1 vez (100, nunca 2x)', dreDepois.cpOp, 100);
-  test('15. depois de paga, o DRE reflete o CMV de Matéria-Prima exatamente 1 vez (220, nunca 2x)', dreDepois.cmvMat, 220);
-}
-
-// ── 5. Pagar a fatura 2x não é permitido; CP já pago nunca é remexido ──────
-{
-  var mod = novoAmbiente();
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-03', fornecedor: 'Loja A', descricao: 'Papel', categoria: 'Operacional', valorTotal: 100, parcelas: 1, marca: 'vr' });
-  var st0 = mod.state();
-  var faturaId = st0.FIN_FATURAS[0].id;
-  mod.pagarFatura(faturaId, '2026-08-20', 'banco_principal');
-  var r2 = mod.pagarFatura(faturaId, '2026-08-21', 'banco_principal');
-  testTrue('16. pagar a MESMA fatura uma 2ª vez é bloqueado (fatura já paga)', r2.ok === false);
-  // uma compra "retroativa" na mesma competência, registrada por engano após o pagamento, nunca deve reabrir/alterar o CP já pago
-  mod.sincronizarCPFatura(faturaId);
-  var st1 = mod.state();
-  test('17. sincronizar novamente uma fatura já paga NUNCA altera o valor do CP já pago (continua 100, nunca some nem duplica)', [st1.FIN_CP.length, st1.FIN_CP[0].valor, st1.FIN_CP[0].status], [1, 100, 'pago']);
-}
-
-// ── 6. Parcelamento: cada parcela do ciclo entra na fatura certa ───────────
-{
-  var mod = novoAmbiente();
-  // compra em 3x no dia 5 (antes do fechamento dia 10) — 1ª parcela cai no ciclo de agosto
-  mod.registrarCompra({ cartaoId: 'fcartao_1', data: '2026-08-05', fornecedor: 'Loja X', descricao: 'Equipamento', categoria: 'Operacional', valorTotal: 300, parcelas: 3, marca: 'vr' });
-  var st = mod.state();
-  test('18. compra parcelada em 3x gera faturas em 3 competências distintas (ago/set/out)', st.FIN_FATURAS.map(function (f) { return f.competencia; }).sort(), ['2026-08', '2026-09', '2026-10']);
-  test('19. cada fatura do parcelamento tem exatamente 1 CP de 100 (300/3, centavo-exato)', st.FIN_CP.map(function (c) { return c.valor; }).sort(function (a, b) { return a - b; }), [100, 100, 100]);
+  test('10. compra parcelada em 3x gera faturas em 3 competências distintas (ago/set/out)', st.FIN_FATURAS.map(function (f) { return f.competencia; }).sort(), ['2026-08', '2026-09', '2026-10']);
+  test('11. cada fatura do parcelamento tem exatamente 1 CP de 100 (300/3, centavo-exato) — 1 por fatura, não 1 por categoria', st.FIN_CP.map(function (c) { return c.valor; }).sort(function (a, b) { return a - b; }), [100, 100, 100]);
+  testTrue('12. cada CP de parcela também é única por fatura', st.FIN_CP.length === 3 && st.FIN_FATURAS.every(function (f) { return st.FIN_CP.filter(function (c) { return c.origemFaturaId === f.id; }).length === 1; }));
 }
 
 try { fs.unlinkSync(modPath); } catch (e) {}

@@ -48,15 +48,15 @@ var VALORES_CENTS = [10, 20, 30, 1001, 9999, 33333]; // 0,10 / 0,20 / 0,30 / 10,
     'finCPCompetenciaStr', 'finCPVencimentoDaCompetencia', 'finCartaoCompetenciaFatura',
     'finCartaoGerarParcelas', 'finCartaoRegistrarCompra', 'finCartaoGarantirFaturas',
     'finCartaoValorFatura',
-    // GO-LIVE 2026-08-11, seção 42-50 — finCartaoGarantirFaturas agora também
-    // sincroniza Contas a Pagar por categoria a cada compra registrada.
-    'finNormCat', 'finCartaoCategoriaSlug', 'finCartaoFaturaPorCategoria',
+    // GO-LIVE 2026-08-11, seção 42-50 (correção pós-relatório) —
+    // finCartaoGarantirFaturas agora também sincroniza a ÚNICA obrigação de
+    // Contas a Pagar por (cartão, competência) a cada compra registrada.
+    'finNormCat', 'finCartaoFaturaPorCategoria',
     'finCartaoSincronizarCPFatura', 'finCartaoComprasDaFatura',
   ];
   var src = [
     'var FIN_CARTOES = []; var FIN_CARTAO_COMPRAS = []; var FIN_FATURAS = []; var FIN_CP = [];',
     "var FIN_CAT_ALIAS={'Matéria-prima':'Matéria-Prima','Pessoal':'Pessoal Admin'};",
-    "var FIN_CARTAO_CAT_SLUG={'Matéria-Prima':'materia_prima','Mão de Obra Direta':'mod','Pessoal Admin':'pessoal_admin','Operacional':'operacional','Impostos':'impostos','Empréstimos':'emprestimos','Outros':'outros'};",
     FN_NAMES.map(extractFn).join('\n\n'),
     'module.exports = {',
     '  registrarCompra: finCartaoRegistrarCompra, valorFatura: finCartaoValorFatura,',

@@ -57,7 +57,7 @@ var FN_NAMES = [
   'relNormMetodo', 'relMetodoBadge', '_relFecRow',
   'relCaixaDiario', 'relMensal', 'relContasPagas', 'relAnual', 'finCalcularDRE',
   'finCartaoCompetenciaFatura', 'finCartaoGerarParcelas', 'finCartaoRegistrarCompra',
-  'finCartaoGarantirFaturas', 'finCartaoCategoriaSlug', 'finCartaoFaturaPorCategoria',
+  'finCartaoGarantirFaturas', 'finCartaoFaturaPorCategoria',
   'finCartaoSincronizarCPFatura', 'finCartaoComprasDaFatura', 'finCartaoValorFatura',
   'finCartaoPagarFatura', '_finCPPagarConfirmar', '_confirmarAposSalvar',
 ];
@@ -66,7 +66,6 @@ var src = [
   "var FIN_TAXA_IMPOSTO_DRE=0.085;",
   "var FIN_CAT_ALIAS={'Matéria-prima':'Matéria-Prima','Pessoal':'Pessoal Admin'};",
   "var FIN_TIPO_MAP={'Matéria-Prima':'custo','Mão de Obra Direta':'custo','Pessoal Admin':'despesa','Operacional':'despesa','Impostos':'despesa','Empréstimos':'despesa','Outros':'despesa'};",
-  "var FIN_CARTAO_CAT_SLUG={'Matéria-Prima':'materia_prima','Mão de Obra Direta':'mod','Pessoal Admin':'pessoal_admin','Operacional':'operacional','Impostos':'impostos','Empréstimos':'emprestimos','Outros':'outros'};",
   "var _cloudSaveCalls=[]; function _cloudSave(k,v){ _cloudSaveCalls.push(k); return Promise.resolve({ok:true}); }",
   "function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }",
   "function finCPRender(){} function finDashKPIs(){} function finDonutRender(){}",

@@ -40,13 +40,12 @@ var FN_NAMES = [
   'finCartaoPagarFatura', 'finCartaoAtualizarStatusFaturas',
   // GO-LIVE 2026-08-11, seção 42-50 — Cartões passou a sincronizar/pagar via
   // Contas a Pagar (finCartaoSincronizarCPFatura/_finCPPagarConfirmar).
-  'finNormCat', 'finCartaoCategoriaSlug', 'finCartaoFaturaPorCategoria',
+  'finNormCat', 'finCartaoFaturaPorCategoria',
   'finCartaoSincronizarCPFatura', '_finCPPagarConfirmar', '_confirmarAposSalvar',
 ];
 var src = [
   'var FIN_CARTOES = []; var FIN_CARTAO_COMPRAS = []; var FIN_FATURAS = []; var FIN_CP = [];',
   "var FIN_CAT_ALIAS={'Matéria-prima':'Matéria-Prima','Pessoal':'Pessoal Admin'};",
-  "var FIN_CARTAO_CAT_SLUG={'Matéria-Prima':'materia_prima','Mão de Obra Direta':'mod','Pessoal Admin':'pessoal_admin','Operacional':'operacional','Impostos':'impostos','Empréstimos':'emprestimos','Outros':'outros'};",
   "function _cloudSave(k,v){ return Promise.resolve({ok:true}); }",
   "function _finSaveCP(){ return _cloudSave('fin_cp', FIN_CP); }",
   "function finCPRender(){} function finDashKPIs(){} function finDonutRender(){}",
