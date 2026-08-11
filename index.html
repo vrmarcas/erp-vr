@@ -12037,7 +12037,13 @@ function kbRenderItensDetalhe(os) {
         var extrasDesc = (it.extras && it.extras.descricao) ? String(it.extras.descricao) : '';
         var obsPartes = [it.det, extrasDesc].filter(Boolean);
         var obsHtml = obsPartes.length ? '<div style="grid-column:1/-1"><span class="kb-os-field-lbl">Observações / Acabamento</span>'+cfgEsc(obsPartes.join(' · '))+'</div>' : '';
-        var planHtml = (it.planArea && parseFloat(it.planArea) > 0) ? '<div><span class="kb-os-field-lbl">Área planificada</span>'+parseFloat(it.planArea).toFixed(2)+' m²</div>' : '';
+        // GO-LIVE 2026-08-11, achado do smoke visual — it.planArea é gravado
+        // em cm² (mesma unidade usada pelo preview ao vivo do wizard, ver
+        // orcCalcularPlanificacao), mas esta tela mostrava o número cru
+        // rotulado como "m²" (ex.: 16634.16 m² para uma peça de ~1,66 m²
+        // real) — confusão grave para quem lê na Produção. Converte para m²
+        // igual ao preview do wizard, nunca recalcula a área em si.
+        var planHtml = (it.planArea && parseFloat(it.planArea) > 0) ? '<div><span class="kb-os-field-lbl">Área planificada</span>'+(parseFloat(it.planArea)/10000).toFixed(4)+' m²</div>' : '';
         // GO-LIVE 2026-08-11, P0 seção 17 — "Planificação do Orçamento":
         // somente leitura, snapshot exato copiado por osProjecaoOperacionalItem
         // (nunca recalculado aqui). Separado de "Arquivos da Produção"
