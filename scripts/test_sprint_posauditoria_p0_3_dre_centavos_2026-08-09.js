@@ -78,8 +78,10 @@ console.log('\n=== SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.3 — DRE cent-safe =
   var dre2 = mod.finCalcularDRE([{ valor: 10000 }], [{ categoria: 'Matéria-Prima', valor: 2000 }, { categoria: 'Operacional', valor: 3000 }]);
   test('2. CMV e despesa operacional continuam corretamente separados', [dre2.cmvMat, dre2.cpOp], [2000, 3000]);
 }
+// GO-LIVE 2026-08-11, seção 51-58 — finCalcularDRE passou a devolver também
+// cpOutros (categoria 'Outros' não pode mais desaparecer do DRE).
 test('3. DRE vazio (sem transações) — todos os campos zerados, nunca NaN',
-  mod.finCalcularDRE([], []), { receitaBruta:0,impostos:0,receitaLiq:0,cmvMat:0,cmvMod:0,cmv:0,lucroBruto:0,cpPessoal:0,cpOp:0,cpEmp:0,cpImp:0,desp:0,lucroLiq:0 });
+  mod.finCalcularDRE([], []), { receitaBruta:0,impostos:0,receitaLiq:0,cmvMat:0,cmvMod:0,cmv:0,lucroBruto:0,cpPessoal:0,cpOp:0,cpEmp:0,cpImp:0,cpOutros:0,desp:0,lucroLiq:0 });
 
 // ─────────────────────────────────────────────────────────────────────────
 // Fixture geradora — valores classicamente problemáticos em float,

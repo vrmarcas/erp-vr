@@ -17039,11 +17039,23 @@ function finCalcularDRE(txFiltro, cpFiltro) {
   var cpOpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Operacional';}), function(c){return finCPValorNum(c);});
   var cpEmpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Empréstimos';}), function(c){return finCPValorNum(c);});
   var cpImpCents=sumCents(cpFiltroNorm.filter(function(c){return c._cat==='Impostos';}), function(c){return finCPValorNum(c);});
-  var despCents=cpPessoalCents+cpOpCents+cpEmpCents+cpImpCents;
+  // GO-LIVE 2026-08-11, seção 51-58 — BUG REAL encontrado e corrigido:
+  // categoria 'Outros' (e qualquer categoria fora das 6 conhecidas —
+  // nunca inventamos que algo some silenciosamente) nunca entrava em
+  // nenhuma das somas acima (nem CMV, nem despesa) — Lucro Líquido do
+  // DRE ficava superestimado sempre que existia FIN_CP pago com essa
+  // categoria, mesmo essa despesa aparecendo corretamente em Caixa
+  // Diário/Contas Pagas/Relatório Mensal/Anual (todos somam FIN_CP bruto,
+  // sem filtrar categoria). Toda despesa paga precisa aparecer em ALGUM
+  // lugar do DRE — nunca desaparecer.
+  var cpOutrosCents=sumCents(cpFiltroNorm.filter(function(c){
+    return c._cat!=='Matéria-Prima' && c._cat!=='Mão de Obra Direta' && c._cat!=='Pessoal Admin' && c._cat!=='Operacional' && c._cat!=='Empréstimos' && c._cat!=='Impostos';
+  }), function(c){return finCPValorNum(c);});
+  var despCents=cpPessoalCents+cpOpCents+cpEmpCents+cpImpCents+cpOutrosCents;
   var lucroLiqCents=lucroBrutoCents-despCents;
   return {receitaBruta:centsToMoney(receitaBrutaCents),impostos:centsToMoney(impostosCents),receitaLiq:centsToMoney(receitaLiqCents),
     cmvMat:centsToMoney(cmvMatCents),cmvMod:centsToMoney(cmvModCents),cmv:centsToMoney(cmvCents),
-    lucroBruto:centsToMoney(lucroBrutoCents),cpPessoal:centsToMoney(cpPessoalCents),cpOp:centsToMoney(cpOpCents),cpEmp:centsToMoney(cpEmpCents),cpImp:centsToMoney(cpImpCents),desp:centsToMoney(despCents),lucroLiq:centsToMoney(lucroLiqCents)};
+    lucroBruto:centsToMoney(lucroBrutoCents),cpPessoal:centsToMoney(cpPessoalCents),cpOp:centsToMoney(cpOpCents),cpEmp:centsToMoney(cpEmpCents),cpImp:centsToMoney(cpImpCents),cpOutros:centsToMoney(cpOutrosCents),desp:centsToMoney(despCents),lucroLiq:centsToMoney(lucroLiqCents)};
 }
 // ============================================================
 // AGENDA DE PAGAMENTOS — Calendário mensal
@@ -18144,7 +18156,7 @@ function finDREBuild() {
   var _dre=finCalcularDRE(txFiltro,cpFiltro);
   var receitaBruta=_dre.receitaBruta, impostos=_dre.impostos, receitaLiq=_dre.receitaLiq;
   var cmvMat=_dre.cmvMat, cmvMod=_dre.cmvMod, cmv=_dre.cmv, lucroBruto=_dre.lucroBruto;
-  var cpPessoal=_dre.cpPessoal, cpOp=_dre.cpOp, cpEmp=_dre.cpEmp, cpImp=_dre.cpImp, desp=_dre.desp, lucroLiq=_dre.lucroLiq;
+  var cpPessoal=_dre.cpPessoal, cpOp=_dre.cpOp, cpEmp=_dre.cpEmp, cpImp=_dre.cpImp, cpOutros=_dre.cpOutros, desp=_dre.desp, lucroLiq=_dre.lucroLiq;
   var pct=function(v){return receitaBruta>0?' <span class="dre-pct">'+(v/receitaBruta*100).toFixed(1)+'%</span>':'';};
   var secHd=function(t,sub){return '<div class="dre-section-hd">'+t+(sub?'<span style="font-size:9px;font-weight:400;margin-left:6px;opacity:.7">'+sub+'</span>':'')+'</div>';};
   var row=function(lbl,val,extra,indent){
@@ -18190,6 +18202,7 @@ function finDREBuild() {
     +row('(−) Operacional (aluguel, energia, etc.)',cpOp,'',true)
     +row('(−) Empréstimos e Financiamentos',cpEmp,'',true)
     +row('(−) Impostos e Tributos',cpImp,'',true)
+    +(cpOutros?row('(−) Outros',cpOutros,'',true):'')
     +row('(=) Total de Despesas Operacionais',desp,'dre-row-total')
     +secHd('RESULTADO')
     +row(lucroLiq>=0?'(=) 🟢 Lucro Líquido do Período':'(=) 🔴 Prejuízo do Período',lucroLiq,'dre-row-total '+(lucroLiq>=0?'dre-row-result-pos':'dre-row-result-neg'))
@@ -19220,7 +19233,7 @@ function relatoriosRender() {
   var _dre2=finCalcularDRE(txFiltro,cpFiltro);
   var receitaBruta=_dre2.receitaBruta, impostos=_dre2.impostos, receitaLiq=_dre2.receitaLiq;
   var cmvMat=_dre2.cmvMat, cmvMod=_dre2.cmvMod, cmv=_dre2.cmv, lucroBruto=_dre2.lucroBruto;
-  var cpPessoal=_dre2.cpPessoal, cpOp=_dre2.cpOp, cpEmp=_dre2.cpEmp, cpImp=_dre2.cpImp, desp=_dre2.desp, lucroLiq=_dre2.lucroLiq;
+  var cpPessoal=_dre2.cpPessoal, cpOp=_dre2.cpOp, cpEmp=_dre2.cpEmp, cpImp=_dre2.cpImp, cpOutros=_dre2.cpOutros, desp=_dre2.desp, lucroLiq=_dre2.lucroLiq;
   var totalReceber=crPend.reduce(function(s,r){return s+r.valor;},0);
   var totalPagar=cpPend.reduce(function(s,r){return s+finCPValorNum(r);},0);
 
@@ -19241,6 +19254,7 @@ function relatoriosRender() {
     {lbl:'(−) Operacional',              val:-cpOp,       bold:false,tipo:'despesa'},
     {lbl:'(−) Empréstimos',              val:-cpEmp,      bold:false,tipo:'despesa'},
     {lbl:'(−) Impostos Operacionais',    val:-cpImp,      bold:false,tipo:'despesa'},
+    {lbl:'(−) Outros',                   val:-cpOutros,   bold:false,tipo:'despesa'},
     {lbl:'(=) Total Despesas',           val:-desp,       bold:true,tipo:'subtotal'},
     {lbl:'LUCRO LÍQUIDO DO PERÍODO',     val:lucroLiq,    bold:true,tipo:lucroLiq>=0?'positivo':'negativo'}
   ];
