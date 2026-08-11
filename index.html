@@ -5205,6 +5205,7 @@ function _authFirebaseError(code){
                 <option value="vencido">Vencido</option>
               </select>
               <button class="topbar-btn" onclick="finCPNovoModal()">+ Nova Despesa</button>
+              <button class="topbar-btn ghost" onclick="finCPImportarTemplatesPadraoUI()" title="Cadastra os templates de recorrência da lista padrão (Custos + Despesas Gerais) que ainda não existirem — nunca sobrescreve, nunca assume valor">📋 Carregar lista padrão</button>
             </div>
           </div>
           <!-- Bulk action bar CP -->
@@ -17689,6 +17690,100 @@ function finCPGerarOcorrencias(horizonteMeses) {
     });
   });
   return criadas;
+}
+// GO-LIVE 2026-08-11, seção 41 — lista padrão de despesas recorrentes de
+// valor variável (Despesas Gerais e Administrativas + Custos), pedida
+// explicitamente pelo usuário nesta rodada. NUNCA roda sozinha — só via
+// clique humano em "📋 Carregar lista padrão" (finCPImportarTemplatesPadraoUI).
+// Cada item vira um FIN_CP_RECORRENCIAS com valor:null/tipoRecorrencia:
+// 'variavel' (nunca assume dívida do mês) — mesmo motor já existente e
+// testado de finCPCriarRecorrencia/finCPGerarOcorrencias. Categoria usa
+// os valores já reconhecidos pelo DRE (Matéria-Prima/Mão de Obra Direta
+// = CUSTO/CMV; Pessoal Admin/Operacional/Impostos/Empréstimos/Outros =
+// DESPESA) — nunca inventa uma categoria nova que o DRE não sabe classificar.
+var FIN_CP_TEMPLATES_PADRAO = [
+  // ── DESPESAS GERAIS E ADMINISTRATIVAS ──
+  { descricao:'VALE TRANSPORTE E PÃO', categoria:'Pessoal Admin' },
+  { descricao:'CLIMT', categoria:'Operacional' },
+  { descricao:'CENTRAL CLICK', categoria:'Operacional' },
+  { descricao:'TARIFA BANCÁRIA, EMPRÉSTIMOS', categoria:'Empréstimos' },
+  { descricao:'GOOGLE', categoria:'Operacional' },
+  { descricao:'EQUATORIAL', categoria:'Operacional' },
+  { descricao:'SALÁRIO DO PAULO', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DO JOSÉ', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DO VANDEILSON', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DA DAIANE', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DA GREICY', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DO MICHEL', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DA LUDIMILA', categoria:'Pessoal Admin' },
+  { descricao:'SALÁRIO DA ELAINE', categoria:'Pessoal Admin' },
+  { descricao:'ISABELLA', categoria:'Pessoal Admin' },
+  { descricao:'DETRAN - SAVEIRO', categoria:'Operacional' },
+  { descricao:'TAXI - SP', categoria:'Operacional' },
+  { descricao:'DARF', categoria:'Impostos' },
+  { descricao:'FGTS', categoria:'Impostos' },
+  { descricao:'VIVO FIXO', categoria:'Operacional' },
+  { descricao:'CONTABILIDADE', categoria:'Operacional' },
+  { descricao:'SUPER SIMPLES', categoria:'Impostos' },
+  { descricao:'VIVO CELULAR', categoria:'Operacional' },
+  { descricao:'CDL', categoria:'Operacional' },
+  { descricao:'MEI DA ISABELLA', categoria:'Impostos' },
+  { descricao:'SEGURO EMPRESA', categoria:'Operacional' },
+  { descricao:'DIFAL', categoria:'Impostos' },
+  { descricao:'INCINERA', categoria:'Operacional' },
+  { descricao:'IFOOD', categoria:'Operacional' },
+  { descricao:'CORREIOS', categoria:'Operacional' },
+  { descricao:'MELHOR ENVIO', categoria:'Operacional' },
+  { descricao:'TRANSPORTADORA', categoria:'Operacional' },
+  { descricao:'CERTIFICADO DIGITAL', categoria:'Operacional' },
+  { descricao:'PREF. EL SHADAI', categoria:'Operacional' },
+  { descricao:'DAYANE - LIMPEZA', categoria:'Pessoal Admin' },
+  { descricao:'RAFAELA', categoria:'Pessoal Admin' },
+  { descricao:'ALGAR', categoria:'Operacional' },
+  { descricao:'IFOOD BENEFÍCIOS', categoria:'Pessoal Admin' },
+  // ── CUSTOS ──
+  { descricao:'CBM MADEIRAS', categoria:'Matéria-Prima' },
+  { descricao:'VALLIM', categoria:'Matéria-Prima' },
+  { descricao:'PROMARCENEIRO', categoria:'Mão de Obra Direta' },
+  { descricao:'QI MIDIA', categoria:'Matéria-Prima' },
+  { descricao:'GEOPLAS', categoria:'Matéria-Prima' },
+  { descricao:'ELIANE GARCEZ', categoria:'Mão de Obra Direta' },
+  { descricao:'DESTAK ALBUNS', categoria:'Matéria-Prima' },
+  { descricao:'WHITE MARTINS', categoria:'Matéria-Prima' },
+  { descricao:'SANDRE', categoria:'Matéria-Prima' },
+  { descricao:'CARTÃO ITAÚ', categoria:'Outros' },
+  { descricao:'CARTÃO BRADESCO', categoria:'Outros' },
+  { descricao:'TR COMÉRCIO', categoria:'Matéria-Prima' },
+  { descricao:'NICK CRACHÁS', categoria:'Matéria-Prima' },
+  { descricao:'ACTOS', categoria:'Matéria-Prima' },
+];
+function finCPImportarTemplatesPadraoUI() {
+  if (!confirm('Cadastrar os '+FIN_CP_TEMPLATES_PADRAO.length+' templates padrão de despesa recorrente (valor variável, "a informar" todo mês)?\n\nTemplates cuja descrição já existir (mesmo nome) são pulados — nunca duplica.')) return;
+  var r = finCPImportarTemplatesPadrao();
+  showToast(r.criados+' template(s) novo(s) criado(s), '+r.pulados+' já existiam (pulado).', r.criados?'ok':'info');
+  if (typeof finCPRender === 'function') finCPRender();
+}
+function finCPImportarTemplatesPadrao() {
+  var hoje = new Date();
+  var inicio = hoje.getFullYear() + '-' + String(hoje.getMonth()+1).padStart(2,'0') + '-01';
+  var existentes = {};
+  FIN_CP_RECORRENCIAS.forEach(function(r){ existentes[(r.descricao||'').trim().toUpperCase()] = true; });
+  var criados = 0, pulados = 0;
+  FIN_CP_TEMPLATES_PADRAO.forEach(function(t){
+    var chave = t.descricao.trim().toUpperCase();
+    if (existentes[chave]) { pulados++; return; }
+    finCPCriarRecorrencia({
+      descricao: t.descricao, categoria: t.categoria, valor: null,
+      tipoRecorrencia: 'variavel', diaVencimento: 10, dataInicial: inicio,
+    });
+    existentes[chave] = true;
+    criados++;
+  });
+  if (criados) {
+    if (typeof _finSaveCPRecorrencias === 'function') _finSaveCPRecorrencias();
+    if (typeof _finSaveCP === 'function') _finSaveCP();
+  }
+  return { criados: criados, pulados: pulados };
 }
 function finCPCriarRecorrencia(dados) {
   // tipoRecorrencia: 'fixa' (padrão, comportamento original — cada ocorrência
