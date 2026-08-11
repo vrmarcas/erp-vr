@@ -2729,14 +2729,20 @@ function _authFirebaseError(code){
               </div>
             </div>
           </div>
-          <!-- Planificação da OS -->
+          <!-- GO-LIVE 2026-08-11, P0 seção 17 — renomeada de "Planificação"
+               para "Arquivos da Produção": este bloco sempre foi um upload
+               manual e opcional (revisão de corte, foto, PDF do funcionário),
+               nunca o snapshot técnico vendido — que agora tem sua própria
+               seção somente-leitura por item (📐 Abrir Planificação do
+               Orçamento, ver kbRenderItensDetalhe/kbAbrirPlanificacaoItem).
+               Nunca substitui a planificação vendida. -->
           <div id="kbPlanImgBox" style="margin-bottom:10px">
-            <div class="section-lbl">📐 Planificação</div>
+            <div class="section-lbl">📎 Arquivos da Produção</div>
             <!-- Estado: sem imagem -->
             <div id="kbPlanEmpty" style="margin-top:6px;border:2px dashed var(--border);border-radius:8px;padding:16px;text-align:center;cursor:pointer" onclick="document.getElementById('kbPlanFileInput').click()">
               <div style="font-size:20px;margin-bottom:4px">📎</div>
-              <div style="font-size:12px;font-weight:700;color:var(--text)">Anexar planificação</div>
-              <div style="font-size:10px;color:var(--muted);margin-top:2px">Clique para selecionar PNG, JPG ou PDF</div>
+              <div style="font-size:12px;font-weight:700;color:var(--text)">Anexar arquivo da produção</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">Revisão de corte, foto, PDF — clique para selecionar PNG, JPG ou PDF</div>
               <input type="file" id="kbPlanFileInput" accept="image/*,application/pdf" style="display:none" onchange="kbPlanAnexar(this)">
             </div>
             <!-- Estado: com imagem -->
@@ -9426,6 +9432,14 @@ function osProjecaoOperacionalItem(item) {
     // furos) são dado OPERACIONAL (a Produção precisa deles para executar
     // a peça), nunca financeiro — seguem para a OS.
     camposExtras: item.camposExtras || null,
+    // GO-LIVE 2026-08-11, P0 seção 17 (achado real: "vender A, produzir
+    // B") — planLarg/planAlt/planProf são as dimensões L/A/P efetivamente
+    // usadas no cálculo da planificação vendida (o resultado agregado
+    // larg/alt/planArea sozinho não basta para reconstruir o corte);
+    // 100% dado técnico, nunca financeiro — precisam chegar na OS.
+    planLarg: item.planLarg || null,
+    planAlt: item.planAlt || null,
+    planProf: item.planProf || null,
   };
   if (item.recipeSnapshot) {
     seguro.recipeSnapshot = {
@@ -9433,6 +9447,10 @@ function osProjecaoOperacionalItem(item) {
       dim3d: item.recipeSnapshot.dim3d,
       pecas: item.recipeSnapshot.pecas,
       campos: item.recipeSnapshot.campos || [],
+      // GO-LIVE 2026-08-11, P0 seção 17 — planificacoes é o layout de
+      // corte (templates SVG por espessura, ver planAbrir()); sem isto a
+      // OS nunca tinha acesso ao layout gráfico do produto vendido.
+      planificacoes: item.recipeSnapshot.planificacoes || null,
     };
   }
   return seguro;
@@ -11944,15 +11962,62 @@ function kbRenderItensDetalhe(os) {
         var obsPartes = [it.det, extrasDesc].filter(Boolean);
         var obsHtml = obsPartes.length ? '<div style="grid-column:1/-1"><span class="kb-os-field-lbl">Observações / Acabamento</span>'+cfgEsc(obsPartes.join(' · '))+'</div>' : '';
         var planHtml = (it.planArea && parseFloat(it.planArea) > 0) ? '<div><span class="kb-os-field-lbl">Área planificada</span>'+parseFloat(it.planArea).toFixed(2)+' m²</div>' : '';
+        // GO-LIVE 2026-08-11, P0 seção 17 — "Planificação do Orçamento":
+        // somente leitura, snapshot exato copiado por osProjecaoOperacionalItem
+        // (nunca recalculado aqui). Separado de "Arquivos da Produção"
+        // (anexos que o funcionário adiciona depois, ver kbPlanImgBox).
+        var temPlan = !!((it.pieces && it.pieces.length) || (it.recipeSnapshot && it.recipeSnapshot.pecas && it.recipeSnapshot.pecas.length));
+        var planBtnHtml = temPlan
+          ? '<div style="grid-column:1/-1"><button onclick="kbAbrirPlanificacaoItem('+i+')" style="padding:6px 12px;border:1px solid var(--brand-mid);border-radius:7px;background:transparent;color:var(--brand-mid);font-weight:700;font-size:11px;cursor:pointer">📐 Abrir Planificação do Orçamento</button></div>'
+          : '';
         return '<div class="kb-item-card">'
           + '<div class="kb-item-hdr"><strong>'+(i+1)+'. '+cfgEsc(it.prod)+'</strong><span class="kb-item-qty">'+(it.qty||1)+'un</span></div>'
           + '<div class="kb-item-body">'
           + '<div><span class="kb-os-field-lbl">Material</span>'+cfgEsc(it.mat||'—')+'</div>'
           + '<div><span class="kb-os-field-lbl">Medidas</span>'+medidas+'</div>'
-          + planHtml + obsHtml
+          + planHtml + obsHtml + planBtnHtml
           + '</div></div>';
       }).join('')
     + '</div>';
+}
+function kbFecharPlanificacaoItemModal(){
+  var el = document.getElementById('kbPlanItemModal');
+  if (el) el.remove();
+}
+// GO-LIVE 2026-08-11, P0 seção 17 — visualização somente leitura do
+// snapshot de planificação copiado do orçamento (osProjecaoOperacionalItem),
+// nunca recalculado a partir da config atual de materiais/receitas.
+function kbAbrirPlanificacaoItem(idx){
+  var os = KB_OS[_kbOsId]; if(!os) return;
+  var it = (os.itens||[])[idx]; if(!it) return;
+  var pecas = (it.recipeSnapshot && it.recipeSnapshot.pecas) || it.pieces || [];
+  var pecasHtml = pecas.length
+    ? '<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th></tr>'
+      + pecas.map(function(p){
+          return '<tr style="border-top:1px solid var(--border)">'
+            + '<td style="padding:4px">'+cfgEsc(p.nome||p.label||'—')+'</td>'
+            + '<td style="padding:4px">'+(p.larg||p.l||'—')+'×'+(p.alt||p.a||'—')+' '+(p.unidade||'cm')+'</td>'
+            + '<td style="padding:4px">'+(p.qty||1)+'</td>'
+            + '<td style="padding:4px">'+(p.esp!=null?p.esp+'mm':'—')+'</td>'
+            + '</tr>';
+        }).join('')
+      + '</table>'
+    : '<div style="font-size:12px;color:var(--muted)">Nenhuma peça detalhada neste snapshot.</div>';
+  var dimsHtml = (it.planLarg||it.planAlt||it.planProf)
+    ? '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Dimensões planificadas: '+(it.planLarg||'—')+' × '+(it.planAlt||'—')+(it.planProf?(' × '+it.planProf):'')+' cm</div>'
+    : '';
+  var layoutHtml = (it.recipeSnapshot && it.recipeSnapshot.planificacoes)
+    ? '<div style="font-size:11px;color:#059669;margin-bottom:8px">✓ Layout de corte disponível neste snapshot (mesma receita usada na venda).</div>'
+    : '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Este item não tem layout de corte gráfico salvo — use as peças/medidas abaixo.</div>';
+  var html = '<div id="kbPlanItemModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10002;display:flex;align-items:center;justify-content:center">'
+    + '<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:480px;width:92%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:14px;font-weight:800">📐 Planificação do Orçamento — '+cfgEsc(it.prod||'')+'</div><button onclick="kbFecharPlanificacaoItemModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Somente leitura — exatamente como foi planificado na venda, nunca recalculado.</div>'
+    + dimsHtml + layoutHtml + pecasHtml
+    + '</div></div>';
+  kbFecharPlanificacaoItemModal();
+  document.body.insertAdjacentHTML('beforeend', html);
 }
 
 function kbOpen(id) {
