@@ -12680,7 +12680,19 @@ function kbRender() {
     var isVt=(os.mk==='vit'||os.marca==='Vitre');
     // Determinar coluna pelo dia da semana da data de entrega
     var colId='kbNovas';
-    if(os.status==='pronta'||os.pronto) {
+    // GO-LIVE 2026-08-11, P0 seção 11 (bug real reproduzido em produção):
+    // toda OS recém-gerada já nasce com um prazo/entrega sugerido
+    // automaticamente (orcEnvGerarOS) — se essa data caísse dentro da
+    // semana exibida no board, a OS pulava direto para a coluna do dia,
+    // NUNCA passando por "Novas OS" para triagem do operador. Enquanto a
+    // produção não foi explicitamente iniciada (status ainda 'iniciada'/
+    // 'aguardando_saldo' — ver kbIniciarProd/producaoIniciarOuEditar, que
+    // são os únicos pontos que avançam para 'producao'), a OS fica sempre
+    // em "Novas OS", nunca num dia da semana nem em "Prontas".
+    var _producaoJaIniciada = (os.status!=='iniciada' && os.status!=='aguardando_saldo');
+    if(!_producaoJaIniciada) {
+      colId='kbNovas';
+    } else if(os.status==='pronta'||os.pronto) {
       colId='kbProntas';
     } else {
       var _prazoStr=os.entrega||os.prazo||'';
