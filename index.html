@@ -2876,7 +2876,7 @@ function _authFirebaseError(code){
           </span>
         </div>
         <table class="table">
-          <tr><th>OS #</th><th>Cliente</th><th>Produto</th><th>Marca</th><th>Valor</th><th id="osColPrazo">Prazo</th><th>Status</th><th>Ação</th></tr>
+          <tr><th>OS #</th><th>Cliente</th><th>Produto</th><th>Marca</th><th>Valor</th><th id="osColPrazo">Prazo</th><th>Status</th><th>Etapa</th><th>Ação</th></tr>
           <tbody id="osTableBody"></tbody>
         </table>
       </div>
@@ -12807,14 +12807,34 @@ function kbSwitchTab(tab) {
 // ── Checklist render + add/delete ────────────────────────────────────────────
 function kbRenderChecklist(os) {
   if (!os) return;
+  // GO-LIVE 2026-08-11, seção 16 — OS "Pronta" não pode ter o checklist
+  // alterado silenciosamente; precisa reverter explicitamente primeiro
+  // (kbReverterProducao()) para reabrir a edição.
+  var bloqueado = os.status==='pronta' || os.status==='entregue';
   document.getElementById('kbChecklist').innerHTML = (os.checks||[]).map(function(item, i) {
     var done = os._ck && os._ck[i];
-    return '<label class="kb-check-item'+(done?' done':'')+'" id="kbci-'+i+'" onclick="kbToggle('+i+')">'
-      + '<input type="checkbox"'+(done?' checked':'')+' onclick="event.stopPropagation();kbToggle('+i+')">'
+    var onClk = bloqueado ? '' : (' onclick="kbToggle('+i+')"');
+    var onClkIn = bloqueado ? 'onclick="event.stopPropagation()"' : ('onclick="event.stopPropagation();kbToggle('+i+')"');
+    return '<label class="kb-check-item'+(done?' done':'')+(bloqueado?' locked':'')+'" id="kbci-'+i+'"'+onClk+(bloqueado?' title="Reverta para Produção para editar o checklist"':'')+'>'
+      + '<input type="checkbox"'+(done?' checked':'')+(bloqueado?' disabled':'')+' '+onClkIn+'>'
       + '<span>'+item+'</span>'
-      + '<button class="kb-check-del" onclick="event.stopPropagation();kbCheckDeleteItem('+i+')" title="Remover item">✕</button>'
+      + (bloqueado?'':'<button class="kb-check-del" onclick="event.stopPropagation();kbCheckDeleteItem('+i+')" title="Remover item">✕</button>')
       + '</label>';
   }).join('');
+}
+// GO-LIVE 2026-08-11, seção 14 — "Etapa" = primeiro item do checklist
+// ainda não marcado (na ordem fixa dele, ver OPERACOES_PADRAO). Diferente
+// de Status: uma OS pode estar "Em Produção" com etapa "Montagem" por
+// exemplo. Quando tudo está marcado mas o status ainda não é "pronta",
+// mostra "Produção concluída" (falta só o clique explícito em "Marcar
+// como Pronta" — nunca automático, ver kbToggle()).
+function kbEtapaAtual(os) {
+  if (!os || os.status==='entregue' || os.status==='cancelado') return '—';
+  if (os.status==='pronta') return 'Pronta';
+  if (os.status==='iniciada' || os.status==='aguardando_saldo') return '—';
+  var checks = os.checks||[], ck = os._ck||[];
+  for (var i=0; i<checks.length; i++) { if (!ck[i]) return checks[i]; }
+  return checks.length ? 'Produção concluída' : '—';
 }
 
 function kbCheckAddItem() {
@@ -12850,17 +12870,22 @@ function kbSalvarObs() {
   if (lbl) { lbl.textContent = '✓ Salvo'; clearTimeout(_kbObsTimer); _kbObsTimer = setTimeout(function(){ lbl.textContent=''; }, 2000); }
 }
 
-// Corrigido 2026-08-07 (Rodada Mestre, seção 22) — dois problemas reais:
-// (1) marcar um item do checklist nunca persistia (kbSaveKbos() nunca era
-// chamado aqui, diferente de kbCheckAddItem/kbCheckDeleteItem) — um
-// refresh ou outra aba perdia o progresso; (2) o checklist não "dirigia"
-// nada — marcar a última etapa (Embalagem) não levava a OS para Pronta
-// sozinha, o operador precisava marcar o checklist E DEPOIS clicar
-// "Marcar como Pronta" separadamente. Agora persiste sempre, e marcar o
-// ÚLTIMO item pendente aciona kbMarcarPronto() automaticamente — sem
-// duplicar a ação se a OS já estava pronta/entregue.
+// Corrigido 2026-08-07 (Rodada Mestre, seção 22) — marcar um item do
+// checklist nunca persistia (kbSaveKbos() nunca era chamado aqui,
+// diferente de kbCheckAddItem/kbCheckDeleteItem) — um refresh ou outra
+// aba perdia o progresso. Isso continua corrigido (persiste sempre).
+//
+// GO-LIVE 2026-08-11, seção 14/16 — REVERTIDO o auto-complete introduzido
+// em 2026-08-07: marcar o último item do checklist (Embalagem) NÃO pode
+// mais mudar o status para Pronta sozinho — só o clique explícito em
+// "Marcar como Pronta" (kbMarcarPronto(), botão dedicado) faz isso. Achado
+// real: com Embalagem marcando Pronta automaticamente, não existia como
+// o operador conferir o pedido embalado antes de liberar para entrega.
+// Também bloqueia edição de OS "Pronta"/"Entregue" (precisa reverter
+// primeiro — ver kbRenderChecklist).
 function kbToggle(i) {
   const os = KB_OS[_kbOsId]; if (!os) return;
+  if (os.status==='pronta' || os.status==='entregue') return;
   os._ck[i] = !os._ck[i];
   const item = document.getElementById('kbci-' + i);
   if (item) {
@@ -12868,10 +12893,8 @@ function kbToggle(i) {
     item.querySelector('input').checked = os._ck[i];
   }
   kbSaveKbos();
-  var todasFeitas = os._ck && os._ck.length>0 && os._ck.every(function(c){ return !!c; });
-  if (todasFeitas && os.status!=='pronta' && os.status!=='master' && os.status!=='entregue') {
-    if (typeof kbMarcarPronto === 'function') kbMarcarPronto();
-  }
+  if (typeof kbRenderOsList==='function') kbRenderOsList();
+  if (typeof renderOsTable==='function') renderOsTable();
 }
 
 // ============================================================
@@ -13857,6 +13880,12 @@ function kbReverterProducao(){
   var os=KB_OS[_kbOsId]; if(!os) return;
   if(!confirm('Reverter OS #'+os.num+' de "Pronta" para "Em Produção"?')) return;
   os.status='producao'; os.pronto=false; os.prog=70;
+  // GO-LIVE 2026-08-11, seção 16 — auditoria de quem/quando reverteu, e
+  // libera de novo a edição do checklist (kbRenderChecklist/kbToggle
+  // bloqueiam edição só quando status==='pronta'|'entregue').
+  os.revertidoPor = (typeof _currentSession!=='undefined' && _currentSession && _currentSession.user) || '—';
+  os.revertidoEm = new Date().toLocaleString('pt-BR');
+  if(typeof kbRenderChecklist==='function') kbRenderChecklist(os);
   var card=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
   var dest=document.getElementById(os.kbDay||'kbSeg')||document.getElementById('kbSeg');
   if(card&&dest) dest.appendChild(card);
@@ -15089,7 +15118,7 @@ function renderOsTable() {
   });
   var cnt=document.getElementById('osTableCount');
   if(cnt) cnt.textContent='('+rows.length+' OS)';
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';return;}
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';return;}
   var sL={iniciada:'Iniciada',producao:'Em Produção',pronta:'Pronta ✅',master:'🔐 Aguard. Master',entregue:'Entregue 🎉',em_andamento:'Iniciada',aguard_master:'🔐 Aguard. Master',cancelado:'Cancelado',orcamento:'Orçamento'};
   var sC={iniciada:'#6B7280',producao:'#D97706',pronta:'#059669',master:'#1EB8D8',entregue:'#059669',em_andamento:'#D97706',aguard_master:'#1EB8D8',cancelado:'#DC2626',orcamento:'#6B7280'};
   var showEntregaCol = (tab==='recentes'||tab==='historico');
@@ -15110,8 +15139,11 @@ function renderOsTable() {
       +'<td style="font-weight:600;color:#059669;font-size:11px">'+valFmt+'</td>'
       +colEntregaOuPrazo
       +'<td><span style="color:'+( sC[os.status]||'#6B7280')+';font-weight:600;font-size:11px">'+( sL[os.status]||os.status)+'</span></td>'
+      // GO-LIVE 2026-08-11, seção 14 — coluna Etapa: primeiro item do
+      // checklist ainda pendente (kbEtapaAtual) — diferente de Status.
+      +'<td style="font-size:10px;color:var(--muted)">'+(typeof kbEtapaAtual==='function'?kbEtapaAtual(os):'—')+'</td>'
       +'<td style="white-space:nowrap"></td>';
-    tr.querySelectorAll('td').forEach(function(td,idx){if(idx<7)td.onclick=function(){kbOpen(id);}; });
+    tr.querySelectorAll('td').forEach(function(td,idx){if(idx<8)td.onclick=function(){kbOpen(id);}; });
     var actTd=tr.querySelector('td:last-child');
     var btnVer=document.createElement('button');
     btnVer.textContent='Ver'; btnVer.style.cssText='padding:3px 7px;border:1px solid var(--border);background:transparent;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
