@@ -77,24 +77,34 @@ console.log('\n=== RODADA 6 — Operações por receita (seção 5) ===\n');
 }
 
 // ── osChecklistDeOperacoes ───────────────────────────────────────────
+// GO-LIVE 2026-08-11 — mudança de regra de negócio DELIBERADA, decidida
+// pelo usuário após o smoke visual final encontrar Montagem ausente do
+// checklist de uma OS real: o checklist operacional da OS passou a ser
+// SEMPRE os 5 itens fixos (Corte/Gravação/Montagem/Acabamento/Embalagem),
+// independentemente da composição comercial/custo do orçamento OU da
+// configuração de `operacoes` da receita. A configuração de operações da
+// receita segue existindo (testada acima) para uso técnico futuro
+// (máquinas/consumíveis), mas não filtra mais o checklist da OS — os
+// cenários 13/15/16/18/19 abaixo, que testavam a filtragem antiga, foram
+// atualizados para provar que ela não filtra mais nada.
 {
-  test('13. sem receita (null) e sem montagem paga: comportamento legado (sem Montagem)', mod.checklist(null, false), ['Corte','Gravação','Acabamento','Embalagem']);
-  test('14. sem receita (null) e COM montagem paga: comportamento legado inclui Montagem', mod.checklist(null, true), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
+  test('13. sem receita (null) e sem montagem paga: checklist SEMPRE os 5 fixos (regra nova, decidida pelo usuário)', mod.checklist(null, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
+  test('14. sem receita (null) e COM montagem paga: os 5 fixos (comportamento preservado)', mod.checklist(null, true), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 
   var receitaSemMontagem = { operacoes: { montagem: 'nao_aplicavel' } };
-  test('15. receita marca montagem nao_aplicavel: nunca aparece, mesmo com montagem paga no orçamento', mod.checklist(receitaSemMontagem, true), ['Corte','Gravação','Acabamento','Embalagem']);
+  test('15. receita marca montagem nao_aplicavel: NÃO remove mais Montagem do checklist (config de receita não filtra mais o checklist da OS)', mod.checklist(receitaSemMontagem, true), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 
   var receitaComGravacaoOpcionalDesligada = { operacoes: { gravacao: 'nao_aplicavel' } };
-  test('16. receita desliga uma operação sempre-ligada por padrão (gravação)', mod.checklist(receitaComGravacaoOpcionalDesligada, false), ['Corte','Acabamento','Embalagem']);
+  test('16. receita "desliga" gravação: checklist da OS continua com os 5 fixos mesmo assim', mod.checklist(receitaComGravacaoOpcionalDesligada, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 
   var receitaForcaMontagem = { operacoes: { montagem: 'obrigatoria' } };
-  test('17. receita força montagem mesmo SEM montagem paga no orçamento', mod.checklist(receitaForcaMontagem, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
+  test('17. receita força montagem mesmo SEM montagem paga no orçamento (continua presente, como sempre)', mod.checklist(receitaForcaMontagem, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 
   var receitaOpcionalConta = { operacoes: { corte: 'opcional' } };
-  test('18. status "opcional" ainda entra no checklist (só nao_aplicavel exclui)', mod.checklist(receitaOpcionalConta, false), ['Corte','Gravação','Acabamento','Embalagem']);
+  test('18. status "opcional" na receita: checklist da OS continua com os 5 fixos', mod.checklist(receitaOpcionalConta, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 
   var receitaTudoNaoAplicavel = { operacoes: { corte:'nao_aplicavel', gravacao:'nao_aplicavel', acabamento:'nao_aplicavel', embalagem:'nao_aplicavel' } };
-  test('19. receita pode zerar o checklist inteiro (produto pronto-entrega, por exemplo)', mod.checklist(receitaTudoNaoAplicavel, false), []);
+  test('19. receita marca tudo como nao_aplicavel: checklist da OS NÃO pode mais ser zerado — sempre os 5 fixos', mod.checklist(receitaTudoNaoAplicavel, false), ['Corte','Gravação','Montagem','Acabamento','Embalagem']);
 }
 
 console.log('\n' + '='.repeat(70));

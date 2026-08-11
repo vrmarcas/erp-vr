@@ -6217,8 +6217,9 @@ function _authFirebaseError(code){
           <div>
             <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🛠️ Operações de Produção (opcional)</div>
             <div style="background:#E3F7FB;border-radius:7px;padding:8px 12px;font-size:10px;color:#983C8F;margin-bottom:8px;line-height:1.6">
-              💡 Define quais etapas entram no checklist da OS para este produto. Deixe "usar padrão do sistema" para manter o
-              comportamento atual (Corte/Gravação/Acabamento/Embalagem sempre; Montagem só se o orçamento cobrar montagem).
+              💡 O checklist operacional da OS é sempre os 5 itens fixos (Corte/Gravação/Montagem/Acabamento/Embalagem),
+              independentemente desta configuração. Estas operações ficam documentadas aqui para uso técnico futuro
+              (máquinas/consumíveis), sem afetar o checklist da OS.
             </div>
             <div id="planProdOperacoesBody" style="display:flex;flex-direction:column;gap:6px"></div>
           </div>
@@ -9217,14 +9218,13 @@ function receitaOperacoesValidar(operacoes) {
 }
 // Decide a lista de labels de operações que entram no checklist da OS —
 // usada tanto pelo caminho transacional real quanto pelo fallback local de
-// orcEnvGerarOS(). `temMontagemPaga` preserva a regra legada (Montagem só
-// aparece quando o orçamento efetivamente cobrou montagem) para receitas
-// que não configuram a operação explicitamente.
+// orcEnvGerarOS(). O checklist operacional padrão é SEMPRE os 5 itens fixos
+// (Corte/Gravação/Montagem/Acabamento/Embalagem), independentemente da
+// composição comercial/custo da receita — a configuração de `operacoes` da
+// receita segue existindo só para cálculo técnico (máquinas/consumíveis),
+// nunca para remover um item do checklist operacional da OS.
 function osChecklistDeOperacoes(produto, temMontagemPaga) {
-  return receitaOperacoesEfetivas(produto).filter(function (op) {
-    if (op.status) return op.status !== 'nao_aplicavel';
-    return op.chave === 'montagem' ? !!temMontagemPaga : true;
-  }).map(function (op) { return op.label; });
+  return OPERACOES_PADRAO.map(function (op) { return op.label; });
 }
 
 // RODADA 6, seção 6 — máquinas relacionadas à receita, por ID real do
@@ -12881,7 +12881,7 @@ function kbRender() {
     card.style.position='relative';
     // Etapas de produção
     var _etapas=os._etapas||{};
-    var _etNms=['Corte','Gravar','Acab.','Embal.']; var _etKs=['corte','gravacao','acabamento','embalagem'];
+    var _etNms=['Corte','Gravar','Montar','Acab.','Embal.']; var _etKs=['corte','gravacao','montagem','acabamento','embalagem'];
     var _etHtml='<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap">';
     _etNms.forEach(function(e,i){
       var d=!!_etapas[_etKs[i]];
@@ -13137,7 +13137,7 @@ function kbToggleEtapa(osId, key, el) {
   el.style.background=done?'#059669':'transparent';
   el.style.borderColor=done?'#059669':'var(--border)';
   el.style.color=done?'#fff':'var(--muted)';
-  el.textContent=(done?'✓ ':'')+{corte:'Corte',gravacao:'Gravar',acabamento:'Acab.',embalagem:'Embal.'}[key];
+  el.textContent=(done?'✓ ':'')+{corte:'Corte',gravacao:'Gravar',montagem:'Montar',acabamento:'Acab.',embalagem:'Embal.'}[key];
   if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
 }
 
@@ -25553,21 +25553,18 @@ function orcEnvGerarOS(){
   var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
   var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
   // Parte 18/19 — checklist de etapas de produção na OS (Kanban continua
-  // sendo a visão de ENTREGA/prazo, nunca reflete etapa interna). Montagem
-  // só entra quando o orçamento de origem realmente cobrou montagem (VR
-  // personalizado com orcMontagem>0) — etapas que não se aplicam a este
-  // pedido não aparecem, em vez de um checklist fixo genérico.
+  // sendo a visão de ENTREGA/prazo, nunca reflete etapa interna). Checklist
+  // operacional padrão é SEMPRE os 5 itens fixos (Corte/Gravação/Montagem/
+  // Acabamento/Embalagem), independentemente de Montagem ter sido cobrada
+  // comercialmente no orçamento ou não — decisão explícita do usuário após
+  // o smoke de GO-LIVE encontrar Montagem ausente do checklist.
   var _temMontagem = !!(o.snapshotCompleto && o.snapshotCompleto.parametros && parseFloat(o.snapshotCompleto.parametros.orcMontagem) > 0);
-  // RODADA 6, seção 5 — quando o item principal tem uma receita cadastrada
-  // com operações configuradas (Obrigatória/Opcional/Não-aplicável), ela
-  // decide o checklist; senão osChecklistDeOperacoes() reproduz exatamente
-  // o comportamento legado acima (nunca quebra receitas/pedidos antigos).
   var _produtoPrincipalOp = (itens[0] && itens[0].productId && typeof planProdLoad==='function')
     ? (planProdLoad()||[]).find(function(p){ return p.id===itens[0].productId; })
     : null;
   var checksProducao = (typeof osChecklistDeOperacoes==='function')
     ? osChecklistDeOperacoes(_produtoPrincipalOp, _temMontagem)
-    : (_temMontagem ? ['Corte','Gravação','Montagem','Acabamento','Embalagem'] : ['Corte','Gravação','Acabamento','Embalagem']);
+    : ['Corte','Gravação','Montagem','Acabamento','Embalagem'];
   var _ckProducao = checksProducao.map(function(){ return false; });
   // RODADA 6, seção 6 — máquinas relacionadas à receita do item principal,
   // puramente informativo para a Produção (nunca custo/hora — isso
