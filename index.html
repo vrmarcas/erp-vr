@@ -13397,13 +13397,35 @@ function kbSugerirMaterial(os, matKey) {
   var fracaoTxt = fracao === 1 ? '1 chapa' : (String(fracao).replace('.', ',') + ' chapa' + (fracao > 1 ? 's' : ''));
   return { tipo: 'chapa', fracaoChapa: fracao, texto: '💡 Sugestão: usar ' + fracaoTxt + ' (área planificada ' + areaNecessaria.toFixed(2) + ' m² de ' + areaChapa.toFixed(2) + ' m²/chapa).' };
 }
+// GO-LIVE FINAL 2026-08-12, seção 36-42 — a sugestão de retalho já era
+// calculada corretamente (encaixe geométrico largura×altura + margem de
+// segurança, melhor-fit — ver kbSugerirMaterial/kbRetalhoCabeGeometricamente,
+// rodada anterior), mas aparecia só como texto solto — o funcionário
+// precisava adivinhar que o dropdown pré-preenchido já ERA a sugestão,
+// sem nenhuma ação explícita. Gera o cartão com as 3 ações pedidas
+// (usar / escolher outro / abrir chapa nova) — o ERP sugere, o
+// funcionário decide, nunca é decidido sozinho pelo sistema.
+function kbSugestaoHtml(sug) {
+  if (!sug) return '';
+  if (sug.tipo === 'retalho') {
+    var r = sug.retalho;
+    return '<div style="font-weight:700;margin-bottom:4px">♻️ Sugestão de aproveitamento</div>'
+      + '<div style="margin-bottom:8px">Retalho recomendado: <strong>' + cfgEsc(r.codigo || '—') + '</strong> — ' + cfgEsc(r.dims || '') + ' cm</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;retalho&quot;)" style="padding:5px 10px;border-radius:6px;border:1px solid #059669;background:#059669;color:#fff;font-size:11px;font-weight:700;cursor:pointer">✅ Usar retalho ' + cfgEsc(r.codigo || '') + '</button>'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;retalho&quot;); var _s=document.getElementById(&quot;kbProdRetalhoSel&quot;); if(_s) _s.focus();" style="padding:5px 10px;border-radius:6px;border:1px solid #1EB8D8;background:transparent;color:#1EB8D8;font-size:11px;font-weight:700;cursor:pointer">🔎 Escolher outro retalho</button>'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;chapa&quot;)" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:11px;font-weight:700;cursor:pointer">🆕 Abrir chapa nova</button>'
+      + '</div>';
+  }
+  return cfgEsc(sug.texto || '');
+}
 function kbProdOnMatChange() {
   var os = KB_OS[_kbOsId];
   var matKey = (document.getElementById('kbProdMatSel') || {}).value || '';
   var sugBox = document.getElementById('kbProdSugestaoBox');
   var sug = (os && matKey && !_kbProdEditMode) ? kbSugerirMaterial(os, matKey) : null;
   if (sug) {
-    if (sugBox) { sugBox.style.display = ''; sugBox.textContent = sug.texto; }
+    if (sugBox) { sugBox.style.display = ''; sugBox.innerHTML = kbSugestaoHtml(sug); }
     if (sug.tipo === 'chapa') {
       kbProdSetTipo('chapa');
       var qtyEl = document.getElementById('kbProdQty'); if (qtyEl) qtyEl.value = sug.fracaoChapa;
