@@ -12303,6 +12303,14 @@ function kbOpen(id) {
     }
   })();
 
+  // GO-LIVE FINAL 2026-08-12, seção 21-29 — normaliza OS legadas cujo
+  // checklist persistido não é mais os 5 itens canônicos (ver
+  // kbNormalizarChecklistLegado) ANTES de qualquer fallback/render, para
+  // que o funcionário sempre veja Corte/Gravação/Montagem/Acabamento/
+  // Embalagem, mesmo em OS criadas antes dessa regra existir.
+  if (typeof kbNormalizarChecklistLegado === 'function' && kbNormalizarChecklistLegado(os)) {
+    if (typeof kbSaveKbos === 'function') kbSaveKbos();
+  }
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
   kbRenderChecklist(os);
   // Reset tabs to Produção
@@ -13095,6 +13103,41 @@ function kbSwitchTab(tab) {
   }
 }
 
+// GO-LIVE FINAL 2026-08-12, seção 21-29 — OS criadas ANTES da regra atual
+// (checklist SEMPRE Corte/Gravação/Montagem/Acabamento/Embalagem, nunca
+// derivado da receita/composição comercial) podem ter os.checks
+// incompleto ou fora de ordem — sem normalizar, essas OS legadas nunca
+// ganham os itens que faltam e o funcionário nunca vê (nem consegue
+// marcar) etapas que realmente precisam acontecer. Mescla SEMPRE com a
+// lista canônica (OPERACOES_PADRAO), preservando o estado já marcado dos
+// itens que já existem (comparação por nome, case-insensitive) e
+// adicionando só os que faltam como pendentes — nunca duplica, nunca
+// descarta itens extras que o funcionário adicionou manualmente
+// (kbCheckAddItem). Idempotente: OS já normalizada não sofre nenhuma
+// mutação (retorna false, o chamador não precisa salvar de novo).
+function kbNormalizarChecklistLegado(os) {
+  if (!os) return false;
+  var canonico = OPERACOES_PADRAO.map(function (op) { return op.label; });
+  var checksAtuais = os.checks || [];
+  var ckAtuais = os._ck || [];
+  var jaCanonico = checksAtuais.length === canonico.length
+    && checksAtuais.every(function (label, i) { return label === canonico[i]; });
+  if (jaCanonico) return false;
+
+  var novosChecks = [], novosCk = [];
+  canonico.forEach(function (label) {
+    var idx = checksAtuais.findIndex(function (c) { return String(c).trim().toLowerCase() === label.toLowerCase(); });
+    novosChecks.push(label);
+    novosCk.push(idx >= 0 ? !!ckAtuais[idx] : false);
+  });
+  checksAtuais.forEach(function (c, idx) {
+    var ehCanonico = canonico.some(function (label) { return String(c).trim().toLowerCase() === label.toLowerCase(); });
+    if (!ehCanonico) { novosChecks.push(c); novosCk.push(!!ckAtuais[idx]); }
+  });
+  os.checks = novosChecks;
+  os._ck = novosCk;
+  return true;
+}
 // ── Checklist render + add/delete ────────────────────────────────────────────
 function kbRenderChecklist(os) {
   if (!os) return;
