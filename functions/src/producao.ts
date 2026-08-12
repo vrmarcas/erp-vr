@@ -56,6 +56,10 @@ interface OS {
   inicioProducaoTs?: number; matProd?: MatProd; orcRef?: string | null;
   [key: string]: unknown;
 }
+interface Orcamento {
+  id?: string; status?: string;
+  [key: string]: unknown;
+}
 interface LogEntry {
   tipo: string; matKey: string; matLabel: string; qty: number; os: unknown; obs: string; dt: string;
   osId: string; orcamentoId: string | null; materialId: string | null; quantidade: number;
@@ -137,17 +141,19 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
   const stockRef = db.collection(COL).doc("stock");
   const retRef = db.collection(COL).doc("retalhos");
   const logRef = db.collection(COL).doc("erp_stock_log");
+  const orcRef = db.collection(COL).doc("orcamentos");
   const osProducaoIdemKey = "producao_inicio:" + input.osId; // mesma chave de negócio usada pelo legado (producaoStartId da OS)
 
   try {
     const resultado = await db.runTransaction(async (tx) => {
-      const [snapOs, snapStock, snapRet, snapLog] = await Promise.all([
-        tx.get(kbOsRef), tx.get(stockRef), tx.get(retRef), tx.get(logRef),
+      const [snapOs, snapStock, snapRet, snapLog, snapOrc] = await Promise.all([
+        tx.get(kbOsRef), tx.get(stockRef), tx.get(retRef), tx.get(logRef), tx.get(orcRef),
       ]);
       const objOS = parseDoc<Record<string, OS>>(snapOs, {});
       const sd = parseDoc<Record<string, StockItem>>(snapStock, {});
       const retList = parseDoc<Retalho[]>(snapRet, []);
       let log = parseDoc<LogEntry[]>(snapLog, []);
+      const orcList = parseDoc<Orcamento[]>(snapOrc, []);
 
       const osFresh = objOS[input.osId];
       if (!osFresh) throw new functions.https.HttpsError("not-found", "OS_NAO_ENCONTRADA");
@@ -258,11 +264,34 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
       }
 
       osFresh.matProd = novoMatProd;
+      let orcListMutada = false;
       if (!input.editMode) {
         osFresh.status = "producao";
         osFresh.producaoStartId = osProducaoIdemKey;
         osFresh.producaoIniciadaEm = Date.now();
         if (!osFresh.inicioProducaoTs) osFresh.inicioProducaoTs = osFresh.producaoIniciadaEm;
+
+        // GO-LIVE FINAL 2026-08-12 (gate 1) — bug real: esta Function iniciava
+        // a produção (baixa de estoque + status da OS) mas nunca sincronizava
+        // o orçamento vinculado — só o caminho de RETOMADA no frontend
+        // (kbIniciarProd, quando producaoStartId já existe) chamava
+        // orcEnvSetStatus. No 1º "Iniciar Produção" real (que sempre passa
+        // por aqui, nunca pelo caminho de retomada), o orçamento ficava
+        // parado em "Enviado para Produção" mesmo com a OS já em produção.
+        // Corrigido: mesma transação, mesmo requestId/idempotência de cima —
+        // se a OS tem orcRef e o orçamento existe, avança para 'em_producao'
+        // (mesmo valor de enum já usado pelo caminho de retomada — fonte
+        // única ORC_STATUS_LABEL no frontend). Nunca grava nada financeiro
+        // aqui — só o campo `status`, nunca toca valorFinal/entrada/saldo/
+        // fin_cr/fin_tx. Se o orçamento não existir mais (dado órfão), segue
+        // sem erro — sincronizar o rótulo nunca pode bloquear a produção.
+        if (osFresh.orcRef) {
+          const orcIdx = orcList.findIndex((o) => o.id === osFresh.orcRef);
+          if (orcIdx >= 0 && orcList[orcIdx].status !== "em_producao") {
+            orcList[orcIdx].status = "em_producao";
+            orcListMutada = true;
+          }
+        }
       } else if (!osFresh.producaoStartId) {
         osFresh.producaoStartId = osProducaoIdemKey;
       }
@@ -275,6 +304,7 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
       tx.set(stockRef, { data: JSON.stringify(sd), ts: Date.now() });
       tx.set(logRef, { data: JSON.stringify(log), ts: Date.now() });
       if (retListMutada) tx.set(retRef, { data: JSON.stringify(retList), ts: Date.now() });
+      if (orcListMutada) tx.set(orcRef, { data: JSON.stringify(orcList), ts: Date.now() });
 
       return { osFresh, matProd: novoMatProd };
     });
