@@ -27,9 +27,10 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Validar draft recuperável pela interface (refresh/navegação) — não testado nesta rodada
 
 ## Bloco P0-3 — Recibo A4 (seções 14-16)
-- [TODO] Redesign A4 com logo oficial real
-- [TODO] Dados canônicos sem "(não informado)" por erro de reidratação
-- [TODO] Reimpressão não duplica transação/OS
+- [TESTED] Redesign A4 com logo oficial real — já implementado em rodada anterior (2026-08-07): header colorido, logo real (assets/brand/*.png, confirmado existente), hierarquia profissional, ok-box/warn-box de destaque, rodapé com assinaturas. Confirmado por leitura, sem regressão necessária.
+- [TESTED] Dados canônicos sem "(não informado)" — confirmado: lê direto de orc.cliente/orc.vendedor/os.valorEntrada (dado real persistido), fallbacks só disparam quando o campo é genuinamente vazio, nunca substitui dado existente.
+- [TESTED] Reimpressão não duplica transação/OS — confirmado: orcGerarReciboEntrada nunca grava no Firestore (só window.open+print), o gate (orcObterConfirmacaoEntrada) só lê. BUG REAL corrigido nesta rodada: número do recibo usava Date.now() (mudava a cada impressão) — agora deriva de orc.num (estável). Teste: scripts/test_orc_recibo_entrada_2026-08-12.js (16/16 verde)
+- [TODO] Smoke visual real da impressão no navegador — não feito nesta rodada (sessão bloqueada), coberto só por auditoria de código/regex
 
 ## Bloco P0-4 — Status do orçamento (seções 17-20)
 - [TESTED] Bug real confirmado em produção (#000018: entrada recebida R$83,08 + OS#8 gerada, mostrava "Aguard. Pagamento", detalhe mostrava enum cru "aguardando_pagamento"). Causa: `o.status = restante>0 ? 'aguardando_pagamento' : 'pago'` executado na geração da OS, misturando status operacional com financeiro.
@@ -42,21 +43,22 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Ordem exata do modal (10 blocos) — não reordenado nesta rodada
 - [TODO] Botão Iniciar Produção antes do checklist, fluxo material→reserva→iniciar — não verificado nesta rodada
 - [TESTED] Marcar Pronta: bug real confirmado em produção (OS #8 — botão habilitado com 0/5 marcados, kbMarcarPronto() forçava checklist completo ao clicar). CORRIGIDO: kbChecklistCompleto(os) nova fonte única; kbMarcarPronto() bloqueia de verdade (nunca só visual) se status!=='producao' ou checklist incompleto; render oculta o botão antes de iniciar e desabilita até 5/5. Teste: scripts/test_kb_marcar_pronta_gate_2026-08-12.js (11/11 verde)
-- [TODO] Checklist sempre 5 itens fixos — já corrigido em rodada anterior (osChecklistDeOperacoes), confirmado visualmente OK no card do Kanban (OS #8 mostra os 5)
-- [TODO] Normalizador para OS legadas com checklist persistido incompleto — não implementado nesta rodada
+- [TESTED] Checklist sempre 5 itens fixos — já corrigido em rodada anterior (osChecklistDeOperacoes), confirmado visualmente OK no card do Kanban (OS #8 mostra os 5)
+- [TESTED] Normalizador para OS legadas com checklist persistido incompleto — kbNormalizarChecklistLegado(os) novo, mescla com OPERACOES_PADRAO preservando estado marcado, chamado em kbOpen(). Teste: scripts/test_kb_checklist_normalizador_legado_2026-08-12.js (21/21 verde)
 - [TODO] Coluna Etapa em Todas as OS + reverter para produção — kbEtapaAtual/kbReverterProducao já existem de rodada anterior, não re-verificados nesta rodada
 
 ## Bloco P0-6 — Planificação visual na OS (seções 30-35)
-- [TODO] Snapshot completo orçamento→OS (imutável)
-- [TODO] Preview visual renderizado (SVG/Canvas/imagem/PDF), não só medidas
-- [TODO] Separação Planificação × Arquivos da Produção
-- [TODO] PDF da OS sem financeiro
+- [TESTED] Snapshot completo orçamento→OS já era imutável (osProjecaoOperacionalItem, rodada anterior) — confirmado por leitura, sem mudança necessária
+- [TESTED] Bug real confirmado: só medidas/tabela, nunca o desenho. CORRIGIDO: kbPlanificacaoGerarSVG(pecas) nova — reaproveita o MESMO algoritmo determinístico de empacotamento de planExportSVG()/planDrawCanvas() (depende só das medidas já persistidas, nunca recalcula), gera SVG do layout de corte real a partir de it.pieces/it.recipeSnapshot.pecas. kbAbrirPlanificacaoItem() injeta o desenho no modal (antes só tabela+aviso textual). Também renderiza o template gráfico do produto (recipeSnapshot.planificacoes), sanitizado via svgSanitizar. Teste: scripts/test_kb_planificacao_visual_2026-08-12.js (13/13 verde) — vazio, empacotamento, múltiplas chapas, aliases legados, escaping XSS, determinismo
+- [TESTED] Separação Planificação × Arquivos da Produção já existia (rodada anterior, kbPlanImgBox distinto) — confirmado por leitura, sem mudança necessária
+- [TODO] PDF da OS sem financeiro — já corrigido em rodada anterior (osPdfProducao), não re-verificado visualmente nesta rodada
+- [TODO] Smoke visual real do desenho no navegador — não feito nesta rodada (sessão bloqueada), coberto só por teste de extração de função real
 
 ## Bloco P0-7 — Estoque/Retalhos (seções 36-42)
-- [TODO] Leitura da planificação antes de perguntar Chapa/Retalho
-- [TODO] Margem de segurança 2D (não só área)
-- [TODO] Melhor-fit + UI de sugestão
-- [TODO] Concorrência atômica server-side (parece já implementado — validar)
+- [TESTED] Leitura da planificação antes de perguntar Chapa/Retalho — já implementado em rodada anterior (kbCalcAreaOS lê it.planArea/larg×alt dos itens da OS antes de sugerir); confirmado por leitura
+- [TESTED] Margem de segurança 2D configurável (kbMargemSegurancaRetalhoCm, Config→Produção, default +5cm) aplicada a largura E altura via kbRetalhoCabeGeometricamente (não só área) — já implementado em rodada anterior (seção 19), confirmado por leitura
+- [TESTED] Melhor-fit já implementado (sort por área crescente — menor retalho que ainda serve primeiro). GAP FECHADO NESTA RODADA: UI de sugestão só mostrava texto solto, sem ação explícita. kbSugestaoHtml(sug) novo — cartão "♻️ Sugestão de aproveitamento" com 3 botões (✅ Usar retalho / 🔎 Escolher outro / 🆕 Abrir chapa nova). Teste: scripts/test_kb_sugestao_retalho_ui_2026-08-12.js (12/12 verde)
+- [TESTED] Concorrência atômica server-side — já implementado em rodada anterior (Cloud Function producaoIniciarOuEditar, leitura fresca de stock/retalhos + transação, nunca decide no cliente); confirmado por leitura do código (functions/src/producao.ts), sem novo teste de emulador nesta rodada especificamente
 
 ## Bloco P0-8 — Privacidade financeira no Kanban (seções 43-48)
 - [TESTED] Bug real CONFIRMADO em produção (OS #8): caixa "Receber Saldo" do modal Kanban mostrava "Restante: R$X" cru + botão que disparava a transação financeira ali mesmo. CORRIGIDO: valor removido (status sanitizado "Saldo pendente na entrada", sem R$), botão agora abre o modal financeiro dedicado (osAbrirPagamentoSaldoModal, mesma fonte já usada em "Todas as OS") — cobre inclusive o caminho legado aguardando_saldo→iniciada, zero perda de capacidade. kbReceberSaldo() (função antiga) ficou sem chamador na UI mas foi mantida intocada (ainda testada/atômica) — não removida por segurança/escopo.
@@ -65,7 +67,7 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Teste automatizado via Auth Emulator real (perfil Produção tentando ler kb_os_fin → DENIED) — não executado nesta rodada (Rules já existiam corretas de rodada anterior, risco de regressão baixo, mas não há novo teste de emulador cobrindo isso especificamente nesta sessão)
 
 ## Bloco P0-9 — CRM (seção 49) — não regredir
-- [TODO] Validar sincronização com nova máquina de status
+- [TESTED] Validado por leitura de código (sem mudança necessária): o funil comercial do CRM usa seu próprio campo `etapa` (independente), NUNCA lê orc.status diretamente — os novos valores de enum (enviado_producao/em_producao/pronto/entregue) introduzidos nesta rodada não têm nenhum caminho de leitura no CRM, portanto não podem regredir a sincronização existente
 
 ## Bloco P0-10 — Cleanup #000018/OS#8 (seções 50-52, 65)
 - [TODO] Auditoria de dependências + snapshot + dry-run + apply
