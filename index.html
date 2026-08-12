@@ -13094,6 +13094,10 @@ function kbIniciarProd() {
   // nova baixa — apenas volta o status para "Em Produção".
   if (os.producaoStartId || os.matProd) {
     os.status = 'producao';
+    // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status operacional
+    // do orçamento vinculado com o avanço real da OS (nunca precisa de
+    // refresh manual em Orçamentos Enviados).
+    if (os.orcRef && typeof orcEnvSetStatus === 'function') orcEnvSetStatus(os.orcRef, 'em_producao');
     kbSaveKbos();
     var stag = document.getElementById('kstag-' + _kbOsId);
     if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
@@ -14117,7 +14121,13 @@ function kbMarcarPronto() {
       'Não foi possível marcar a OS #'+os.num+' como Pronta'
     ).then(function(ok){
       os._marcandoPronto = false;
-      if(ok && typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+      if(ok){
+        if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+        // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status
+        // operacional do orçamento vinculado (nunca precisa de refresh
+        // manual em Orçamentos Enviados).
+        if(os.orcRef && typeof orcEnvSetStatus==='function') orcEnvSetStatus(os.orcRef, 'pronto');
+      }
     });
   }, 150);
 }
@@ -15478,7 +15488,13 @@ function osLiberar(id) {
     _refletirNaTela,
     saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!',
     'Não foi possível liberar a OS #'+os.num
-  ).then(function(){ os._liberando = false; });
+  ).then(function(ok){
+    os._liberando = false;
+    // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status
+    // operacional do orçamento vinculado (nunca precisa de refresh
+    // manual em Orçamentos Enviados).
+    if(ok && os.orcRef && typeof orcEnvSetStatus==='function') orcEnvSetStatus(os.orcRef, 'entregue');
+  });
 }
 
 // ============================================================
@@ -24895,6 +24911,49 @@ function orcEnvFiltroDataLimpar() {
   orcEnviadosRender();
 }
 
+// GO-LIVE FINAL 2026-08-12, seção 17-20 — bug real reproduzido em
+// produção (#000018): a listagem/detalhe mostrava "Aguard. Pagamento"
+// mesmo com entrada já recebida e OS já gerada, porque o campo o.status
+// misturava status OPERACIONAL/COMERCIAL com status FINANCEIRO — ao
+// gerar a OS, o código fazia `o.status = restante>0 ? 'aguardando_pagamento'
+// : 'pago'`, reusando um valor que originalmente significava "cliente
+// aprovou mas ainda não pagou NADA" para representar "OS já gerada, só
+// falta o saldo (fluxo normal 50/50)". Saldo pendente NUNCA deve impedir
+// nem esconder o avanço operacional da OS.
+//
+// A partir de agora, a geração da OS sempre marca o.status='enviado_producao'
+// (nunca mais 'aguardando_pagamento'/'pago' nesse momento) — o estado
+// FINANCEIRO (entrada recebida/saldo pendente/pago integral) continua
+// disponível separadamente via o.restante (ver orcFinanceiroReal), nunca
+// mais copiado para o campo de status operacional.
+//
+// Fonte única de rótulo/cor de status — usada pela listagem, pelo
+// detalhe e por qualquer outra tela que precise exibir o status do
+// orçamento, para nunca mais existir um texto cru (enum não traduzido)
+// nem 3 cópias divergentes do mesmo mapa.
+var ORC_STATUS_LABEL = {
+  aguardando: '⏳ Aguardando Cliente',
+  aprovado: '✅ Aprovado — Aguard. Pagamento',
+  enviado_producao: '🏭 Enviado p/ Produção',
+  em_producao: '🔧 Em Produção',
+  pronto: '📦 Pronto',
+  entregue: '✅ Entregue',
+  // legado — registros antigos podem ainda ter estes valores persistidos;
+  // mantém rótulo/cor reconhecíveis em vez de cair no fallback genérico.
+  aguardando_pagamento: '🏭 Enviado p/ Produção',
+  pago: '🏭 Enviado p/ Produção',
+  recusado: '❌ Recusado',
+  expirado: '🕐 Expirado',
+};
+var ORC_STATUS_COLOR = {
+  aguardando: '#D97706', aprovado: '#F59E0B', enviado_producao: '#7C3AED',
+  em_producao: '#2563EB', pronto: '#0D9488', entregue: '#059669',
+  aguardando_pagamento: '#7C3AED', pago: '#7C3AED',
+  recusado: '#DC2626', expirado: '#9CA3AF',
+};
+function orcStatusLabel(status) { return ORC_STATUS_LABEL[status] || status; }
+function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
+
 function orcEnviadosRender() {
   var tbody = document.getElementById('orcEnvBody'); if(!tbody) return;
   orcEnvFiltroMesPopular();
@@ -24927,8 +24986,6 @@ function orcEnviadosRender() {
   }
   // aguardando_pagamento/pago são estados aditivos (setados automaticamente ao
   // gerar OS / receber saldo) — nunca substituem os 4 estados manuais originais.
-  var statusLabel = {aguardando:'⏳ Aguardando',aprovado:'✅ Aprovado',aguardando_pagamento:'💰 Aguard. Pagamento',pago:'✅ Pago',recusado:'❌ Recusado',expirado:'🕐 Expirado'};
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   tbody.innerHTML = filtered.map(function(o,idx){
     var isVR = o.marca==='vr';
     var marcaHtml = '<span style="background:'+(isVR?'#E3F7FB':'#E3F0F1')+';color:'+(isVR?'#983C8F':'#134F57')+';padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">'+(isVR?'VR Marcas':'Vitre')+'</span>';
@@ -24948,7 +25005,7 @@ function orcEnviadosRender() {
     // que devia acontecer junto. A listagem agora só REFLETE o status
     // canônico (badge somente leitura); a mudança de status acontece nas
     // ações do detalhe (orcEnvAbrir → Aprovar/Recusar/Confirmar Pgt).
-    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+(statusColor[o.status]||'#9CA3AF')+'22;color:'+(statusColor[o.status]||'#9CA3AF')+'">'+(statusLabel[o.status]||o.status)+'</span>';
+    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+orcStatusCor(o.status)+'22;color:'+orcStatusCor(o.status)+'">'+orcStatusLabel(o.status)+'</span>';
     return '<tr>'
       +'<td><strong>#'+o.num+'</strong></td>'
       +'<td>'+o.cliente+'</td>'
@@ -25110,7 +25167,7 @@ function orcEnvAbrir(id) {
     +'<div><span style="color:var(--muted)">Condição:</span> '+finReal.condicaoLabel+'</div>'
     +'<div><span style="color:var(--muted)">Marca:</span> '+(isVR?'VR Marcas':'Vitre')+'</div>'
     +'<div><span style="color:var(--muted)">Vendedor:</span> '+(o.vendedor||'—')+'</div>'
-    +'<div><span style="color:var(--muted)">Status:</span> '+o.status+'</div>'
+    +'<div><span style="color:var(--muted)">Status:</span> <span style="color:'+orcStatusCor(o.status)+';font-weight:700">'+orcStatusLabel(o.status)+'</span></div>'
     +'</div>'
     +financeiroHtml
     +itensHtml
@@ -25431,7 +25488,6 @@ function orcEnvConfirmarPgto(id) {
   }
   var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var valorTotal = o.valorFinal||0;
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(520px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
     +'<div><div style="font-size:16px;font-weight:900">💳 Confirmar Pagamento</div>'
@@ -25721,7 +25777,11 @@ function orcEnvGerarOS(){
     // _kbMergeFinCache(), mantendo o comportamento em memória consistente
     // com o caminho transacional real logo abaixo.
     if(typeof kbSaveKbos==='function') kbSaveKbos();
-    o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
+    // GO-LIVE FINAL 2026-08-12, seção 17-19 — OS gerada = status
+    // operacional "Enviado p/ Produção", SEMPRE, independente de haver
+    // saldo pendente (o restante>0 do fluxo normal 50/50 nunca deve virar
+    // "Aguardando Pagamento" outra vez — ver ORC_STATUS_LABEL).
+    o.status = 'enviado_producao';
     o.osRef=newIdLocal; orcSetEnviados(lista);
     if(valorEntrada>0){
       var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
@@ -25817,7 +25877,11 @@ function orcEnvGerarOS(){
           formaPgto:forma, pagtoTipo:tipo, valorEntrada:valorEntrada, restante:restante,
           itensValores: itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; })
         };
-        arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
+        // GO-LIVE FINAL 2026-08-12, seção 17-19 — mesma correção do
+        // caminho transacional real: OS gerada = "Enviado p/ Produção",
+        // nunca "Aguardando Pagamento" (que confundia saldo pendente do
+        // fluxo normal 50/50 com "cliente ainda não pagou nada").
+        arrOrc[idxOrc].status = 'enviado_producao';
         arrOrc[idxOrc].osRef = newId;
 
         var txMutado = false;

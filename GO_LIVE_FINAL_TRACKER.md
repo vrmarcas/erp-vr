@@ -29,10 +29,11 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Reimpressão não duplica transação/OS
 
 ## Bloco P0-4 — Status do orçamento (seções 17-20)
-- [TODO] Separar status operacional × financeiro
-- [TODO] Máquina de estados operacional (Aguard.Cliente → ... → Entregue)
-- [TODO] Nunca "Aguardando Pagamento" com OS já gerada
-- [TODO] Sincronização entre telas sem refresh manual
+- [TESTED] Bug real confirmado em produção (#000018: entrada recebida R$83,08 + OS#8 gerada, mostrava "Aguard. Pagamento", detalhe mostrava enum cru "aguardando_pagamento"). Causa: `o.status = restante>0 ? 'aguardando_pagamento' : 'pago'` executado na geração da OS, misturando status operacional com financeiro.
+- [TESTED] CORRIGIDO: geração de OS sempre marca o.status='enviado_producao' (2 pontos: fallback local + caminho transacional real). Fonte única orcStatusLabel/orcStatusCor substitui 3 cópias divergentes do mapa (uma nem existia — texto cru no detalhe). Legado (aguardando_pagamento/pago já persistidos) mapeia pro mesmo rótulo — sem migração necessária. Teste: scripts/test_orc_status_operacional_2026-08-12.js (12/12) + 3 testes pré-existentes atualizados (mudança de regra deliberada, documentada inline)
+- [TESTED] Máquina de estados completa implementada: kbIniciarProd→em_producao, kbMarcarPronto→pronto (só após confirmação real do save), osLiberar→entregue (idem). Usa orcEnvSetStatus() já existente (fonte única, sem duplicar lógica). Testes 4a-4c em test_orc_status_operacional_2026-08-12.js.
+- [TODO] NÃO sincronizado: o caminho real via Cloud Function producaoIniciarOuEditar (1º "Iniciar Produção" com seleção de material/retalho) não atualiza o orçamento — só o caminho de retomada (kbIniciarProd direto) atualiza. Corrigir isso exigiria editar functions/src/producao.ts + rebuild + deploy de Functions, fora do escopo desta rodada (risco desproporcional ao benefício de um rótulo). Pendência anotada para rodada futura.
+- [TODO] Sincronização entre telas sem refresh manual — orcEnvSetStatus já chama orcAtualizarBadgeEnviados()/re-render; não testado via browser nesta rodada.
 
 ## Bloco P0-5 — Kanban/Modal da OS (seções 21-29)
 - [TODO] Ordem exata do modal (10 blocos) — não reordenado nesta rodada

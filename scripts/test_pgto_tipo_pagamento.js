@@ -176,7 +176,13 @@ test('2. Integral — entrada = total, restante = 0, status pago, um recebimento
   assertApprox(os.valorEntrada, 1000, 'entrada = total');
   assertApprox(os.restante, 0, 'restante = 0');
   var o = mod.getEnviados().find(function (x) { return x.id === 'ORC-2'; });
-  assertEq(o.status, 'pago', 'orçamento deve ficar pago');
+  // GO-LIVE FINAL 2026-08-12, seção 17-20 — mudança de regra deliberada:
+  // o.status passou a ser um estado OPERACIONAL (nunca mais financeiro).
+  // Gerar a OS sempre marca 'enviado_producao', mesmo com pagamento
+  // integral — "pago"/"aguardando_pagamento" misturavam status
+  // operacional com financeiro (achado real: orçamento com entrada
+  // recebida e OS gerada mostrava "Aguard. Pagamento" na listagem).
+  assertEq(o.status, 'enviado_producao', 'orçamento deve ir para Enviado p/ Produção (nunca mais status financeiro no campo operacional)');
   assertEq(FIN_CR.filter(function (c) { return c.status === 'recebido'; }).length, 1, 'exatamente um recebimento');
   assertEq(FIN_CR.filter(function (c) { return c.status === 'pendente'; }).length, 0, 'nenhum CR pendente para integral');
 });
@@ -222,7 +228,11 @@ test('5. A Receber/Futuro — entrada zero, restante = total, nenhum recebimento
   assertApprox(os.restante, 500, 'restante = total');
   assertEq(FIN_CR.length, 0, 'nenhum recebimento lançado para futuro');
   var o = mod.getEnviados().find(function (x) { return x.id === 'ORC-5'; });
-  assertEq(o.status, 'aguardando_pagamento', 'orçamento aguardando pagamento');
+  // GO-LIVE FINAL 2026-08-12, seção 17-20 — mesma mudança de regra: OS
+  // gerada (mesmo sem nenhuma entrada, tipo "futuro") = Enviado p/
+  // Produção. Saldo total pendente é rastreado via os.restante/FIN_CR,
+  // nunca mais pelo campo de status operacional do orçamento.
+  assertEq(o.status, 'enviado_producao', 'orçamento deve ir para Enviado p/ Produção mesmo sem entrada (tipo futuro) — produção não é bloqueada pelo pagamento');
 });
 
 test('6. alternar Integral → Parcial → 50/50 → Futuro mantém só a última seleção', function () {
