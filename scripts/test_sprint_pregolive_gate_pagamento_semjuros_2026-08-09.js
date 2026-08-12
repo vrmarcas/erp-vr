@@ -100,20 +100,25 @@ function montarAmbiente(finalPrice, metodo, nParc) {
 
 {
   // Achado real exato reproduzido no preview local: orçamento de R$192,58.
+  // GO-LIVE FINAL 2026-08-12, seção 4 — mudança de regra deliberada,
+  // confirmada em produção: a taxa real da maquininha volta a ser
+  // embutida no preço do cartão (o Bloco E fazia a VR absorvê-la
+  // silenciosamente). Para R$192,58 em 3x (taxa 3,99%):
+  // 19258/(1-0,0399) = 20058 centavos = R$200,58.
   var amb = montarAmbiente(192.58, 'cartao', 3);
   amb.mod.orcCalcParcelaDisplay();
-  test('7. achado real corrigido: Cartão 3x sobre R$192,58 mostra "3× de R$64,19 (total: R$192,58)" — nunca mais R$200,25',
-    amb.els.orcSimParcelaDisplay.textContent, '3× de R$ 64,19 (total: R$ 192,58)');
-  test('8. "Valor a Receber" bate exatamente com o total da linha de parcelamento (R$192,58, nunca R$200,25)',
-    amb.els.orcPgtoValorDisplay.textContent, 'R$ 192,58');
+  test('7. GO-LIVE FINAL — Cartão 3x sobre R$192,58 embute a taxa real (3,99%): "3× de R$66,86 (total: R$200,58)"',
+    amb.els.orcSimParcelaDisplay.textContent, '3× de R$ 66,86 (total: R$ 200,58)');
+  test('8. "Valor a Receber" bate exatamente com o total da linha de parcelamento (R$200,58, com a taxa embutida)',
+    amb.els.orcPgtoValorDisplay.textContent, 'R$ 200,58');
 }
 
 {
-  // 2x também precisa ser sem juros.
+  // 2x também embute a taxa real (2,99%): 19258/(1-0,0299) = 19852 centavos.
   var amb2 = montarAmbiente(192.58, 'cartao', 2);
   amb2.mod.orcCalcParcelaDisplay();
-  test('9. Cartão 2x sobre R$192,58 também sem juros — total continua R$192,58 (nunca a taxa real de 2,99%)',
-    amb2.els.orcPgtoValorDisplay.textContent, 'R$ 192,58');
+  test('9. GO-LIVE FINAL — Cartão 2x sobre R$192,58 embute a taxa real (2,99%): total R$198,52',
+    amb2.els.orcPgtoValorDisplay.textContent, 'R$ 198,52');
 }
 
 {

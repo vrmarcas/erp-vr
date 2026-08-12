@@ -160,11 +160,16 @@ console.log('='.repeat(72) + '\n');
   }
   var mod = require(modPath);
 
+  // GO-LIVE FINAL 2026-08-12, seção 4 — mudança de regra deliberada,
+  // confirmada em produção: o Bloco E fazia a VR absorver a taxa da
+  // maquininha silenciosamente (cartão sempre = base, em qualquer
+  // parcela). A regra nova é o oposto — "sem juros" = sem juros
+  // VISÍVEIS, mas a taxa real É embutida no preço mostrado ao cliente.
   reset({ nParc: 1 });
   var m1 = mod.orcCalcCondicoesPagamento(1000);
-  test('10. cartão 1x = MESMA base (nunca com taxa)', m1.cartao[1].totalCents, 100000);
-  test('11. cartão 2x = MESMA base (nunca com taxa, mesmo o config real tendo 2,99%)', m1.cartao[2].totalCents, 100000);
-  test('12. cartão 3x = MESMA base (nunca com taxa, mesmo o config real tendo 3,99%)', m1.cartao[3].totalCents, 100000);
+  test('10. cartão 1x = MESMA base (taxa de 1x é 0% no fixture — nunca há o que embutir)', m1.cartao[1].totalCents, 100000);
+  test('11. GO-LIVE FINAL — cartão 2x EMBUTE a taxa real (2,99%): 100000/(1-0,0299) = 103082', m1.cartao[2].totalCents, 103082);
+  test('12. GO-LIVE FINAL — cartão 3x EMBUTE a taxa real (3,99%): 100000/(1-0,0399) = 104156', m1.cartao[3].totalCents, 104156);
 
   reset({ nParc: 6 });
   var m2 = mod.orcCalcCondicoesPagamento(1000);
@@ -174,10 +179,21 @@ console.log('='.repeat(72) + '\n');
 
   reset({ dcOn: true, dcPct: 10, pxPct: 5 });
   var m3 = mod.orcCalcCondicoesPagamento(1000); // baseEfetiva já reduzida pelo chamador em produção — aqui simulamos exatamente essa base
-  test('15. achado investigado (dois descontos PIX por engano): PIX aplicado UMA única vez sobre a base recebida — R$1000×(1-0,05)=R$950, nunca R$1000×0,90×0,95=R$855 (dc dobrado) nem R$1000×0,95×0,95=R$902,50 (pix dobrado)',
-    m3.pixTotal, 950);
-  test('16. sem percentual PIX configurado, pixTotal = a própria base (nunca inventa desconto)',
-    (function () { reset({ nParc: 3 }); return mod.orcCalcCondicoesPagamento(1000).pixTotal; })(), 1000);
+  // GO-LIVE FINAL 2026-08-12, seção 5 — PIX (override manual de 5%, já
+  // que a sugestão em 3x seria 3,99%) aplica UMA única vez, mas agora
+  // sobre o preço do CARTÃO (com taxa embutida — 104156 cents), não mais
+  // sobre a base crua: 104156×(1-0,05) = 98948 cents = R$989,48. Ainda
+  // aplicado uma única vez (nunca dc dobrado nem pix dobrado).
+  test('15. PIX aplicado UMA única vez, sobre o preço do cartão (taxa embutida): 104156×(1-0,05) = R$989,48',
+    m3.pixTotal, 989.48);
+  // GO-LIVE FINAL 2026-08-12, seção 5 — "sem percentual PIX configurado"
+  // (pxPct=0 explícito) é tratado como override para 0% de desconto —
+  // resultado é o preço do cartão sem desconto adicional (R$1.041,56 em
+  // 3x com taxa de 3,99%), não mais a base crua. Na UI real, o campo
+  // nunca fica "0 sem configurar" — orcPixSincronizarSugestao sempre
+  // pré-preenche com a sugestão (ver test_orc_pix_sugestao_override).
+  test('16. GO-LIVE FINAL — pxPct=0 explícito = cartão sem desconto adicional (R$1.041,56 em 3x, taxa 3,99%), nunca mais a base crua',
+    (function () { reset({ nParc: 3 }); return mod.orcCalcCondicoesPagamento(1000).pixTotal; })(), 1041.56);
 
   try { fs.unlinkSync(modPath); } catch (e) {}
 }

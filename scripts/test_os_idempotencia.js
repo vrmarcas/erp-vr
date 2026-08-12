@@ -384,7 +384,10 @@ await test('11. Integral — uma OS, um recebimento, entrada=total, restante=0, 
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOSMerged())[0];
   var o = fakeStoreOrc().find(function (x) { return x.id === 'ORC-11'; });
-  assertApprox(os.valorEntrada, 1000); assertApprox(os.restante, 0); assertEq(o.status, 'pago');
+  // GO-LIVE FINAL 2026-08-12, seção 17-20 — mudança de regra deliberada:
+  // o.status é operacional (nunca mais financeiro) — OS gerada sempre vai
+  // para 'enviado_producao', mesmo com pagamento integral.
+  assertApprox(os.valorEntrada, 1000); assertApprox(os.restante, 0); assertEq(o.status, 'enviado_producao');
 });
 
 await test('12. 50/50 — uma OS, uma entrada, um saldo pendente, nenhum duplicado', async function () {

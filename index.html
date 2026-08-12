@@ -2772,11 +2772,23 @@ function _authFirebaseError(code){
               🔧 Iniciar Produção
             </button>
           </div>
-          <!-- Receber Saldo — visível quando status=aguardando_saldo -->
+          <!-- Receber Saldo — visível quando status=aguardando_saldo.
+          GO-LIVE FINAL 2026-08-12, seção 43-48 — bug real reproduzido em
+          produção (OS #8): esta caixa mostrava "Restante: R$X" (valor
+          financeiro cru) direto na visão operacional do Kanban, violando
+          a separação financeiro×operação — mesmo para Master, a visão
+          Kanban não pode conter valores (seção 43: "nem para Master
+          dentro da visão Kanban"). Corrigido: nenhum valor aqui — status
+          sanitizado (enum, nunca dinheiro — ver kbSaldoValor) e o botão
+          abre o modal financeiro dedicado (osAbrirPagamentoSaldoModal,
+          já usado em "Todas as OS"), que também cobre o caminho legado
+          aguardando_saldo→iniciada (ver finRegistrarRecebimento) — nunca
+          perde capacidade, só sai do "kb_os"-view direto pra fonte
+          financeira correta. -->
           <div id="kbReceberSaldoBox" style="display:none;margin-bottom:10px;background:#FEF9C3;border:1.5px dashed #D97706;border-radius:9px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Saldo na Entrega</div>
-            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px">Restante: <span id="kbSaldoValor">—</span></div>
-            <button id="kbReceberSaldoBtn" onclick="kbReceberSaldo()" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ Confirmar Recebimento do Saldo</button>
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Pagamento</div>
+            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px" id="kbSaldoValor">Saldo pendente na entrada</div>
+            <button id="kbReceberSaldoBtn" onclick="if(typeof osAbrirPagamentoSaldoModal==='function') osAbrirPagamentoSaldoModal(_kbOsId);" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Registrar Pagamento</button>
           </div>
           <!-- Exibição do material selecionado para produção -->
           <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
@@ -3292,10 +3304,15 @@ function _authFirebaseError(code){
               <div style="font-size:10px;color:var(--muted);margin-top:2px">Sempre mostrado ao cliente como opção, com desconto automático</div>
               <input type="checkbox" id="orcPixDiscToggle" checked style="display:none">
               <div id="orcPixDiscFields" style="display:block;margin-top:12px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:9px;padding:12px">
-                <div class="fg" style="margin-bottom:10px">
+                <div class="fg" style="margin-bottom:6px">
                   <label>Desconto PIX (%)</label>
                   <input type="number" id="orcPixDiscPct" value="" min="0" max="50" step="0.5" placeholder="Ex: 5" oninput="orcCalcPixDisc()" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px">
                 </div>
+                <!-- GO-LIVE FINAL 2026-08-12, seção 5-6 — sugestão automática
+                (= taxa da maquininha embutida no cartão selecionado) sempre
+                visível; "Usar sugerido" nunca sobrescreve silenciosamente
+                um valor que o vendedor já digitou (override manual). -->
+                <div id="orcPixSugestaoHint" style="font-size:10px;color:var(--muted);margin-bottom:10px"></div>
                 <div id="orcPixDiscPreview" style="background:#fff;border:1px solid #86EFAC;border-radius:7px;padding:9px 11px;font-size:11px;color:#166534;line-height:1.6"></div>
               </div>
             </div>
@@ -8528,6 +8545,11 @@ function orcStep(n) {
   var _os = document.querySelector('.orc-steps'); if (_os) _os.style.display = 'flex';
   // Step 3 is now inline in Step 2 — skip it, go to 4
   if(n===3) n=4;
+  // GO-LIVE FINAL 2026-08-12, seção 9-13 — lembra a última etapa
+  // realmente exibida do wizard VR, para que "Continuar editando" (ver
+  // orcNovoOrcamentoFecharModal) consiga voltar para onde o operador
+  // estava, em vez de deixá-lo preso na tela de escolha de fluxo.
+  window._orcUltimoStepAtivo = n;
   document.querySelectorAll('.orc-pg').forEach(p => p.style.display='none');
   const target = document.getElementById('opg'+n);
   if (target) target.style.display='block';
@@ -11082,7 +11104,14 @@ function orcGerarReciboEntrada(orcIdParam) {
   var vend    = orc.vendedor||'—';
   var fmtBR   = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}); };
   var pct     = total>0 ? Math.round(entrada/total*100) : 0;
-  var numRec  = 'REC-'+Date.now().toString().slice(-6);
+  // GO-LIVE FINAL 2026-08-12, seção 14-16 — número do recibo era gerado a
+  // partir de Date.now(), então reimprimir o MESMO recibo (mesmo
+  // orçamento/mesma entrada, nenhum dado novo) mostrava um "Nº" diferente
+  // a cada impressão — confuso para um documento financeiro (parece um
+  // recibo novo, mesmo sem nenhuma nova transação/gravação). Corrigido
+  // para derivar do número oficial do orçamento (já estável e único),
+  // com a OS como fallback — a mesma entrada sempre imprime o mesmo Nº.
+  var numRec  = 'REC-'+String(orc.num || os.num || orc.id || 'SN').replace(/[^0-9A-Za-z]/g,'');
   var itensStr = (os.itens||orc.itens||[]).map(function(it){ return (it.qty||1)+'x '+(it.prod||'Produto'); }).join(', ')||'Serviço conforme orçamento';
   var _brandBaseRec = location.origin + '/assets/brand/';
   var logoSrcRec = isVt ? (_brandBaseRec+'vitre-logo.png') : (_brandBaseRec+'vr-marcas-logo.png');
@@ -11345,15 +11374,22 @@ function orcPgtoAtualizarValorReceber() {
   // é sempre igual ao valor à vista (sem juros); só o PIX aplica desconto,
   // e só quando PIX é de fato o método selecionado (nunca soma desconto de
   // PIX ao escolher Cartão/Dinheiro/Link).
+  var nParcSim = parseInt((document.getElementById('orcSimParcelas')||{}).value,10)||1;
   var baseAposCond = (cond.dcOn && cond.dcPct>0) ? (v.finalPrice||0)*(1-cond.dcPct/100) : (v.finalPrice||0);
-  var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
+  var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParcSim });
   // GO-LIVE 2026-08-11, P0 seção 7 (bug real reproduzido em produção):
   // "metodo==='pix'" tratava Dinheiro no mesmo ramo de Cartão/Link (preço
   // cheio, sem desconto à vista) — Dinheiro mostrava R$131,82 igual ao
   // Cartão, quando a regra é PREÇO À VISTA = PIX = DINHEIRO. O desconto à
   // vista (cond.pxPct) precisa se aplicar igualmente às duas formas.
   var isAVista = (metodo==='pix' || metodo==='dinheiro') && cond.pxOn;
-  var valor = isAVista ? (motorCom.pix.totalCents/100) : (motorCom.baseCents/100);
+  // GO-LIVE FINAL 2026-08-12, seção 4 — Cartão/Link mostra o preço com a
+  // taxa da maquininha já embutida (cartao[n].totalCents), nunca mais o
+  // valor-base sem taxa (motorCom.baseCents, que agora é só a referência
+  // interna usada para o cálculo do PIX — nunca o preço mostrado ao
+  // cliente no cartão).
+  var cartaoSim = motorCom.cartao[nParcSim] || motorCom.cartao[1];
+  var valor = isAVista ? (motorCom.pix.totalCents/100) : (cartaoSim.totalCents/100);
   var vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valor);
   var sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valor);
 }
@@ -12066,9 +12102,83 @@ function kbFecharPlanificacaoItemModal(){
   var el = document.getElementById('kbPlanItemModal');
   if (el) el.remove();
 }
-// GO-LIVE 2026-08-11, P0 seção 17 — visualização somente leitura do
+// GO-LIVE FINAL 2026-08-12, seção 30-35 — bug real confirmado: a OS só
+// mostrava metadados (medidas/lista de peças em tabela), nunca o DESENHO
+// do corte — "uma OS sem planificação visual pode fabricar produto
+// diferente do vendido". Gera o layout real (empacotamento das peças na
+// chapa) a partir do snapshot IMUTÁVEL de peças já congelado na venda
+// (osProjecaoOperacionalItem → it.pieces / it.recipeSnapshot.pecas) —
+// mesmo algoritmo determinístico de packGrupo()/planExportSVG() (o
+// resultado só depende das medidas das peças já persistidas, nunca de
+// uma receita/config recalculada agora), extraído aqui como função pura
+// (sem DOM) para poder ser reaproveitado tanto no preview do wizard
+// quanto, somente-leitura, dentro da OS.
+function kbPlanificacaoGerarSVG(pecas) {
+  var allPieces = [];
+  (pecas || []).forEach(function (p) {
+    var larg = parseFloat(p.larg != null ? p.larg : p.l) || 0;
+    var alt  = parseFloat(p.alt  != null ? p.alt  : p.a) || 0;
+    if (larg <= 0 || alt <= 0) return;
+    var qty = parseInt(p.qty, 10) || 1;
+    for (var i = 0; i < qty; i++) {
+      allPieces.push({ nome: p.nome || p.label || 'Peça', larg: larg, alt: alt, esp: p.esp != null ? String(p.esp) : '' });
+    }
+  });
+  if (!allPieces.length) return '';
+
+  var PALETA = ['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#7DD3E8','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
+  var colorMap = {}, colorIdx = 0;
+  allPieces.forEach(function (p) { if (!colorMap[p.nome]) { colorMap[p.nome] = PALETA[colorIdx % PALETA.length]; colorIdx++; } });
+
+  var SHEET_W = 200, SHEET_H = 100;
+  var sorted = allPieces.slice().sort(function (a, b) { return (b.alt - a.alt) || (b.larg - a.larg); });
+  var chapas = [], curChapa = [], curX = 0, curY = 0, rowH = 0;
+  sorted.forEach(function (p) {
+    if (curX + p.larg > SHEET_W + 0.01) { curY += rowH; curX = 0; rowH = 0; }
+    if (curY + p.alt > SHEET_H + 0.01) { chapas.push(curChapa); curChapa = []; curX = 0; curY = 0; rowH = 0; }
+    curChapa.push({ p: p, x: curX, y: curY }); curX += p.larg; if (p.alt > rowH) rowH = p.alt;
+  });
+  if (curChapa.length) chapas.push(curChapa);
+
+  var SC = 10, PAD = 50, GAP = 80, LABEL_H = 40;
+  var svgW = SHEET_W * SC + PAD * 2;
+  var svgH = PAD + chapas.length * (SHEET_H * SC + GAP + LABEL_H) + PAD;
+
+  var svgParts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + svgW + ' ' + svgH + '">'];
+  svgParts.push('<rect width="' + svgW + '" height="' + svgH + '" fill="#e8eaed"/>');
+  chapas.forEach(function (pieces, si) {
+    var offY = PAD + si * (SHEET_H * SC + GAP + LABEL_H);
+    svgParts.push('<text x="' + PAD + '" y="' + (offY - 8) + '" font-family="sans-serif" font-size="14" font-weight="bold" fill="' + (chapas.length > 1 ? '#983C8F' : '#555') + '">Chapa ' + (si + 1) + (chapas.length > 1 ? ' de ' + chapas.length : '') + ' — 200×100 cm</text>');
+    svgParts.push('<rect x="' + PAD + '" y="' + offY + '" width="' + (SHEET_W * SC) + '" height="' + (SHEET_H * SC) + '" fill="#fff" stroke="#aaa" stroke-width="2"/>');
+    for (var gx = 20; gx < SHEET_W; gx += 20) svgParts.push('<line x1="' + (PAD + gx * SC) + '" y1="' + offY + '" x2="' + (PAD + gx * SC) + '" y2="' + (offY + SHEET_H * SC) + '" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>');
+    for (var gy = 20; gy < SHEET_H; gy += 20) svgParts.push('<line x1="' + PAD + '" y1="' + (offY + gy * SC) + '" x2="' + (PAD + SHEET_W * SC) + '" y2="' + (offY + gy * SC) + '" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>');
+    pieces.forEach(function (item) {
+      var p = item.p, px = PAD + item.x * SC, py = offY + item.y * SC, pw = p.larg * SC, ph = p.alt * SC;
+      var col = colorMap[p.nome] || '#93C5FD';
+      svgParts.push('<rect x="' + px + '" y="' + py + '" width="' + pw + '" height="' + ph + '" fill="' + col + '" fill-opacity="0.85" stroke="#fff" stroke-width="2" rx="3"/>');
+      var cx = px + pw / 2, cy = py + ph / 2;
+      if (pw > 40 && ph > 20) {
+        svgParts.push('<text x="' + cx + '" y="' + (cy - 5) + '" text-anchor="middle" font-family="sans-serif" font-size="' + (Math.min(pw, ph) * 0.12 > 12 ? 12 : Math.max(6, Math.min(pw, ph) * 0.12)) + '" font-weight="bold" fill="#1e293b">' + cfgEsc(p.nome) + '</text>');
+        svgParts.push('<text x="' + cx + '" y="' + (cy + 10) + '" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#334155">' + p.larg + '×' + p.alt + ' cm</text>');
+      }
+    });
+  });
+  var legY = svgH - PAD + 15, legX = PAD;
+  svgParts.push('<text x="' + legX + '" y="' + legY + '" font-family="sans-serif" font-size="13" font-weight="bold" fill="#555">Legenda:</text>');
+  legX += 90;
+  Object.keys(colorMap).forEach(function (nome) {
+    svgParts.push('<rect x="' + legX + '" y="' + (legY - 13) + '" width="18" height="14" fill="' + colorMap[nome] + '" rx="3"/>');
+    svgParts.push('<text x="' + (legX + 22) + '" y="' + legY + '" font-family="sans-serif" font-size="12" fill="#333">' + cfgEsc(nome) + '</text>');
+    legX += nome.length * 7 + 36;
+  });
+  svgParts.push('</svg>');
+  return svgParts.join('');
+}
+// GO-LIVE 2026-08-11/12, P0 seção 17/30-35 — visualização somente leitura do
 // snapshot de planificação copiado do orçamento (osProjecaoOperacionalItem),
-// nunca recalculado a partir da config atual de materiais/receitas.
+// nunca recalculado a partir da config atual de materiais/receitas. Mostra
+// o DESENHO real do corte (kbPlanificacaoGerarSVG, a partir das peças
+// congeladas), não só a tabela de medidas — o botão sozinho não bastava.
 function kbAbrirPlanificacaoItem(idx){
   var os = KB_OS[_kbOsId]; if(!os) return;
   var it = (os.itens||[])[idx]; if(!it) return;
@@ -12089,14 +12199,29 @@ function kbAbrirPlanificacaoItem(idx){
   var dimsHtml = (it.planLarg||it.planAlt||it.planProf)
     ? '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Dimensões planificadas: '+(it.planLarg||'—')+' × '+(it.planAlt||'—')+(it.planProf?(' × '+it.planProf):'')+' cm</div>'
     : '';
-  var layoutHtml = (it.recipeSnapshot && it.recipeSnapshot.planificacoes)
-    ? '<div style="font-size:11px;color:#059669;margin-bottom:8px">✓ Layout de corte disponível neste snapshot (mesma receita usada na venda).</div>'
-    : '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Este item não tem layout de corte gráfico salvo — use as peças/medidas abaixo.</div>';
+  var svgDesenho = kbPlanificacaoGerarSVG(pecas);
+  var desenhoHtml = svgDesenho
+    ? '<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:340px;background:var(--bg)">'+svgDesenho+'</div>'
+    : '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Este item não tem peças com medidas suficientes para desenhar o layout de corte — use as medidas abaixo.</div>';
+  // Template gráfico do produto (SVG cadastrado no catálogo), quando o
+  // snapshot o preservou — complementa (nunca substitui) o desenho do
+  // corte acima; mesma sanitização usada na tela de venda (svgSanitizar).
+  var svgsTemplate = (it.recipeSnapshot && it.recipeSnapshot.planificacoes) || [];
+  var templateHtml = svgsTemplate.length
+    ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:10px 0 4px">Desenho técnico do produto (catálogo)</div>'
+      + svgsTemplate.map(function(pl){
+          var svgs = pl.svgs && pl.svgs.length ? pl.svgs : (pl.svgData ? [{svgData:pl.svgData}] : []);
+          return svgs.map(function(s){
+            var seguro = (typeof svgSanitizar === 'function') ? (svgSanitizar(s.svgData) || '') : '';
+            return seguro ? '<div style="margin-bottom:6px;overflow:auto;max-height:180px;border:1px solid var(--border);border-radius:6px;padding:4px;text-align:center">'+seguro+'</div>' : '';
+          }).join('');
+        }).join('')
+    : '';
   var html = '<div id="kbPlanItemModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10002;display:flex;align-items:center;justify-content:center">'
-    + '<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:480px;width:92%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
+    + '<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:560px;width:92%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:14px;font-weight:800">📐 Planificação do Orçamento — '+cfgEsc(it.prod||'')+'</div><button onclick="kbFecharPlanificacaoItemModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">×</button></div>'
     + '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Somente leitura — exatamente como foi planificado na venda, nunca recalculado.</div>'
-    + dimsHtml + layoutHtml + pecasHtml
+    + dimsHtml + desenhoHtml + pecasHtml + templateHtml
     + '</div></div>';
   kbFecharPlanificacaoItemModal();
   document.body.insertAdjacentHTML('beforeend', html);
@@ -12178,6 +12303,14 @@ function kbOpen(id) {
     }
   })();
 
+  // GO-LIVE FINAL 2026-08-12, seção 21-29 — normaliza OS legadas cujo
+  // checklist persistido não é mais os 5 itens canônicos (ver
+  // kbNormalizarChecklistLegado) ANTES de qualquer fallback/render, para
+  // que o funcionário sempre veja Corte/Gravação/Montagem/Acabamento/
+  // Embalagem, mesmo em OS criadas antes dessa regra existir.
+  if (typeof kbNormalizarChecklistLegado === 'function' && kbNormalizarChecklistLegado(os)) {
+    if (typeof kbSaveKbos === 'function') kbSaveKbos();
+  }
   if (!os._ck) os._ck = os.checks.map((_, i) => os.pronto ? true : i < Math.round(os.prog / 100 * os.checks.length));
   kbRenderChecklist(os);
   // Reset tabs to Produção
@@ -12257,9 +12390,25 @@ function kbOpen(id) {
   if (isPronta) {
     btn.className = 'kb-pronto-btn done';
     btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS Pronta';
+    btn.disabled = false;
+    btn.style.display = '';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.title = '';
+  } else if (os.status !== 'producao') {
+    // GO-LIVE FINAL 2026-08-12, seção 25 — OS ainda não iniciada (nem em
+    // "iniciada"/aguardando material, nem em produção de fato): nunca
+    // pode ser marcada Pronta. Botão fica oculto (não só desabilitado).
+    btn.style.display = 'none';
   } else {
+    var _pronto = kbChecklistCompleto(os);
+    btn.style.display = '';
     btn.className = 'kb-pronto-btn';
     btn.textContent = '✓ Marcar como Pronta';
+    btn.disabled = !_pronto;
+    btn.style.opacity = _pronto ? '1' : '.45';
+    btn.style.cursor = _pronto ? 'pointer' : 'not-allowed';
+    btn.title = _pronto ? '' : 'Marque as 5 etapas do checklist (Corte, Gravação, Montagem, Acabamento, Embalagem) antes de marcar como Pronta.';
   }
   // Entregar ao Cliente — só aparece quando a OS está Pronta; some quando já Entregue
   var entBtn = document.getElementById('kbEntregarBtn');
@@ -12289,13 +12438,16 @@ function kbOpen(id) {
       _iniciarBox.style.display = 'none';
     }
   }
-  // Receber Saldo — visível quando aguardando_saldo
+  // Receber Saldo — visível quando aguardando_saldo. GO-LIVE FINAL
+  // 2026-08-12, seção 43-48 — nunca mais um valor R$ aqui (visão Kanban
+  // é operacional, nunca financeira, nem para Master) — apenas um status
+  // sanitizado; o valor real só aparece no modal financeiro dedicado
+  // (osAbrirPagamentoSaldoModal), aberto pelo botão.
   var _saldoBox = document.getElementById('kbReceberSaldoBox');
   if (_saldoBox) {
     if (os.status === 'aguardando_saldo') {
-      var _restFmt = 'R$ '+(os.restante||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       var _svEl = document.getElementById('kbSaldoValor');
-      if (_svEl) _svEl.textContent = _restFmt;
+      if (_svEl) _svEl.textContent = 'Saldo pendente na entrada';
       _saldoBox.style.display = '';
     } else {
       _saldoBox.style.display = 'none';
@@ -12951,6 +13103,41 @@ function kbSwitchTab(tab) {
   }
 }
 
+// GO-LIVE FINAL 2026-08-12, seção 21-29 — OS criadas ANTES da regra atual
+// (checklist SEMPRE Corte/Gravação/Montagem/Acabamento/Embalagem, nunca
+// derivado da receita/composição comercial) podem ter os.checks
+// incompleto ou fora de ordem — sem normalizar, essas OS legadas nunca
+// ganham os itens que faltam e o funcionário nunca vê (nem consegue
+// marcar) etapas que realmente precisam acontecer. Mescla SEMPRE com a
+// lista canônica (OPERACOES_PADRAO), preservando o estado já marcado dos
+// itens que já existem (comparação por nome, case-insensitive) e
+// adicionando só os que faltam como pendentes — nunca duplica, nunca
+// descarta itens extras que o funcionário adicionou manualmente
+// (kbCheckAddItem). Idempotente: OS já normalizada não sofre nenhuma
+// mutação (retorna false, o chamador não precisa salvar de novo).
+function kbNormalizarChecklistLegado(os) {
+  if (!os) return false;
+  var canonico = OPERACOES_PADRAO.map(function (op) { return op.label; });
+  var checksAtuais = os.checks || [];
+  var ckAtuais = os._ck || [];
+  var jaCanonico = checksAtuais.length === canonico.length
+    && checksAtuais.every(function (label, i) { return label === canonico[i]; });
+  if (jaCanonico) return false;
+
+  var novosChecks = [], novosCk = [];
+  canonico.forEach(function (label) {
+    var idx = checksAtuais.findIndex(function (c) { return String(c).trim().toLowerCase() === label.toLowerCase(); });
+    novosChecks.push(label);
+    novosCk.push(idx >= 0 ? !!ckAtuais[idx] : false);
+  });
+  checksAtuais.forEach(function (c, idx) {
+    var ehCanonico = canonico.some(function (label) { return String(c).trim().toLowerCase() === label.toLowerCase(); });
+    if (!ehCanonico) { novosChecks.push(c); novosCk.push(!!ckAtuais[idx]); }
+  });
+  os.checks = novosChecks;
+  os._ck = novosCk;
+  return true;
+}
 // ── Checklist render + add/delete ────────────────────────────────────────────
 function kbRenderChecklist(os) {
   if (!os) return;
@@ -12982,6 +13169,21 @@ function kbEtapaAtual(os) {
   var checks = os.checks||[], ck = os._ck||[];
   for (var i=0; i<checks.length; i++) { if (!ck[i]) return checks[i]; }
   return checks.length ? 'Produção concluída' : '—';
+}
+// GO-LIVE FINAL 2026-08-12, seção 25/67 — bug real reproduzido em
+// produção (OS #8): "Marcar como Pronta" ficava disponível e clicável
+// mesmo com 0 dos 5 itens do checklist marcados, e kbMarcarPronto() força
+// completava o checklist inteiro ao clicar (os._ck = todos true) — em vez
+// de exigir que o funcionário realmente marque as 5 etapas primeiro.
+// Fonte única de verdade sobre "pode marcar Pronta" — usada tanto para
+// habilitar/ocultar o botão (kbRenderInline/render do modal) quanto para
+// bloquear kbMarcarPronto() no clique (nunca só visual — ver seção 67).
+function kbChecklistCompleto(os) {
+  if (!os) return false;
+  var checks = os.checks||[], ck = os._ck||[];
+  if (!checks.length) return false;
+  for (var i=0; i<checks.length; i++) { if (!ck[i]) return false; }
+  return true;
 }
 
 function kbCheckAddItem() {
@@ -13058,6 +13260,10 @@ function kbIniciarProd() {
   // nova baixa — apenas volta o status para "Em Produção".
   if (os.producaoStartId || os.matProd) {
     os.status = 'producao';
+    // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status operacional
+    // do orçamento vinculado com o avanço real da OS (nunca precisa de
+    // refresh manual em Orçamentos Enviados).
+    if (os.orcRef && typeof orcEnvSetStatus === 'function') orcEnvSetStatus(os.orcRef, 'em_producao');
     kbSaveKbos();
     var stag = document.getElementById('kstag-' + _kbOsId);
     if (stag) { stag.className = 'stag sp'; stag.textContent = 'Em Produção'; }
@@ -13241,13 +13447,35 @@ function kbSugerirMaterial(os, matKey) {
   var fracaoTxt = fracao === 1 ? '1 chapa' : (String(fracao).replace('.', ',') + ' chapa' + (fracao > 1 ? 's' : ''));
   return { tipo: 'chapa', fracaoChapa: fracao, texto: '💡 Sugestão: usar ' + fracaoTxt + ' (área planificada ' + areaNecessaria.toFixed(2) + ' m² de ' + areaChapa.toFixed(2) + ' m²/chapa).' };
 }
+// GO-LIVE FINAL 2026-08-12, seção 36-42 — a sugestão de retalho já era
+// calculada corretamente (encaixe geométrico largura×altura + margem de
+// segurança, melhor-fit — ver kbSugerirMaterial/kbRetalhoCabeGeometricamente,
+// rodada anterior), mas aparecia só como texto solto — o funcionário
+// precisava adivinhar que o dropdown pré-preenchido já ERA a sugestão,
+// sem nenhuma ação explícita. Gera o cartão com as 3 ações pedidas
+// (usar / escolher outro / abrir chapa nova) — o ERP sugere, o
+// funcionário decide, nunca é decidido sozinho pelo sistema.
+function kbSugestaoHtml(sug) {
+  if (!sug) return '';
+  if (sug.tipo === 'retalho') {
+    var r = sug.retalho;
+    return '<div style="font-weight:700;margin-bottom:4px">♻️ Sugestão de aproveitamento</div>'
+      + '<div style="margin-bottom:8px">Retalho recomendado: <strong>' + cfgEsc(r.codigo || '—') + '</strong> — ' + cfgEsc(r.dims || '') + ' cm</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;retalho&quot;)" style="padding:5px 10px;border-radius:6px;border:1px solid #059669;background:#059669;color:#fff;font-size:11px;font-weight:700;cursor:pointer">✅ Usar retalho ' + cfgEsc(r.codigo || '') + '</button>'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;retalho&quot;); var _s=document.getElementById(&quot;kbProdRetalhoSel&quot;); if(_s) _s.focus();" style="padding:5px 10px;border-radius:6px;border:1px solid #1EB8D8;background:transparent;color:#1EB8D8;font-size:11px;font-weight:700;cursor:pointer">🔎 Escolher outro retalho</button>'
+      + '<button type="button" onclick="kbProdSetTipo(&quot;chapa&quot;)" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:11px;font-weight:700;cursor:pointer">🆕 Abrir chapa nova</button>'
+      + '</div>';
+  }
+  return cfgEsc(sug.texto || '');
+}
 function kbProdOnMatChange() {
   var os = KB_OS[_kbOsId];
   var matKey = (document.getElementById('kbProdMatSel') || {}).value || '';
   var sugBox = document.getElementById('kbProdSugestaoBox');
   var sug = (os && matKey && !_kbProdEditMode) ? kbSugerirMaterial(os, matKey) : null;
   if (sug) {
-    if (sugBox) { sugBox.style.display = ''; sugBox.textContent = sug.texto; }
+    if (sugBox) { sugBox.style.display = ''; sugBox.innerHTML = kbSugestaoHtml(sug); }
     if (sug.tipo === 'chapa') {
       kbProdSetTipo('chapa');
       var qtyEl = document.getElementById('kbProdQty'); if (qtyEl) qtyEl.value = sug.fracaoChapa;
@@ -14011,6 +14239,12 @@ function kbMsgOsPronta(os) {
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
+  // GO-LIVE FINAL 2026-08-12, seção 25/67 — gate real (não só visual):
+  // nunca marca Pronta sem produção iniciada, e nunca força-completa o
+  // checklist ao clicar. O funcionário precisa ter marcado as 5 etapas
+  // de verdade primeiro (kbToggle) — este clique só confirma.
+  if (os.status !== 'producao') { showToast('Inicie a produção antes de marcar como Pronta.','warn'); return; }
+  if (!kbChecklistCompleto(os)) { showToast('Marque as 5 etapas do checklist antes de marcar como Pronta.','warn'); return; }
   if (os._marcandoPronto) { showToast('Ação já em andamento — aguarde.','warn'); return; }
   os._marcandoPronto = true;
   // Saldo pendente (normalmente pago na retirada) NÃO bloqueia mais "Pronta" — apenas
@@ -14075,7 +14309,13 @@ function kbMarcarPronto() {
       'Não foi possível marcar a OS #'+os.num+' como Pronta'
     ).then(function(ok){
       os._marcandoPronto = false;
-      if(ok && typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+      if(ok){
+        if(typeof secAuditLog==='function') secAuditLog('os_status','OS #'+os.num+' marcada como Pronta'+(_saldoPendente?' (saldo de '+finFmt(os.restante)+' ainda pendente)':''));
+        // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status
+        // operacional do orçamento vinculado (nunca precisa de refresh
+        // manual em Orçamentos Enviados).
+        if(os.orcRef && typeof orcEnvSetStatus==='function') orcEnvSetStatus(os.orcRef, 'pronto');
+      }
     });
   }, 150);
 }
@@ -15436,7 +15676,13 @@ function osLiberar(id) {
     _refletirNaTela,
     saldoPendente ? '⚠️ OS #'+os.num+' entregue com saldo pendente registrado (dívida mantida em aberto)' : 'OS #'+os.num+' liberada para o cliente!',
     'Não foi possível liberar a OS #'+os.num
-  ).then(function(){ os._liberando = false; });
+  ).then(function(ok){
+    os._liberando = false;
+    // GO-LIVE FINAL 2026-08-12, seção 20 — sincroniza o status
+    // operacional do orçamento vinculado (nunca precisa de refresh
+    // manual em Orçamentos Enviados).
+    if(ok && os.orcRef && typeof orcEnvSetStatus==='function') orcEnvSetStatus(os.orcRef, 'entregue');
+  });
 }
 
 // ============================================================
@@ -21440,6 +21686,10 @@ function orcResetCondicoesPagamentoCompartilhadas(){
   // padrão (3x) e o percentual de PIX é limpo (repopulado da config
   // financeira central por orcTogglePixDisc()).
   setV('orcPixDiscPct','');
+  // GO-LIVE FINAL 2026-08-12, seção 12 — novo orçamento nunca herda o
+  // rastreamento de override do PIX (window._orcPixUltimaSugestao) do
+  // orçamento anterior.
+  if (typeof window !== 'undefined') window._orcPixUltimaSugestao = null;
   var parcSel = document.getElementById('orcParcSel'); if(parcSel) parcSel.innerHTML='';
   if(typeof orcToggleParc==='function') orcToggleParc();
   if(typeof orcTogglePixDisc==='function') orcTogglePixDisc();
@@ -21469,6 +21719,10 @@ function orcResetFormularioVR(){
   // próximo: novo orçamento sempre começa com esse campo zerado.
   setV('orcEntradaValor','');
   var entRestoEl=document.getElementById('orcEntradaResto'); if(entRestoEl) entRestoEl.textContent='R$ —';
+  // GO-LIVE FINAL 2026-08-12, seção 12 — reset real também cobre data do
+  // pedido e validade (achado: ficavam herdadas do orçamento anterior).
+  setV('orcDataPedido', new Date().toISOString().slice(0,10));
+  var validadeEl=document.getElementById('orcValidadeDias'); if(validadeEl) validadeEl.value='10';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
   orcResetCondicoesPagamentoCompartilhadas();
@@ -22902,35 +23156,66 @@ function orcDistribuirParcelas(totalCents, n) {
   return parcelas;
 }
 
-// SPRINT PRÉ-GO-LIVE, Bloco E — motor central ÚNICO da nova regra
-// comercial definitiva de Cartão/PIX: o preço em até 3x no cartão é
-// SEMPRE "sem juros" (o cliente nunca vê a taxa de processamento do
-// cartão embutida nas parcelas — ela é um custo interno, absorvido na
-// margem, nunca uma linha visível) e o PIX está SEMPRE disponível como
-// alternativa (nunca mais atrás de um toggle Sim/Não). Substitui, para
-// consumidores da NOVA regra, a antiga leitura solta de
-// orcPixDiscToggle/orcParcToggle — todo consumidor (resumo do wizard,
-// Confirmação de Pagamento, PDF, WhatsApp) deve usar esta função, nunca
-// reimplementar a conta.
+// GO-LIVE FINAL 2026-08-12, seções 4-8 — motor central ÚNICO reescrito
+// para a regra comercial definitiva: "sem juros" significa SEM JUROS
+// VISÍVEIS para o cliente — nunca significou a VR absorvendo
+// silenciosamente a taxa da maquininha (o Bloco E anterior fazia
+// cartao[n].totalCents = baseCents SEMPRE, ignorando a taxa cadastrada;
+// bug real: preço no cartão saía igual ao PIX, e o desconto PIX virava
+// um número arbitrário digitado, sem relação com a taxa real).
+//
+// Regra canônica de embutimento: cartao(n) = base / (1 - taxa(n)/100) —
+// assim, depois de a operadora descontar a taxa, a VR recebe exatamente
+// `base` líquido; o cliente só vê "3x sem juros de R$X", nunca uma linha
+// de taxa separada.
+//
+// PIX — cálculo inverso (seção 5): o percentual sugerido é exatamente a
+// taxa embutida no cartão da quantidade de parcelas ATUALMENTE
+// selecionada (cfgFinanceiro.nParcAtual) — matematicamente,
+// cartao(n) * (1 - taxa(n)/100) = base sempre, então o valor PIX
+// sugerido volta exatamente à base, em centavos, por CONSTRUÇÃO (nunca
+// por coincidência de arredondamento: usamos baseCents diretamente, não
+// uma segunda conta que poderia divergir por 1 centavo — ver seção 8,
+// "testar centavos ímpares"). Override manual (cfgFinanceiro.pix
+// diferente da sugestão) aplica o percentual efetivo sobre o preço do
+// cartão da mesma quantidade de parcelas — o vendedor pode negociar mais
+// ou menos desconto, mas a base do cálculo nunca muda.
 //
 // Retorna: { baseCents, cartao: {1,2,3: {parcelas:[cents...], valorParcela,
-// totalCents}}, pix: {percentual, totalCents} }.
+// totalCents, taxaPct}}, pix: {percentual, percentualSugerido, totalCents} }.
 function orcMotorComercial(baseReais, cfgFinanceiro) {
   var baseCents = Math.round((baseReais || 0) * 100);
   cfgFinanceiro = cfgFinanceiro || {};
+  var tabela = cfgFinanceiro.tabelaParcelamento
+    || (typeof cfgLoad === 'function' ? (cfgLoad().parcelamento || (typeof CFG_DEFAULT !== 'undefined' ? CFG_DEFAULT.parcelamento : [])) : [])
+    || [];
+  function _taxaDe(n) {
+    var found = tabela.find(function (r) { return r.parcelas === n; });
+    return found ? (found.taxa || 0) : 0;
+  }
   var cartao = {};
   [1, 2, 3].forEach(function (n) {
-    var parcelas = orcDistribuirParcelas(baseCents, n);
+    var taxaPct = _taxaDe(n);
+    var cartaoTotalCents = taxaPct > 0 ? Math.round(baseCents / (1 - taxaPct / 100)) : baseCents;
+    var parcelas = orcDistribuirParcelas(cartaoTotalCents, n);
     // valor "representativo" da parcela = o valor que se repete (a
     // maioria das parcelas, quando não dividem exato) — nunca a parcela
     // que absorveu o resto, para exibição singular tipo "3x de R$Y,YY"
     // ficar com o valor mais comum, não a exceção.
     var valorRepresentativoCents = n > 1 ? parcelas[parcelas.length - 1] : parcelas[0];
-    cartao[n] = { parcelas: parcelas, valorParcela: valorRepresentativoCents / 100, totalCents: baseCents };
+    cartao[n] = { parcelas: parcelas, valorParcela: valorRepresentativoCents / 100, totalCents: cartaoTotalCents, taxaPct: taxaPct };
   });
-  var pixPct = cfgFinanceiro.pix != null ? cfgFinanceiro.pix : 0;
-  var pixTotalCents = Math.round(baseCents * (1 - pixPct / 100));
-  return { baseCents: baseCents, cartao: cartao, pix: { percentual: pixPct, totalCents: pixTotalCents } };
+  var nParcAtual = cfgFinanceiro.nParcAtual > 0 ? cfgFinanceiro.nParcAtual : 1;
+  var pixSugeridoPct = _taxaDe(nParcAtual);
+  var pixPctEfetivo = cfgFinanceiro.pix != null ? cfgFinanceiro.pix : pixSugeridoPct;
+  var cartaoAtualCents = (cartao[nParcAtual] ? cartao[nParcAtual].totalCents : baseCents);
+  var pixTotalCents = (pixPctEfetivo === pixSugeridoPct)
+    ? baseCents
+    : Math.round(cartaoAtualCents * (1 - pixPctEfetivo / 100));
+  return {
+    baseCents: baseCents, cartao: cartao,
+    pix: { percentual: pixPctEfetivo, percentualSugerido: pixSugeridoPct, totalCents: pixTotalCents }
+  };
 }
 
 // RODADA 6, seção 2 — motor central de Cartão/PIX, em centavos: fonte
@@ -23022,10 +23307,10 @@ function orcCalcCondicoesPagamento(baseEfetiva) {
   // baseEfetiva chega aqui já com o desconto condicional (dcPct) aplicado
   // pelo chamador quando ativo — o PIX é calculado em cima dessa MESMA
   // base, uma única vez (nunca dois descontos aplicados por engano).
-  var motor = orcMotorComercial(baseEfetiva, { pix: cond.pxPct });
+  var motor = orcMotorComercial(baseEfetiva, { pix: cond.pxPct, nParcAtual: cond.nParc });
   if (cond.parcAtivo && cond.nParc > 1) {
     var cartaoSel = motor.cartao[cond.nParc] || motor.cartao[3];
-    parcela = { nParc: cond.nParc, valorParcela: cartaoSel.valorParcela, totalCents: cartaoSel.totalCents, semJuros: true };
+    parcela = { nParc: cond.nParc, valorParcela: cartaoSel.valorParcela, totalCents: cartaoSel.totalCents, semJuros: true, taxaPct: cartaoSel.taxaPct };
   }
   return { dcOn: cond.dcOn, dcPct: cond.dcPct, pxOn: cond.pxPct>0, pxPct: cond.pxPct, pixTotal: motor.pix.totalCents/100, parcela: parcela, cartao: motor.cartao };
 }
@@ -23763,28 +24048,19 @@ function orcClienteConfirmou() { if(!_orcClienteAprovado) orcToggleClienteAprov(
 // ============================================================
 // DESCONTO PIX — toggle + cálculo
 // ============================================================
-// SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE oferecido como alternativa
-// (o toggle visual Sim/Não foi removido do HTML; o checkbox
+// GO-LIVE FINAL 2026-08-12, seção 5-6 — PIX é SEMPRE oferecido como
+// alternativa (o toggle visual Sim/Não foi removido do HTML; o checkbox
 // orcPixDiscToggle continua no DOM, sempre "checked", só para esta
-// função não precisar de um redesenho maior). Nome preservado
-// (orcTogglePixDisc) por compatibilidade — só pré-preenche o percentual
-// padrão da config financeira central na 1ª vez (nunca sobrescreve um
-// valor que o vendedor já digitou).
+// função não precisar de um redesenho maior). O percentual não é mais
+// pré-preenchido de um valor fixo de config — é a SUGESTÃO calculada
+// (= taxa real do cartão da quantidade de parcelas selecionada, ver
+// orcPixSincronizarSugestao), sempre recalculada ao trocar de parcelas,
+// nunca sobrescrevendo silenciosamente um valor que o vendedor já digitou.
 function orcTogglePixDisc() {
   var cb    = document.getElementById('orcPixDiscToggle');
   var fields= document.getElementById('orcPixDiscFields');
   var on = cb ? cb.checked : true;
   if(fields) fields.style.display = 'block';
-  // Parte 4.3 (2026-08-07) — pré-preenche com o percentual padrão da
-  // configuração central (Config > Financeiro > PIX), em vez de sempre
-  // começar vazio; o operador continua podendo ajustar por negociação.
-  if(on){
-    var pctEl=document.getElementById('orcPixDiscPct');
-    if(pctEl && !pctEl.value){
-      var _fin=(cfgLoad().financeiro)||CFG_DEFAULT.financeiro;
-      if(_fin.pix>0) pctEl.value=_fin.pix;
-    }
-  }
   if(on) { orcCalcPixDisc(); } else { orcRefreshFinalPrice(); }
 }
 // SPRINT PRÉ-GO-LIVE, Bloco E — o preview do PIX (economia/valor com
@@ -23797,6 +24073,53 @@ function orcCalcPixDisc() {
 document.addEventListener('input',function(e){
   if(e.target && e.target.id==='orcPixDiscPct') orcCalcPixDisc();
 });
+
+// GO-LIVE FINAL 2026-08-12, seção 5-6 — cálculo inverso do desconto PIX:
+// a sugestão é sempre a taxa real do cartão da quantidade de parcelas
+// ATUALMENTE selecionada (pixSugeridoPct = taxa(nParc)), o que garante
+// que o valor PIX sugerido volte exatamente ao valor-base (ver
+// orcMotorComercial). window._orcPixUltimaSugestao guarda a última
+// sugestão que ESTE código escreveu no campo — se o valor atual do campo
+// bate com ela, o vendedor não mexeu, então é seguro atualizar
+// automaticamente ao trocar de parcelas; se o vendedor digitou outra
+// coisa (override manual), o valor NUNCA é sobrescrito em silêncio — só
+// mostramos a nova sugestão com um atalho para aplicá-la.
+// _orcPixEstadoGlobal() — mesmo padrão defensivo usado para não quebrar
+// harnesses de teste em Node que extraem esta função sozinha (sem
+// stub de `window`); em produção (browser) sempre resolve pro `window`
+// real.
+function _orcPixEstadoGlobal() {
+  return (typeof window !== 'undefined') ? window : (typeof global !== 'undefined' ? global : {});
+}
+function orcPixSincronizarSugestao(nParc) {
+  var pctEl = document.getElementById('orcPixDiscPct');
+  if (!pctEl) return;
+  var g = _orcPixEstadoGlobal();
+  var dpd = cfgLoad();
+  var tabela = dpd.parcelamento || (typeof CFG_DEFAULT !== 'undefined' ? CFG_DEFAULT.parcelamento : []) || [];
+  var found = tabela.find(function (r) { return r.parcelas === nParc; });
+  var sugerido = found ? (found.taxa || 0) : 0;
+  var atual = pctEl.value === '' ? null : parseFloat(pctEl.value);
+  var overridden = atual != null && g._orcPixUltimaSugestao != null && atual !== g._orcPixUltimaSugestao;
+  var hint = document.getElementById('orcPixSugestaoHint');
+  if (!overridden) {
+    pctEl.value = sugerido > 0 ? sugerido : '';
+    g._orcPixUltimaSugestao = sugerido;
+    if (hint) hint.textContent = sugerido > 0 ? ('💡 Sugestão automática (taxa do cartão ' + nParc + 'x): ' + sugerido + '%') : '';
+  } else {
+    g._orcPixUltimaSugestao = sugerido;
+    if (hint) hint.innerHTML = sugerido > 0
+      ? ('💡 Nova sugestão: ' + sugerido + '% (taxa do cartão ' + nParc + 'x) — <button type="button" onclick="orcPixUsarSugerido()" style="border:none;background:none;color:var(--brand-mid);text-decoration:underline;cursor:pointer;font-size:10px;padding:0">usar sugerido</button>')
+      : '';
+  }
+}
+function orcPixUsarSugerido() {
+  var pctEl = document.getElementById('orcPixDiscPct');
+  if (!pctEl) return;
+  var g = _orcPixEstadoGlobal();
+  pctEl.value = (g._orcPixUltimaSugestao > 0) ? g._orcPixUltimaSugestao : '';
+  if (typeof orcRefreshFinalPrice === 'function') orcRefreshFinalPrice();
+}
 
 // ── FUNÇÃO CENTRAL DE ATUALIZAÇÃO DO VALOR FINAL ──
 // SPRINT PRÉ-GO-LIVE, Bloco E — troca o motor LEGADO (orcMotorPagamento,
@@ -23816,10 +24139,16 @@ function orcRefreshFinalPrice() {
   var orig = document.getElementById('orcRsmOriginal');
   if(!tot||!base) return;
   var cond = orcLerCondicoesPagamentoDOM();
+  var nParc = cond.nParc;
+  // GO-LIVE FINAL 2026-08-12, seção 5-6 — sincroniza a sugestão de PIX
+  // ANTES de ler cond.pxPct: se não houver override manual, o campo é
+  // auto-preenchido com a taxa do cartão da quantidade de parcelas atual
+  // (relê cond depois, para pegar o valor já sincronizado).
+  if (typeof orcPixSincronizarSugestao === 'function') orcPixSincronizarSugestao(nParc);
+  cond = orcLerCondicoesPagamentoDOM();
   var hasDescCond = cond.dcOn && cond.dcPct>0;
   var baseAposCond = hasDescCond ? base*(1-cond.dcPct/100) : base;
-  var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
-  var nParc = cond.nParc;
+  var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParc });
   var cartaoInfo = motor.cartao[nParc] || motor.cartao[3];
 
   if(hasDescCond){
@@ -24183,17 +24512,49 @@ function orcNovoOrcamentoFecharModal(){
   var el = document.getElementById('orcNovoOrcModal');
   if(el) el.remove();
 }
+// GO-LIVE FINAL 2026-08-12, seção 9-13 — bug real reproduzido em produção:
+// clicar "Continuar editando" só fechava o modal (orcNovoOrcamentoFecharModal
+// acima), deixando o operador preso na tela de escolha de fluxo (opg0) —
+// nav('orcamento') sempre chama orcEscolhaFluxo() ao entrar nesta página
+// (ver comentário em nav()), então o wizard fica escondido atrás do
+// seletor mesmo com os dados (cliente/itens/window._orcSessaoAtualId)
+// intactos no DOM. "Continuar editando" precisa genuinely reabrir o
+// editor — nunca só remover o overlay. Os dados nunca foram tocados (só a
+// VISÃO foi trocada), então basta reexibir o wizard na última etapa
+// realmente ativa (window._orcUltimoStepAtivo, ver orcStep) — preserva o
+// MESMO orçamento/rascunho, nunca cria número novo, nunca limpa dado.
+function orcNovoOrcamentoEscolherContinuar(){
+  orcNovoOrcamentoFecharModal();
+  var _opg0 = document.getElementById('opg0'); if(_opg0) _opg0.style.display='none';
+  var _vw = document.getElementById('vitreOrcWrap'); if(_vw) _vw.style.display='none';
+  var _vs = document.getElementById('vitreOrcSteps'); if(_vs) _vs.style.display='none';
+  orcStep(window._orcUltimoStepAtivo || 4);
+  if(typeof showToast==='function') showToast('Continuando o orçamento em andamento','info');
+}
 function orcNovoOrcamentoModal(){
   orcNovoOrcamentoFecharModal();
+  // GO-LIVE FINAL 2026-08-12, seção 11 — diferencia a semântica: se
+  // window._orcSessaoAtualId está setado, isto é um orçamento OFICIAL já
+  // salvo (com alterações ainda não persistidas), não um "orçamento ainda
+  // não salvo" — o texto anterior era enganoso (achado real: aparecia
+  // junto com o banner "Editando orçamento #000018").
+  var _editando = !!window._orcSessaoAtualId;
+  var _banner = document.getElementById('orcEditBanner');
+  var _num = (_banner && _banner._orcOrigNum) || null;
+  var _titulo = _editando
+    ? ('Orçamento #'+(_num||'')+' tem alterações não salvas')
+    : 'Você possui um orçamento ainda não salvo';
+  var _btnSalvar = _editando ? 'Salvar alterações e iniciar novo' : 'Salvar e iniciar novo';
+  var _btnDescartar = _editando ? 'Descartar alterações e iniciar novo' : 'Descartar e iniciar novo';
   var html = ''
     +'<div id="orcNovoOrcModal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center">'
     +'<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:360px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
-    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">Você possui um orçamento ainda não salvo</div>'
+    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">'+cfgEsc(_titulo)+'</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:14px">O que deseja fazer com os dados preenchidos na tela?</div>'
     +'<div style="display:flex;flex-direction:column;gap:8px">'
-    +'<button onclick="orcNovoOrcamentoEscolherSalvar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">Salvar e iniciar novo</button>'
-    +'<button onclick="orcNovoOrcamentoFecharModal()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Continuar editando</button>'
-    +'<button onclick="orcNovoOrcamentoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">Descartar e iniciar novo</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherSalvar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">'+cfgEsc(_btnSalvar)+'</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherContinuar()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Continuar editando</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">'+cfgEsc(_btnDescartar)+'</button>'
     +'</div></div></div>';
   document.body.insertAdjacentHTML('beforeend', html);
 }
@@ -24349,7 +24710,13 @@ async function _orcSalvarOrcamentoImpl() {
   // "desligado" para decidir isso; aplicar aqui geraria um valorFinal
   // sempre descontado, mesmo quando o cliente nem escolheu pagar via PIX).
   var baseAposCondSalvar = dcOn ? c.finalPrice*(1-dcPct/100) : (c.finalPrice||0);
-  var afterDisc = orcMotorComercial(baseAposCondSalvar, {}).baseCents/100;
+  // GO-LIVE FINAL 2026-08-12, seção 4 — valorFinal persistido é o preço
+  // no CARTÃO da quantidade de parcelas selecionada, já com a taxa da
+  // maquininha embutida (nunca mais o valor-base sem taxa) — é a MESMA
+  // regra que orcRefreshFinalPrice()/orcCalcCondicoesPagamento() usam
+  // para o que o cliente vê no resumo/PDF/WhatsApp.
+  var _motorSalvar = orcMotorComercial(baseAposCondSalvar, { nParcAtual: nParc });
+  var afterDisc = (_motorSalvar.cartao[nParc] || _motorSalvar.cartao[3]).totalCents/100;
   // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — nunca sobrescrever
   // silenciosamente o valor de um orçamento já aprovado/com CR criado.
   // Ver orcAvaliarRevisaoFinanceira(). orcExistente já foi resolvido acima.
@@ -24817,6 +25184,49 @@ function orcEnvFiltroDataLimpar() {
   orcEnviadosRender();
 }
 
+// GO-LIVE FINAL 2026-08-12, seção 17-20 — bug real reproduzido em
+// produção (#000018): a listagem/detalhe mostrava "Aguard. Pagamento"
+// mesmo com entrada já recebida e OS já gerada, porque o campo o.status
+// misturava status OPERACIONAL/COMERCIAL com status FINANCEIRO — ao
+// gerar a OS, o código fazia `o.status = restante>0 ? 'aguardando_pagamento'
+// : 'pago'`, reusando um valor que originalmente significava "cliente
+// aprovou mas ainda não pagou NADA" para representar "OS já gerada, só
+// falta o saldo (fluxo normal 50/50)". Saldo pendente NUNCA deve impedir
+// nem esconder o avanço operacional da OS.
+//
+// A partir de agora, a geração da OS sempre marca o.status='enviado_producao'
+// (nunca mais 'aguardando_pagamento'/'pago' nesse momento) — o estado
+// FINANCEIRO (entrada recebida/saldo pendente/pago integral) continua
+// disponível separadamente via o.restante (ver orcFinanceiroReal), nunca
+// mais copiado para o campo de status operacional.
+//
+// Fonte única de rótulo/cor de status — usada pela listagem, pelo
+// detalhe e por qualquer outra tela que precise exibir o status do
+// orçamento, para nunca mais existir um texto cru (enum não traduzido)
+// nem 3 cópias divergentes do mesmo mapa.
+var ORC_STATUS_LABEL = {
+  aguardando: '⏳ Aguardando Cliente',
+  aprovado: '✅ Aprovado — Aguard. Pagamento',
+  enviado_producao: '🏭 Enviado p/ Produção',
+  em_producao: '🔧 Em Produção',
+  pronto: '📦 Pronto',
+  entregue: '✅ Entregue',
+  // legado — registros antigos podem ainda ter estes valores persistidos;
+  // mantém rótulo/cor reconhecíveis em vez de cair no fallback genérico.
+  aguardando_pagamento: '🏭 Enviado p/ Produção',
+  pago: '🏭 Enviado p/ Produção',
+  recusado: '❌ Recusado',
+  expirado: '🕐 Expirado',
+};
+var ORC_STATUS_COLOR = {
+  aguardando: '#D97706', aprovado: '#F59E0B', enviado_producao: '#7C3AED',
+  em_producao: '#2563EB', pronto: '#0D9488', entregue: '#059669',
+  aguardando_pagamento: '#7C3AED', pago: '#7C3AED',
+  recusado: '#DC2626', expirado: '#9CA3AF',
+};
+function orcStatusLabel(status) { return ORC_STATUS_LABEL[status] || status; }
+function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
+
 function orcEnviadosRender() {
   var tbody = document.getElementById('orcEnvBody'); if(!tbody) return;
   orcEnvFiltroMesPopular();
@@ -24849,8 +25259,6 @@ function orcEnviadosRender() {
   }
   // aguardando_pagamento/pago são estados aditivos (setados automaticamente ao
   // gerar OS / receber saldo) — nunca substituem os 4 estados manuais originais.
-  var statusLabel = {aguardando:'⏳ Aguardando',aprovado:'✅ Aprovado',aguardando_pagamento:'💰 Aguard. Pagamento',pago:'✅ Pago',recusado:'❌ Recusado',expirado:'🕐 Expirado'};
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   tbody.innerHTML = filtered.map(function(o,idx){
     var isVR = o.marca==='vr';
     var marcaHtml = '<span style="background:'+(isVR?'#E3F7FB':'#E3F0F1')+';color:'+(isVR?'#983C8F':'#134F57')+';padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">'+(isVR?'VR Marcas':'Vitre')+'</span>';
@@ -24870,7 +25278,7 @@ function orcEnviadosRender() {
     // que devia acontecer junto. A listagem agora só REFLETE o status
     // canônico (badge somente leitura); a mudança de status acontece nas
     // ações do detalhe (orcEnvAbrir → Aprovar/Recusar/Confirmar Pgt).
-    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+(statusColor[o.status]||'#9CA3AF')+'22;color:'+(statusColor[o.status]||'#9CA3AF')+'">'+(statusLabel[o.status]||o.status)+'</span>';
+    var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+orcStatusCor(o.status)+'22;color:'+orcStatusCor(o.status)+'">'+orcStatusLabel(o.status)+'</span>';
     return '<tr>'
       +'<td><strong>#'+o.num+'</strong></td>'
       +'<td>'+o.cliente+'</td>'
@@ -25032,7 +25440,7 @@ function orcEnvAbrir(id) {
     +'<div><span style="color:var(--muted)">Condição:</span> '+finReal.condicaoLabel+'</div>'
     +'<div><span style="color:var(--muted)">Marca:</span> '+(isVR?'VR Marcas':'Vitre')+'</div>'
     +'<div><span style="color:var(--muted)">Vendedor:</span> '+(o.vendedor||'—')+'</div>'
-    +'<div><span style="color:var(--muted)">Status:</span> '+o.status+'</div>'
+    +'<div><span style="color:var(--muted)">Status:</span> <span style="color:'+orcStatusCor(o.status)+';font-weight:700">'+orcStatusLabel(o.status)+'</span></div>'
     +'</div>'
     +financeiroHtml
     +itensHtml
@@ -25275,7 +25683,12 @@ function orcEnvEditar(id) {
       if(typeof orcCalcParc==='function') orcCalcParc();
     }
     if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); // idempotente — só pré-preenche o % padrão se o campo estiver vazio
-    if(o.descPix>0){ setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
+    // GO-LIVE FINAL 2026-08-12, seção 8 — reabrir um orçamento salvo NUNCA
+    // recalcula o desconto PIX de forma diferente do que foi persistido:
+    // força o valor restaurado a ser tratado como override manual
+    // (sentinela -1 garante que orcPixSincronizarSugestao nunca o
+    // sobrescreva "por engano" mesmo se coincidir com a sugestão atual).
+    if(o.descPix>0){ if(typeof window!=='undefined') window._orcPixUltimaSugestao = -1; setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
     if(materiaisNaoEncontrados.length) showToast('Material não encontrado na config atual para: '+materiaisNaoEncontrados.join(', ')+' — reselecione manualmente.','warn');
     // Badge de edição
     var _editBanner = document.getElementById('orcEditBanner');
@@ -25288,6 +25701,7 @@ function orcEnvEditar(id) {
     }
     _editBanner.innerHTML='✏️ Editando orçamento <strong>#'+o.num+'</strong> — salvar aqui ATUALIZA este mesmo orçamento (nunca cria um novo número).';
     _editBanner._orcOrigId = o.id;
+    _editBanner._orcOrigNum = o.num;
     // Idempotência: liga esta sessão do wizard ao orçamento existente —
     // orcSalvarOrcamento() vai atualizar o mesmo registro, nunca duplicar.
     window._orcSessaoAtualId = o.id;
@@ -25352,7 +25766,6 @@ function orcEnvConfirmarPgto(id) {
   }
   var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var valorTotal = o.valorFinal||0;
-  var statusColor = {aguardando:'#D97706',aprovado:'#059669',aguardando_pagamento:'#F59E0B',pago:'#059669',recusado:'#DC2626',expirado:'#9CA3AF'};
   pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(520px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
     +'<div><div style="font-size:16px;font-weight:900">💳 Confirmar Pagamento</div>'
@@ -25642,7 +26055,11 @@ function orcEnvGerarOS(){
     // _kbMergeFinCache(), mantendo o comportamento em memória consistente
     // com o caminho transacional real logo abaixo.
     if(typeof kbSaveKbos==='function') kbSaveKbos();
-    o.status = restante>0 ? 'aguardando_pagamento' : 'pago';
+    // GO-LIVE FINAL 2026-08-12, seção 17-19 — OS gerada = status
+    // operacional "Enviado p/ Produção", SEMPRE, independente de haver
+    // saldo pendente (o restante>0 do fluxo normal 50/50 nunca deve virar
+    // "Aguardando Pagamento" outra vez — ver ORC_STATUS_LABEL).
+    o.status = 'enviado_producao';
     o.osRef=newIdLocal; orcSetEnviados(lista);
     if(valorEntrada>0){
       var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
@@ -25738,7 +26155,11 @@ function orcEnvGerarOS(){
           formaPgto:forma, pagtoTipo:tipo, valorEntrada:valorEntrada, restante:restante,
           itensValores: itens.map(function(it){ return {unit: it&&it.unit, total: it&&it.total}; })
         };
-        arrOrc[idxOrc].status = restante>0 ? 'aguardando_pagamento' : 'pago';
+        // GO-LIVE FINAL 2026-08-12, seção 17-19 — mesma correção do
+        // caminho transacional real: OS gerada = "Enviado p/ Produção",
+        // nunca "Aguardando Pagamento" (que confundia saldo pendente do
+        // fluxo normal 50/50 com "cliente ainda não pagou nada").
+        arrOrc[idxOrc].status = 'enviado_producao';
         arrOrc[idxOrc].osRef = newId;
 
         var txMutado = false;
