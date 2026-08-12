@@ -2702,15 +2702,16 @@ function _authFirebaseError(code){
             <button class="kb-os-tab" id="kbTabBtnObs" onclick="kbSwitchTab('obs')">📝 Observações</button>
           </div>
           <!-- Tab: Produção -->
+          <!-- GO-LIVE FINAL 2026-08-12, seção 21-29 — bug real reproduzido em
+               produção (OS #8): a ordem real dos blocos tinha o Checklist de
+               Produção como o PRIMEIRO item da aba, antes de qualquer sugestão
+               de prazo, material ou do próprio botão "Iniciar Produção" —
+               o funcionário via o checklist antes de existir qualquer produção
+               iniciada. Reordenado para a sequência operacional real: Prazo →
+               Material → Iniciar Produção → Checklist → Arquivos da Produção
+               → ações finais (Receber Saldo/Avisar Cliente). Nenhum bloco foi
+               alterado por dentro, só a ORDEM — mesmos ids, mesmos handlers. -->
           <div id="kbTabProd">
-          <div>
-            <div class="section-lbl">Checklist de Produção</div>
-            <div class="kb-checklist" id="kbChecklist"></div>
-            <div class="kb-check-add">
-              <input type="text" id="kbCheckNewInput" placeholder="Novo item no checklist..." onkeydown="if(event.key==='Enter')kbCheckAddItem()">
-              <button onclick="kbCheckAddItem()">➕ Adicionar</button>
-            </div>
-          </div>
           <!-- Sugestão de Prazo Inteligente -->
           <div id="kbPrazoSugBox" style="margin-bottom:12px;display:none"></div>
           <!-- Tempo de Produção + Prazo -->
@@ -2727,6 +2728,29 @@ function _authFirebaseError(code){
                   onblur="kbSalvarPrazo()">
                 <div id="kbPrazoCd" style="display:none;margin-top:5px;font-size:11px;padding:5px 8px;background:var(--bg2);border-radius:6px;text-align:center"></div>
               </div>
+            </div>
+          </div>
+          <!-- Exibição do material selecionado para produção -->
+          <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">📦 Material em Produção</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div id="kbMatProdLabel" style="font-size:13px;font-weight:700;color:#78350F">—</div>
+              <button onclick="kbEditarMatProd()" style="padding:5px 10px;background:transparent;border:1.5px solid #D97706;color:#D97706;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar</button>
+            </div>
+            <div id="kbMatProdQtyLabel" style="font-size:11px;color:#92400E;margin-top:3px"></div>
+          </div>
+          <!-- Botão Iniciar Produção (visível quando status=iniciada) -->
+          <div id="kbIniciarProdBox" style="display:none;margin-bottom:10px">
+            <button onclick="kbIniciarProd()" style="width:100%;padding:11px;background:linear-gradient(90deg,#D97706,#B45309);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
+              🔧 Iniciar Produção
+            </button>
+          </div>
+          <div>
+            <div class="section-lbl">Checklist de Produção</div>
+            <div class="kb-checklist" id="kbChecklist"></div>
+            <div class="kb-check-add">
+              <input type="text" id="kbCheckNewInput" placeholder="Novo item no checklist..." onkeydown="if(event.key==='Enter')kbCheckAddItem()">
+              <button onclick="kbCheckAddItem()">➕ Adicionar</button>
             </div>
           </div>
           <!-- GO-LIVE 2026-08-11, P0 seção 17 — renomeada de "Planificação"
@@ -2766,12 +2790,6 @@ function _authFirebaseError(code){
             </div>
             <div style="font-size:10px;color:var(--muted);margin-top:3px">Google Drive, Dropbox, WeTransfer, OneDrive...</div>
           </div>
-          <!-- Botão Iniciar Produção (visível quando status=iniciada) -->
-          <div id="kbIniciarProdBox" style="display:none;margin-bottom:10px">
-            <button onclick="kbIniciarProd()" style="width:100%;padding:11px;background:linear-gradient(90deg,#D97706,#B45309);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px">
-              🔧 Iniciar Produção
-            </button>
-          </div>
           <!-- Receber Saldo — visível quando status=aguardando_saldo.
           GO-LIVE FINAL 2026-08-12, seção 43-48 — bug real reproduzido em
           produção (OS #8): esta caixa mostrava "Restante: R$X" (valor
@@ -2789,15 +2807,6 @@ function _authFirebaseError(code){
             <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Pagamento</div>
             <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px" id="kbSaldoValor">Saldo pendente na entrada</div>
             <button id="kbReceberSaldoBtn" onclick="if(typeof osAbrirPagamentoSaldoModal==='function') osAbrirPagamentoSaldoModal(_kbOsId);" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Registrar Pagamento</button>
-          </div>
-          <!-- Exibição do material selecionado para produção -->
-          <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
-            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">📦 Material em Produção</div>
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-              <div id="kbMatProdLabel" style="font-size:13px;font-weight:700;color:#78350F">—</div>
-              <button onclick="kbEditarMatProd()" style="padding:5px 10px;background:transparent;border:1.5px solid #D97706;color:#D97706;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar</button>
-            </div>
-            <div id="kbMatProdQtyLabel" style="font-size:11px;color:#92400E;margin-top:3px"></div>
           </div>
           <!-- Bloco Avisar Cliente — só visível para Master quando OS está pronta -->
           <div id="kbAvisarClienteBox" style="display:none;margin-top:10px;background:#F0FDF4;border:2px solid #86EFAC;border-radius:10px;padding:14px">
