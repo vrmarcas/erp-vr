@@ -26049,6 +26049,15 @@ function orcEnvEditar(id) {
     setV('orcClientTel',  o.tel);
     setV('orcClientEmail',o.email);
     setV('orcClientVendedor', o.vendedor);
+    // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: orcEnvEditar()
+    // nunca restaurava prazoDias/prazoDiasMax do orçamento salvo, deixando
+    // os campos vazios; orcPreencherPrazoAuto() (chamado ao entrar na
+    // Etapa 4) só preenche campo VAZIO com a estimativa da receita —
+    // sobrescrevia silenciosamente um prazo customizado (ex.: "5 a 6 dias
+    // úteis") pela sugestão automática (ex.: "2 dias") a cada reabertura,
+    // e o autosave do WhatsApp/PDF persistia esse valor errado de volta.
+    setV('orcPrazoDias', o.prazoDias);
+    setV('orcPrazoDiasMax', o.prazoDiasMax);
     // Marca
     if(o.marca==='vr') { if(document.body.classList.contains('vitre')) orcToggleMarca(); }
     else               { if(!document.body.classList.contains('vitre')) orcToggleMarca(); }
