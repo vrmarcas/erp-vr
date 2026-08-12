@@ -23768,11 +23768,22 @@ async function orcEnviarOrcamentoWA() {
   var dcOnWA = _condDomWA.dcOn, dcPctWA = _condDomWA.dcPct;
   var baseEfetivaWA = dcOnWA ? (c.finalPrice||0)*(1-dcPctWA/100) : (c.finalPrice||0);
   var fmtBRLWA = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var totalExibido = baseEfetivaWA>0 ? fmtBRLWA(baseEfetivaWA) : (c.finalPrice?fmtBRLWA(c.finalPrice):'—');
-  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento/PIX calculados sobre o "Total" já exibido acima
+  var _condWA2 = orcCalcCondicoesPagamento(baseEfetivaWA); // parcelamento/PIX calculados sobre a base efetiva
+  // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: baseEfetivaWA (=
+  // window._orcCalc.finalPrice) é o preço SEM a taxa de parcelamento —
+  // matematicamente idêntico ao preço PIX (orcMotorComercial deriva o PIX
+  // sugerido revertendo essa mesma taxa) — nunca o preço no cartão. Usar
+  // baseEfetivaWA direto como "VALOR TOTAL" mostrava ao cliente o valor já
+  // com desconto PIX aplicado sem ele ter escolhido PIX, mais barato que o
+  // valorFinal realmente salvo por orcSalvarOrcamento (que soma a taxa via
+  // este mesmo orcMotorComercial). "VALOR TOTAL" precisa ser o preço no
+  // CARTÃO — a taxa embutida vem de _condWA2 (mesmo motor usado por
+  // orcSalvarOrcamento e pelo resumo em tela), nunca recalculada aqui.
+  var totalCartaoWA = ((_condWA2.parcela ? _condWA2.parcela.totalCents : (_condWA2.cartao && _condWA2.cartao[1] ? _condWA2.cartao[1].totalCents : null)) || Math.round(baseEfetivaWA*100)) / 100;
+  var totalExibido = totalCartaoWA>0 ? fmtBRLWA(totalCartaoWA) : (c.finalPrice?fmtBRLWA(c.finalPrice):'—');
 
   // Itens numerados — mesma fonte usada pelo PDF (orcColetarItensDistribuidos).
-  var itensLista = orcColetarItensDistribuidos(baseEfetivaWA>0 ? baseEfetivaWA : (c.finalPrice||0));
+  var itensLista = orcColetarItensDistribuidos(totalCartaoWA>0 ? totalCartaoWA : (c.finalPrice||0));
   var itensStr = itensLista.map(function(item, i){
     var n = String(i+1).padStart(2,'0');
     return n+'. '+item.desc+'\nQuantidade: '+item.qty+'\nValor unitário: '+fmtBRLWA(item.unit)+'\nSubtotal: '+fmtBRLWA(item.total);
@@ -24165,21 +24176,29 @@ async function orcImprimirOrcamentoPDF() {
   // é uma alternativa sempre exibida à parte (ver condPagamentoHtml
   // abaixo), calculada sobre esta MESMA base, nunca duas vezes.
   var baseEfetiva = c2.finalPrice ? c2.finalPrice*(1-condPct/100) : 0;
+  // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — mesmo achado do WhatsApp
+  // (orcEnviarOrcamentoWA): baseEfetiva é o preço SEM taxa de parcelamento
+  // (= preço PIX), nunca o preço no cartão. "Total Geral" do PDF precisa
+  // ser o preço no cartão — a taxa embutida vem de _condPDF (mesmo motor
+  // orcMotorComercial usado por orcSalvarOrcamento), calculado aqui antes
+  // de distribuir os itens/montar o total, nunca depois.
+  var _condPDF = orcCalcCondicoesPagamento(baseEfetiva>0 ? baseEfetiva : (c2.finalPrice||0));
+  var totalCartaoPDF = ((_condPDF.parcela ? _condPDF.parcela.totalCents : (_condPDF.cartao && _condPDF.cartao[1] ? _condPDF.cartao[1].totalCents : null)) || Math.round((baseEfetiva||c2.finalPrice||0)*100)) / 100;
 
   // Itens já redistribuídos — mesma fonte usada pelo WhatsApp
   // (orcColetarItensDistribuidos), PDF e WhatsApp nunca mais divergem aqui.
-  var _totalParaDistribuir = baseEfetiva || c2.finalPrice || 0;
+  var _totalParaDistribuir = totalCartaoPDF || c2.finalPrice || 0;
   var fmtBRL = function(v){ return 'R$'+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var itensRows = '';
-  orcColetarItensDistribuidos(baseEfetiva).forEach(function(item){
+  orcColetarItensDistribuidos(totalCartaoPDF).forEach(function(item){
     itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+item.desc+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(item.unit)+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+item.qty+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(item.total)+'</td>'
       +'</tr>';
   });
-  var totalFmt = baseEfetiva>0
-    ? 'R$ '+baseEfetiva.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
+  var totalFmt = totalCartaoPDF>0
+    ? 'R$ '+totalCartaoPDF.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (c2.finalPrice ? 'R$ '+c2.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
 
   // SPRINT PRÉ-GO-LIVE, Bloco I — Condições de pagamento (parcelamento no
@@ -24188,7 +24207,8 @@ async function orcImprimirOrcamentoPDF() {
   // até 3x é SEMPRE sem juros e o PIX é SEMPRE mostrado como alternativa
   // (nunca mais atrás de um toggle) — nunca mais o texto "(parcelas com
   // acréscimo)" nem qualquer menção a taxa/juros/acréscimo pro cliente.
-  var _condPDF = orcCalcCondicoesPagamento(baseEfetiva>0 ? baseEfetiva : (c2.finalPrice||0));
+  // _condPDF já foi calculado acima (Gate 4) — reaproveitado aqui, nunca
+  // recalculado, para nunca divergir do total já exibido.
   var condPagamentoHtml = '';
   if((_condPDF.parcela && _condPDF.parcela.nParc>1) || _condPDF.pxPct>0){
     var _linhas = '';

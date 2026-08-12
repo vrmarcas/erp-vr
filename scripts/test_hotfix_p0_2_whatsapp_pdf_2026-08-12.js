@@ -39,10 +39,20 @@ ok('1b. orcColetarItensDistribuidos() não usa mais ".options[matEl.selectedInde
 // ── 2. PDF e WhatsApp usam a MESMA fonte (orcColetarItensDistribuidos) e o MESMO finalPrice (Cartão) ──
 var pdfSrc = extractFn('orcImprimirOrcamentoPDF');
 var waSrc  = extractFn('orcEnviarOrcamentoWA');
-ok('2a. PDF chama orcColetarItensDistribuidos(baseEfetiva) — mesma fonte do WhatsApp', /orcColetarItensDistribuidos\(baseEfetiva\)/.test(pdfSrc));
-ok('2b. WhatsApp chama orcColetarItensDistribuidos(baseEfetivaWA) — mesma função, nunca um cálculo próprio divergente', /orcColetarItensDistribuidos\(baseEfetivaWA/.test(waSrc));
-ok('2c. baseEfetiva do PDF parte de c2.finalPrice (preço Cartão/comercial) — nunca de um valor PIX', /var baseEfetiva\s*=\s*c2\.finalPrice/.test(pdfSrc));
-ok('2d. baseEfetivaWA do WhatsApp parte de c\\.finalPrice (mesmo campo, mesma fonte) — nunca de um valor PIX', /baseEfetivaWA\s*=\s*dcOnWA\s*\?\s*\(c\.finalPrice/.test(waSrc));
+// HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: baseEfetiva/baseEfetivaWA
+// (window._orcCalc.finalPrice) é o preço SEM a taxa de parcelamento, que
+// matematicamente é o preço PIX, nunca o preço no cartão (orcMotorComercial
+// deriva o PIX sugerido revertendo essa mesma taxa). Passar baseEfetiva/
+// baseEfetivaWA direto para orcColetarItensDistribuidos() reproduzia
+// exatamente esse bug (item/total mostrado ao cliente = preço PIX, sem ele
+// ter escolhido PIX). PDF e WhatsApp agora distribuem sobre totalCartaoPDF/
+// totalCartaoWA — o mesmo baseEfetiva(WA) passado por orcCalcCondicoesPagamento
+// (→ orcMotorComercial), que soma de volta a taxa de parcelamento — nunca a
+// base crua. Ver 5c/5d abaixo para a prova numérica (R$42,60, não R$40,41).
+ok('2a. PDF chama orcColetarItensDistribuidos(totalCartaoPDF) — total já com taxa de cartão, nunca a base PIX', /orcColetarItensDistribuidos\(totalCartaoPDF\)/.test(pdfSrc));
+ok('2b. WhatsApp chama orcColetarItensDistribuidos(totalCartaoWA) — mesma regra, nunca um cálculo próprio divergente', /orcColetarItensDistribuidos\(totalCartaoWA/.test(waSrc));
+ok('2c. totalCartaoPDF do PDF vem de _condPDF (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoPDF\s*=\s*\(\(_condPDF\.parcela/.test(pdfSrc));
+ok('2d. totalCartaoWA do WhatsApp vem de _condWA2 (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoWA\s*=\s*\(\(_condWA2\.parcela/.test(waSrc));
 ok('2e. PIX no WhatsApp é sempre uma linha SEPARADA ("Desconto PIX"), nunca substitui o "VALOR TOTAL"', /\*Desconto PIX:\*/.test(waSrc) && /VALOR TOTAL:\s*'\s*\+\s*totalExibido/.test(waSrc));
 
 // ── 3. window._orcCalc.finalPrice (usado por ambos) é sempre o preço Cartão — nunca recebe valor PIX em nenhuma atribuição do arquivo ──

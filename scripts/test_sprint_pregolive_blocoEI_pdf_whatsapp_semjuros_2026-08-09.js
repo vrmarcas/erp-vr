@@ -295,8 +295,14 @@ console.log('='.repeat(72) + '\n');
       /\*Desconto PIX:\* 4% de desconto/.test(textParam));
     assertTrue('22. linha de parcelamento (3x) diz "sem juros", nunca "com acréscimo"',
       /\*Parcelamento:\* em até 3x de R\$ [\d.,]+ sem juros/.test(textParam));
-    assertTrue('23. VALOR TOTAL é o preço no cartão (R$ 1.000,00) — não o valor já reduzido pelo PIX (R$960,00)',
-      textParam.indexOf('*VALOR TOTAL: R$ 1.000,00*') >= 0);
+    // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: R$1.000,00 é a
+    // base SEM a taxa de parcelamento (o "preço PIX" matemático), nunca o
+    // preço no cartão — a fixture usa taxa 3,99% para 3x (ver
+    // CFG_DEFAULT.parcelamento acima e os testes 11/12, que já provam
+    // 100000/(1-0,0399)=104156 centavos). O preço no cartão correto é
+    // R$1.041,56 (base + taxa embutida), não R$1.000,00 nem R$960,00 (PIX).
+    assertTrue('23. VALOR TOTAL é o preço no cartão com a taxa de 3x embutida (R$ 1.041,56) — não a base sem taxa (R$1.000,00) nem o valor já reduzido pelo PIX (R$960,00)',
+      textParam.indexOf('*VALOR TOTAL: R$ 1.041,56*') >= 0);
 
     // Cenário 1x — a linha de "Parcelamento" não deve aparecer (1x é só o
     // Total, não uma oferta de parcelamento à parte), mas o PIX continua sempre.
