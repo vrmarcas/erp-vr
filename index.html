@@ -11104,7 +11104,14 @@ function orcGerarReciboEntrada(orcIdParam) {
   var vend    = orc.vendedor||'—';
   var fmtBR   = function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2}); };
   var pct     = total>0 ? Math.round(entrada/total*100) : 0;
-  var numRec  = 'REC-'+Date.now().toString().slice(-6);
+  // GO-LIVE FINAL 2026-08-12, seção 14-16 — número do recibo era gerado a
+  // partir de Date.now(), então reimprimir o MESMO recibo (mesmo
+  // orçamento/mesma entrada, nenhum dado novo) mostrava um "Nº" diferente
+  // a cada impressão — confuso para um documento financeiro (parece um
+  // recibo novo, mesmo sem nenhuma nova transação/gravação). Corrigido
+  // para derivar do número oficial do orçamento (já estável e único),
+  // com a OS como fallback — a mesma entrada sempre imprime o mesmo Nº.
+  var numRec  = 'REC-'+String(orc.num || os.num || orc.id || 'SN').replace(/[^0-9A-Za-z]/g,'');
   var itensStr = (os.itens||orc.itens||[]).map(function(it){ return (it.qty||1)+'x '+(it.prod||'Produto'); }).join(', ')||'Serviço conforme orçamento';
   var _brandBaseRec = location.origin + '/assets/brand/';
   var logoSrcRec = isVt ? (_brandBaseRec+'vitre-logo.png') : (_brandBaseRec+'vr-marcas-logo.png');
