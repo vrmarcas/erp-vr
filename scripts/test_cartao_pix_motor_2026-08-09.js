@@ -263,15 +263,20 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     /orcPgtoValorDisplay[^\n]*=\s*'R\$ '\s*\+\s*orcFmt/.test(srcRecv), false);
 }
 
-// ── 6. orcPagtoTipoSel() — execução real, achado do smoke de produção
+// ── 6. orcPgtoTipoSelWizard() — execução real, achado do smoke de produção
 // (2026-08-09): metade=(valorTotal/2) em ponto flutuante direto, com
 // `.toFixed(2)` (campo real gravado no CR/OS) e `.toLocaleString(...)`
 // (texto ao lado) arredondando o MESMO número de forma diferente no
 // caso-limite ",xx5" — campo mostrava R$385,82, texto mostrava R$385,83,
-// para o mesmo orçamento de R$771,65.
+// para o mesmo orçamento de R$771,65. HOTFIX OPERACIONAL 2026-08-12,
+// P0.3/P0.4 — o modal secundário foi removido; o mesmo painel Tipo de
+// Pagamento agora vive na própria Etapa 4 (orcPgtoTipoSelWizard/
+// orcPgtoRecalcularSaldoWizard), consumindo window._orcPgtoValorEfetivo
+// (fonte única já usada por "Valor a Receber"), nunca mais um valor
+// buscado à parte no orçamento salvo.
 {
-  var FN6 = ['orcPagtoTipoSel', 'orcValorEfetivoPorForma'];
-  var src6 = FN6.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN6.join(',') + '};';
+  var FN6 = ['orcPgtoTipoSelWizard', 'orcPgtoRecalcularSaldoWizard'];
+  var src6 = 'var _pgtoTipoAtualWizard;\n\n' + FN6.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN6.join(',') + '};';
   var modPath6 = path.join(__dirname, '_cartao_pix_5050_extracted.tmp.js');
   fs.writeFileSync(modPath6, src6);
   delete require.cache[require.resolve(modPath6)];
@@ -282,23 +287,23 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     getElementById: function (id) { return _elements6[id]; },
     querySelectorAll: function () { return { forEach: function () {} }; }
   };
-  global._orcPagtoId = 'orc1';
-  global.orcGetEnviados = function () { return [{ id: 'orc1', valorFinal: 771.65 }]; };
+  global.window = { _orcPgtoValorEfetivo: 771.65 };
 
   _elements6 = {
-    pgtoEntradaBox: makeEl6({}),
-    pgtoEntradaVal: makeEl6({}),
-    pgtoEntradaPct: makeEl6({})
+    pgtoEntradaBoxWizard: makeEl6({}),
+    pgtoEntradaValWizard: makeEl6({}),
+    pgtoEntradaPctWizard: makeEl6({}),
+    pgtoSaldoResultanteWizard: makeEl6({})
   };
   var btn6 = { style: {}, dataset: { tipo: '50-50' } };
 
   var mod6 = require(modPath6);
-  mod6.orcPagtoTipoSel(btn6);
+  mod6.orcPgtoTipoSelWizard(btn6);
 
   test('15. achado real (smoke de produção): campo de entrada 50/50 (valor de fato gravado no CR/OS) mostra R$385,83, NUNCA R$385,82 (ponto flutuante direto de 771.65/2)',
-    _elements6.pgtoEntradaVal.value, '385.83');
-  test('16. o texto de apoio ao lado nunca diverge do campo — ambos vêm do mesmo cálculo em centavos',
-    _elements6.pgtoEntradaPct.textContent, '= 50% do total — corresponde a R$ 385,83');
+    _elements6.pgtoEntradaValWizard.value, '385.83');
+  test('16. o saldo resultante nunca diverge do campo de entrada — ambos vêm do mesmo cálculo em centavos',
+    _elements6.pgtoSaldoResultanteWizard.textContent, 'R$ 385,82');
 }
 
 console.log('\n' + '='.repeat(70));

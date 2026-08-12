@@ -63,11 +63,14 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco B — reset de estado ao iniciar n
     orcParcSel: makeEl({ value: '6', innerHTML: '<option value="6">6x — herdado do orçamento anterior</option>' })
   };
   global.document = { getElementById: function (id) { return _els[id]; } };
-  global._pgtoTipoAtual = '50-50';
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — _pgtoTipoAtual (modal
+  // removido) foi substituído por _pgtoTipoAtualWizard (painel inline da
+  // Etapa 4); o reset volta ao padrão operacional "50-50", não a null.
+  global._pgtoTipoAtualWizard = 'parcial';
   // orcToggleDescCond/orcToggleParc/orcTogglePixDisc intencionalmente
   // ausentes — o teste foca no que o próprio reset faz diretamente
-  // (valores limpos, _pgtoTipoAtual=null), não na cascata de refresh
-  // visual (já coberta por outros testes desta suíte).
+  // (valores limpos, _pgtoTipoAtualWizard='50-50'), não na cascata de
+  // refresh visual (já coberta por outros testes desta suíte).
 
   var mod = require(modPath);
   mod.orcResetCondicoesPagamentoCompartilhadas();
@@ -79,8 +82,8 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco B — reset de estado ao iniciar n
     _els.orcParcSel.innerHTML, '');
   test('4. achado real: percentual do desconto PIX (orcPixDiscPct) é limpo — não herda o % configurado no orçamento anterior',
     _els.orcPixDiscPct.value, '');
-  test('5. achado real: _pgtoTipoAtual (tipo de pagamento do modal de confirmação) volta a null',
-    global._pgtoTipoAtual, null);
+  test('5. HOTFIX P0.3/P0.4: _pgtoTipoAtualWizard (tipo de pagamento da Etapa 4) volta ao padrão "50-50" — não herda "parcial" do orçamento anterior',
+    global._pgtoTipoAtualWizard, '50-50');
 }
 
 // ── 2. Regressão estrutural: os dois pontos de entrada de "novo orçamento" chamam o reset compartilhado ──

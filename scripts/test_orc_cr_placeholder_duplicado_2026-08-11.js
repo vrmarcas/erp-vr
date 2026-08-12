@@ -10,9 +10,11 @@
  * Pendente=R$1.148,05 — exatamente o dobro/inflado pelo placeholder nunca
  * removido quando a entrada/saldo definitivos foram criados.
  *
- * Corrigido em orcEnvGerarOS (nos dois caminhos — transação real e
- * fallback local): ao criar a entrada/saldo definitivos, remove o
- * placeholder (identificado por o.crId) do mesmo array de FIN_CR.
+ * Corrigido originalmente em orcEnvGerarOS; HOTFIX OPERACIONAL 2026-08-12,
+ * P0.3/P0.4 moveu essa correção de lugar (o placeholder some quando o
+ * PAGAMENTO é confirmado — orcRegistrarSituacaoFinanceira, dentro de
+ * aplicarCRTx — nunca mais quando a OS é gerada; orcEnvGerarOS agora só
+ * LINKA os CRs já corretos à OS, nunca cria/corrige nenhum).
  *
  * Uso: node scripts/test_orc_cr_placeholder_duplicado_2026-08-11.js
  */
@@ -42,15 +44,15 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvSetStatus', 'orcEnvGerarOS', 'orcValorEfetivoPorForma'];
+var FN_NAMES = ['orcEnvSetStatus', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
 var src = [
   "var _ORC_ENVIADOS_DATA = [];",
   "function _isTestRecord(o){ return !!(o && (o.isTest === true || o.environment === 'test')); }",
   "function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return !_isTestRecord(o); }); }",
   "function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; return Promise.resolve({ok:true}); }",
   "var KB_OS = {}; var _OS_COUNTER = 0; var FIN_CR = []; var FIN_TX = [];",
-  "var _pgtoTipoAtual = null; var _orcPagtoId = null;",
-  "var domStore = {}; function document_getElementById(id){ if(!domStore[id]) domStore[id] = { value:'', style:{} }; return domStore[id]; }",
+  "var window = { _orcSessaoAtualId: null };",
+  "var domStore = {}; function document_getElementById(id){ if(!domStore[id]) domStore[id] = { value:'', style:{}, disabled:false }; return domStore[id]; }",
   "var document = { getElementById: document_getElementById };",
   "var _toasts = []; function showToast(msg,tipo){ _toasts.push({msg:msg,tipo:tipo}); }",
   "function orcEnviadosRender(){} function nav(){} function kbRender(){}",
@@ -63,11 +65,21 @@ var src = [
     '  addOrc: function (orc) { _ORC_ENVIADOS_DATA.push(orc); },',
     '  getCR: function () { return FIN_CR; },',
     '  getOrc: function (id) { return _ORC_ENVIADOS_DATA.find(function (o) { return o.id === id; }); },',
-    '  setPgtoCtx: function (id, tipo, forma, entradaVal) {',
-    '    _orcPagtoId = id; _pgtoTipoAtual = tipo;',
-    '    document_getElementById("pgtoForma").value = forma;',
-    '    document_getElementById("pgtoEntradaVal").value = String(entradaVal);',
+    // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — reproduz o que
+    // orcConfirmarPagamentoWizard() calcula e envia a
+    // orcRegistrarSituacaoFinanceira() (base já validada pelos testes
+    // dedicados de orcPgtoTipoSelWizard); em seguida marca qual orçamento
+    // está "aberto no wizard" (window._orcSessaoAtualId), exatamente como
+    // orcEnvEditar()/orcSalvarOrcamento() fazem em produção.
+    '  confirmarPagamento: function (id, tipo, forma, entradaVal) {',
+    '    var o = _ORC_ENVIADOS_DATA.find(function (x) { return x.id === id; });',
+    '    var valorTotal = o.valorFinal;',
+    '    var valorEntrada = tipo === "integral" ? valorTotal : (entradaVal !== undefined ? entradaVal : 0);',
+    '    var restante = Math.round((valorTotal - valorEntrada) * 100) / 100;',
+    '    window._orcSessaoAtualId = id;',
+    '    return orcRegistrarSituacaoFinanceira(id, { tipo: tipo, forma: forma, valorEfetivo: valorTotal, valorEntrada: valorEntrada, restante: restante, obs: "", nf: false });',
     '  },',
+    '  setSessao: function (id) { window._orcSessaoAtualId = id; },',
     '};',
   ].join('\n'),
 ].join('\n\n');
@@ -77,6 +89,8 @@ delete require.cache[require.resolve(modPath)];
 var mod = require(modPath);
 
 console.log('\n=== GO-LIVE SMOKE FINAL — CR placeholder duplicado ao aprovar + confirmar pagamento ===\n');
+
+(async function main() {
 
 var ORC_ID = 'orc_teste_1';
 mod.addOrc({
@@ -94,9 +108,11 @@ testTrue('2. o placeholder fica com status=pendente (nunca "recebido" — nada f
 var orcDepoisAprovar = mod.getOrc(ORC_ID);
 testTrue('3. o orçamento guarda o crId do placeholder', !!orcDepoisAprovar.crId && orcDepoisAprovar.crId === crAposAprovar[0].id);
 
-// 2. Confirmar pagamento (entrada 50%) gera OS — o placeholder precisa sumir
-mod.setPgtoCtx(ORC_ID, '50-50', 'PIX', 382.69);
-mod.gerarOS();
+// 2. Confirmar pagamento (entrada 50%) — o placeholder precisa sumir AQUI
+// (HOTFIX P0.3/P0.4: a correção do CR acontece na Confirmação, não mais na
+// geração da OS) — depois Gerar OS só vincula os CRs já corretos.
+await mod.confirmarPagamento(ORC_ID, '50-50', 'PIX', 382.69);
+await mod.gerarOS();
 var crDepoisPagamento = mod.getCR();
 test('4. depois de confirmar o pagamento, o placeholder de R$765,37 NÃO existe mais (foi substituído pela entrada+saldo definitivos)', crDepoisPagamento.some(function (c) { return c.valor === 765.37 && c.status === 'pendente' && !c.osId; }), false);
 test('5. sobram exatamente 2 lançamentos de CR: entrada (recebido) + saldo (pendente)', crDepoisPagamento.length, 2);
@@ -122,3 +138,5 @@ console.log('\n' + '='.repeat(70));
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
 console.log('='.repeat(70) + '\n');
 if (failed > 0) process.exitCode = 1;
+
+})();

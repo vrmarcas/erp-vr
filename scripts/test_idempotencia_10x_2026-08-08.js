@@ -89,18 +89,23 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   });
 
   // ── Bloco 2: orcEnvGerarOS — 10 "abas" concorrentes ───────────────────────
-  var FN_NAMES_OS = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma'];
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — Confirmar Pagamento
+  // (orcRegistrarSituacaoFinanceira) roda uma única vez ANTES da corrida
+  // (mesmo que a UI real faria: a situação financeira já está confirmada
+  // antes de "Gerar OS" ficar habilitado); as 10 "abas" concorrem só na
+  // etapa Gerar OS — que é onde o idempotency guard real está.
+  var FN_NAMES_OS = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
   var srcOS = [
-    'var _orcPagtoId = null;',
-    'var _pgtoTipoAtual = null;',
     'var _ORC_ENVIADOS_DATA = [];',
     'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',
     'function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; }',
     'var _OS_COUNTER = 0;',
     "var _COL = 'erp_vr';",
+    'var _KB_OS_FIN_CACHE = {};',
+    'var FIN_TX = [];',
     FN_NAMES_OS.map(extractFn).join('\n\n'),
     'module.exports = {',
-    '  orcEnvConfirmarPgto: orcEnvConfirmarPgto, orcPagtoTipoSel: orcPagtoTipoSel,',
+    '  orcRegistrarSituacaoFinanceira: orcRegistrarSituacaoFinanceira,',
     '  orcEnvGerarOS: orcEnvGerarOS,',
     '  setEnviados: function(arr){ _ORC_ENVIADOS_DATA = arr; },',
     '  getEnviados: function(){ return _ORC_ENVIADOS_DATA; }',
@@ -179,13 +184,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     _tipoButtons = {};
     ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);
     reg('orcEnvModal', makeEl({ style: {} }));
-    reg('orcPagtoModal', makeEl({ style: {} }));
-    reg('orcGerarOSBtn', makeEl({ disabled: false }));
-    reg('pgtoEntradaBox', makeEl({ style: {} }));
-    reg('pgtoEntradaVal', makeEl({ value: '' }));
-    reg('pgtoEntradaPct', makeEl({}));
-    reg('pgtoForma', makeEl({ options: [{ text: 'PIX' }], selectedIndex: 0 }));
-    reg('pgtoObs', makeEl({ value: '' }));
+    reg('orcBtnGerarOSWizard', makeEl({ disabled: false }));
   }
   delete require.cache[require.resolve(modPathOS)];
   var modOS = require(modPathOS);
@@ -197,6 +196,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     _fakeStoreOS['kb_os'] = { data: JSON.stringify({}) };
     _fakeStoreOS['kb_os_fin'] = { data: JSON.stringify({}) };
     _fakeStoreOS['fin_cr'] = { data: JSON.stringify([]) };
+    _fakeStoreOS['fin_tx'] = { data: JSON.stringify([]) };
     _fakeStoreOS['erp_os_counter'] = { data: JSON.stringify(0) };
   }
   function fakeStoreOSDocs() { var raw = _fakeStoreOS['kb_os']; return raw ? JSON.parse(raw.data) : {}; }
@@ -207,8 +207,12 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     var orc = makeOrcOS('ORC-10X', '000099', 999);
     seedFirestoreOS([orc]);
     modOS.setEnviados([orc]);
-    modOS.orcEnvConfirmarPgto('ORC-10X');
-    modOS.orcPagtoTipoSel(_tipoButtons['integral']);
+    // Confirmar Pagamento roda uma única vez, ANTES da corrida — é o que a
+    // UI real garante (Gerar OS só fica habilitado depois de confirmado).
+    await modOS.orcRegistrarSituacaoFinanceira('ORC-10X', {
+      tipo: 'integral', forma: 'PIX', valorEfetivo: 999, valorEntrada: 999, restante: 0, obs: '', nf: false
+    });
+    global._orcSessaoAtualId = 'ORC-10X';
     _txnDelayMsOS = 15; // força as 10 transações a fazerem get() antes de qualquer set()
     try {
       var chamadas = [];

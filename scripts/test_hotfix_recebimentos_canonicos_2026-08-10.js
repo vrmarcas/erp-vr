@@ -79,18 +79,19 @@ var FN_NAMES = [
   'finRegistrarRecebimento', 'osRegistrarPagamentoSaldo',
   'finCRLinkedOS', '_finCRBaixaConfirmar', 'finCRBulkBaixar',
   'finAuditoriaDivergencias', 'kbSaveKbos',
-  'orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma',
+  'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS',
 ];
 var src = [
   "var _COL = 'erp_vr';",
   "var _cloudLastPayload = {};",
   "var KB_OS = {};",
+  "var _KB_OS_FIN_CACHE = {};",
   "var FIN_CR = []; var FIN_TX = [];",
   "var _ORC_ENVIADOS_DATA = [];",
   "var _kbOsId = null;",
   "var _kbStatusMap = { iniciada:{cls:'si',txt:'Iniciada'}, aguardando_saldo:{cls:'sas',txt:'Aguard. Saldo'}, pronta:{cls:'sp',txt:'Pronta'} };",
   "var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];",
-  "var _orcPagtoId = null; var _pgtoTipoAtual = null; var _OS_COUNTER = 0;",
+  "var _OS_COUNTER = 0;",
   "function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }",
   "function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; }",
   "var _finCRSel = {};",
@@ -103,7 +104,7 @@ var src = [
   "  finCRBulkBaixar: finCRBulkBaixar,",
   "  finAuditoriaDivergencias: finAuditoriaDivergencias,",
   "  kbSaveKbos: kbSaveKbos,",
-  "  orcEnvConfirmarPgto: orcEnvConfirmarPgto, orcPagtoTipoSel: orcPagtoTipoSel, orcEnvGerarOS: orcEnvGerarOS,",
+  "  orcRegistrarSituacaoFinanceira: orcRegistrarSituacaoFinanceira, orcEnvGerarOS: orcEnvGerarOS,",
   "  getKbOs: function(){ return KB_OS; }, setKbOs: function(v){ KB_OS = v; },",
   "  getFinCR: function(){ return FIN_CR; }, setFinCR: function(v){ FIN_CR = v; },",
   "  getFinTX: function(){ return FIN_TX; }, setFinTX: function(v){ FIN_TX = v; },",
@@ -181,13 +182,7 @@ function resetModalDom() {
   _tipoButtons = {};
   ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);
   reg('orcEnvModal', makeEl({ style: {} }));
-  reg('orcPagtoModal', makeEl({ style: {} }));
-  reg('orcGerarOSBtn', makeEl({ disabled: false }));
-  reg('pgtoEntradaBox', makeEl({ style: {} }));
-  reg('pgtoEntradaVal', makeEl({ value: '' }));
-  reg('pgtoEntradaPct', makeEl({}));
-  reg('pgtoForma', makeEl({ options: [{ text: 'PIX' }], selectedIndex: 0 }));
-  reg('pgtoObs', makeEl({ value: '' }));
+  reg('orcBtnGerarOSWizard', makeEl({ disabled: false }));
   reg('osPgtoSaldoBtn', makeEl({ disabled: false }));
 }
 
@@ -221,10 +216,11 @@ function resetAll() {
 
 console.log('\n=== HOTFIX RECEBIMENTOS CANÔNICOS — CR × OS × CAIXA (2026-08-10) ===\n');
 
-// Helper: gera uma OS real via orcEnvGerarOS (mesmo caminho de produção),
-// devolvendo {osId, orcId} para os testes usarem como fixture verdadeira
-// (nunca um fixture inventado à mão — a própria rotina de criação é quem
-// monta o estado inicial).
+// Helper: gera uma OS real via orcRegistrarSituacaoFinanceira() + orcEnvGerarOS()
+// (mesmo caminho de produção pós P0.3/P0.4 — Confirmar Pagamento e Gerar OS
+// são duas ações separadas), devolvendo {osId, orcId} para os testes usarem
+// como fixture verdadeira (nunca um fixture inventado à mão — a própria
+// rotina de criação é quem monta o estado inicial).
 async function gerarOSReal(numOrc, valorFinal, tipo, entradaVal) {
   resetModalDom();
   var orc = { id: 'ORC-' + numOrc, num: numOrc, cliente: 'Cliente E2E ' + numOrc, valorFinal: valorFinal, status: 'aguardando' };
@@ -234,11 +230,16 @@ async function gerarOSReal(numOrc, valorFinal, tipo, entradaVal) {
   if (!readDoc('kb_os')) seedDoc('kb_os', {});
   if (!readDoc('kb_os_fin')) seedDoc('kb_os_fin', {});
   if (!readDoc('fin_cr')) seedDoc('fin_cr', []);
+  if (!readDoc('fin_tx')) seedDoc('fin_tx', []);
   if (!readDoc('erp_os_counter')) seedDoc('erp_os_counter', 0);
   mod.setOrc(arrOrc);
-  mod.orcEnvConfirmarPgto(orc.id);
-  mod.orcPagtoTipoSel(_tipoButtons[tipo]);
-  if (entradaVal !== undefined) _elements['pgtoEntradaVal'].value = String(entradaVal);
+  var valorTotal = valorFinal; // forma PIX sem descPix configurado ⇒ valor efetivo = valorFinal
+  var valorEntrada = tipo === 'integral' ? valorTotal : (entradaVal !== undefined ? entradaVal : 0);
+  var restante = Math.round((valorTotal - valorEntrada) * 100) / 100;
+  await mod.orcRegistrarSituacaoFinanceira(orc.id, {
+    tipo: tipo, forma: 'PIX', valorEfetivo: valorTotal, valorEntrada: valorEntrada, restante: restante, obs: '', nf: false
+  });
+  global._orcSessaoAtualId = orc.id;
   await mod.orcEnvGerarOS();
   var kbOs = readDoc('kb_os');
   var osId = Object.keys(kbOs).find(function (k) { return kbOs[k].orcRef === orc.id; });
@@ -502,7 +503,16 @@ console.log('\n--- Invariante: recebidoCents + saldoCents === contratadoCents --
     var r = await gerarOSReal('INV3', 1000, 'futuro', undefined);
     var fin = readDoc('kb_os_fin')[r.osId];
     var cr = readDoc('fin_cr');
-    assertEq(cr.length, 0, 'sem entrada, nenhum FIN_CR criado (nunca inventa recebimento)');
+    // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — orcRegistrarSituacaoFinanceira()
+    // (Confirmar Pagamento) é a ÚNICA autoridade que registra o CR de "A
+    // Receber", independente de um placeholder de aprovação prévio existir
+    // ou não (este fixture nunca passa por orcEnvSetStatus). Corretamente
+    // registra exatamente 1 CR pendente com o valor total — nunca 0 (senão
+    // o cliente "A Receber" nunca apareceria em Contas a Receber) e nunca
+    // um recebimento (0 status="recebido").
+    assertEq(cr.length, 1, 'CR de "A Receber" é registrado — pendente, nunca invisível em Contas a Receber');
+    assertEq(cr[0].status, 'pendente', 'nunca recebido — sem entrada, sem dinheiro real ainda');
+    assertEq(cr[0].valor, 1000, 'CR registrado pelo valor total confirmado');
     assertEq(fin.restante, 1000, 'saldo = total, nada recebido ainda');
   });
 

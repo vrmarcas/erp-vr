@@ -57,27 +57,45 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = [
-  'orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS',
-  // HOTFIX pós-homologação (2026-08-10) — orcEnvConfirmarPgto() monta o
-  // caption do modal via orcCondicaoLabelPorTipo() (nunca mais o texto
-  // morto o.pgto).
-  'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma',
-];
+// HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — Confirmar Pagamento e Gerar OS
+// viraram duas ações separadas (o modal secundário foi removido; tudo vive
+// na Etapa 4 do wizard). orcEnvConfirmarPgto() (ponto de entrada legado da
+// lista "Orçamentos Enviados") agora só roteia para o wizard OU mostra um
+// toast quando já existe OS — nunca mais constrói um modal com HTML
+// próprio, então os testes 5/6 (que checavam innerHTML do modal) passam a
+// checar o toast.
+var FN_NAMES = ['orcEnvConfirmarPgto', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
 var COL = 'erp_vr';
 var src = [
-  'var _orcPagtoId = null;',
-  'var _pgtoTipoAtual = null;',
   'var _ORC_ENVIADOS_DATA = [];',
   'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',
   'function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; }',
   'var _OS_COUNTER = 0;',
   'var _COL = ' + JSON.stringify(COL) + ';',
+  'var _KB_OS_FIN_CACHE = {};',
+  'var FIN_TX = [];',
+  // orcEnvConfirmarPgto() (ponto de entrada legado) chama orcEnvEditar()
+  // quando não há osRef — fora do escopo destes testes (cobertos à parte
+  // em testes de UI do wizard); aqui só interessa o ramo de bloqueio
+  // (osRef já existe → toast, nunca abre o wizard).
+  'function orcEnvEditar(){ throw new Error("orcEnvEditar não deveria ser chamado quando o.osRef já existe"); }',
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = {',
-  '  orcEnvConfirmarPgto: orcEnvConfirmarPgto, orcPagtoTipoSel: orcPagtoTipoSel,',
+  '  orcEnvConfirmarPgto: orcEnvConfirmarPgto,',
+  '  orcRegistrarSituacaoFinanceira: orcRegistrarSituacaoFinanceira,',
   '  orcEnvGerarOS: orcEnvGerarOS,',
-  '  getPgtoTipoAtual: function(){ return _pgtoTipoAtual; },',
+  '  setSessao: function(id){ window._orcSessaoAtualId = id; },',
+  // Reproduz o que orcConfirmarPagamentoWizard() calcula e envia a
+  // orcRegistrarSituacaoFinanceira() (base já validada pelos testes
+  // dedicados de orcPgtoTipoSelWizard) — nunca uma lógica nova.
+  '  confirmarPagamento: function(id, tipo, entradaVal){',
+  '    var o = _ORC_ENVIADOS_DATA.find(function(x){ return x.id===id; });',
+  '    var valorTotal = o.valorFinal;',
+  '    var valorEntrada = tipo==="integral" ? valorTotal : (entradaVal!==undefined ? entradaVal : 0);',
+  '    var restante = Math.round((valorTotal - valorEntrada)*100)/100;',
+  '    window._orcSessaoAtualId = id;',
+  '    return orcRegistrarSituacaoFinanceira(id, { tipo:tipo, forma:"PIX", valorEfetivo:valorTotal, valorEntrada:valorEntrada, restante:restante, obs:"", nf:false });',
+  '  },',
   '  setEnviados: function(arr){ _ORC_ENVIADOS_DATA = arr; },',
   '  getEnviados: function(){ return _ORC_ENVIADOS_DATA; },',
   '  getOSCounter: function(){ return _OS_COUNTER; },',
@@ -162,13 +180,8 @@ function resetModalDom() {
   _tipoButtons = {};
   ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);
   reg('orcEnvModal', makeEl({ style: {} }));
-  reg('orcPagtoModal', makeEl({ style: {} }));
-  reg('orcGerarOSBtn', makeEl({ disabled: false }));
-  reg('pgtoEntradaBox', makeEl({ style: {} }));
-  reg('pgtoEntradaVal', makeEl({ value: '' }));
-  reg('pgtoEntradaPct', makeEl({}));
-  reg('pgtoForma', makeEl({ options: [{ text: 'PIX' }], selectedIndex: 0 }));
-  reg('pgtoObs', makeEl({ value: '' }));
+  reg('orcBtnGerarOSWizard', makeEl({ disabled: false }));
+  global._lastToast = null;
 }
 
 var mod = require(modPath);
@@ -185,6 +198,7 @@ function seedFirestore(orcamentos) {
   // teria depois da mudança.
   _fakeStore['kb_os_fin'] = { data: JSON.stringify({}) };
   _fakeStore['fin_cr'] = { data: JSON.stringify([]) };
+  _fakeStore['fin_tx'] = { data: JSON.stringify([]) };
   _fakeStore['erp_os_counter'] = { data: JSON.stringify(0) };
 }
 function fakeStoreOS() { var raw = _fakeStore['kb_os']; return raw ? JSON.parse(raw.data) : {}; }
@@ -209,8 +223,7 @@ await test('1. geração normal cria exatamente uma OS e um recebimento', async 
   var orc = makeOrc('ORC-1', '000001', 1000);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-1');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-1', 'integral');
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOS());
   var osFin = Object.values(fakeStoreOSMerged());
@@ -220,20 +233,20 @@ await test('1. geração normal cria exatamente uma OS e um recebimento', async 
   assertApprox(osFin[0].valorEntrada, 1000, 'entrada integral');
 });
 
-await test('2. reabrir o modal do mesmo orçamento e tentar de novo não duplica', async function () {
+await test('2. reabrir o orçamento (já com OS) e tentar Gerar OS de novo não duplica', async function () {
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-2', '000002', 500);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-2');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-2', 'integral');
   await mod.orcEnvGerarOS();
-  // simula reabertura: releitura do orçamento (agora já com osRef) do
-  // Firestore, exatamente como orcEnvAbrir()+orcEnvConfirmarPgto() fariam
+  // simula reabertura: releitura do orçamento (agora já com osRef e
+  // pgtoConfirmado) do Firestore, exatamente como orcEnvAbrir() faria —
+  // e uma nova tentativa de Gerar OS (camada de dados, não de interface;
+  // a interface já bloqueia isso via orcEnvConfirmarPgto()/o.osRef).
   mod.setEnviados(fakeStoreOrc());
   resetModalDom();
-  mod.orcEnvConfirmarPgto('ORC-2');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  mod.setSessao('ORC-2');
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 1, 'ainda exatamente uma OS após reabrir e tentar de novo');
   assertEq(fakeStoreCR().length, 1, 'ainda exatamente um recebimento');
@@ -244,8 +257,7 @@ await test('3. duas chamadas sequenciais (mesmo estado em memória) — segunda 
   var orc = makeOrc('ORC-3', '000003', 700);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-3');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-3', 'integral');
   // NÃO atualiza o estado em memória entre as duas chamadas — simula o
   // botão reabilitado manualmente ou dois handlers concorrentes que ainda
   // veem o `o` antigo sem osRef.
@@ -261,8 +273,7 @@ await test('4. duas chamadas verdadeiramente simultâneas (latência de rede sim
   var orc = makeOrc('ORC-4', '000004', 900);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-4');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-4', 'integral');
   _txnDelayMs = 20; // força as duas transações a fazerem get() antes de qualquer set()
   try {
     var pA = mod.orcEnvGerarOS();
@@ -273,49 +284,44 @@ await test('4. duas chamadas verdadeiramente simultâneas (latência de rede sim
   assertEq(fakeStoreCR().length, 1, 'apenas um recebimento');
 });
 
-await test('5. duas abas — segunda aba relê o Firestore e vê a OS já criada pela primeira', async function () {
+// HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — o modal secundário "Confirmar
+// Pagamento" foi removido; orcEnvConfirmarPgto() (ponto de entrada legado
+// da lista "Orçamentos Enviados") agora só roteia para o wizard OU mostra
+// um toast quando já existe OS — nunca mais constrói HTML de formulário.
+// Os testes 5/6 passam a checar esse toast em vez de innerHTML de modal.
+await test('5. duas abas — segunda aba relê o Firestore e vê a OS já criada pela primeira (toast, nunca reabre o formulário)', async function () {
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-5', '000005', 300);
   seedFirestore([orc]);
   // aba 1
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-5');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-5', 'integral');
   await mod.orcEnvGerarOS();
   // aba 2 — processo separado que só lê o Firestore agora, depois da aba 1
   mod.setEnviados(fakeStoreOrc());
   resetModalDom();
   mod.orcEnvConfirmarPgto('ORC-5');
-  // orcEnvConfirmarPgto detecta osRef e nem monta o formulário de
-  // pagamento — mostra "OS já gerada" em vez do formulário; a proteção
-  // de interface já resolveu o caso mais comum.
-  var html5 = _elements['orcPagtoModal'].innerHTML;
-  if (html5.indexOf('Valor da Entrada') >= 0 || html5.indexOf('orcGerarOSBtn') >= 0) {
-    throw new Error('modal reconstruiu o formulário de pagamento mesmo com osRef já definido');
-  }
-  if (html5.indexOf('OS já gerada para este orçamento') < 0) {
-    throw new Error('modal não mostrou a mensagem "OS já gerada"');
+  // orcEnvConfirmarPgto detecta osRef e nem chama orcEnvEditar (o mock
+  // lança se for chamado) — mostra um toast "já tem OS gerada" em vez de
+  // abrir o wizard; a proteção de interface já resolveu o caso mais comum.
+  if (!global._lastToast || global._lastToast.indexOf('já tem uma OS gerada') < 0) {
+    throw new Error('orcEnvConfirmarPgto() não mostrou o toast esperado de OS já existente — obtido: ' + global._lastToast);
   }
 });
 
-await test('6. refresh depois da primeira geração — novo carregamento do Firestore não permite gerar de novo', async function () {
+await test('6. refresh depois da primeira geração — novo carregamento do Firestore não permite gerar de novo (toast, nunca reabre o formulário)', async function () {
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-6', '000006', 450);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-6');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-6', 'integral');
   await mod.orcEnvGerarOS();
   // "refresh": recarrega do zero a partir do Firestore, como orcCargaInicial faria
   mod.setEnviados(fakeStoreOrc());
   resetModalDom();
   mod.orcEnvConfirmarPgto('ORC-6');
-  var html6 = _elements['orcPagtoModal'].innerHTML;
-  if (html6.indexOf('Valor da Entrada') >= 0 || html6.indexOf('orcGerarOSBtn') >= 0) {
-    throw new Error('após refresh, o formulário de pagamento reapareceu para um orçamento já processado');
-  }
-  if (html6.indexOf('OS já gerada para este orçamento') < 0) {
-    throw new Error('após refresh, modal não mostrou a mensagem "OS já gerada"');
+  if (!global._lastToast || global._lastToast.indexOf('já tem uma OS gerada') < 0) {
+    throw new Error('após refresh, orcEnvConfirmarPgto() não mostrou o toast esperado — obtido: ' + global._lastToast);
   }
 });
 
@@ -324,11 +330,11 @@ await test('7. retry após timeout simulado — transação ainda impede duplici
   var orc = makeOrc('ORC-7', '000007', 620);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-7');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-7', 'integral');
   await mod.orcEnvGerarOS();
   // "retry após resposta perdida": o cliente credita que a primeira
   // chamada falhou (rede) e tenta de novo, sem ter atualizado o `o` local
+  resetModalDom(); // simula o botão "Gerar OS" voltando a ficar habilitado
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 1, 'retry não duplica a OS');
   assertEq(fakeStoreCR().length, 1, 'retry não duplica o recebimento');
@@ -338,14 +344,18 @@ await test('8. orçamento já com osRef (dado pré-existente) é rejeitado diret
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-8', '000008', 200);
   orc.osRef = 'os_legado_123';
+  // Simula um pagamento já confirmado anteriormente (necessário para
+  // passar do gate de orcEnvGerarOS() e chegar de fato na barreira de
+  // osRef/transação, que é o que este cenário quer provar).
+  orc.pgtoConfirmado = { tipo: 'integral', forma: 'PIX', valorEfetivo: 200, valorEntrada: 200, restante: 0, obs: '', nf: false };
   seedFirestore([orc]);
   _fakeStore['kb_os'] = { data: JSON.stringify({ os_legado_123: { id: 'os_legado_123', num: '1', orcRef: 'ORC-8' } }) };
   mod.setEnviados([orc]);
+  mod.setSessao('ORC-8');
   // orcEnvConfirmarPgto já bloqueia via interface; para provar que a
   // CAMADA DE DADOS também bloqueia de forma independente, chamamos
   // orcEnvGerarOS() diretamente (simula um handler duplicado/chamada
   // indireta que pulou a checagem de interface).
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 1, 'nenhuma OS nova — a transação recusa por causa do osRef já existente no Firestore');
 });
@@ -356,8 +366,7 @@ await test('9. OS existente mas osRef ausente no orçamento (dado legado) — ba
   seedFirestore([orc]);
   _fakeStore['kb_os'] = { data: JSON.stringify({ os_orfa: { id: 'os_orfa', num: '2', orcRef: 'ORC-9' } }) };
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-9');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-9', 'integral');
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 1, 'barreira 2 (OS já vinculada) impede duplicidade mesmo sem osRef no orçamento');
 });
@@ -365,10 +374,10 @@ await test('9. OS existente mas osRef ausente no orçamento (dado legado) — ba
 await test('10. falha no meio da transação (orçamento removido) não deixa dado parcial', async function () {
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-10', '000010', 150);
+  orc.pgtoConfirmado = { tipo: 'integral', forma: 'PIX', valorEfetivo: 150, valorEntrada: 150, restante: 0, obs: '', nf: false };
   seedFirestore([]); // orçamento não existe mais no Firestore
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-10');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  mod.setSessao('ORC-10');
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 0, 'nenhuma OS gravada quando o orçamento não é encontrado na transação');
   assertEq(fakeStoreCR().length, 0, 'nenhum recebimento gravado');
@@ -379,8 +388,7 @@ await test('11. Integral — uma OS, um recebimento, entrada=total, restante=0, 
   var orc = makeOrc('ORC-11', '000011', 1000);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-11');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-11', 'integral');
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOSMerged())[0];
   var o = fakeStoreOrc().find(function (x) { return x.id === 'ORC-11'; });
@@ -395,8 +403,7 @@ await test('12. 50/50 — uma OS, uma entrada, um saldo pendente, nenhum duplica
   var orc = makeOrc('ORC-12', '000012', 1000);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-12');
-  mod.orcPagtoTipoSel(_tipoButtons['50-50']);
+  await mod.confirmarPagamento('ORC-12', '50-50', 500);
   await mod.orcEnvGerarOS();
   var cr = fakeStoreCR();
   assertEq(cr.filter(function (c) { return c.status === 'recebido'; }).length, 1);
@@ -408,23 +415,25 @@ await test('13. Parcial — uma OS, um recebimento no valor informado, saldo cor
   var orc = makeOrc('ORC-13', '000013', 1000);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-13');
-  mod.orcPagtoTipoSel(_tipoButtons['parcial']);
-  _elements['pgtoEntradaVal'].value = '120.55';
+  await mod.confirmarPagamento('ORC-13', 'parcial', 120.55);
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.valorEntrada, 120.55); assertApprox(os.restante, 879.45);
 });
 
-await test('14. Futuro — uma OS, nenhum recebimento inicial, saldo integral pendente', async function () {
+await test('14. Futuro — uma OS, o CR de "A Receber" registrado na Confirmação (nunca invisível em Contas a Receber), saldo integral pendente', async function () {
   resetModalDom(); resetFakeStore();
   var orc = makeOrc('ORC-14', '000014', 640);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-14');
-  mod.orcPagtoTipoSel(_tipoButtons['futuro']);
+  await mod.confirmarPagamento('ORC-14', 'futuro');
   await mod.orcEnvGerarOS();
-  assertEq(fakeStoreCR().length, 0);
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — orcRegistrarSituacaoFinanceira()
+  // (Confirmar Pagamento) é a ÚNICA autoridade que registra o CR de "A
+  // Receber" — sempre 1 CR pendente com o valor total, nunca 0.
+  var cr = fakeStoreCR();
+  assertEq(cr.length, 1, 'CR de "A Receber" é registrado — pendente, nunca invisível em Contas a Receber');
+  assertEq(cr[0].status, 'pendente');
   var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.restante, 640);
 });
@@ -434,9 +443,7 @@ await test('15. centavos preservados mesmo com a transação', async function ()
   var orc = makeOrc('ORC-15', '000015', 100.10);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-15');
-  mod.orcPagtoTipoSel(_tipoButtons['parcial']);
-  _elements['pgtoEntradaVal'].value = '33.33';
+  await mod.confirmarPagamento('ORC-15', 'parcial', 33.33);
   await mod.orcEnvGerarOS();
   var os = Object.values(fakeStoreOSMerged())[0];
   assertApprox(os.valorEntrada + os.restante, 100.10);
@@ -447,13 +454,12 @@ await test('16. alterar o DOM (reabilitar o botão manualmente) não contorna a 
   var orc = makeOrc('ORC-16', '000016', 400);
   seedFirestore([orc]);
   mod.setEnviados([orc]);
-  mod.orcEnvConfirmarPgto('ORC-16');
-  mod.orcPagtoTipoSel(_tipoButtons['integral']);
+  await mod.confirmarPagamento('ORC-16', 'integral');
   await mod.orcEnvGerarOS();
   // simula usuário reabilitando o botão via devtools e tentando de novo,
-  // sem que orcEnvConfirmarPgto tenha sido chamado de novo (contornando a
+  // sem que Confirmar Pagamento tenha sido chamado de novo (contornando a
   // camada de interface diretamente)
-  _elements['orcGerarOSBtn'].disabled = false;
+  _elements['orcBtnGerarOSWizard'].disabled = false;
   await mod.orcEnvGerarOS();
   assertEq(Object.keys(fakeStoreOS()).length, 1, 'reabilitar o botão manualmente não cria uma segunda OS — a transação ainda bloqueia');
 });

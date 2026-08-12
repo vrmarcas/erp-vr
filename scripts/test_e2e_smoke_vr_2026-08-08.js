@@ -4,16 +4,25 @@
  *
  * As funções deste fluxo já são testadas isoladamente, cada uma com seu
  * próprio fixture sintético (orcEnvGerarOS em test_os_idempotencia.js,
- * kbReceberSaldo em test_kbrecebersaldo_atomicidade.js, orcPagtoTipoSel/
- * default 50-50 em test_pgto_tipo_pagamento.js). O que NENHUM desses
- * arquivos prova é a COMPOSIÇÃO real: a OS que orcEnvGerarOS() cria é
- * exatamente o que kbReceberSaldo() consegue consumir depois — mesmo id,
- * mesmo split kb_os/kb_os_fin, valorEntrada/restante corretos ponta a
- * ponta, sem depender de nenhum fixture "já pronto" preparado à mão.
+ * kbReceberSaldo em test_kbrecebersaldo_atomicidade.js, o painel Tipo de
+ * Pagamento em test_pgto_tipo_pagamento.js). O que NENHUM desses arquivos
+ * prova é a COMPOSIÇÃO real: a OS que orcEnvGerarOS() cria é exatamente o
+ * que kbReceberSaldo() consegue consumir depois — mesmo id, mesmo split
+ * kb_os/kb_os_fin, valorEntrada/restante corretos ponta a ponta, sem
+ * depender de nenhum fixture "já pronto" preparado à mão.
+ *
+ * HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — Confirmar Pagamento e Gerar OS
+ * viraram duas ações separadas (o modal secundário "Confirmar Pagamento"
+ * foi removido; tudo vive na própria Etapa 4 do wizard). Este smoke agora
+ * exercita as duas etapas reais nessa ordem: orcRegistrarSituacaoFinanceira
+ * (o que orcConfirmarPagamentoWizard() grava — CR/FIN_TX/pgtoConfirmado,
+ * sem OS) e só depois orcEnvGerarOS() (que exige o.pgtoConfirmado e só
+ * VINCULA o CR/FIN_TX já existentes à OS, nunca cria um segundo
+ * lançamento).
  *
  * Funções extraídas de index.html (mesma técnica de test_os_idempotencia.js
- * — nunca reimplementadas): orcEnvConfirmarPgto, orcPagtoTipoSel,
- * orcEnvGerarOS, kbReceberSaldo.
+ * — nunca reimplementadas): orcRegistrarSituacaoFinanceira, orcEnvGerarOS,
+ * kbReceberSaldo.
  *
  * Uso: node scripts/test_e2e_smoke_vr_2026-08-08.js
  */
@@ -48,26 +57,25 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'kbReceberSaldo', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma'];
+var FN_NAMES = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'kbReceberSaldo'];
 var COL = 'erp_vr';
 var src = [
-  'var _orcPagtoId = null;',
-  'var _pgtoTipoAtual = null;',
   'var _ORC_ENVIADOS_DATA = [];',
   'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',
   'function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; }',
   'var _OS_COUNTER = 0;',
   'var _COL = ' + JSON.stringify(COL) + ';',
   'var KB_OS = {};',
+  'var _KB_OS_FIN_CACHE = {};',
   'var _kbOsId = null;',
   'var _kbStatusMap = { iniciada:{cls:"si",txt:"Iniciada"}, aguardando_saldo:{cls:"sas",txt:"Aguard. Saldo"} };',
   'var FIN_CR = [];',
+  'var FIN_TX = [];',
   'var _cloudLastPayload = {};',
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = {',
-  '  orcEnvConfirmarPgto: orcEnvConfirmarPgto, orcPagtoTipoSel: orcPagtoTipoSel,',
+  '  orcRegistrarSituacaoFinanceira: orcRegistrarSituacaoFinanceira,',
   '  orcEnvGerarOS: orcEnvGerarOS, kbReceberSaldo: kbReceberSaldo,',
-  '  getPgtoTipoAtual: function(){ return _pgtoTipoAtual; },',
   '  setEnviados: function(arr){ _ORC_ENVIADOS_DATA = arr; },',
   '  getEnviados: function(){ return _ORC_ENVIADOS_DATA; },',
   '  getKbOs: function(){ return KB_OS; },',
@@ -149,13 +157,7 @@ function resetModalDom() {
   _tipoButtons = {};
   ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);
   reg('orcEnvModal', makeEl({ style: {} }));
-  reg('orcPagtoModal', makeEl({ style: {} }));
-  reg('orcGerarOSBtn', makeEl({ disabled: false }));
-  reg('pgtoEntradaBox', makeEl({ style: {} }));
-  reg('pgtoEntradaVal', makeEl({ value: '' }));
-  reg('pgtoEntradaPct', makeEl({}));
-  reg('pgtoForma', makeEl({ options: [{ text: 'PIX' }], selectedIndex: 0 }));
-  reg('pgtoObs', makeEl({ value: '' }));
+  reg('orcBtnGerarOSWizard', makeEl({ disabled: false }));
 }
 
 var mod = require(modPath);
@@ -167,6 +169,7 @@ function seedFirestore(orcamentos) {
   _fakeStore['kb_os'] = { data: JSON.stringify({}) };
   _fakeStore['kb_os_fin'] = { data: JSON.stringify({}) };
   _fakeStore['fin_cr'] = { data: JSON.stringify([]) };
+  _fakeStore['fin_tx'] = { data: JSON.stringify([]) };
   _fakeStore['erp_os_counter'] = { data: JSON.stringify(0) };
 }
 function fakeStoreOS() { var raw = _fakeStore['kb_os']; return raw ? JSON.parse(raw.data) : {}; }
@@ -176,17 +179,29 @@ function fakeStoreOSMerged() {
   Object.keys(ops).forEach(function (id) { out[id] = Object.assign({}, ops[id], fin[id] || {}); });
   return out;
 }
+// HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — simula exatamente o que
+// orcConfirmarPagamentoWizard() calcula e passa adiante (base já validada
+// pelos testes dedicados de orcPgtoTipoSelWizard), sem depender do DOM
+// completo do wizard nem de orcSalvarOrcamento().
+async function confirmarPagamento(orcId, tipo, valorTotal, valorEntrada, restante) {
+  global.window._orcSessaoAtualId = orcId;
+  return mod.orcRegistrarSituacaoFinanceira(orcId, {
+    tipo: tipo, forma: 'PIX', valorEfetivo: valorTotal, valorEntrada: valorEntrada, restante: restante, obs: '', nf: false
+  });
+}
 
-console.log('\n=== SMOKE E2E — fluxo VR: aprovar → 50/50 → gerar OS → receber saldo → iniciada ===\n');
+console.log('\n=== SMOKE E2E — fluxo VR: aprovar → confirmar pagamento (50/50) → gerar OS → receber saldo → iniciada ===\n');
 
 (async function main() {
-  await test('1. orçamento aprovado → confirmar pagamento (50/50 é o default) → gerar OS sem exigir pagamento total', async function () {
+  await test('1. orçamento aprovado → Confirmar Pagamento (50/50) → Gerar OS sem exigir pagamento total', async function () {
     resetModalDom(); resetFakeStore();
     var orc = makeOrc('ORC-SMOKE-1', '000901', 1000);
     seedFirestore([orc]);
     mod.setEnviados([orc]);
-    mod.orcEnvConfirmarPgto('ORC-SMOKE-1');
-    assertEq(mod.getPgtoTipoAtual(), '50-50', 'default é 50/50 — nunca exige pagamento total pra iniciar produção');
+    var confirmado = await confirmarPagamento('ORC-SMOKE-1', '50-50', 1000, 500, 500);
+    assertEq(confirmado.ok, true, 'Confirmar Pagamento grava a situação financeira com sucesso');
+    assertEq(confirmado.dados.tipo, '50-50', 'tipo confirmado é o mesmo enviado');
+    global.window._orcSessaoAtualId = 'ORC-SMOKE-1';
     await mod.orcEnvGerarOS();
     var osList = Object.values(fakeStoreOSMerged());
     if (!osList.length) throw new Error('OS não foi criada no servidor');
@@ -197,6 +212,7 @@ console.log('\n=== SMOKE E2E — fluxo VR: aprovar → 50/50 → gerar OS → re
     var cr = JSON.parse(_fakeStore['fin_cr'].data);
     assertEq(cr.filter(function (c) { return c.status === 'recebido'; }).length, 1, 'entrada de 50% já lançada como recebida');
     assertEq(cr.filter(function (c) { return c.status === 'pendente'; }).length, 1, 'saldo de 50% lançado como pendente');
+    assertEq(cr.every(function (c) { return c.osId === os.id; }), true, 'Gerar OS vinculou os CRs já registrados na Confirmação à OS recém-criada, sem duplicar');
     var orcAtualizado = JSON.parse(_fakeStore['orcamentos'].data)[0];
     assertEq(orcAtualizado.osRef, os.id, 'orçamento fica vinculado à OS gerada');
     global.__smokeOsId = os.id;
@@ -220,13 +236,27 @@ console.log('\n=== SMOKE E2E — fluxo VR: aprovar → 50/50 → gerar OS → re
     var orc = makeOrc('ORC-SMOKE-2', '000902', 500);
     seedFirestore([orc]);
     mod.setEnviados([orc]);
-    mod.orcEnvConfirmarPgto('ORC-SMOKE-2');
-    mod.orcPagtoTipoSel(_tipoButtons['integral']);
+    await confirmarPagamento('ORC-SMOKE-2', 'integral', 500, 500, 0);
+    global.window._orcSessaoAtualId = 'ORC-SMOKE-2';
     await mod.orcEnvGerarOS();
     var os = Object.values(fakeStoreOSMerged())[0];
     assertEq(os.status, 'iniciada', 'pago 100% já nasce iniciada, sem etapa extra de "receber saldo"');
     assertEq(os.restante, 0);
     assertApprox(os.totalGeral, 500);
+  });
+
+  await test('4. Gerar OS é bloqueado sem Confirmar Pagamento antes (P0.3/P0.4 — ações separadas)', async function () {
+    resetModalDom(); resetFakeStore();
+    var orc = makeOrc('ORC-SMOKE-3', '000903', 300);
+    seedFirestore([orc]);
+    mod.setEnviados([orc]);
+    global.window._orcSessaoAtualId = 'ORC-SMOKE-3';
+    // Sem chamar orcRegistrarSituacaoFinanceira antes — Gerar OS não pode
+    // criar a OS nem registrar nenhum pagamento por conta própria.
+    var resultado = await mod.orcEnvGerarOS();
+    assertEq(resultado, undefined, 'orcEnvGerarOS() retorna sem prosseguir quando o.pgtoConfirmado não existe');
+    var osList = Object.values(fakeStoreOSMerged());
+    assertEq(osList.length, 0, 'nenhuma OS é criada sem confirmação de pagamento prévia');
   });
 
   console.log('\n=== resultado ===');

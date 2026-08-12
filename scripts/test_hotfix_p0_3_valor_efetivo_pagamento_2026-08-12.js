@@ -63,22 +63,34 @@ ok('1b. id="orcEntradaResto" (restante simulado) não existe mais no HTML', !/id
   try { fs.unlinkSync(modPath); } catch (e) {}
 }
 
-// ── 3. orcPagtoTipoSel()/orcEnvGerarOS() consomem orcValorEfetivoPorForma() com a forma SELECIONADA no modal — nunca o.valorFinal fixo ──
+// ── 3. HOTFIX P0.3/P0.4 (unificação da Etapa 4) — o valor efetivo é
+// confirmado UMA única vez (orcConfirmarPagamentoWizard, a partir de
+// window._orcPgtoValorEfetivo — a mesma fonte canônica de "Valor a
+// Receber") e persistido em o.pgtoConfirmado.valorEfetivo; orcEnvGerarOS()
+// nunca recalcula esse valor de novo — só lê o que já foi confirmado. ──
 {
-  var tipoSelSrc = extractFn('orcPagtoTipoSel');
-  ok('3a. orcPagtoTipoSel() lê a forma ATUAL do select #pgtoForma (nunca ignora a seleção do operador)', /getElementById\('pgtoForma'\)/.test(tipoSelSrc) && /orcValorEfetivoPorForma\(o, formaAtual\)/.test(tipoSelSrc));
-  ok('3b. orcPagtoTipoSel() não usa mais "o.valorFinal" direto para a base do cálculo', !/var valorTotal\s*=\s*o\s*\?\s*o\.valorFinal/.test(tipoSelSrc));
+  var confirmarSrc = extractFn('orcConfirmarPagamentoWizard');
+  ok('3a. orcConfirmarPagamentoWizard() lê o valor efetivo de window._orcPgtoValorEfetivo (fonte única, nunca um cálculo próprio)', /window\._orcPgtoValorEfetivo/.test(confirmarSrc));
+  ok('3b. orcConfirmarPagamentoWizard() não usa mais "o.valorFinal" direto para a base do cálculo', !/o\.valorFinal/.test(confirmarSrc));
 
   var gerarOSSrc = extractFn('orcEnvGerarOS');
-  ok('3c. orcEnvGerarOS() (transação final, o que é REALMENTE gravado) usa orcValorEfetivoPorForma(o, forma) — a forma de fato selecionada', /var valorTotal=orcValorEfetivoPorForma\(o, forma\);/.test(gerarOSSrc));
-  ok('3d. orcEnvGerarOS() não usa mais "Math.round((o.valorFinal||0)*100)/100" direto para o total', !/var valorTotal=Math\.round\(\(o\.valorFinal\|\|0\)\*100\)\/100;/.test(gerarOSSrc));
+  ok('3c. orcEnvGerarOS() (o que é REALMENTE gravado na OS/CR) lê o valor já confirmado em o.pgtoConfirmado.valorEfetivo — nunca recalcula', /var valorTotal=Math\.round\(\(o\.pgtoConfirmado\.valorEfetivo\|\|0\)\*100\)\/100;/.test(gerarOSSrc));
+  ok('3d. orcEnvGerarOS() não chama mais orcValorEfetivoPorForma nem lê "o.valorFinal" direto para o total', !/orcValorEfetivoPorForma/.test(gerarOSSrc) && !/var valorTotal=Math\.round\(\(o\.valorFinal\|\|0\)\*100\)\/100;/.test(gerarOSSrc));
+  ok('3e. Confirmar Pagamento e Gerar OS são ações SEPARADAS: orcEnvGerarOS() nunca CHAMA orcRegistrarSituacaoFinanceira (menções em comentário são só explicação, não invocação)', !/[=(]\s*orcRegistrarSituacaoFinanceira\(/.test(gerarOSSrc) && !/await orcRegistrarSituacaoFinanceira/.test(gerarOSSrc));
+  ok('3f. Gerar OS só prossegue se a situação financeira já foi confirmada (gate em o.pgtoConfirmado)', /if\(!o\.pgtoConfirmado\)\{/.test(gerarOSSrc));
 }
 
-// ── 4. "A Receber" (tipo=futuro): nunca gera FIN_TX, mas linka o CR placeholder à OS ──
+// ── 4. "A Receber" (tipo=futuro): nunca gera FIN_TX na Confirmação; o CR é
+// registrado/corrigido lá e só VINCULADO à OS (nunca recriado) quando
+// Gerar OS roda depois ──
 {
+  var registrarSrc = extractFn('orcRegistrarSituacaoFinanceira');
+  ok('4a. orcRegistrarSituacaoFinanceira(): tipo="futuro" sem dinheiro real nunca cria FIN_TX (0 recibo)', /\}\s*else if\(tipo==='futuro'\)\{/.test(registrarSrc));
+  ok('4b. orcRegistrarSituacaoFinanceira(): CR de "A Receber" é registrado com o valor EFETIVO já confirmado, nunca preso na estimativa de aprovação', /arrCR\[crIdx\]\.valor = valorTotal;/.test(registrarSrc));
+
   var gerarOSSrc = extractFn('orcEnvGerarOS');
-  ok('4a. Caminho fallback: tipo="futuro" com CR existente vincula osId/osRef ao invés de ignorar', /else if\(tipo==='futuro' && o\.crId\)\{/.test(gerarOSSrc));
-  ok('4b. Caminho transacional real: mesmo tratamento (tipo="futuro" linka o CR dentro da mesma transação)', /else if\(tipo==='futuro' && arrOrc\[idxOrc\]\.crId\)\{/.test(gerarOSSrc));
+  ok('4c. orcEnvGerarOS() generaliza o vínculo: todo CR deste orçamento sem osId (independente do tipo) é vinculado à OS recém-criada, nunca recriado', /FIN_CR\.forEach\(function\(c\)\{ if\(c\.orcamentoId===o\.id && !c\.osId\)/.test(gerarOSSrc));
+  ok('4d. mesmo tratamento no caminho transacional real (dentro da MESMA transação que cria a OS)', /arrCR\.forEach\(function\(c\)\{ if\(c\.orcamentoId===o\.id && !c\.osId\)/.test(gerarOSSrc));
 }
 
 console.log('\n' + '='.repeat(70));
