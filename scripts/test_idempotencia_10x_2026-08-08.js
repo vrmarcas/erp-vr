@@ -89,7 +89,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   });
 
   // ── Bloco 2: orcEnvGerarOS — 10 "abas" concorrentes ───────────────────────
-  var FN_NAMES_OS = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo'];
+  var FN_NAMES_OS = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma'];
   var srcOS = [
     'var _orcPagtoId = null;',
     'var _pgtoTipoAtual = null;',

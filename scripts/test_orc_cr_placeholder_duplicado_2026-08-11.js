@@ -42,7 +42,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvSetStatus', 'orcEnvGerarOS'];
+var FN_NAMES = ['orcEnvSetStatus', 'orcEnvGerarOS', 'orcValorEfetivoPorForma'];
 var src = [
   "var _ORC_ENVIADOS_DATA = [];",
   "function _isTestRecord(o){ return !!(o && (o.isTest === true || o.environment === 'test')); }",

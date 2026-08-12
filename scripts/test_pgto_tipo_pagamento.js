@@ -55,7 +55,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo'];
+var FN_NAMES = ['orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma'];
 var src = [
   'var _orcPagtoId = null;',
   'var _pgtoTipoAtual = null;',

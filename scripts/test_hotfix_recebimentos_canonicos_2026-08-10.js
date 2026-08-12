@@ -79,7 +79,7 @@ var FN_NAMES = [
   'finRegistrarRecebimento', 'osRegistrarPagamentoSaldo',
   'finCRLinkedOS', '_finCRBaixaConfirmar', 'finCRBulkBaixar',
   'finAuditoriaDivergencias', 'kbSaveKbos',
-  'orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo',
+  'orcEnvConfirmarPgto', 'orcPagtoTipoSel', 'orcEnvGerarOS', 'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma',
 ];
 var src = [
   "var _COL = 'erp_vr';",

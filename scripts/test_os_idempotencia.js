@@ -62,7 +62,7 @@ var FN_NAMES = [
   // HOTFIX pós-homologação (2026-08-10) — orcEnvConfirmarPgto() monta o
   // caption do modal via orcCondicaoLabelPorTipo() (nunca mais o texto
   // morto o.pgto).
-  'orcCondicaoLabelPorTipo',
+  'orcCondicaoLabelPorTipo', 'orcValorEfetivoPorForma',
 ];
 var COL = 'erp_vr';
 var src = [

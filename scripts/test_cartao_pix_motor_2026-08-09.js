@@ -270,7 +270,7 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 // caso-limite ",xx5" — campo mostrava R$385,82, texto mostrava R$385,83,
 // para o mesmo orçamento de R$771,65.
 {
-  var FN6 = ['orcPagtoTipoSel'];
+  var FN6 = ['orcPagtoTipoSel', 'orcValorEfetivoPorForma'];
   var src6 = FN6.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN6.join(',') + '};';
   var modPath6 = path.join(__dirname, '_cartao_pix_5050_extracted.tmp.js');
   fs.writeFileSync(modPath6, src6);
