@@ -2772,11 +2772,23 @@ function _authFirebaseError(code){
               🔧 Iniciar Produção
             </button>
           </div>
-          <!-- Receber Saldo — visível quando status=aguardando_saldo -->
+          <!-- Receber Saldo — visível quando status=aguardando_saldo.
+          GO-LIVE FINAL 2026-08-12, seção 43-48 — bug real reproduzido em
+          produção (OS #8): esta caixa mostrava "Restante: R$X" (valor
+          financeiro cru) direto na visão operacional do Kanban, violando
+          a separação financeiro×operação — mesmo para Master, a visão
+          Kanban não pode conter valores (seção 43: "nem para Master
+          dentro da visão Kanban"). Corrigido: nenhum valor aqui — status
+          sanitizado (enum, nunca dinheiro — ver kbSaldoValor) e o botão
+          abre o modal financeiro dedicado (osAbrirPagamentoSaldoModal,
+          já usado em "Todas as OS"), que também cobre o caminho legado
+          aguardando_saldo→iniciada (ver finRegistrarRecebimento) — nunca
+          perde capacidade, só sai do "kb_os"-view direto pra fonte
+          financeira correta. -->
           <div id="kbReceberSaldoBox" style="display:none;margin-bottom:10px;background:#FEF9C3;border:1.5px dashed #D97706;border-radius:9px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Saldo na Entrega</div>
-            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px">Restante: <span id="kbSaldoValor">—</span></div>
-            <button id="kbReceberSaldoBtn" onclick="kbReceberSaldo()" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">✅ Confirmar Recebimento do Saldo</button>
+            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Pagamento</div>
+            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px" id="kbSaldoValor">Saldo pendente na entrada</div>
+            <button id="kbReceberSaldoBtn" onclick="if(typeof osAbrirPagamentoSaldoModal==='function') osAbrirPagamentoSaldoModal(_kbOsId);" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Registrar Pagamento</button>
           </div>
           <!-- Exibição do material selecionado para produção -->
           <div id="kbMatProdBox" style="display:none;margin-bottom:10px;background:#FEF3C7;border:1.5px solid #FCD34D;border-radius:9px;padding:11px 13px">
@@ -12322,13 +12334,16 @@ function kbOpen(id) {
       _iniciarBox.style.display = 'none';
     }
   }
-  // Receber Saldo — visível quando aguardando_saldo
+  // Receber Saldo — visível quando aguardando_saldo. GO-LIVE FINAL
+  // 2026-08-12, seção 43-48 — nunca mais um valor R$ aqui (visão Kanban
+  // é operacional, nunca financeira, nem para Master) — apenas um status
+  // sanitizado; o valor real só aparece no modal financeiro dedicado
+  // (osAbrirPagamentoSaldoModal), aberto pelo botão.
   var _saldoBox = document.getElementById('kbReceberSaldoBox');
   if (_saldoBox) {
     if (os.status === 'aguardando_saldo') {
-      var _restFmt = 'R$ '+(os.restante||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       var _svEl = document.getElementById('kbSaldoValor');
-      if (_svEl) _svEl.textContent = _restFmt;
+      if (_svEl) _svEl.textContent = 'Saldo pendente na entrada';
       _saldoBox.style.display = '';
     } else {
       _saldoBox.style.display = 'none';

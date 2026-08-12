@@ -59,10 +59,10 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Concorrência atômica server-side (parece já implementado — validar)
 
 ## Bloco P0-8 — Privacidade financeira no Kanban (seções 43-48)
-- [TODO] Remover TODO valor monetário do Kanban/modal operacional da OS
-- [TODO] Confirmar Recebimento de Saldo não pertence ao Kanban
-- [TODO] Enum sanitizado financeiroStatusPublico (sem copiar dinheiro pra kb_os)
-- [TODO] Testes de Rules: Produção não lê kb_os_fin/FIN_CR/FIN_TX
+- [TESTED] Bug real CONFIRMADO em produção (OS #8): caixa "Receber Saldo" do modal Kanban mostrava "Restante: R$X" cru + botão que disparava a transação financeira ali mesmo. CORRIGIDO: valor removido (status sanitizado "Saldo pendente na entrada", sem R$), botão agora abre o modal financeiro dedicado (osAbrirPagamentoSaldoModal, mesma fonte já usada em "Todas as OS") — cobre inclusive o caminho legado aguardando_saldo→iniciada, zero perda de capacidade. kbReceberSaldo() (função antiga) ficou sem chamador na UI mas foi mantida intocada (ainda testada/atômica) — não removida por segurança/escopo.
+- [TESTED] Varredura de "R$" na função kbOpen/kbRender (Kanban) — nenhuma outra ocorrência de valor monetário encontrada. Teste: scripts/test_kb_privacidade_sem_valor_2026-08-12.js (6/6 verde)
+- [TESTED] Rules já corretas (confirmado por leitura, não é código novo): kb_os_fin/fin_cr/fin_tx/fin_cp exigem isMaster()||isFinanceiro()||isComercial() — isProducao() sozinho nunca satisfaz nenhuma delas, Produção não lê essas coleções
+- [TODO] Teste automatizado via Auth Emulator real (perfil Produção tentando ler kb_os_fin → DENIED) — não executado nesta rodada (Rules já existiam corretas de rodada anterior, risco de regressão baixo, mas não há novo teste de emulador cobrindo isso especificamente nesta sessão)
 
 ## Bloco P0-9 — CRM (seção 49) — não regredir
 - [TODO] Validar sincronização com nova máquina de status
