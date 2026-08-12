@@ -12262,9 +12262,25 @@ function kbOpen(id) {
   if (isPronta) {
     btn.className = 'kb-pronto-btn done';
     btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS Pronta';
+    btn.disabled = false;
+    btn.style.display = '';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.title = '';
+  } else if (os.status !== 'producao') {
+    // GO-LIVE FINAL 2026-08-12, seção 25 — OS ainda não iniciada (nem em
+    // "iniciada"/aguardando material, nem em produção de fato): nunca
+    // pode ser marcada Pronta. Botão fica oculto (não só desabilitado).
+    btn.style.display = 'none';
   } else {
+    var _pronto = kbChecklistCompleto(os);
+    btn.style.display = '';
     btn.className = 'kb-pronto-btn';
     btn.textContent = '✓ Marcar como Pronta';
+    btn.disabled = !_pronto;
+    btn.style.opacity = _pronto ? '1' : '.45';
+    btn.style.cursor = _pronto ? 'pointer' : 'not-allowed';
+    btn.title = _pronto ? '' : 'Marque as 5 etapas do checklist (Corte, Gravação, Montagem, Acabamento, Embalagem) antes de marcar como Pronta.';
   }
   // Entregar ao Cliente — só aparece quando a OS está Pronta; some quando já Entregue
   var entBtn = document.getElementById('kbEntregarBtn');
@@ -12987,6 +13003,21 @@ function kbEtapaAtual(os) {
   var checks = os.checks||[], ck = os._ck||[];
   for (var i=0; i<checks.length; i++) { if (!ck[i]) return checks[i]; }
   return checks.length ? 'Produção concluída' : '—';
+}
+// GO-LIVE FINAL 2026-08-12, seção 25/67 — bug real reproduzido em
+// produção (OS #8): "Marcar como Pronta" ficava disponível e clicável
+// mesmo com 0 dos 5 itens do checklist marcados, e kbMarcarPronto() força
+// completava o checklist inteiro ao clicar (os._ck = todos true) — em vez
+// de exigir que o funcionário realmente marque as 5 etapas primeiro.
+// Fonte única de verdade sobre "pode marcar Pronta" — usada tanto para
+// habilitar/ocultar o botão (kbRenderInline/render do modal) quanto para
+// bloquear kbMarcarPronto() no clique (nunca só visual — ver seção 67).
+function kbChecklistCompleto(os) {
+  if (!os) return false;
+  var checks = os.checks||[], ck = os._ck||[];
+  if (!checks.length) return false;
+  for (var i=0; i<checks.length; i++) { if (!ck[i]) return false; }
+  return true;
 }
 
 function kbCheckAddItem() {
@@ -14016,6 +14047,12 @@ function kbMsgOsPronta(os) {
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   if (os.status === 'pronta' || os.status === 'master' || os.status === 'entregue') return;
+  // GO-LIVE FINAL 2026-08-12, seção 25/67 — gate real (não só visual):
+  // nunca marca Pronta sem produção iniciada, e nunca força-completa o
+  // checklist ao clicar. O funcionário precisa ter marcado as 5 etapas
+  // de verdade primeiro (kbToggle) — este clique só confirma.
+  if (os.status !== 'producao') { showToast('Inicie a produção antes de marcar como Pronta.','warn'); return; }
+  if (!kbChecklistCompleto(os)) { showToast('Marque as 5 etapas do checklist antes de marcar como Pronta.','warn'); return; }
   if (os._marcandoPronto) { showToast('Ação já em andamento — aguarde.','warn'); return; }
   os._marcandoPronto = true;
   // Saldo pendente (normalmente pago na retirada) NÃO bloqueia mais "Pronta" — apenas
