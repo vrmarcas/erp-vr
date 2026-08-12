@@ -11339,6 +11339,20 @@ function orcCalcParcelaDisplay() {
   var sel = document.getElementById('orcSimParcelas');
   var disp = document.getElementById('orcSimParcelaDisplay');
   if(!sel||!disp) return;
+  // GO-LIVE FINAL 2026-08-12 (gate 2, smoke visual real em produção) — bug
+  // real: trocar "Forma de Pagamento" para Dinheiro escondia corretamente a
+  // LINHA do seletor de parcelas (orcSimParcelasRow, ver orcAtualizarIconePgto),
+  // mas esta função continuava escrevendo e exibindo a linha de resumo
+  // "3× de R$X (total: R$Y)" (orcSimParcelaDisplay) — um elemento IRMÃO, não
+  // filho da row escondida — porque só checava a quantidade de parcelas
+  // salva no <select>, nunca o método atual. Dinheiro/PIX nunca podem
+  // mostrar parcelamento de cartão (não existe "3x" em dinheiro/PIX).
+  var metodo = (document.getElementById('orcSimMetodo')||{}).value||'pix';
+  if (metodo !== 'cartao' && metodo !== 'link') {
+    disp.style.display = 'none';
+    if (typeof orcPgtoAtualizarValorReceber === 'function') orcPgtoAtualizarValorReceber();
+    return;
+  }
   var n = parseInt(sel.value)||1;
   var base = window._orcCalc ? (window._orcCalc.finalPrice||0) : 0;
   if(n<=1){disp.style.display='none'; if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber(); return;}

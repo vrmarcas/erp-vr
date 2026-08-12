@@ -77,6 +77,15 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
     opts = opts || {};
     global.window = { _orcCalc: { finalPrice: finalPrice } };
     _elements = {
+      // GO-LIVE FINAL 2026-08-12 (gate 2, smoke visual real) — orcSimMetodo
+      // precisa existir no mock: orcCalcParcelaDisplay() agora lê o método
+      // de pagamento antes de mostrar a linha de parcelamento (Dinheiro/PIX
+      // nunca mostram parcelas de cartão — bug real encontrado no
+      // orçamento #000020). Todos os cenários deste bloco testam
+      // especificamente a matemática do CARTÃO, então o default é 'cartao'
+      // — o mesmo valor que a tela real tem quando o vendedor está
+      // simulando parcelamento no cartão.
+      orcSimMetodo: makeEl({ value: opts.metodo || 'cartao' }),
       orcSimParcelas: makeEl({ value: String(opts.n || 1) }),
       orcSimParcelaDisplay: makeEl({}),
       orcDescCondToggle: makeEl({ checked: !!opts.dcOn }),
