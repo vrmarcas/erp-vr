@@ -78,6 +78,15 @@ ok('2a. renderOsTable() lê Object.values(KB_OS) — mesma fonte do Kanban, nunc
   }
 }
 
+// ── 4. Rótulo de status em "Todas as OS" bate com o Kanban para aguardando_saldo ──
+// HOTFIX OPERACIONAL 2026-08-12, P0.7 — achado real no smoke de produção (OS #011):
+// renderOsTable() mostrava o status cru "aguardando_saldo" em vez de um rótulo,
+// divergindo do Kanban (que mostra "Iniciada" para esse status desde o P0.6).
+{
+  var renderOsTableSrc2 = extractFn('renderOsTable');
+  ok('4a. renderOsTable() mapeia aguardando_saldo para o mesmo rótulo "Iniciada" usado pelo Kanban', /aguardando_saldo:'Iniciada'/.test(renderOsTableSrc2));
+}
+
 console.log('\n' + '='.repeat(70));
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
 console.log('='.repeat(70) + '\n');

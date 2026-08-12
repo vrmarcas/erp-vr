@@ -15617,8 +15617,15 @@ function renderOsTable() {
   var cnt=document.getElementById('osTableCount');
   if(cnt) cnt.textContent='('+rows.length+' OS)';
   if(!rows.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';return;}
-  var sL={iniciada:'Iniciada',producao:'Em Produção',pronta:'Pronta ✅',master:'🔐 Aguard. Master',entregue:'Entregue 🎉',em_andamento:'Iniciada',aguard_master:'🔐 Aguard. Master',cancelado:'Cancelado',orcamento:'Orçamento'};
-  var sC={iniciada:'#6B7280',producao:'#D97706',pronta:'#059669',master:'#1EB8D8',entregue:'#059669',em_andamento:'#D97706',aguard_master:'#1EB8D8',cancelado:'#DC2626',orcamento:'#6B7280'};
+  // HOTFIX OPERACIONAL 2026-08-12, P0.7 — achado real no smoke de produção
+  // (OS #011): esta tabela mostrava o status cru "aguardando_saldo" em vez
+  // de um rótulo, divergindo do Kanban (que, após o P0.6, mostra "Iniciada"
+  // para esse status — é um estado financeiro, não operacional). Status e
+  // Etapa em "Todas as OS" precisam bater exatamente com o Kanban (seção
+  // 48) — o Saldo pendente continua visível na coluna Saldo, sem precisar
+  // duplicar essa informação no texto do Status.
+  var sL={iniciada:'Iniciada',producao:'Em Produção',pronta:'Pronta ✅',master:'🔐 Aguard. Master',entregue:'Entregue 🎉',em_andamento:'Iniciada',aguard_master:'🔐 Aguard. Master',cancelado:'Cancelado',orcamento:'Orçamento',aguardando_saldo:'Iniciada'};
+  var sC={iniciada:'#6B7280',producao:'#D97706',pronta:'#059669',master:'#1EB8D8',entregue:'#059669',em_andamento:'#D97706',aguard_master:'#1EB8D8',cancelado:'#DC2626',orcamento:'#6B7280',aguardando_saldo:'#6B7280'};
   var showEntregaCol = (tab==='recentes'||tab==='historico');
   var rows2=rows.map(function(os){
     var mk=mkNorm(os.marca);
