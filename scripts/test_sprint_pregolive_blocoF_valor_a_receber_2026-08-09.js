@@ -18,6 +18,16 @@
  * na entrada da etapa (orcStep) quanto em toda troca de método/parcela
  * (orcAtualizarIconePgto → orcCalcParcelaDisplay → aqui).
  *
+ * GO-LIVE FINAL 2026-08-12, reverificação pós-relatório — achado real
+ * mais recente ainda: orcStep(n===5) chamava orcPgtoAtualizarValorReceber()
+ * direto, o que atualizava o valor em destaque mas deixava a LINHA de
+ * parcelamento (orcSimParcelaDisplay) sem resync na entrada da etapa
+ * (elementos DOM reaproveitados entre orçamentos da mesma sessão SPA — ver
+ * test_orcstep5_resync_metodo_2026-08-12.js). Corrigido para orcStep(n===5)
+ * chamar orcAtualizarIconePgto() em vez de orcPgtoAtualizarValorReceber()
+ * direto — orcAtualizarIconePgto() já inclui essa mesma chamada
+ * internamente (via orcCalcParcelaDisplay), preservando a fonte única.
+ *
  * Uso: node scripts/test_sprint_pregolive_blocoF_valor_a_receber_2026-08-09.js
  */
 'use strict';
@@ -46,8 +56,8 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco F — "Valor a Receber" atualiza a
 
 // ── 1-2. Regressão estrutural: wiring correto ──
 var srcOrcStep = extractFn('orcStep');
-test('1. orcStep(5) agora usa a fonte única orcPgtoAtualizarValorReceber() em vez de calcular sozinho',
-  /if \(n===5\)[\s\S]{0,600}orcPgtoAtualizarValorReceber\(\)/.test(srcOrcStep), true);
+test('1. orcStep(5) agora delega para orcAtualizarIconePgto() (resync completo — parcelas + Valor a Receber), que por sua vez usa a fonte única orcPgtoAtualizarValorReceber() em vez de calcular sozinho',
+  /if \(n===5\)[\s\S]{0,1200}orcAtualizarIconePgto\(\)/.test(srcOrcStep), true);
 
 var srcIcone = extractFn('orcAtualizarIconePgto');
 test('2. orcAtualizarIconePgto() (disparado ao trocar a Forma de Pagamento) continua chamando orcCalcParcelaDisplay(), que agora também atualiza o Valor a Receber',

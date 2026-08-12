@@ -8586,7 +8586,20 @@ function orcStep(n) {
     // em paralelo (achado real: trocar de PIX para Cartão aqui não
     // atualizava mais nada, porque o valor só era calculado uma vez, na
     // entrada da etapa).
-    if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber();
+    // GO-LIVE FINAL 2026-08-12, reverificação pós-relatório — achado real
+    // reproduzido ao vivo: como orcSimMetodo/orcSimParcelasRow/
+    // orcSimParcelaDisplay são os MESMOS elementos DOM reaproveitados por
+    // todos os orçamentos da sessão (SPA), a entrada nesta etapa nunca
+    // recalculava a linha/linha de resumo de parcelamento — só o valor em
+    // destaque. Um orçamento anterior com Cartão selecionado (parcelas
+    // visíveis) deixava a linha "3× de R$X" travada e visível mesmo depois
+    // de abrir um orçamento NOVO com PIX (o <select> voltava para "pix" no
+    // value, mas a exibição não era resincronizada). orcAtualizarIconePgto()
+    // já faz esse resync completo (linha de parcelas + orcCalcParcelaDisplay)
+    // e por sua vez chama orcPgtoAtualizarValorReceber() — chamada única
+    // agora cobre tudo na entrada da etapa.
+    if(typeof orcAtualizarIconePgto==='function') orcAtualizarIconePgto();
+    else if(typeof orcPgtoAtualizarValorReceber==='function') orcPgtoAtualizarValorReceber();
     // Sincroniza bancos com a empresa selecionada
     var _empV = (document.getElementById('orcEmpresaSel')||{}).value||'vr';
     if(typeof orcPopularBancos==='function') orcPopularBancos(_empV);

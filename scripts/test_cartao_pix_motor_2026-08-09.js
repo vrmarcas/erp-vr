@@ -239,10 +239,18 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 // também reusada ao trocar Forma de Pagamento/parcelas (achado real
 // mais recente: trocar de PIX para Cartão não atualizava mais nada,
 // porque o cálculo só rodava uma vez, na entrada da etapa).
+// GO-LIVE FINAL 2026-08-12, reverificação pós-relatório — achado real
+// mais recente ainda: orcStep(n===5) chamava só orcPgtoAtualizarValorReceber()
+// direto, deixando a LINHA/exibição de parcelamento (orcSimParcelaDisplay)
+// sem resync na entrada da etapa (elementos DOM reaproveitados entre
+// orçamentos da mesma sessão — ver test_orcstep5_resync_metodo_2026-08-12.js).
+// Corrigido para chamar orcAtualizarIconePgto(), que já inclui a mesma
+// chamada a orcPgtoAtualizarValorReceber() internamente — fonte única
+// preservada, só o ponto de entrada mudou.
 {
   var srcStep = extractFn('orcStep');
-  test('12. orcStep() (n===5) delega o cálculo do "Valor a Receber" para a fonte única orcPgtoAtualizarValorReceber() — nunca mais uma conta própria e travada no momento de abrir a etapa',
-    /if \(n===5\)[\s\S]{0,600}orcPgtoAtualizarValorReceber\(\)/.test(srcStep), true);
+  test('12. orcStep() (n===5) delega o resync completo (parcelas + "Valor a Receber") para orcAtualizarIconePgto(), que por sua vez usa a fonte única orcPgtoAtualizarValorReceber() — nunca mais uma conta própria e travada no momento de abrir a etapa',
+    /if \(n===5\)[\s\S]{0,1200}orcAtualizarIconePgto\(\)/.test(srcStep), true);
 
   var srcRecv = extractFn('orcPgtoAtualizarValorReceber');
   // SPRINT PRÉ-GO-LIVE, Bloco E/F (gap encontrado no preview local
