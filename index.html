@@ -2790,24 +2790,17 @@ function _authFirebaseError(code){
             </div>
             <div style="font-size:10px;color:var(--muted);margin-top:3px">Google Drive, Dropbox, WeTransfer, OneDrive...</div>
           </div>
-          <!-- Receber Saldo — visível quando status=aguardando_saldo.
-          GO-LIVE FINAL 2026-08-12, seção 43-48 — bug real reproduzido em
-          produção (OS #8): esta caixa mostrava "Restante: R$X" (valor
-          financeiro cru) direto na visão operacional do Kanban, violando
-          a separação financeiro×operação — mesmo para Master, a visão
-          Kanban não pode conter valores (seção 43: "nem para Master
-          dentro da visão Kanban"). Corrigido: nenhum valor aqui — status
-          sanitizado (enum, nunca dinheiro — ver kbSaldoValor) e o botão
-          abre o modal financeiro dedicado (osAbrirPagamentoSaldoModal,
-          já usado em "Todas as OS"), que também cobre o caminho legado
-          aguardando_saldo→iniciada (ver finRegistrarRecebimento) — nunca
-          perde capacidade, só sai do "kb_os"-view direto pra fonte
-          financeira correta. -->
-          <div id="kbReceberSaldoBox" style="display:none;margin-bottom:10px;background:#FEF9C3;border:1.5px dashed #D97706;border-radius:9px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">💰 Pagamento</div>
-            <div style="font-size:13px;font-weight:700;color:#78350F;margin-bottom:8px" id="kbSaldoValor">Saldo pendente na entrada</div>
-            <button id="kbReceberSaldoBtn" onclick="if(typeof osAbrirPagamentoSaldoModal==='function') osAbrirPagamentoSaldoModal(_kbOsId);" style="width:100%;padding:10px;background:linear-gradient(90deg,#D97706,#92400E);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Registrar Pagamento</button>
-          </div>
+          <!-- HOTFIX OPERACIONAL 2026-08-12, P0.6 — achado real: mesmo já
+          sanitizado de valores em R$ (GO-LIVE FINAL 2026-08-12, seção
+          43-48), este bloco ainda expunha as PALAVRAS "Pagamento" /
+          "Registrar Pagamento" / "Saldo pendente" dentro da visão
+          Kanban — que deve ser 100% operacional, sem NENHUM vocabulário
+          financeiro, para QUALQUER perfil (não é uma questão de
+          Produção não poder ver o valor; é o Kanban não ser o lugar de
+          registrar pagamento). A ação de registrar pagamento continua
+          existindo e funcionando normalmente, só que exclusivamente em
+          "Todas as OS" (botão 💰 Pagamento em renderOsTable(), mesma
+          função osAbrirPagamentoSaldoModal) — nunca duplicada aqui. -->
           <!-- Bloco Avisar Cliente — só visível para Master quando OS está pronta -->
           <div id="kbAvisarClienteBox" style="display:none;margin-top:10px;background:#F0FDF4;border:2px solid #86EFAC;border-radius:10px;padding:14px">
             <div style="font-size:12px;font-weight:800;color:#065F46;margin-bottom:6px">📱 Avisar Cliente — OS Pronta</div>
@@ -5757,7 +5750,24 @@ function _authFirebaseError(code){
 
         <!-- ── ABA 4: MÃO DE OBRA ── -->
         <div id="cfgPg4" class="cfg-pg" style="display:none">
+          <!-- HOTFIX OPERACIONAL 2026-08-12, P0.1 — preço dos consumíveis
+               Adesivo/Adh. Branco deixou de ser hardcoded no motor
+               (orcRecalc) e passou a ser configurável aqui. Valores
+               default = os mesmos que já estavam hardcoded (migração sem
+               mudar o cálculo de nenhum orçamento novo até o usuário
+               alterar). Orçamentos já salvos usam o snapshot do preço no
+               momento da venda (ver orcSalvarOrcamento/orcEnvEditar). -->
           <div class="card">
+            <div class="card-h"><div class="card-h-left">🩹 Consumíveis — Adesivo</div></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+              <div class="fg"><label>Adesivo — R$/cm²</label><input type="number" id="cfgAdesivoPrecoCm2" step="0.0001" min="0" placeholder="Ex: 0,0056"></div>
+              <div class="fg"><label>Adesivo Branco — R$/cm²</label><input type="number" id="cfgAdesivoBrancoPrecoCm2" step="0.0001" min="0" placeholder="Ex: 0,0011"></div>
+            </div>
+            <div style="text-align:right;margin-top:12px">
+              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:18px">
             <div class="card-h">
               <div class="card-h-left">🧑‍🔧 Mão de Obra & Serviços</div>
               <button class="topbar-btn" style="padding:5px 12px;font-size:11px" onclick="cfgAddRow('mobTable','mob')">+ Adicionar</button>
@@ -10182,8 +10192,19 @@ function orcRecalc() {
   const imp     = parseFloat(document.getElementById('oc_imp')?.value)||0;
   const spray   = (parseFloat(document.getElementById('oc_spray')?.value)||0)*16;
   const extra   = parseFloat(document.getElementById('oc_extra')?.value)||0;
-  const adh     = adhYes  ? areaTotal*0.0056 : 0;
-  const adhb    = adhbYes ? areaTotal*0.0011 : 0;
+  // HOTFIX OPERACIONAL 2026-08-12, P0.1 — preço/cm² de Adesivo/Adh. Branco
+  // deixou de ser hardcoded (0.0056/0.0011): (1) reabrir um orçamento já
+  // salvo usa o SNAPSHOT do preço vigente na venda (window._orcAdhPrecoSnapshot,
+  // setado por orcEnvEditar) — nunca recalcula histórico com preço novo;
+  // (2) um orçamento novo lê o preço atual configurável em Config.
+  // Orçamento → Consumíveis (cfgLoad().financeiro), com fallback para o
+  // mesmo valor que já era hardcoded (migração sem quebrar cálculo).
+  var _adhSnap = (typeof window!=='undefined' && window._orcAdhPrecoSnapshot) || null;
+  var _cfgFinAdh = (typeof cfgLoad==='function') ? (cfgLoad().financeiro||{}) : {};
+  const adhPrecoCm2  = _adhSnap && typeof _adhSnap.adh==='number'  ? _adhSnap.adh  : (typeof _cfgFinAdh.adesivoPrecoCm2==='number'       ? _cfgFinAdh.adesivoPrecoCm2       : 0.0056);
+  const adhbPrecoCm2 = _adhSnap && typeof _adhSnap.adhb==='number' ? _adhSnap.adhb : (typeof _cfgFinAdh.adesivoBrancoPrecoCm2==='number' ? _cfgFinAdh.adesivoBrancoPrecoCm2 : 0.0011);
+  const adh     = adhYes  ? areaTotal*adhPrecoCm2  : 0;
+  const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : 0;
   const consTotal = adh+adhb+imp+spray+extra;
   orcSetV('ocv_adh',adh); orcSetV('ocv_adhb',adhb);
   orcSetV('ocv_imp',imp); orcSetV('ocv_spray',spray); orcSetV('ocv_extra',extra);
@@ -11249,11 +11270,17 @@ function orcAplicarConsumivelReceita(prodNome) {
   var totalItens = document.querySelectorAll('#orcItemBody tr[data-idx]').length;
   if(totalItens !== 1) return;
   var receita = (planProdLoad()||[]).find(function(p){ return p.nome===prodNome; });
-  if(!receita) return;
   var mudou = false;
+  // HOTFIX OPERACIONAL 2026-08-12, P0.1 — achado real: trocar de produto
+  // dentro do MESMO orçamento (único item) mantinha Adesivo/Adh. Branco
+  // em "Sim" herdado do produto anterior sempre que a receita do NOVO
+  // produto não define status para o consumível (valor===null). Regra
+  // canônica: todo novo item nasce Não/Não — só continua Sim se a
+  // receita do produto ATUAL exigir explicitamente ('obrigatoria').
+  // Nunca herda do produto/item anterior.
   ['adh','adhb'].forEach(function(chave){
-    var valor = orcConsumivelResolverValor(receita, chave);
-    if(valor===null) return;
+    var valor = receita ? orcConsumivelResolverValor(receita, chave) : null;
+    if(valor===null) valor = 'nao';
     var el = document.getElementById(chave==='adh' ? 'oc_adh' : 'oc_adhb');
     if(el && el.value!==valor) { el.value = valor; mudou = true; }
   });
@@ -12087,7 +12114,14 @@ const _kbStatusMap = {
   aguard_master:    { cls:'sm',  txt:'🔐 Aguard. Master' },
   cancelado:        { cls:'si',  txt:'Cancelado'         },
   orcamento:        { cls:'si',  txt:'Orçamento'         },
-  aguardando_saldo: { cls:'sas', txt:'💰 Aguard. Saldo'  }
+  // HOTFIX OPERACIONAL 2026-08-12, P0.6 — "aguardando_saldo" é um estado
+  // FINANCEIRO (entrada paga, saldo pendente); no Kanban (visão 100%
+  // operacional) ele nunca pode aparecer como "Aguard. Saldo" — do ponto
+  // de vista de produção, esta OS ainda não iniciou, exatamente como
+  // 'iniciada' (ver _producaoJaIniciada). O status financeiro real
+  // continua existindo/sendo usado em "Todas as OS", que É o lugar
+  // autorizado a mostrá-lo.
+  aguardando_saldo: { cls:'si', txt:'Iniciada' }
 };
 
 // RODADA 2, P0.5 (2026-08-07) — antes, a OS só mostrava um resumo genérico
@@ -12474,21 +12508,11 @@ function kbOpen(id) {
       _iniciarBox.style.display = 'none';
     }
   }
-  // Receber Saldo — visível quando aguardando_saldo. GO-LIVE FINAL
-  // 2026-08-12, seção 43-48 — nunca mais um valor R$ aqui (visão Kanban
-  // é operacional, nunca financeira, nem para Master) — apenas um status
-  // sanitizado; o valor real só aparece no modal financeiro dedicado
-  // (osAbrirPagamentoSaldoModal), aberto pelo botão.
-  var _saldoBox = document.getElementById('kbReceberSaldoBox');
-  if (_saldoBox) {
-    if (os.status === 'aguardando_saldo') {
-      var _svEl = document.getElementById('kbSaldoValor');
-      if (_svEl) _svEl.textContent = 'Saldo pendente na entrada';
-      _saldoBox.style.display = '';
-    } else {
-      _saldoBox.style.display = 'none';
-    }
-  }
+  // HOTFIX OPERACIONAL 2026-08-12, P0.6 — bloco "Receber Saldo" removido
+  // do HTML do Kanban (era a última peça de vocabulário financeiro na
+  // visão de produção — "Pagamento"/"Registrar Pagamento"/"Saldo
+  // pendente"). Registrar pagamento continua disponível, só que
+  // exclusivamente em "Todas as OS" (renderOsTable → osAbrirPagamentoSaldoModal).
   if (_matProdBox) {
     var _mp = os.matProd;
     if (_mp && os.status === 'producao') {
@@ -15482,7 +15506,16 @@ function kbOpenNovaOS() {
 // hora do dia em que o operador está olhando a tela.
 // ============================================================
 var _osListTab = 'ativas';
-var _OS_ATIVOS_STATUS = ['iniciada','producao','master','em_andamento','aguard_master'];
+// HOTFIX OPERACIONAL 2026-08-12, P0.7 — achado real em produção: Kanban
+// tinha OS #011/#012 mas "Todas as OS" mostrava 0/"Nenhuma OS encontrada".
+// Raiz: as duas telas leem a MESMA fonte (Object.values(KB_OS)), mas esta
+// allowlist estava incompleta — faltava 'aguardando_saldo' (status muito
+// comum logo após um pagamento de entrada 50/50), então QUALQUER OS nesse
+// status ficava invisível em TODAS as abas de "Todas as OS" (ativas/
+// prontas/recentes/histórico), enquanto o Kanban (kbRender) usa uma lista
+// de EXCLUSÃO (só esconde 'entregue'/'cancelado'), não uma allowlist — por
+// isso o Kanban sempre mostrava a OS e "Todas as OS" não.
+var _OS_ATIVOS_STATUS = ['iniciada','producao','master','em_andamento','aguard_master','aguardando_saldo'];
 var _OS_RECENTES_DIAS = 7;
 
 function osFiltrarPorAba(tab, list, agora) {
@@ -21747,6 +21780,10 @@ function orcResetFormularioVR(){
   var vend=document.getElementById('orcClientVendedor'); if(vend) vend.value=(typeof _currentSession!=='undefined' && _currentSession && _currentSession.user) || '';
   ['orcDesc','orcAcres','orcMontagem','orcDesl','om_laser','om_dobra','om_pol','om_uv','om_lixa','om_tupia','oc_imp','oc_spray','oc_extra','orcSoCorteMin'].forEach(function(id){ setV(id,'0'); });
   setV('oc_adh','nao'); setV('oc_adhb','nao');
+  // HOTFIX OPERACIONAL 2026-08-12, P0.1 — novo orçamento nunca herda o
+  // snapshot de preço de Adesivo do orçamento anterior editado nesta
+  // sessão; volta a usar a config vigente (ver orcRecalc).
+  window._orcAdhPrecoSnapshot = null;
   var descTipo=document.getElementById('orcDescTipo'); if(descTipo) descTipo.value='pct';
   var acresTipo=document.getElementById('orcAcresTipo'); if(acresTipo) acresTipo.value='pct';
   var soCorte=document.getElementById('orcSoCorte'); if(soCorte) soCorte.checked=false;
@@ -23729,7 +23766,14 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var larg  = (document.getElementById('oi_larg_'+idx)||{}).value||'';
     var alt   = (document.getElementById('oi_alt_'+idx)||{}).value||'';
     var matEl = document.getElementById('oi_mat_'+idx);
-    var matLbl= matEl ? matEl.options[matEl.selectedIndex].text : '';
+    // HOTFIX OPERACIONAL 2026-08-12, P0.2 — achado real: o texto visível da
+    // <option> inclui espessura E preço/m² interno (ex: "Acrílico Cristal
+    // 4mm — R$151,17/m²"), que vazava para o cliente via WhatsApp/PDF.
+    // data-nome preserva o nome limpo (sem preço), já preparado para isso
+    // em orcConstruirMatOpts() mas não usado aqui — nunca usar .text para
+    // descrição voltada ao cliente.
+    var matOptSel = matEl ? matEl.options[matEl.selectedIndex] : null;
+    var matLbl= matOptSel ? (matOptSel.dataset && matOptSel.dataset.nome ? matOptSel.dataset.nome : matOptSel.text) : '';
     var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
     var totRawTxt = (document.getElementById('oi_tot_'+idx)||{}).textContent||'0';
     var totRaw = parseFloat(totRawTxt.replace(/[^\d,]/g,'').replace(',','.').replace(/\./g,function(m,o,s){return o<s.lastIndexOf('.')?'':'.'})) || 0;
@@ -24249,14 +24293,115 @@ function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return 
 function orcSetEnviados(arr){
   _ORC_ENVIADOS_DATA=arr; // otimista — mantém a tela responsiva, igual ao comportamento anterior
   if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'nuvem-nao-pronta'});
+  return _orcamentosSalvarComMerge(arr, 0);
+}
+
+// HOTFIX OPERACIONAL 2026-08-12, P0.5 — achado real em produção: orcamentos
+// é UM documento (array inteiro de todos os orçamentos). orcSetEnviados()
+// gravava esse array inteiro via _cloudSave(), que faz CAS (compare-and-
+// swap) contra o payload SERIALIZADO INTEIRO — então dois vendedores
+// diferentes, salvando dois ORÇAMENTOS DIFERENTES ao mesmo tempo, sempre
+// colidiam ("foi alterado por outra sessão"), mesmo sem nenhuma relação
+// entre as duas edições. Conflito só é legítimo quando é o MESMO orçamento
+// (mesmo id) sendo editado por duas sessões ao mesmo tempo.
+//
+// Em vez de migrar a coleção inteira para documento-por-orçamento (troca de
+// arquitetura arriscada em cima de dados reais no mesmo dia), esta função
+// aplica concorrência POR ENTIDADE sobre o mesmo documento único:
+//   1. Descobre quais ids do array `arr` esta aba de fato mudou (diff
+//      contra o último payload confirmado pelo servidor nesta aba).
+//   2. Se o _cloudSave() reportar conflito, busca o array fresco do
+//      servidor e verifica APENAS os ids que esta aba mudou:
+//        - id também mudou no servidor → conflito real e específico
+//          daquele orçamento (nunca do array inteiro).
+//        - nenhum dos meus ids mudou no servidor → outra sessão só mexeu
+//          em OUTRO orçamento; faz merge automático (array fresco do
+//          servidor + meus ids por cima) e tenta de novo — nunca perde a
+//          gravação de ninguém.
+function _orcamentosSalvarComMerge(arr, tentativas){
+  // Salvaguarda: se esta aba nunca observou o documento "orcamentos" (baseline
+  // undefined — nunca chamou _cloudLoad/_cloudWatch para ele, ou ainda não
+  // terminou), _cloudSaveExec() pula o CAS e GRAVA POR CIMA sem checar nada
+  // (comportamento genérico de "nunca vi este doc, grava sem checar" —
+  // correto para a maioria das chaves, mas destrutivo aqui, porque
+  // sobrescreveria orçamentos de OUTRAS sessões que a nossa nunca leu). Na
+  // prática _cloudLoadAll() sempre carrega "orcamentos" no boot antes de
+  // qualquer salvamento — este guard só protege a janela rara em que isso
+  // ainda não aconteceu, buscando o estado real do servidor primeiro.
+  if(_cloudLastPayload['orcamentos']===undefined && typeof _db!=='undefined' && _db){
+    return _db.collection(_COL).doc('orcamentos').get().then(function(snap){
+      var raw = (snap.exists && snap.data() && typeof snap.data().data!=='undefined') ? snap.data().data : null;
+      if(raw===null) return _orcamentosSalvarComMergeContinuar(arr, tentativas); // documento ainda não existe — nada a mesclar
+      _cloudLastPayload['orcamentos'] = raw;
+      // Sem baseline anterior, TODO id em `arr` é candidato a ser "meu" —
+      // funde sobre o array fresco do servidor (nunca substitui o array
+      // inteiro por `arr` sozinho, que poderia não conter orçamentos de
+      // outras sessões que esta aba nunca chegou a carregar).
+      var freshArr0 = []; try{ freshArr0 = JSON.parse(raw)||[]; }catch(e){ freshArr0=[]; }
+      var idx0 = {}; freshArr0.forEach(function(o,i){ if(o && o.id) idx0[o.id]=i; });
+      var merged0 = freshArr0.slice();
+      arr.forEach(function(o){
+        if(!o || !o.id) return;
+        if(idx0.hasOwnProperty(o.id)) merged0[idx0[o.id]] = o; else merged0.unshift(o);
+      });
+      return _orcamentosSalvarComMergeContinuar(merged0, tentativas);
+    });
+  }
+  return _orcamentosSalvarComMergeContinuar(arr, tentativas);
+}
+function _orcamentosSalvarComMergeContinuar(arr, tentativas){
+  var baselineStr = _cloudLastPayload['orcamentos'];
+  var baselineArr = [];
+  if(baselineStr){ try{ baselineArr = JSON.parse(baselineStr)||[]; }catch(e){ baselineArr=[]; } }
+  var baselineById = {};
+  baselineArr.forEach(function(o){ if(o && o.id) baselineById[o.id]=o; });
+  var meusIds = [];
+  arr.forEach(function(o){
+    if(!o || !o.id) return;
+    var antes = baselineById[o.id];
+    if(!antes || JSON.stringify(antes) !== JSON.stringify(o)) meusIds.push(o.id);
+  });
+
   return _cloudSave('orcamentos', arr).then(function(res){
-    if(!res.ok && res.reason==='conflito' && res.serverData){
-      // Esta aba estava com uma cópia desatualizada — nunca reaplicar o snapshot
-      // obsoleto por conta própria: reconcilia com a verdade do servidor.
-      _ORC_ENVIADOS_DATA = res.serverData;
-      try{ orcEnviadosRender(); }catch(e){}
+    if(res.ok || res.unchanged) return res;
+    if(res.reason!=='conflito' || !res.serverData){
+      return res;
     }
-    return res;
+    var freshArr = res.serverData;
+    var freshById = {};
+    freshArr.forEach(function(o){ if(o && o.id) freshById[o.id]=o; });
+    // Conflito real: algum dos ids que EU mudei também mudou no servidor
+    // desde a última vez que eu o li.
+    var idConflito = null;
+    for(var i=0;i<meusIds.length;i++){
+      var id = meusIds[i];
+      var antes = baselineById[id];
+      if(!antes) continue; // era novo para mim — não posso conflitar com algo que eu não conhecia
+      var fresco = freshById[id];
+      if(fresco && JSON.stringify(fresco) !== JSON.stringify(antes)) { idConflito = id; break; }
+    }
+    if(idConflito){
+      var confOrc = freshById[idConflito];
+      _ORC_ENVIADOS_DATA = freshArr; try{ orcEnviadosRender(); }catch(e){}
+      if(typeof showToast==='function') showToast('⚠️ O orçamento #'+(confOrc?confOrc.num:'?')+' foi atualizado por outro usuário. Atualize os dados antes de continuar.','warn');
+      return {ok:false, reason:'conflito_orcamento', orcId:idConflito, serverData: freshArr};
+    }
+    if(tentativas >= 5){
+      _ORC_ENVIADOS_DATA = freshArr; try{ orcEnviadosRender(); }catch(e){}
+      if(typeof showToast==='function') showToast('⚠️ Não foi possível salvar após múltiplas tentativas — tente novamente.','warn');
+      return {ok:false, reason:'conflito-persistente', serverData: freshArr};
+    }
+    // Nenhum conflito real — outra sessão só mexeu em outro orçamento.
+    // Merge automático: array fresco do servidor + os MEUS ids por cima.
+    var merged = freshArr.slice();
+    var mergedIdxById = {};
+    merged.forEach(function(o,i){ if(o && o.id) mergedIdxById[o.id]=i; });
+    arr.forEach(function(o){
+      if(!o || !o.id || meusIds.indexOf(o.id) < 0) return; // só reaplica o que é meu
+      if(mergedIdxById.hasOwnProperty(o.id)) merged[mergedIdxById[o.id]] = o;
+      else merged.unshift(o);
+    });
+    return _orcamentosSalvarComMerge(merged, tentativas+1);
   });
 }
 
@@ -24868,6 +25013,12 @@ async function _orcSalvarOrcamentoImpl() {
     om_uv: _gv('om_uv'), om_lixa: _gv('om_lixa'), om_tupia: _gv('om_tupia'),
     oc_adh: (document.getElementById('oc_adh')||{}).value||'nao',
     oc_adhb: (document.getElementById('oc_adhb')||{}).value||'nao',
+    // HOTFIX OPERACIONAL 2026-08-12, P0.1 — snapshot do preço R$/cm² de
+    // Adesivo/Adh. Branco EFETIVAMENTE usado neste cálculo (nunca o valor
+    // vigente na config no momento em que alguém reabrir depois). Ver
+    // orcEnvEditar (restaura em window._orcAdhPrecoSnapshot) e orcRecalc.
+    adesivoPrecoCm2: (function(){ var f=(typeof cfgLoad==='function'?(cfgLoad().financeiro||{}):{}); return typeof f.adesivoPrecoCm2==='number'?f.adesivoPrecoCm2:0.0056; })(),
+    adesivoBrancoPrecoCm2: (function(){ var f=(typeof cfgLoad==='function'?(cfgLoad().financeiro||{}):{}); return typeof f.adesivoBrancoPrecoCm2==='number'?f.adesivoBrancoPrecoCm2:0.0011; })(),
     oc_imp: _gv('oc_imp'), oc_spray: _gv('oc_spray'), oc_extra: _gv('oc_extra'),
     orcDesc: _gv('orcDesc'), orcDescTipo: (document.getElementById('orcDescTipo')||{}).value||'pct',
     orcAcres: _gv('orcAcres'), orcAcresTipo: (document.getElementById('orcAcresTipo')||{}).value||'pct',
@@ -25676,6 +25827,13 @@ function orcEnvEditar(id) {
       setV('om_laser', p.om_laser); setV('om_dobra', p.om_dobra); setV('om_pol', p.om_pol);
       setV('om_uv', p.om_uv); setV('om_lixa', p.om_lixa); setV('om_tupia', p.om_tupia);
       setV('oc_adh', p.oc_adh); setV('oc_adhb', p.oc_adhb);
+      // HOTFIX OPERACIONAL 2026-08-12, P0.1 — restaura o snapshot do preço
+      // R$/cm² efetivamente usado quando este orçamento foi salvo; orcRecalc()
+      // passa a usar este valor em vez da config vigente enquanto o
+      // orçamento estiver aberto (nunca recalcula histórico com preço novo).
+      window._orcAdhPrecoSnapshot = (typeof p.adesivoPrecoCm2==='number' || typeof p.adesivoBrancoPrecoCm2==='number')
+        ? { adh: typeof p.adesivoPrecoCm2==='number'?p.adesivoPrecoCm2:null, adhb: typeof p.adesivoBrancoPrecoCm2==='number'?p.adesivoBrancoPrecoCm2:null }
+        : null;
       setV('oc_imp', p.oc_imp); setV('oc_spray', p.oc_spray); setV('oc_extra', p.oc_extra);
       setV('orcDesc', p.orcDesc); setV('orcDescTipo', p.orcDescTipo);
       setV('orcAcres', p.orcAcres); setV('orcAcresTipo', p.orcAcresTipo);
@@ -26490,7 +26648,10 @@ var CFG_KEY = 'erp_config_precos';
 
 // Dados padrão
 var CFG_DEFAULT = {
-  financeiro: { overhead:15, vrml:30, impostos:0, comissao:0, cartao:3.49, pix:0.99, link:4.99, descMax:10 },
+  // HOTFIX OPERACIONAL 2026-08-12, P0.1 — adesivoPrecoCm2/adesivoBrancoPrecoCm2
+  // migrados dos literais hardcoded que orcRecalc() usava antes (0.0056 e
+  // 0.0011 R$/cm²) — mesmos valores, agora editáveis em Config. Orçamento.
+  financeiro: { overhead:15, vrml:30, impostos:0, comissao:0, cartao:3.49, pix:0.99, link:4.99, descMax:10, adesivoPrecoCm2:0.0056, adesivoBrancoPrecoCm2:0.0011 },
   markup: { geral:100, adesivo:120, placa:90, instalacao:150, arte:200, mob:100 },
   parcelamento: [
     {parcelas:1,  taxa:0,    obs:'À vista'},
@@ -26983,7 +27144,7 @@ function cfgRenderTables() {
 
   // Financeiro
   var fin = d.financeiro||{};
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct',adesivoPrecoCm2:'cfgAdesivoPrecoCm2',adesivoBrancoPrecoCm2:'cfgAdesivoBrancoPrecoCm2'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
   cfgAtualizarMargemPlan();
   cfgRenderLaserSpeeds();
@@ -27362,7 +27523,7 @@ function cfgAtualizarMargemPlan() {
 function cfgSalvar() {
   if(!_cfgData) _cfgData = cfgLoad();
   // Financeiro
-  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct'};
+  var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct',adesivoPrecoCm2:'cfgAdesivoPrecoCm2',adesivoBrancoPrecoCm2:'cfgAdesivoBrancoPrecoCm2'};
   if(!_cfgData.financeiro) _cfgData.financeiro={};
   // Snapshot ANTES de sobrescrever — usado para detectar se overhead/VRML/
   // impostos (os parâmetros de markup) realmente mudaram nesta gravação.
@@ -29916,6 +30077,28 @@ function secAlterarSenha(){
 }
 
 // ── Auditoria ─────────────────────────────────────────────────────────────────
+// HOTFIX OPERACIONAL 2026-08-12, P0.5 — achado real em produção: erp_audit_log
+// era gravado via _cloudSave(), que faz um CAS (compare-and-swap) contra o
+// payload INTEIRO do documento — e como secAuditLog() é chamado em ~46
+// pontos do app (login, salvar orçamento, pagamento, status de OS, etc.),
+// QUALQUER ação de QUALQUER usuário podia colidir com a de outro e mostrar
+// "erp_audit_log foi alterado por outra sessão — esta mudança não foi
+// salva" mesmo quando os dois usuários faziam coisas completamente
+// diferentes (ex.: dois vendedores em dois orçamentos distintos). Auditoria
+// é só um registro histórico — nunca pode travar uma ação comercial real.
+// Gravação direta (sem transação/CAS): nunca gera conflito para o usuário,
+// nunca bloqueia a ação que está sendo auditada. Cada aba já carrega
+// _SEC_AUDIT uma vez no login (_cloudLoad, não é um listener ao vivo — ver
+// _cloudLoadAll) e só acrescenta seus PRÓPRIOS eventos; o pior caso de uma
+// escrita direta perder um evento muito recente de outra aba é aceitável
+// para um log auxiliar e infinitamente melhor que travar o ERP inteiro.
+function _auditLogGravarDireto(arr){
+  try{
+    if(typeof _db==='undefined' || !_db || typeof _COL==='undefined') return;
+    _db.collection(_COL).doc('erp_audit_log').set({ data: JSON.stringify(arr), ts: Date.now() })
+      .catch(function(e){ console.warn('[Cloud] erp_audit_log set falhou:', e); });
+  }catch(e){}
+}
 function secAuditLog(action, detail){
   try{
     var now=new Date();
@@ -29923,7 +30106,7 @@ function secAuditLog(action, detail){
     var user=_currentSession?_currentSession.user:'—';
     _SEC_AUDIT.unshift({ts:ts, user:user, action:action, detail:detail});
     if(_SEC_AUDIT.length>300) _SEC_AUDIT=_SEC_AUDIT.slice(0,300);
-    if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_audit_log', _SEC_AUDIT);
+    if(_cloudReady) _auditLogGravarDireto(_SEC_AUDIT);
   }catch(e){}
 }
 
@@ -29964,7 +30147,7 @@ function secRenderAudit(){
 function secLimparAudit(){
   if(!window.confirm('Limpar todo o histórico de auditoria? Esta ação não pode ser desfeita.')) return;
   _SEC_AUDIT=[];
-  if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_audit_log',[]);
+  if(_cloudReady) _auditLogGravarDireto([]);
   secAuditLog('audit_clear','Histórico de auditoria limpo');
   secRenderAudit();
   showToast('Histórico de auditoria limpo','info');
