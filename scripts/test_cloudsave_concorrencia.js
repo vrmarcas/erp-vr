@@ -66,7 +66,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar'];
 var COL = 'erp_vr';
 // SPRINT PRÉ-GO-LIVE, Bloco H — envolvido numa fábrica para que cada
 // chamada da fábrica produza uma instância com seu PRÓPRIO
@@ -205,16 +205,41 @@ await test('5. conflito reconcilia _cloudLastPayload com a verdade do servidor (
   assertEq(mod.getLastPayload('orcamentos'), JSON.stringify(makeArr(['A', 'EXTERNO'])), 'baseline local atualizado para o valor real do servidor após o conflito');
 });
 
-await test('6. orcSetEnviados(): em conflito, reconcilia o array local com o servidor e notifica (sem reaplicar snapshot antigo)', async function () {
+await test('6. orcSetEnviados(): EXTERNO é um orçamento DIFERENTE de MEU — HOTFIX P0.5 faz merge automático em vez de recusar (nunca mais falso conflito entre vendedores diferentes)', async function () {
+  // HOTFIX OPERACIONAL 2026-08-12, P0.5 — este cenário (outra sessão salvou um
+  // orçamento diferente "EXTERNO" enquanto esta aba, com baseline desatualizado,
+  // tenta salvar seu PRÓPRIO orçamento novo "MEU") é exatamente o bug real relatado
+  // em produção: dois vendedores, dois orçamentos DIFERENTES, sem nenhuma relação
+  // entre si — nunca deveria falhar. Antes deste hotfix, _cloudSave() tratava
+  // qualquer divergência do array inteiro como conflito e recusava a gravação
+  // (r.ok=false), obrigando o vendedor a tentar de novo manualmente. Agora
+  // _orcamentosSalvarComMerge() identifica que "MEU" não conflita com nenhum id
+  // que esta aba já conhecia, funde automaticamente com o array fresco do servidor
+  // (que já contém EXTERNO) e grava os dois juntos — sem perder nenhuma gravação.
   resetFakeStore();
   mod.setEnviadosRaw(makeArr(['A', 'B']));
   await mod._cloudSave('orcamentos', makeArr(['A', 'B'])); // sincroniza baseline
   _fakeStore['orcamentos'] = { data: JSON.stringify(makeArr(['A', 'B', 'EXTERNO'])), ts: Date.now() };
+  var r = await mod.orcSetEnviados(makeArr(['A', 'B', 'MEU'])); // array local desatualizado (não viu EXTERNO ainda)
+  assertEq(r.ok, true, 'merge automático — salva com sucesso, nunca recusa por causa de um orçamento diferente');
+  var servidorFinal = JSON.parse(_fakeStore['orcamentos'].data);
+  assertEq(servidorFinal.some(function (o) { return o.id === 'EXTERNO'; }), true, 'orçamento externo (de outra sessão) preservado no servidor');
+  assertEq(servidorFinal.some(function (o) { return o.id === 'MEU'; }), true, 'meu orçamento novo também foi salvo — nenhuma gravação perdida');
+});
+
+await test('6b. orcSetEnviados(): conflito LEGÍTIMO continua sendo detectado quando é o MESMO id que mudou nos dois lados', async function () {
+  resetFakeStore();
+  mod.setEnviadosRaw(makeArr(['A', 'B']));
+  await mod._cloudSave('orcamentos', makeArr(['A', 'B'])); // sincroniza baseline
+  // Outra sessão ALTEROU o id 'A' (mesmo orçamento que esta aba também vai alterar)
+  var aAlteradoExterno = makeArr(['A', 'B']); aAlteradoExterno[0] = { id: 'A', v: 'editado por outra sessão' };
+  _fakeStore['orcamentos'] = { data: JSON.stringify(aAlteradoExterno), ts: Date.now() };
+  var meuAAlterado = makeArr(['A', 'B']); meuAAlterado[0] = { id: 'A', v: 'editado por esta aba' };
   var rendersAntes = global._renderCalls;
-  var r = await mod.orcSetEnviados(makeArr(['A', 'B', 'MEU'])); // array obsoleto local
-  assertEq(r.ok, false, 'gravação recusada propagada pelo retorno');
-  assertEq(mod.orcGetEnviados().some(function (o) { return o.id === 'EXTERNO'; }), true, 'array local reconciliado com o servidor (contém EXTERNO)');
-  assertEq(mod.orcGetEnviados().some(function (o) { return o.id === 'MEU'; }), false, 'mudança obsoleta local não permanece como se tivesse sido salva');
+  var r = await mod.orcSetEnviados(meuAAlterado);
+  assertEq(r.ok, false, 'conflito real (mesmo id A mudou nos dois lados) continua sendo recusado');
+  assertEq(r.reason, 'conflito_orcamento', 'motivo específico de conflito por orçamento, não um genérico');
+  assertEq(r.orcId, 'A', 'conflito nomeia especificamente o orçamento A, não o array inteiro');
   assertTruthy(global._renderCalls > rendersAntes, 'tela foi atualizada para refletir o estado real após o conflito');
 });
 

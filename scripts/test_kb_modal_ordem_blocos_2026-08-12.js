@@ -47,7 +47,6 @@ var posIniciar    = posOf('id="kbIniciarProdBox"', 'Botão Iniciar Produção (k
 var posChecklist  = posOf('Checklist de Produção', 'Checklist de Produção');
 var posArquivos   = posOf('id="kbPlanImgBox"', 'Arquivos da Produção (kbPlanImgBox)');
 var posLink       = posOf('🔗 Link do Arquivo', 'Link do Arquivo');
-var posReceber    = posOf('id="kbReceberSaldoBox"', 'Receber Saldo / Pagamento (kbReceberSaldoBox)');
 var posAvisar     = posOf('id="kbAvisarClienteBox"', 'Avisar Cliente (kbAvisarClienteBox)');
 
 ok('1. Prazo Sugerido vem antes de Produção & Prazo', posPrazo < posProdPrazo);
@@ -56,11 +55,16 @@ ok('3. Material em Produção vem antes de Iniciar Produção', posMaterial < po
 ok('4. Iniciar Produção vem antes do Checklist — BUG REAL corrigido (antes o checklist era o primeiro bloco de todos)', posIniciar < posChecklist);
 ok('5. Checklist vem antes de Arquivos da Produção', posChecklist < posArquivos);
 ok('6. Arquivos da Produção vem antes do Link do Arquivo (mesmo grupo "Arquivos")', posArquivos < posLink);
-ok('7. Link do Arquivo vem antes de Receber Saldo (ações finais)', posLink < posReceber);
-ok('8. Receber Saldo vem antes de Avisar Cliente (última ação final)', posReceber < posAvisar);
+// HOTFIX OPERACIONAL 2026-08-12, P0.6 — bloco "Receber Saldo / Pagamento"
+// foi REMOVIDO do Kanban (visão 100% operacional, zero vocabulário
+// financeiro — ver test_hotfix_p0_6_kanban_sem_financeiro_2026-08-12.js).
+// Registrar pagamento continua existindo, só que exclusivamente em
+// "Todas as OS" — nunca mais duplicado aqui.
+ok('7. Bloco "Receber Saldo" não existe mais no Kanban (P0.6 — ação de pagamento só em "Todas as OS")', chunk.indexOf('id="kbReceberSaldoBox"') < 0);
+ok('8. Link do Arquivo vem antes de Avisar Cliente (última ação final, sem o bloco financeiro no meio)', posLink < posAvisar);
 
 // ── Regressão estrutural: nenhum handler/id foi alterado pela reordenação ──
-var HANDLERS_ESPERADOS = ['kbIniciarProd()', 'kbEditarMatProd()', 'kbCheckAddItem()', 'kbSalvarTempo()', 'kbSalvarPrazo()', 'kbSaveLink()', 'kbOpenLink()', 'osAbrirPagamentoSaldoModal(_kbOsId)', 'kbEnviarMsgCliente()'];
+var HANDLERS_ESPERADOS = ['kbIniciarProd()', 'kbEditarMatProd()', 'kbCheckAddItem()', 'kbSalvarTempo()', 'kbSalvarPrazo()', 'kbSaveLink()', 'kbOpenLink()', 'kbEnviarMsgCliente()'];
 HANDLERS_ESPERADOS.forEach(function (h) {
   ok('handler preservado: ' + h, chunk.indexOf(h) >= 0);
 });
