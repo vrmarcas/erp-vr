@@ -94,13 +94,19 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 
   resetEls(1000, { n: 3 });
   mod1.orcCalcParcelaDisplay();
-  test('2. achado real corrigido: 3x nunca aplica a taxa real configurada (3,99%) — 1000/3 = 3x de R$333,33 (total: R$1.000,00), NUNCA R$1.039,90',
-    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 333,33 (total: R$ 1.000,00)');
+  // GO-LIVE FINAL 2026-08-12, seção 4 — mudança de regra deliberada,
+  // confirmada em produção: "3x nunca aplica a taxa" era o comportamento
+  // do Bloco E (SPRINT PRÉ-GO-LIVE), que fazia a VR absorver a taxa da
+  // maquininha silenciosamente. A regra nova é o oposto: "sem juros" =
+  // sem juros VISÍVEIS, mas a taxa real (3,99% em 3x, config real do
+  // fixture) É embutida no preço do cartão — 1000/(1-0,0399) = R$1.041,56.
+  test('2. GO-LIVE FINAL — 3x embute a taxa real configurada (3,99%): 1000/(1-0,0399) = 3x de R$347,18 (total: R$1.041,56)',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 347,18 (total: R$ 1.041,56)');
 
   resetEls(1000, { n: 3, dcOn: true, dcPct: 10 });
   mod1.orcCalcParcelaDisplay();
-  test('3. achado real corrigido: desconto condicional de 10% é aplicado ANTES de dividir (3x de R$300,00 = 900/3), nunca ignorado (1000/3)',
-    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 300,00 (total: R$ 900,00)');
+  test('3. GO-LIVE FINAL — desconto condicional de 10% aplicado ANTES de dividir E a taxa embutida por cima: 900/(1-0,0399) = 3x de R$312,46 (total: R$937,40)',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 312,46 (total: R$ 937,40)');
 
   resetEls(1000, { n: 3, pxPct: 5 });
   mod1.orcCalcParcelaDisplay();
@@ -114,8 +120,8 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
   // nesta conta — 1000/3 sem nenhum desconto = 3x de R$333,33 (total
   // exato: R$1.000,00, a soma real das parcelas — nunca uma aproximação
   // reconstruída via valorParcela×n, que perderia 1 centavo).
-  test('4. achado real corrigido: desconto de "PIX" NUNCA se aplica na simulação de parcelamento no CARTÃO (são condições mutuamente exclusivas) — 1000/3 sem desconto = 3x de R$333,33 (total exato: R$1.000,00)',
-    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 333,33 (total: R$ 1.000,00)');
+  test('4. desconto de "PIX" NUNCA se aplica na simulação de parcelamento no CARTÃO (condições mutuamente exclusivas) — resultado idêntico ao teste 2 (taxa embutida, sem desconto de PIX)',
+    _elements.orcSimParcelaDisplay.textContent, '3× de R$ 347,18 (total: R$ 1.041,56)');
 }
 
 // ── 2. finAntecipar() — execução real, achado do unit-mismatch ─────────
@@ -153,8 +159,13 @@ console.log('\n=== RODADA 6, seção 2 — Cartão/PIX: telas restantes + regres
 // real se o cliente de fato escolher pagar via PIX).
 {
   var srcSalvar = extractFn('_orcSalvarOrcamentoImpl');
-  test('7. valorFinal é calculado via orcMotorComercial (Bloco E), não mais orcMotorPagamento (motor legado com taxa real) nem uma 4ª fórmula duplicada em ponto flutuante',
-    /afterDisc\s*=\s*orcMotorComercial\(/.test(srcSalvar), true);
+  // GO-LIVE FINAL 2026-08-12, seção 4 — valorFinal agora é o preço no
+  // CARTÃO da quantidade de parcelas selecionada (com taxa embutida, ver
+  // seção 4), lido de motor.cartao[nParc] — ainda a MESMA fonte central
+  // (orcMotorComercial), nunca uma 4ª fórmula duplicada; só o campo lido
+  // do resultado mudou (cartao[nParc].totalCents, não mais .baseCents).
+  test('7. valorFinal é calculado via orcMotorComercial (fonte central), lendo cartao[nParc].totalCents (preço com taxa embutida) — nunca uma 4ª fórmula duplicada',
+    /_motorSalvar\s*=\s*orcMotorComercial\(/.test(srcSalvar) && /afterDisc\s*=\s*\(_motorSalvar\.cartao\[nParc\]/.test(srcSalvar), true);
   test('8. valorFinal só é reduzido pelo desconto condicional (dcOn) quando ativo — PIX nunca mais é subtraído automaticamente (não existe mais gate pxOn/pxPct dentro do cálculo de afterDisc)',
     /baseAposCondSalvar\s*=\s*dcOn\s*\?\s*c\.finalPrice\*\(1-dcPct\/100\)/.test(srcSalvar), true);
 }

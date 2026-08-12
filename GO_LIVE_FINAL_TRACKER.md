@@ -9,11 +9,14 @@ Estados: TODO | IN PROGRESS | IMPLEMENTED | TESTED | DEPLOYED | VISUAL PASS | BL
 - [TODO] Reprodução visual dos bugs (browser) — checar se sessão está disponível
 
 ## Bloco P0-1 — Preço Cartão × PIX × Dinheiro (seções 4-8)
-- [TODO] orcMotorComercial: embutir taxa real da maquininha no preço cartão (hoje NÃO embute — Bloco E anterior deixou cartão = base sem taxa)
-- [TODO] PIX sugerido = cálculo inverso (1 - base/cartão)*100, volta exatamente à base em centavos
-- [TODO] PIX editável com override manual preservado + flag
-- [TODO] Dinheiro = mesmo valor efetivo do PIX
-- [TODO] Testes cent-safe (0/3/5/6.5%, 1x/2x/3x, override, reload)
+- [TESTED] orcMotorComercial reescrito: cartao(n) = base/(1-taxa(n)/100), taxa lida de cfgLoad().parcelamento (config real já existente, "Config > Financeiro > Parcelamento"). 6 call-sites atualizados (wizard resumo, Confirmação de Pagamento, PDF/WhatsApp, valorFinal persistido). Teste: scripts/test_orc_motor_comercial_taxa_embutida_2026-08-12.js (56/56 verde) — cobre 0/3/5/6.5%, 1x/2x/3x, centavos ímpares, override, reload
+- [TESTED] PIX sugerido = taxa(nParc atual); sem override, volta EXATAMENTE à base (baseCents direto, nunca por coincidência de arredondamento)
+- [TESTED] PIX override manual: campo auto-preenche com sugestão, mas nunca sobrescreve valor digitado (orcPixSincronizarSugestao + sentinela window._orcPixUltimaSugestao). Botão "usar sugerido". Reabrir orçamento salvo (orcEnvEditar) usa sentinela -1 para nunca recalcular diferente. Teste: scripts/test_orc_pix_sugestao_override_2026-08-12.js (10/10 verde)
+- [TESTED] Dinheiro = PIX (já implementado em rodada anterior via orcPgtoAtualizarValorReceber — herda a correção automaticamente por usar o mesmo motor)
+- [TESTED] 4 arquivos de teste pré-existentes atualizados (mudança de regra deliberada, documentada inline): test_cartao_pix_motor_2026-08-09.js, test_sprint_pregolive_blocoEI_pdf_whatsapp_semjuros_2026-08-09.js, test_sprint_pregolive_gate_pagamento_semjuros_2026-08-09.js, test_sprint_pregolive_blocoB_stalestate_2026-08-09.js (este último era bug real meu — window undefined em harness Node, corrigido com guard defensivo _orcPixEstadoGlobal())
+- [TESTED] Suíte completa (114+ arquivos) rodou 2x limpa após todas as correções de preço
+- [TODO] Smoke visual real no wizard (preencher orçamento, ver PIX/cartão na tela) — não feito nesta rodada, sessão será usada ao final se disponível
+- [TODO] PDF/WhatsApp — não verificados visualmente nesta rodada (herdam a correção via orcCalcCondicoesPagamento, mas não capturados em tela)
 
 ## Bloco P0-2 — Modal "Continuar editando" (seções 9-13)
 - [TESTED] Causa raiz confirmada visualmente em produção (#000018): nav('orcamento') sempre reseta pra opg0 (orcEscolhaFluxo), "Continuar editando" só fechava o modal (orcNovoOrcamentoFecharModal)

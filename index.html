@@ -3292,10 +3292,15 @@ function _authFirebaseError(code){
               <div style="font-size:10px;color:var(--muted);margin-top:2px">Sempre mostrado ao cliente como opção, com desconto automático</div>
               <input type="checkbox" id="orcPixDiscToggle" checked style="display:none">
               <div id="orcPixDiscFields" style="display:block;margin-top:12px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:9px;padding:12px">
-                <div class="fg" style="margin-bottom:10px">
+                <div class="fg" style="margin-bottom:6px">
                   <label>Desconto PIX (%)</label>
                   <input type="number" id="orcPixDiscPct" value="" min="0" max="50" step="0.5" placeholder="Ex: 5" oninput="orcCalcPixDisc()" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px">
                 </div>
+                <!-- GO-LIVE FINAL 2026-08-12, seção 5-6 — sugestão automática
+                (= taxa da maquininha embutida no cartão selecionado) sempre
+                visível; "Usar sugerido" nunca sobrescreve silenciosamente
+                um valor que o vendedor já digitou (override manual). -->
+                <div id="orcPixSugestaoHint" style="font-size:10px;color:var(--muted);margin-bottom:10px"></div>
                 <div id="orcPixDiscPreview" style="background:#fff;border:1px solid #86EFAC;border-radius:7px;padding:9px 11px;font-size:11px;color:#166534;line-height:1.6"></div>
               </div>
             </div>
@@ -11350,15 +11355,22 @@ function orcPgtoAtualizarValorReceber() {
   // é sempre igual ao valor à vista (sem juros); só o PIX aplica desconto,
   // e só quando PIX é de fato o método selecionado (nunca soma desconto de
   // PIX ao escolher Cartão/Dinheiro/Link).
+  var nParcSim = parseInt((document.getElementById('orcSimParcelas')||{}).value,10)||1;
   var baseAposCond = (cond.dcOn && cond.dcPct>0) ? (v.finalPrice||0)*(1-cond.dcPct/100) : (v.finalPrice||0);
-  var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
+  var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParcSim });
   // GO-LIVE 2026-08-11, P0 seção 7 (bug real reproduzido em produção):
   // "metodo==='pix'" tratava Dinheiro no mesmo ramo de Cartão/Link (preço
   // cheio, sem desconto à vista) — Dinheiro mostrava R$131,82 igual ao
   // Cartão, quando a regra é PREÇO À VISTA = PIX = DINHEIRO. O desconto à
   // vista (cond.pxPct) precisa se aplicar igualmente às duas formas.
   var isAVista = (metodo==='pix' || metodo==='dinheiro') && cond.pxOn;
-  var valor = isAVista ? (motorCom.pix.totalCents/100) : (motorCom.baseCents/100);
+  // GO-LIVE FINAL 2026-08-12, seção 4 — Cartão/Link mostra o preço com a
+  // taxa da maquininha já embutida (cartao[n].totalCents), nunca mais o
+  // valor-base sem taxa (motorCom.baseCents, que agora é só a referência
+  // interna usada para o cálculo do PIX — nunca o preço mostrado ao
+  // cliente no cartão).
+  var cartaoSim = motorCom.cartao[nParcSim] || motorCom.cartao[1];
+  var valor = isAVista ? (motorCom.pix.totalCents/100) : (cartaoSim.totalCents/100);
   var vd = document.getElementById('orcPgtoValorDisplay'); if(vd) vd.textContent = orcFmt(valor);
   var sv = document.getElementById('orcSimValor'); if(sv) sv.value = orcFmt(valor);
 }
@@ -21498,6 +21510,10 @@ function orcResetCondicoesPagamentoCompartilhadas(){
   // padrão (3x) e o percentual de PIX é limpo (repopulado da config
   // financeira central por orcTogglePixDisc()).
   setV('orcPixDiscPct','');
+  // GO-LIVE FINAL 2026-08-12, seção 12 — novo orçamento nunca herda o
+  // rastreamento de override do PIX (window._orcPixUltimaSugestao) do
+  // orçamento anterior.
+  if (typeof window !== 'undefined') window._orcPixUltimaSugestao = null;
   var parcSel = document.getElementById('orcParcSel'); if(parcSel) parcSel.innerHTML='';
   if(typeof orcToggleParc==='function') orcToggleParc();
   if(typeof orcTogglePixDisc==='function') orcTogglePixDisc();
@@ -22964,35 +22980,66 @@ function orcDistribuirParcelas(totalCents, n) {
   return parcelas;
 }
 
-// SPRINT PRÉ-GO-LIVE, Bloco E — motor central ÚNICO da nova regra
-// comercial definitiva de Cartão/PIX: o preço em até 3x no cartão é
-// SEMPRE "sem juros" (o cliente nunca vê a taxa de processamento do
-// cartão embutida nas parcelas — ela é um custo interno, absorvido na
-// margem, nunca uma linha visível) e o PIX está SEMPRE disponível como
-// alternativa (nunca mais atrás de um toggle Sim/Não). Substitui, para
-// consumidores da NOVA regra, a antiga leitura solta de
-// orcPixDiscToggle/orcParcToggle — todo consumidor (resumo do wizard,
-// Confirmação de Pagamento, PDF, WhatsApp) deve usar esta função, nunca
-// reimplementar a conta.
+// GO-LIVE FINAL 2026-08-12, seções 4-8 — motor central ÚNICO reescrito
+// para a regra comercial definitiva: "sem juros" significa SEM JUROS
+// VISÍVEIS para o cliente — nunca significou a VR absorvendo
+// silenciosamente a taxa da maquininha (o Bloco E anterior fazia
+// cartao[n].totalCents = baseCents SEMPRE, ignorando a taxa cadastrada;
+// bug real: preço no cartão saía igual ao PIX, e o desconto PIX virava
+// um número arbitrário digitado, sem relação com a taxa real).
+//
+// Regra canônica de embutimento: cartao(n) = base / (1 - taxa(n)/100) —
+// assim, depois de a operadora descontar a taxa, a VR recebe exatamente
+// `base` líquido; o cliente só vê "3x sem juros de R$X", nunca uma linha
+// de taxa separada.
+//
+// PIX — cálculo inverso (seção 5): o percentual sugerido é exatamente a
+// taxa embutida no cartão da quantidade de parcelas ATUALMENTE
+// selecionada (cfgFinanceiro.nParcAtual) — matematicamente,
+// cartao(n) * (1 - taxa(n)/100) = base sempre, então o valor PIX
+// sugerido volta exatamente à base, em centavos, por CONSTRUÇÃO (nunca
+// por coincidência de arredondamento: usamos baseCents diretamente, não
+// uma segunda conta que poderia divergir por 1 centavo — ver seção 8,
+// "testar centavos ímpares"). Override manual (cfgFinanceiro.pix
+// diferente da sugestão) aplica o percentual efetivo sobre o preço do
+// cartão da mesma quantidade de parcelas — o vendedor pode negociar mais
+// ou menos desconto, mas a base do cálculo nunca muda.
 //
 // Retorna: { baseCents, cartao: {1,2,3: {parcelas:[cents...], valorParcela,
-// totalCents}}, pix: {percentual, totalCents} }.
+// totalCents, taxaPct}}, pix: {percentual, percentualSugerido, totalCents} }.
 function orcMotorComercial(baseReais, cfgFinanceiro) {
   var baseCents = Math.round((baseReais || 0) * 100);
   cfgFinanceiro = cfgFinanceiro || {};
+  var tabela = cfgFinanceiro.tabelaParcelamento
+    || (typeof cfgLoad === 'function' ? (cfgLoad().parcelamento || (typeof CFG_DEFAULT !== 'undefined' ? CFG_DEFAULT.parcelamento : [])) : [])
+    || [];
+  function _taxaDe(n) {
+    var found = tabela.find(function (r) { return r.parcelas === n; });
+    return found ? (found.taxa || 0) : 0;
+  }
   var cartao = {};
   [1, 2, 3].forEach(function (n) {
-    var parcelas = orcDistribuirParcelas(baseCents, n);
+    var taxaPct = _taxaDe(n);
+    var cartaoTotalCents = taxaPct > 0 ? Math.round(baseCents / (1 - taxaPct / 100)) : baseCents;
+    var parcelas = orcDistribuirParcelas(cartaoTotalCents, n);
     // valor "representativo" da parcela = o valor que se repete (a
     // maioria das parcelas, quando não dividem exato) — nunca a parcela
     // que absorveu o resto, para exibição singular tipo "3x de R$Y,YY"
     // ficar com o valor mais comum, não a exceção.
     var valorRepresentativoCents = n > 1 ? parcelas[parcelas.length - 1] : parcelas[0];
-    cartao[n] = { parcelas: parcelas, valorParcela: valorRepresentativoCents / 100, totalCents: baseCents };
+    cartao[n] = { parcelas: parcelas, valorParcela: valorRepresentativoCents / 100, totalCents: cartaoTotalCents, taxaPct: taxaPct };
   });
-  var pixPct = cfgFinanceiro.pix != null ? cfgFinanceiro.pix : 0;
-  var pixTotalCents = Math.round(baseCents * (1 - pixPct / 100));
-  return { baseCents: baseCents, cartao: cartao, pix: { percentual: pixPct, totalCents: pixTotalCents } };
+  var nParcAtual = cfgFinanceiro.nParcAtual > 0 ? cfgFinanceiro.nParcAtual : 1;
+  var pixSugeridoPct = _taxaDe(nParcAtual);
+  var pixPctEfetivo = cfgFinanceiro.pix != null ? cfgFinanceiro.pix : pixSugeridoPct;
+  var cartaoAtualCents = (cartao[nParcAtual] ? cartao[nParcAtual].totalCents : baseCents);
+  var pixTotalCents = (pixPctEfetivo === pixSugeridoPct)
+    ? baseCents
+    : Math.round(cartaoAtualCents * (1 - pixPctEfetivo / 100));
+  return {
+    baseCents: baseCents, cartao: cartao,
+    pix: { percentual: pixPctEfetivo, percentualSugerido: pixSugeridoPct, totalCents: pixTotalCents }
+  };
 }
 
 // RODADA 6, seção 2 — motor central de Cartão/PIX, em centavos: fonte
@@ -23084,10 +23131,10 @@ function orcCalcCondicoesPagamento(baseEfetiva) {
   // baseEfetiva chega aqui já com o desconto condicional (dcPct) aplicado
   // pelo chamador quando ativo — o PIX é calculado em cima dessa MESMA
   // base, uma única vez (nunca dois descontos aplicados por engano).
-  var motor = orcMotorComercial(baseEfetiva, { pix: cond.pxPct });
+  var motor = orcMotorComercial(baseEfetiva, { pix: cond.pxPct, nParcAtual: cond.nParc });
   if (cond.parcAtivo && cond.nParc > 1) {
     var cartaoSel = motor.cartao[cond.nParc] || motor.cartao[3];
-    parcela = { nParc: cond.nParc, valorParcela: cartaoSel.valorParcela, totalCents: cartaoSel.totalCents, semJuros: true };
+    parcela = { nParc: cond.nParc, valorParcela: cartaoSel.valorParcela, totalCents: cartaoSel.totalCents, semJuros: true, taxaPct: cartaoSel.taxaPct };
   }
   return { dcOn: cond.dcOn, dcPct: cond.dcPct, pxOn: cond.pxPct>0, pxPct: cond.pxPct, pixTotal: motor.pix.totalCents/100, parcela: parcela, cartao: motor.cartao };
 }
@@ -23825,28 +23872,19 @@ function orcClienteConfirmou() { if(!_orcClienteAprovado) orcToggleClienteAprov(
 // ============================================================
 // DESCONTO PIX — toggle + cálculo
 // ============================================================
-// SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE oferecido como alternativa
-// (o toggle visual Sim/Não foi removido do HTML; o checkbox
+// GO-LIVE FINAL 2026-08-12, seção 5-6 — PIX é SEMPRE oferecido como
+// alternativa (o toggle visual Sim/Não foi removido do HTML; o checkbox
 // orcPixDiscToggle continua no DOM, sempre "checked", só para esta
-// função não precisar de um redesenho maior). Nome preservado
-// (orcTogglePixDisc) por compatibilidade — só pré-preenche o percentual
-// padrão da config financeira central na 1ª vez (nunca sobrescreve um
-// valor que o vendedor já digitou).
+// função não precisar de um redesenho maior). O percentual não é mais
+// pré-preenchido de um valor fixo de config — é a SUGESTÃO calculada
+// (= taxa real do cartão da quantidade de parcelas selecionada, ver
+// orcPixSincronizarSugestao), sempre recalculada ao trocar de parcelas,
+// nunca sobrescrevendo silenciosamente um valor que o vendedor já digitou.
 function orcTogglePixDisc() {
   var cb    = document.getElementById('orcPixDiscToggle');
   var fields= document.getElementById('orcPixDiscFields');
   var on = cb ? cb.checked : true;
   if(fields) fields.style.display = 'block';
-  // Parte 4.3 (2026-08-07) — pré-preenche com o percentual padrão da
-  // configuração central (Config > Financeiro > PIX), em vez de sempre
-  // começar vazio; o operador continua podendo ajustar por negociação.
-  if(on){
-    var pctEl=document.getElementById('orcPixDiscPct');
-    if(pctEl && !pctEl.value){
-      var _fin=(cfgLoad().financeiro)||CFG_DEFAULT.financeiro;
-      if(_fin.pix>0) pctEl.value=_fin.pix;
-    }
-  }
   if(on) { orcCalcPixDisc(); } else { orcRefreshFinalPrice(); }
 }
 // SPRINT PRÉ-GO-LIVE, Bloco E — o preview do PIX (economia/valor com
@@ -23859,6 +23897,53 @@ function orcCalcPixDisc() {
 document.addEventListener('input',function(e){
   if(e.target && e.target.id==='orcPixDiscPct') orcCalcPixDisc();
 });
+
+// GO-LIVE FINAL 2026-08-12, seção 5-6 — cálculo inverso do desconto PIX:
+// a sugestão é sempre a taxa real do cartão da quantidade de parcelas
+// ATUALMENTE selecionada (pixSugeridoPct = taxa(nParc)), o que garante
+// que o valor PIX sugerido volte exatamente ao valor-base (ver
+// orcMotorComercial). window._orcPixUltimaSugestao guarda a última
+// sugestão que ESTE código escreveu no campo — se o valor atual do campo
+// bate com ela, o vendedor não mexeu, então é seguro atualizar
+// automaticamente ao trocar de parcelas; se o vendedor digitou outra
+// coisa (override manual), o valor NUNCA é sobrescrito em silêncio — só
+// mostramos a nova sugestão com um atalho para aplicá-la.
+// _orcPixEstadoGlobal() — mesmo padrão defensivo usado para não quebrar
+// harnesses de teste em Node que extraem esta função sozinha (sem
+// stub de `window`); em produção (browser) sempre resolve pro `window`
+// real.
+function _orcPixEstadoGlobal() {
+  return (typeof window !== 'undefined') ? window : (typeof global !== 'undefined' ? global : {});
+}
+function orcPixSincronizarSugestao(nParc) {
+  var pctEl = document.getElementById('orcPixDiscPct');
+  if (!pctEl) return;
+  var g = _orcPixEstadoGlobal();
+  var dpd = cfgLoad();
+  var tabela = dpd.parcelamento || (typeof CFG_DEFAULT !== 'undefined' ? CFG_DEFAULT.parcelamento : []) || [];
+  var found = tabela.find(function (r) { return r.parcelas === nParc; });
+  var sugerido = found ? (found.taxa || 0) : 0;
+  var atual = pctEl.value === '' ? null : parseFloat(pctEl.value);
+  var overridden = atual != null && g._orcPixUltimaSugestao != null && atual !== g._orcPixUltimaSugestao;
+  var hint = document.getElementById('orcPixSugestaoHint');
+  if (!overridden) {
+    pctEl.value = sugerido > 0 ? sugerido : '';
+    g._orcPixUltimaSugestao = sugerido;
+    if (hint) hint.textContent = sugerido > 0 ? ('💡 Sugestão automática (taxa do cartão ' + nParc + 'x): ' + sugerido + '%') : '';
+  } else {
+    g._orcPixUltimaSugestao = sugerido;
+    if (hint) hint.innerHTML = sugerido > 0
+      ? ('💡 Nova sugestão: ' + sugerido + '% (taxa do cartão ' + nParc + 'x) — <button type="button" onclick="orcPixUsarSugerido()" style="border:none;background:none;color:var(--brand-mid);text-decoration:underline;cursor:pointer;font-size:10px;padding:0">usar sugerido</button>')
+      : '';
+  }
+}
+function orcPixUsarSugerido() {
+  var pctEl = document.getElementById('orcPixDiscPct');
+  if (!pctEl) return;
+  var g = _orcPixEstadoGlobal();
+  pctEl.value = (g._orcPixUltimaSugestao > 0) ? g._orcPixUltimaSugestao : '';
+  if (typeof orcRefreshFinalPrice === 'function') orcRefreshFinalPrice();
+}
 
 // ── FUNÇÃO CENTRAL DE ATUALIZAÇÃO DO VALOR FINAL ──
 // SPRINT PRÉ-GO-LIVE, Bloco E — troca o motor LEGADO (orcMotorPagamento,
@@ -23878,10 +23963,16 @@ function orcRefreshFinalPrice() {
   var orig = document.getElementById('orcRsmOriginal');
   if(!tot||!base) return;
   var cond = orcLerCondicoesPagamentoDOM();
+  var nParc = cond.nParc;
+  // GO-LIVE FINAL 2026-08-12, seção 5-6 — sincroniza a sugestão de PIX
+  // ANTES de ler cond.pxPct: se não houver override manual, o campo é
+  // auto-preenchido com a taxa do cartão da quantidade de parcelas atual
+  // (relê cond depois, para pegar o valor já sincronizado).
+  if (typeof orcPixSincronizarSugestao === 'function') orcPixSincronizarSugestao(nParc);
+  cond = orcLerCondicoesPagamentoDOM();
   var hasDescCond = cond.dcOn && cond.dcPct>0;
   var baseAposCond = hasDescCond ? base*(1-cond.dcPct/100) : base;
-  var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct });
-  var nParc = cond.nParc;
+  var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParc });
   var cartaoInfo = motor.cartao[nParc] || motor.cartao[3];
 
   if(hasDescCond){
@@ -24443,7 +24534,13 @@ async function _orcSalvarOrcamentoImpl() {
   // "desligado" para decidir isso; aplicar aqui geraria um valorFinal
   // sempre descontado, mesmo quando o cliente nem escolheu pagar via PIX).
   var baseAposCondSalvar = dcOn ? c.finalPrice*(1-dcPct/100) : (c.finalPrice||0);
-  var afterDisc = orcMotorComercial(baseAposCondSalvar, {}).baseCents/100;
+  // GO-LIVE FINAL 2026-08-12, seção 4 — valorFinal persistido é o preço
+  // no CARTÃO da quantidade de parcelas selecionada, já com a taxa da
+  // maquininha embutida (nunca mais o valor-base sem taxa) — é a MESMA
+  // regra que orcRefreshFinalPrice()/orcCalcCondicoesPagamento() usam
+  // para o que o cliente vê no resumo/PDF/WhatsApp.
+  var _motorSalvar = orcMotorComercial(baseAposCondSalvar, { nParcAtual: nParc });
+  var afterDisc = (_motorSalvar.cartao[nParc] || _motorSalvar.cartao[3]).totalCents/100;
   // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — nunca sobrescrever
   // silenciosamente o valor de um orçamento já aprovado/com CR criado.
   // Ver orcAvaliarRevisaoFinanceira(). orcExistente já foi resolvido acima.
@@ -25410,7 +25507,12 @@ function orcEnvEditar(id) {
       if(typeof orcCalcParc==='function') orcCalcParc();
     }
     if(typeof orcTogglePixDisc==='function') orcTogglePixDisc(); // idempotente — só pré-preenche o % padrão se o campo estiver vazio
-    if(o.descPix>0){ setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
+    // GO-LIVE FINAL 2026-08-12, seção 8 — reabrir um orçamento salvo NUNCA
+    // recalcula o desconto PIX de forma diferente do que foi persistido:
+    // força o valor restaurado a ser tratado como override manual
+    // (sentinela -1 garante que orcPixSincronizarSugestao nunca o
+    // sobrescreva "por engano" mesmo se coincidir com a sugestão atual).
+    if(o.descPix>0){ if(typeof window!=='undefined') window._orcPixUltimaSugestao = -1; setV('orcPixDiscPct', o.descPix); if(typeof orcCalcPixDisc==='function') orcCalcPixDisc(); }
     if(materiaisNaoEncontrados.length) showToast('Material não encontrado na config atual para: '+materiaisNaoEncontrados.join(', ')+' — reselecione manualmente.','warn');
     // Badge de edição
     var _editBanner = document.getElementById('orcEditBanner');
