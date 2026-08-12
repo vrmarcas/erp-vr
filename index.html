@@ -8651,7 +8651,25 @@ function orcStep(n) {
       var btnOS = document.getElementById('orcBtnGerarOSWizard');
       if(oAtual && oAtual.pgtoConfirmado){
         if(btnConfirmar){ btnConfirmar.disabled=true; btnConfirmar.textContent='✅ Pagamento já confirmado'; }
-        if(typeof orcPgtoMostrarStatusWizard==='function') orcPgtoMostrarStatusWizard(oAtual.pgtoConfirmado.tipo);
+        // Reidrata o painel Tipo de Pagamento com o que foi REALMENTE
+        // confirmado (nunca o resíduo visual de outro orçamento/sessão) —
+        // achado do smoke visual: sem isto, o grid ficava preso no
+        // destaque "50/50" mesmo quando o tipo confirmado era "A Receber".
+        if(typeof _pgtoTipoAtualWizard!=='undefined') _pgtoTipoAtualWizard = oAtual.pgtoConfirmado.tipo;
+        var _pc = oAtual.pgtoConfirmado;
+        document.querySelectorAll('#pgtoTipoGridWizard .pgto-tipo-btn').forEach(function(b){
+          var ativo = b.dataset.tipo===_pc.tipo;
+          b.style.borderColor = ativo ? '#059669' : 'var(--border)';
+          b.style.background = ativo ? '#F0FDF4' : 'var(--bg)';
+          b.style.color = ativo ? '#059669' : 'var(--text)';
+        });
+        var entBoxR=document.getElementById('pgtoEntradaBoxWizard');
+        if(entBoxR) entBoxR.style.display = (_pc.tipo==='50-50'||_pc.tipo==='parcial') ? '' : 'none';
+        var entValR=document.getElementById('pgtoEntradaValWizard'); if(entValR) entValR.value = (_pc.valorEntrada||0).toFixed(2);
+        var deTotalR=document.getElementById('pgtoEntradaDeTotalWizard'); if(deTotalR) deTotalR.textContent = 'de R$ '+(_pc.valorEfetivo||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+        var saldoR=document.getElementById('pgtoSaldoResultanteWizard'); if(saldoR) saldoR.textContent = 'R$ '+(_pc.restante||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+        var obsR=document.getElementById('pgtoObsWizard'); if(obsR) obsR.value = _pc.obs||'';
+        if(typeof orcPgtoMostrarStatusWizard==='function') orcPgtoMostrarStatusWizard(_pc.tipo);
         if(typeof orcPgtoBloquearEdicaoWizard==='function') orcPgtoBloquearEdicaoWizard();
         if(oAtual.osRef){
           if(btnOS){ btnOS.disabled=true; btnOS.style.background='var(--muted)'; btnOS.style.opacity='.5'; btnOS.style.cursor='not-allowed'; btnOS.textContent='✅ OS já gerada'; }
