@@ -8528,6 +8528,11 @@ function orcStep(n) {
   var _os = document.querySelector('.orc-steps'); if (_os) _os.style.display = 'flex';
   // Step 3 is now inline in Step 2 — skip it, go to 4
   if(n===3) n=4;
+  // GO-LIVE FINAL 2026-08-12, seção 9-13 — lembra a última etapa
+  // realmente exibida do wizard VR, para que "Continuar editando" (ver
+  // orcNovoOrcamentoFecharModal) consiga voltar para onde o operador
+  // estava, em vez de deixá-lo preso na tela de escolha de fluxo.
+  window._orcUltimoStepAtivo = n;
   document.querySelectorAll('.orc-pg').forEach(p => p.style.display='none');
   const target = document.getElementById('opg'+n);
   if (target) target.style.display='block';
@@ -21469,6 +21474,10 @@ function orcResetFormularioVR(){
   // próximo: novo orçamento sempre começa com esse campo zerado.
   setV('orcEntradaValor','');
   var entRestoEl=document.getElementById('orcEntradaResto'); if(entRestoEl) entRestoEl.textContent='R$ —';
+  // GO-LIVE FINAL 2026-08-12, seção 12 — reset real também cobre data do
+  // pedido e validade (achado: ficavam herdadas do orçamento anterior).
+  setV('orcDataPedido', new Date().toISOString().slice(0,10));
+  var validadeEl=document.getElementById('orcValidadeDias'); if(validadeEl) validadeEl.value='10';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
   orcResetCondicoesPagamentoCompartilhadas();
@@ -24183,17 +24192,49 @@ function orcNovoOrcamentoFecharModal(){
   var el = document.getElementById('orcNovoOrcModal');
   if(el) el.remove();
 }
+// GO-LIVE FINAL 2026-08-12, seção 9-13 — bug real reproduzido em produção:
+// clicar "Continuar editando" só fechava o modal (orcNovoOrcamentoFecharModal
+// acima), deixando o operador preso na tela de escolha de fluxo (opg0) —
+// nav('orcamento') sempre chama orcEscolhaFluxo() ao entrar nesta página
+// (ver comentário em nav()), então o wizard fica escondido atrás do
+// seletor mesmo com os dados (cliente/itens/window._orcSessaoAtualId)
+// intactos no DOM. "Continuar editando" precisa genuinely reabrir o
+// editor — nunca só remover o overlay. Os dados nunca foram tocados (só a
+// VISÃO foi trocada), então basta reexibir o wizard na última etapa
+// realmente ativa (window._orcUltimoStepAtivo, ver orcStep) — preserva o
+// MESMO orçamento/rascunho, nunca cria número novo, nunca limpa dado.
+function orcNovoOrcamentoEscolherContinuar(){
+  orcNovoOrcamentoFecharModal();
+  var _opg0 = document.getElementById('opg0'); if(_opg0) _opg0.style.display='none';
+  var _vw = document.getElementById('vitreOrcWrap'); if(_vw) _vw.style.display='none';
+  var _vs = document.getElementById('vitreOrcSteps'); if(_vs) _vs.style.display='none';
+  orcStep(window._orcUltimoStepAtivo || 4);
+  if(typeof showToast==='function') showToast('Continuando o orçamento em andamento','info');
+}
 function orcNovoOrcamentoModal(){
   orcNovoOrcamentoFecharModal();
+  // GO-LIVE FINAL 2026-08-12, seção 11 — diferencia a semântica: se
+  // window._orcSessaoAtualId está setado, isto é um orçamento OFICIAL já
+  // salvo (com alterações ainda não persistidas), não um "orçamento ainda
+  // não salvo" — o texto anterior era enganoso (achado real: aparecia
+  // junto com o banner "Editando orçamento #000018").
+  var _editando = !!window._orcSessaoAtualId;
+  var _banner = document.getElementById('orcEditBanner');
+  var _num = (_banner && _banner._orcOrigNum) || null;
+  var _titulo = _editando
+    ? ('Orçamento #'+(_num||'')+' tem alterações não salvas')
+    : 'Você possui um orçamento ainda não salvo';
+  var _btnSalvar = _editando ? 'Salvar alterações e iniciar novo' : 'Salvar e iniciar novo';
+  var _btnDescartar = _editando ? 'Descartar alterações e iniciar novo' : 'Descartar e iniciar novo';
   var html = ''
     +'<div id="orcNovoOrcModal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center">'
     +'<div style="background:var(--surface);border-radius:14px;padding:22px;max-width:360px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
-    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">Você possui um orçamento ainda não salvo</div>'
+    +'<div style="font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text)">'+cfgEsc(_titulo)+'</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:14px">O que deseja fazer com os dados preenchidos na tela?</div>'
     +'<div style="display:flex;flex-direction:column;gap:8px">'
-    +'<button onclick="orcNovoOrcamentoEscolherSalvar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">Salvar e iniciar novo</button>'
-    +'<button onclick="orcNovoOrcamentoFecharModal()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Continuar editando</button>'
-    +'<button onclick="orcNovoOrcamentoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">Descartar e iniciar novo</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherSalvar()" style="padding:10px;border:none;border-radius:8px;background:var(--brand-mid);color:#fff;font-weight:700;font-size:12px;cursor:pointer">'+cfgEsc(_btnSalvar)+'</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherContinuar()" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Continuar editando</button>'
+    +'<button onclick="orcNovoOrcamentoEscolherDescartar()" style="padding:10px;border:none;border-radius:8px;background:transparent;color:#DC2626;font-weight:700;font-size:12px;cursor:pointer">'+cfgEsc(_btnDescartar)+'</button>'
     +'</div></div></div>';
   document.body.insertAdjacentHTML('beforeend', html);
 }
@@ -25288,6 +25329,7 @@ function orcEnvEditar(id) {
     }
     _editBanner.innerHTML='✏️ Editando orçamento <strong>#'+o.num+'</strong> — salvar aqui ATUALIZA este mesmo orçamento (nunca cria um novo número).';
     _editBanner._orcOrigId = o.id;
+    _editBanner._orcOrigNum = o.num;
     // Idempotência: liga esta sessão do wizard ao orçamento existente —
     // orcSalvarOrcamento() vai atualizar o mesmo registro, nunca duplicar.
     window._orcSessaoAtualId = o.id;
