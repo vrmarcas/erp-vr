@@ -3474,30 +3474,15 @@ function _authFirebaseError(code){
                 <div class="fg"><label>Endereço completo</label><input type="text" id="nfEndereco" placeholder="Rua, número, bairro, cidade - UF" style="font-size:12px"></div>
               </div>
             </div>
-            <!-- RECIBO DE ENTRADA -->
-            <div style="margin-bottom:12px;border-top:1px solid var(--border);padding-top:12px">
-              <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px">🧾 Recibo de Entrada / Sinal</div>
-              <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
-                <div class="fg" style="margin:0;flex:1">
-                  <label style="font-size:11px">Simulação de entrada (R$)</label>
-                  <input type="number" id="orcEntradaValor" step="0.01" min="0" placeholder="0,00" oninput="orcCalcEntradaResto()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;width:100%;font-size:12px;background:var(--bg);color:var(--text)">
-                </div>
-                <div class="fg" style="margin:0;flex:1">
-                  <label style="font-size:11px">Restante na retirada</label>
-                  <div id="orcEntradaResto" style="padding:8px 10px;background:var(--bg2);border-radius:7px;font-size:13px;font-weight:700;color:#D97706">R$ —</div>
-                </div>
-              </div>
-              <!-- GO-LIVE 2026-08-11, seção 9 — botão "Gerar Recibo de
-                   Entrada" removido desta tela (pré-confirmação): não faz
-                   sentido gerar recibo antes do pagamento existir de
-                   verdade. O campo acima continua só como simulação de
-                   saldo (orcCalcEntradaResto). O recibo real passou a
-                   viver exclusivamente no modal de sucesso pós-pagamento
-                   (orcPagtoSucessoModal) e no detalhe do orçamento salvo
-                   (Orçamentos Enviados → 🧾 Recibo de Entrada), ambos já
-                   gated por orcObterConfirmacaoEntrada() — nunca a partir
-                   de um valor solto na tela. -->
-            </div>
+            <!-- HOTFIX OPERACIONAL 2026-08-12, P0.3 — bloco "Recibo de
+                 Entrada / Sinal" (simulação de entrada + restante)
+                 removido por completo desta tela pré-confirmação: o
+                 usuário identificou que era exatamente esse tipo de
+                 simulação duplicada — com fonte de valor independente do
+                 pagamento real — que causava a divergência entre telas.
+                 Recibo só existe DEPOIS de um recebimento real confirmado
+                 (orcPagtoSucessoModal / Orçamentos Enviados → 🧾 Recibo de
+                 Entrada), nunca a partir de um campo solto aqui. -->
 
             <button id="orcBtnConfirmar" class="topbar-btn" style="width:100%;background:#059669;font-size:14px;padding:13px;justify-content:center;gap:8px" onclick="orcConfirmarPagtoWizard()">
               💳 Confirmar Pagamento e Gerar OS
@@ -25909,6 +25894,25 @@ function orcEnvEditar(id) {
   }, 200);
 }
 
+// HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — achado real em produção:
+// o modal de pagamento sempre usava o.valorFinal (preço Cartão/principal)
+// como "valor do orçamento" para Integral/50-50/Entrada, mesmo quando o
+// vendedor selecionava PIX/Dinheiro como forma de pagamento — exemplo
+// real: Cartão R$42,60, PIX R$40,41; selecionar PIX e 50/50 calculava
+// sobre R$42,60 (errado: R$21,30) em vez de sobre R$40,41 (correto:
+// R$20,21+R$20,20). Fonte canônica única do "valor efetivo": Cartão usa
+// o.valorFinal; PIX e Dinheiro (mesma regra comercial já aprovada) usam
+// o.valorFinal com o desconto PIX (o.descPix, salvo no orçamento) já
+// aplicado — nunca um valor recalculado à parte por tela.
+function orcValorEfetivoPorForma(o, forma){
+  var valorCartao = Math.round((o&&o.valorFinal||0)*100)/100;
+  var formaNorm = String(forma||'').toLowerCase();
+  var ehPixOuDinheiro = formaNorm.indexOf('pix')>-1 || formaNorm.indexOf('dinheiro')>-1;
+  if(!ehPixOuDinheiro) return valorCartao;
+  var pct = parseFloat(o&&o.descPix)||0;
+  return Math.round(valorCartao*(1-pct/100)*100)/100;
+}
+
 // ── Confirmar Pagamento / Converter em OS ──
 var _orcPagtoId = null;
 // Bug real (homologação Fase F, 2026-08-05): orcEnvGerarOS() descobria o
@@ -25959,7 +25963,12 @@ function orcEnvConfirmarPgto(id) {
     return;
   }
   var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var valorTotal = o.valorFinal||0;
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — valor inicial calculado pela
+  // forma de pagamento pré-selecionada (o.pgto, quando salva; PIX é o
+  // 1º option do select — mesmo default). Recalculado ao vivo sempre que
+  // o operador troca a forma (ver orcPagtoRecalcularValorEfetivo()) —
+  // nunca fica preso no preço Cartão quando PIX/Dinheiro está selecionado.
+  var valorTotal = orcValorEfetivoPorForma(o, o.pgto||'PIX');
   pm.innerHTML = '<div style="background:var(--bg);border-radius:16px;padding:28px;width:min(520px,96vw);max-height:92vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">'
     +'<div><div style="font-size:16px;font-weight:900">💳 Confirmar Pagamento</div>'
@@ -25968,8 +25977,8 @@ function orcEnvConfirmarPgto(id) {
     +'</div>'
     // Valor total em destaque
     +'<div style="text-align:center;padding:16px;background:var(--bg2);border-radius:12px;margin-bottom:16px">'
-    +'<div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Valor do Orçamento</div>'
-    +'<div style="font-size:28px;font-weight:900;color:#059669;margin:4px 0">'+fmtV(valorTotal)+'</div>'
+    +'<div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px">Valor a Receber (<span id="pgtoValorFormaLbl">'+(o.pgto||'PIX')+'</span>)</div>'
+    +'<div style="font-size:28px;font-weight:900;color:#059669;margin:4px 0" id="pgtoValorHead">'+fmtV(valorTotal)+'</div>'
     // HOTFIX pós-homologação (2026-08-10), P0.1 — nunca mais o texto morto
     // de o.pgto ("PIX (100%)" default do select nunca preenchido); mostra
     // a condição comercial padrão até o operador escolher o tipo abaixo.
@@ -25989,14 +25998,17 @@ function orcEnvConfirmarPgto(id) {
     +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Valor da Entrada</div>'
     +'<div style="display:flex;gap:8px;align-items:center">'
     +'<input type="number" id="pgtoEntradaVal" placeholder="0,00" min="0" step="0.01" style="flex:1;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:700">'
-    +'<span style="font-size:12px;color:var(--muted)">de '+fmtV(valorTotal)+'</span>'
+    +'<span style="font-size:12px;color:var(--muted)" id="pgtoEntradaDeTotal">de '+fmtV(valorTotal)+'</span>'
     +'</div>'
     +'<div style="font-size:10px;color:var(--muted);margin-top:4px" id="pgtoEntradaPct"></div>'
     +'</div>'
     // Forma de pagamento
     +'<div style="margin-bottom:16px">'
     +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Forma de Pagamento</div>'
-    +'<select id="pgtoForma" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px">'
+    // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — onchange recalcula o valor
+    // efetivo (Cartão vs PIX/Dinheiro) e refaz a divisão do tipo ativo —
+    // nunca deixa a tela presa no valor calculado para a forma anterior.
+    +'<select id="pgtoForma" onchange="orcPagtoRecalcularValorEfetivo()" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px">'
     +'<option>PIX</option><option>Cartão de Crédito</option><option>Cartão de Débito</option><option>Dinheiro</option><option>Boleto</option><option>Transferência</option>'
     +'</select></div>'
     // Obs
@@ -26012,16 +26024,47 @@ function orcEnvConfirmarPgto(id) {
     +'</div>';
   pm.style.display='flex';
 
+  // Pre-fill forma pagamento (ANTES de orcPagtoTipoSel — precisa estar
+  // correta para o primeiro cálculo de entrada já sair certo, nunca
+  // recalcular duas vezes com um valor intermediário errado).
+  var pf=document.getElementById('pgtoForma');
+  if(pf&&o.pgto){ for(var i=0;i<pf.options.length;i++){if(pf.options[i].text.toLowerCase()===o.pgto.toLowerCase()){pf.selectedIndex=i;break;}} }
   // Init: show/hide entrada box based on tipo — 50/50 é a condição padrão
   // (regra operacional: 50% de entrada para iniciar produção, 50% na
   // retirada/entrega), não mais "Integral".
   orcPagtoTipoSel(pm.querySelector('[data-tipo="50-50"]'));
-  // Pre-fill forma pagamento
-  var pf=document.getElementById('pgtoForma');
-  if(pf&&o.pgto){ for(var i=0;i<pf.options.length;i++){if(pf.options[i].text.toLowerCase()===o.pgto.toLowerCase()){pf.selectedIndex=i;break;}} }
   // Entrada value update %
   var entEl=document.getElementById('pgtoEntradaVal');
-  if(entEl){ entEl.oninput=function(){ var v=parseFloat(this.value)||0; var pct=valorTotal>0?v/valorTotal*100:0; var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl)pctEl.textContent='≈ '+pct.toFixed(1)+'% do total'; }; }
+  if(entEl){ entEl.oninput=function(){ var vt=orcValorEfetivoPorForma(o, (document.getElementById('pgtoForma')||{}).value); var v=parseFloat(this.value)||0; var pct=vt>0?v/vt*100:0; var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl)pctEl.textContent='≈ '+pct.toFixed(1)+'% do total'; }; }
+}
+
+// HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — recalcula o valor efetivo do
+// modal (cabeçalho + "de R$X" ao lado da entrada) sempre que o operador
+// troca a Forma de Pagamento, e refaz a divisão do tipo atualmente
+// selecionado (Integral/50-50/Entrada) sobre o NOVO valor — nunca deixa
+// PIX/Dinheiro presos no cálculo feito em cima do preço Cartão.
+function orcPagtoRecalcularValorEfetivo(){
+  var lista=orcGetEnviados(); var o=lista.find(function(x){return x.id===_orcPagtoId;});
+  if(!o) return;
+  var forma=(document.getElementById('pgtoForma')||{}).value||'PIX';
+  var valorTotal=orcValorEfetivoPorForma(o, forma);
+  var fmtV = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var headEl=document.getElementById('pgtoValorHead'); if(headEl) headEl.textContent=fmtV(valorTotal);
+  var lblEl=document.getElementById('pgtoValorFormaLbl'); if(lblEl) lblEl.textContent=forma;
+  var deEl=document.getElementById('pgtoEntradaDeTotal'); if(deEl) deEl.textContent='de '+fmtV(valorTotal);
+  if((_pgtoTipoAtual||'50-50')==='50-50'){
+    // 50/50 é auto-calculado — precisa refazer a metade sobre o novo valor.
+    var btnAtivo=document.querySelector('.pgto-tipo-btn[data-tipo="50-50"]');
+    if(btnAtivo) orcPagtoTipoSel(btnAtivo);
+  } else {
+    // Integral/Entrada personalizada/A Receber: nunca sobrescreve um valor
+    // de entrada que o operador já digitou — só atualiza o % exibido.
+    var entEl=document.getElementById('pgtoEntradaVal');
+    if(entEl && entEl.value!==''){
+      var v=parseFloat(entEl.value)||0; var pct=valorTotal>0?v/valorTotal*100:0;
+      var pctEl=document.getElementById('pgtoEntradaPct'); if(pctEl) pctEl.textContent='≈ '+pct.toFixed(1)+'% do total';
+    }
+  }
 }
 
 function orcPagtoTipoSel(btn){
@@ -26037,7 +26080,11 @@ function orcPagtoTipoSel(btn){
   _pgtoTipoAtual = tipo;
   var entBox=document.getElementById('pgtoEntradaBox');
   var lista=orcGetEnviados(); var o=lista.find(function(x){return x.id===_orcPagtoId;});
-  var valorTotal=o?o.valorFinal:0;
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — valor efetivo pela forma de
+  // pagamento SELECIONADA no próprio modal, nunca o preço Cartão fixo
+  // (ver orcValorEfetivoPorForma).
+  var formaAtual=(document.getElementById('pgtoForma')||{}).value||'PIX';
+  var valorTotal=o?orcValorEfetivoPorForma(o, formaAtual):0;
   if(tipo==='50-50'){
     entBox.style.display='';
     var entEl=document.getElementById('pgtoEntradaVal');
@@ -26143,7 +26190,13 @@ function orcEnvGerarOS(){
   var tipo=_pgtoTipoAtual||'futuro';
   var forma=(document.getElementById('pgtoForma')||{}).value||'PIX';
   var obs=(document.getElementById('pgtoObs')||{}).value||'';
-  var valorTotal=Math.round((o.valorFinal||0)*100)/100;
+  // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — cálculo FINAL (o que
+  // realmente é gravado no CR/FIN_TX/OS) também usa o valor efetivo pela
+  // forma selecionada — nunca o preço Cartão fixo quando PIX/Dinheiro foi
+  // escolhido. Esta é a fonte que decide dinheiro real; a divergência
+  // aqui era o achado mais grave (R$40,41 do PIX registrado como se fosse
+  // R$42,60 do Cartão, ou vice-versa).
+  var valorTotal=orcValorEfetivoPorForma(o, forma);
   var entradaRaw=(document.getElementById('pgtoEntradaVal')||{}).value;
   var entradaVal=Math.round((parseFloat(entradaRaw)||0)*100)/100;
   // Entrada validada de forma independente da aparência — 50-50 e parcial
@@ -26273,6 +26326,14 @@ function orcEnvGerarOS(){
       // (achado real: orcEnvGerarOS nunca escrevia em fin_tx; a entrada
       // ficava "recebida" no CR mas invisível no Caixa).
       if(typeof FIN_TX!=='undefined') FIN_TX.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:String(nLocal),marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+    } else if(tipo==='futuro' && o.crId){
+      // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — "A Receber" nunca
+      // registra recebimento (0 FIN_TX, ver seção 22), mas o CR precisa
+      // continuar existindo e vinculado à OS gerada — o placeholder criado
+      // na aprovação do orçamento (orcEnvSetStatus, valor total, status
+      // pendente, sem OS) é a fonte, só falta linkar a OS agora.
+      var _crFuturo = FIN_CR.find(function(c){ return c.id===o.crId; });
+      if(_crFuturo){ _crFuturo.osId = newIdLocal; _crFuturo.osRef = 'OS #'+nLocal; }
     }
     finalizar(true, {num:nLocal, osId:newIdLocal});
     return;
@@ -26372,6 +26433,13 @@ function orcEnvGerarOS(){
           if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1)+'_'+n,cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:o.id,osId:newId,descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'OS #'+n,dataCriacao:dia,dataRecebimento:null});
           arrTx.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:String(n),marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
           txMutado = true;
+        } else if(tipo==='futuro' && arrOrc[idxOrc].crId){
+          // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — mesma correção do
+          // caminho de fallback: "A Receber" nunca cria FIN_TX (T-PG-13),
+          // mas o CR placeholder (criado na aprovação) precisa continuar
+          // existindo e ser vinculado à OS gerada agora.
+          var _crFuturoTx = arrCR.find(function(c){ return c.id===arrOrc[idxOrc].crId; });
+          if(_crFuturoTx){ _crFuturoTx.osId = newId; _crFuturoTx.osRef = 'OS #'+n; }
         }
 
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
