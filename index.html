@@ -1755,11 +1755,7 @@ function _cloudLoadAll() {
           merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
           merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
         }
-        // Recalcular rsm2 para todos
-        (merged.materiais||[]).forEach(function(r){
-          var area=(r.comp||0)*(r.larg||0)/10000;
-          if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
-        });
+        _cfgRecalcRsm2Todos(merged.materiais);
         _cfgData = merged;
         // Só marcar como carregado quando dado vier do servidor — cache local pode estar desatualizado
         if(!fromCache) _cfgDataLoaded = true;
@@ -1912,11 +1908,7 @@ function _cloudLoadAll() {
         merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
         merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
       }
-      // Recalcular rsm2 para todos
-      (merged.materiais||[]).forEach(function(r){
-        var area=(r.comp||0)*(r.larg||0)/10000;
-        if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
-      });
+      _cfgRecalcRsm2Todos(merged.materiais);
       _cfgData = merged;
       _cfgDataLoaded = true;
       try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
@@ -1940,10 +1932,7 @@ function _cloudIniciar(){
         // HOTFIX 2026-08-13: idem — nunca reanexar o bootstrap CFG_DEFAULT.
         merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? (local.materiais||[]) : [], true);
       }
-      (merged.materiais||[]).forEach(function(r){
-        var area=(r.comp||0)*(r.larg||0)/10000;
-        if(area>0&&(r.custo||0)>0) r.rsm2=r.custo/area;
-      });
+      _cfgRecalcRsm2Todos(merged.materiais);
       _cfgData = merged;
       _cfgDataLoaded = true;
     }
@@ -27055,6 +27044,18 @@ function _cfgBackfillMaterialIds(arr) {
   });
   return changed;
 }
+// HOTFIX 2026-08-13 — rsm2 (R$/m²) é um campo DERIVADO de custo/área e
+// nunca deve ser tratado como fonte de verdade: antes desta correção, só
+// era recalculado quando um snapshot do cloud chegava (nos 3 pontos de
+// merge), então editar custo/comp/larg e salvar imediatamente persistia o
+// R$/m² ANTIGO — só corrigia depois de um reload+resave. Chamada
+// obrigatória logo antes de qualquer persistência de materiais.
+function _cfgRecalcRsm2Todos(arr) {
+  (arr || []).forEach(function (r) {
+    var area = (r.comp || 0) * (r.larg || 0) / 10000;
+    if (area > 0 && (r.custo || 0) > 0) r.rsm2 = r.custo / area;
+  });
+}
 function cfgLoad() {
   if(_cfgData){
     // Garantir que os arrays sempre existam para evitar erros de .push()
@@ -27811,6 +27812,12 @@ function cfgSalvar() {
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
   if(!_cfgData.markup) _cfgData.markup={};
   Object.keys(mkIds).forEach(function(k){ var el=document.getElementById(mkIds[k]); if(el) _cfgData.markup[k]=parseFloat(el.value)||0; });
+  // HOTFIX 2026-08-13 — rsm2 é campo DERIVADO (custo/área), nunca deve ser
+  // persistido desatualizado: sem isto, editar custo/comp/larg e salvar na
+  // hora gravava o R$/m² antigo (só corrigia depois de um reload, quando o
+  // merge cloud recalculava tudo). Recalcular aqui garante que o 1º save já
+  // sai correto, sem depender de round-trip.
+  _cfgRecalcRsm2Todos(_cfgData.materiais);
   cfgSave(_cfgData);
   if(typeof cfgRenderMarkupRevisaoBanner==='function') cfgRenderMarkupRevisaoBanner();
   // Recalcular R$/m² de todas as linhas antes de re-renderizar
