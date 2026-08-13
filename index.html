@@ -1738,17 +1738,12 @@ function _cloudLoadAll() {
         // Mesclar profundo: preserva comp/larg/custo/esp/rsm2 dos materiais locais
         var local = cfgLoad();
         var merged = Object.assign({}, local, d);
-        // Mesclar materiais por nome — cloud vazio não sobrescreve local
+        // Mesclar materiais por id estável (fallback nome+esp p/ legado
+        // sem id ainda) — nunca por nome sozinho (colide entre espessuras
+        // da mesma família). BUG #31: local tem prioridade — preserva
+        // edições do usuário em curso. Cloud vazio não sobrescreve local.
         if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
-          merged.materiais = d.materiais.map(function(cm){
-            var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
-            if(lm) return Object.assign({}, cm, lm); // BUG #31 fix: local tem prioridade — preserva edições do usuário em curso
-            return cm;
-          });
-          // Adicionar itens locais que não existem no cloud
-          local.materiais.forEach(function(lm){
-            if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
-          });
+          merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais, false);
         } else {
           // Cloud sem materiais — usa local ou CFG_DEFAULT
           merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
@@ -1769,6 +1764,13 @@ function _cloudLoadAll() {
           _cfgData._impostos_migrated = true;
           _cloudSave('erp_config', _cfgData);
           return; // próximo disparo do watch re-renderiza com o valor correto
+        }
+        // Backfill único de id estável por variante de material — corrige a
+        // causa raiz da corrupção (merge por nome colidia entre espessuras).
+        // Só roda com dado real do servidor (nunca a partir do cache local).
+        if (!fromCache && _cfgBackfillMaterialIds(_cfgData.materiais)) {
+          _cloudSave('erp_config', _cfgData);
+          return; // próximo disparo do watch já vem com os ids persistidos
         }
         var pg=document.getElementById('cfgPg1');
         if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
@@ -1894,15 +1896,10 @@ function _cloudLoadAll() {
     if(d && typeof d==='object'){
       var local = cfgLoad();
       var merged = Object.assign({}, local, d);
-      // Deep merge: materiais — cloud vazio não sobrescreve local
+      // Deep merge: materiais por id estável (fallback nome+esp p/ legado
+      // sem id) — nunca por nome sozinho. Cloud vazio não sobrescreve local.
       if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
-        merged.materiais = d.materiais.map(function(cm){
-          var lm = local.materiais.find(function(lx){ return lx.nome === cm.nome; });
-          return lm ? Object.assign({}, lm, cm) : cm;
-        });
-        local.materiais.forEach(function(lm){
-          if(!merged.materiais.find(function(x){ return x.nome===lm.nome; })) merged.materiais.push(lm);
-        });
+        merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais, true);
       } else {
         // Cloud sem materiais — usa local ou CFG_DEFAULT como fallback
         merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
@@ -1934,10 +1931,7 @@ function _cloudIniciar(){
       var local = cfgLoad();
       var merged = Object.assign({}, local, d);
       if(Array.isArray(d.materiais) && d.materiais.length){
-        merged.materiais = d.materiais.map(function(cm){
-          var lm = (local.materiais||[]).find(function(lx){ return lx.nome===cm.nome; });
-          return lm ? Object.assign({}, lm, cm) : cm;
-        });
+        merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais||[], true);
       }
       (merged.materiais||[]).forEach(function(r){
         var area=(r.comp||0)*(r.larg||0)/10000;
@@ -27001,6 +26995,53 @@ function receitaFormulaValidar(expr, nomeParams) {
   return { ok: true };
 }
 
+// HOTFIX CIRÚRGICO 2026-08-12 — causa raiz da corrupção de variantes de
+// materiais (ex.: Acrílico Cristal 3mm/4mm/5mm todos sobrescritos com os
+// dados do 2mm): os merges cloud↔local de erp_config (3 pontos: watch
+// realtime + 2 cargas iniciais) casavam materiais só por `nome`, que é
+// IDÊNTICO entre todas as espessuras de uma mesma família. Cada material
+// agora tem um `id` estável (gerado uma única vez via
+// _cfgBackfillMaterialIds, nunca reaproveitado/reordenado); o merge usa
+// `id` como chave primária e só cai para nome+esp quando UM dos dois lados
+// ainda não tem id (registro legado pré-backfill) — nunca nome sozinho.
+function _cfgFindMaterialMatch(alvo, arr) {
+  if (alvo && alvo.id) {
+    var byId = (arr || []).filter(function (x) { return x.id === alvo.id; })[0];
+    if (byId) return byId;
+  }
+  // Fallback só entre registros SEM id (legado) — evita casar um id já
+  // atribuído com outra variante que coincida em nome+esp.
+  return (arr || []).filter(function (x) { return !x.id && x.nome === alvo.nome && (x.esp || 0) === (alvo.esp || 0); })[0] || null;
+}
+function _cfgNewMaterialId() {
+  return 'mat_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+function _cfgMergeMateriais(cloudArr, localArr, cloudWins) {
+  localArr = localArr || [];
+  var usedLocal = [];
+  var merged = (cloudArr || []).map(function (cm) {
+    var lm = _cfgFindMaterialMatch(cm, localArr);
+    if (!lm) return cm;
+    usedLocal.push(lm);
+    return cloudWins ? Object.assign({}, lm, cm) : Object.assign({}, cm, lm);
+  });
+  // Itens locais que não correspondem a nenhum material do cloud (nem por
+  // id, nem por nome+esp legado) são novos — preservá-los.
+  localArr.forEach(function (lm) {
+    if (usedLocal.indexOf(lm) === -1) merged.push(lm);
+  });
+  return merged;
+}
+// Backfill único e determinístico: atribui `id` estável a materiais legados
+// que ainda não têm — nunca reaproveita, nunca reordena, só preenche o que
+// falta. Retorna true se alterou algo (chamador deve persistir 1x).
+function _cfgBackfillMaterialIds(arr) {
+  var changed = false;
+  (arr || []).forEach(function (m) {
+    if (m && !m.id) { m.id = _cfgNewMaterialId(); changed = true; }
+  });
+  return changed;
+}
 function cfgLoad() {
   if(_cfgData){
     // Garantir que os arrays sempre existam para evitar erros de .push()
@@ -27450,7 +27491,7 @@ function cfgAddRow(tableId, tipo) {
   if(!Array.isArray(_cfgData.materiais)) _cfgData.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
   if(!Array.isArray(_cfgData.maquinas))  _cfgData.maquinas  = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
   if(!Array.isArray(_cfgData.maodeobra)) _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
-  if(tipo==='mat'){ _cfgData.materiais.push({nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
+  if(tipo==='mat'){ _cfgData.materiais.push({id:_cfgNewMaterialId(),nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
   else if(tipo==='maq'){ _cfgData.maquinas.push({nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
   else if(tipo==='mob'){ _cfgData.maodeobra.push({nome:'Novo serviço',unidade:'hora',valor:0,obs:''}); }
   cfgSave(_cfgData);
