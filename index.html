@@ -1743,7 +1743,12 @@ function _cloudLoadAll() {
         // da mesma família). BUG #31: local tem prioridade — preserva
         // edições do usuário em curso. Cloud vazio não sobrescreve local.
         if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
-          merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais, false);
+          // HOTFIX 2026-08-13: se ainda não recebemos dado real do servidor
+          // (_cfgDataLoaded false), `local` é só o bootstrap CFG_DEFAULT —
+          // nunca tratar seus materiais genéricos como "edição local" a
+          // preservar/reanexar; isso vazava Vinil/Placa/ACM/etc para o
+          // catálogo real assim que o backfill salvava.
+          merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? local.materiais : [], false);
         } else {
           // Cloud sem materiais — usa local ou CFG_DEFAULT
           merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
@@ -1899,7 +1904,8 @@ function _cloudLoadAll() {
       // Deep merge: materiais por id estável (fallback nome+esp p/ legado
       // sem id) — nunca por nome sozinho. Cloud vazio não sobrescreve local.
       if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
-        merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais, true);
+        // HOTFIX 2026-08-13: idem ao watch — nunca reanexar o bootstrap CFG_DEFAULT.
+        merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? local.materiais : [], true);
       } else {
         // Cloud sem materiais — usa local ou CFG_DEFAULT como fallback
         merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
@@ -1931,7 +1937,8 @@ function _cloudIniciar(){
       var local = cfgLoad();
       var merged = Object.assign({}, local, d);
       if(Array.isArray(d.materiais) && d.materiais.length){
-        merged.materiais = _cfgMergeMateriais(d.materiais, local.materiais||[], true);
+        // HOTFIX 2026-08-13: idem — nunca reanexar o bootstrap CFG_DEFAULT.
+        merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? (local.materiais||[]) : [], true);
       }
       (merged.materiais||[]).forEach(function(r){
         var area=(r.comp||0)*(r.larg||0)/10000;
@@ -27004,33 +27011,39 @@ function receitaFormulaValidar(expr, nomeParams) {
 // _cfgBackfillMaterialIds, nunca reaproveitado/reordenado); o merge usa
 // `id` como chave primária e só cai para nome+esp quando UM dos dois lados
 // ainda não tem id (registro legado pré-backfill) — nunca nome sozinho.
-function _cfgFindMaterialMatch(alvo, arr) {
+function _cfgFindMaterialMatchIdx(alvo, arr) {
   if (alvo && alvo.id) {
-    var byId = (arr || []).filter(function (x) { return x.id === alvo.id; })[0];
-    if (byId) return byId;
+    var byId = arr.findIndex(function (x) { return x.id === alvo.id; });
+    if (byId !== -1) return byId;
   }
   // Fallback só entre registros SEM id (legado) — evita casar um id já
   // atribuído com outra variante que coincida em nome+esp.
-  return (arr || []).filter(function (x) { return !x.id && x.nome === alvo.nome && (x.esp || 0) === (alvo.esp || 0); })[0] || null;
+  return arr.findIndex(function (x) { return !x.id && x.nome === alvo.nome && (x.esp || 0) === (alvo.esp || 0); });
 }
 function _cfgNewMaterialId() {
   return 'mat_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
+// HOTFIX 2026-08-13 — incidente autoinfligido: a primeira versão desta
+// função não excluía do array de busca um item local já casado, então N
+// materiais duplicados do cloud (o próprio bug que este hotfix corrige)
+// sempre casavam com o MESMO primeiro item local, sobravam N-1 "extras"
+// que eram indevidamente reanexados como materiais novos — e o backfill de
+// id persistia esse lixo em produção. Correção: cada item local só pode
+// casar com UM item do cloud (removido do pool via splice ao ser usado).
 function _cfgMergeMateriais(cloudArr, localArr, cloudWins) {
-  localArr = localArr || [];
-  var usedLocal = [];
+  var pool = (localArr || []).slice();
   var merged = (cloudArr || []).map(function (cm) {
-    var lm = _cfgFindMaterialMatch(cm, localArr);
-    if (!lm) return cm;
-    usedLocal.push(lm);
+    var idx = _cfgFindMaterialMatchIdx(cm, pool);
+    if (idx === -1) return cm;
+    var lm = pool.splice(idx, 1)[0];
     return cloudWins ? Object.assign({}, lm, cm) : Object.assign({}, cm, lm);
   });
-  // Itens locais que não correspondem a nenhum material do cloud (nem por
-  // id, nem por nome+esp legado) são novos — preservá-los.
-  localArr.forEach(function (lm) {
-    if (usedLocal.indexOf(lm) === -1) merged.push(lm);
-  });
-  return merged;
+  // Itens locais que sobraram no pool (não casaram com nenhum material do
+  // cloud, nem por id nem por nome+esp legado) são genuinamente novos —
+  // preservá-los. `pool` só deve conter edições reais do usuário: nunca
+  // chamar esta função com o catálogo padrão de bootstrap (CFG_DEFAULT)
+  // como `localArr` quando o cloud já tem dados reais.
+  return merged.concat(pool);
 }
 // Backfill único e determinístico: atribui `id` estável a materiais legados
 // que ainda não têm — nunca reaproveita, nunca reordena, só preenche o que

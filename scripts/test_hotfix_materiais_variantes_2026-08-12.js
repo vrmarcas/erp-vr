@@ -48,7 +48,7 @@ function extractFn(name) {
 
 console.log('\n=== HOTFIX CIRÚRGICO — Materiais: merge por id estável (nunca por nome sozinho) ===\n');
 
-var FN_NAMES = ['_cfgFindMaterialMatch', '_cfgNewMaterialId', '_cfgMergeMateriais', '_cfgBackfillMaterialIds'];
+var FN_NAMES = ['_cfgFindMaterialMatchIdx', '_cfgNewMaterialId', '_cfgMergeMateriais', '_cfgBackfillMaterialIds'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_materiais_variantes_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
@@ -177,6 +177,109 @@ console.log('\n--- Backfill de id estável ---');
 
   var changedAgain = mod._cfgBackfillMaterialIds(arr);
   ok('4f. rodar de novo é idempotente (nada muda, retorna false)', changedAgain === false);
+}
+
+// ── INCIDENTE 2026-08-13 (autoinfligido) — REGRESSÃO ──────────────────────
+// A 1ª versão de _cfgFindMaterialMatch não excluía do pool de busca um item
+// local já casado: quando N materiais do cloud compartilhavam nome+esp
+// (exatamente os duplicados que este hotfix existe pra corrigir), TODOS
+// casavam com o MESMO primeiro item local, sobrando N-1 "extras" locais que
+// eram reanexados como material novo — e o backfill de id persistia esse
+// lixo em produção (29 materiais → 40, confirmado ao vivo no console do
+// Firestore). Corrigido consumindo (splice) cada item local no máximo uma
+// vez. Este teste reproduz o cenário exato que vazou para produção.
+console.log('\n--- Regressão do incidente 2026-08-13: duplicados locais não podem "sobrar" como material novo ---');
+{
+  // Cloud tem 4 variantes "Acrílico Cristal 2mm" (o próprio catálogo
+  // corrompido que este hotfix repara) — local tem as MESMAS 4 duplicatas,
+  // sem id (exatamente o resultado de uma 1ª rodada de merge pass-through).
+  var cloudDup = [
+    { nome: 'Acrílico Cristal', esp: 2, comp: 122, larg: 244, custo: 290 },
+    { nome: 'Acrílico Cristal', esp: 2, comp: 122, larg: 244, custo: 290 },
+    { nome: 'Acrílico Cristal', esp: 2, comp: 122, larg: 244, custo: 290 },
+    { nome: 'Acrílico Cristal', esp: 2, comp: 122, larg: 244, custo: 290 },
+  ];
+  var localDup = clone(cloudDup); // mesmo estado, sem id, dos dois lados
+
+  var mergedDup = mod._cfgMergeMateriais(clone(cloudDup), clone(localDup), true);
+  ok('5a. 4 duplicados no cloud + 4 duplicados idênticos no local => resultado continua com 4 (nunca 8)',
+    mergedDup.length === 4);
+
+  // Cenário misto: cloud tem 1 variante de cada (2/3/4mm), local tem 2
+  // cópias de 2mm sem id (uma delas é um item local genuinamente extra,
+  // sem par no cloud) + a 3mm real. Cada item do cloud só pode consumir NO
+  // MÁXIMO um item local (splice) — o excedente local sem correspondente
+  // 1:1 é preservado (pode ser uma edição local ainda não sincronizada,
+  // não deve ser descartado), então o resultado tem 4, não 3.
+  var cloudMix = [
+    { nome: 'Acrílico Cristal', esp: 2, custo: 290 },
+    { nome: 'Acrílico Cristal', esp: 3, custo: 350 },
+    { nome: 'Acrílico Cristal', esp: 4, custo: 450 },
+  ];
+  var localMix = [
+    { nome: 'Acrílico Cristal', esp: 2, custo: 290 },
+    { nome: 'Acrílico Cristal', esp: 2, custo: 290 }, // excedente local genuíno (sem par 1:1 no cloud)
+    { nome: 'Acrílico Cristal', esp: 3, custo: 350 },
+  ];
+  var mergedMix = mod._cfgMergeMateriais(clone(cloudMix), clone(localMix), true);
+  ok('5b. cada material do cloud consome NO MÁXIMO 1 item local (1:1) — excedente local genuíno é preservado, resultado = 4',
+    mergedMix.length === 4);
+  ok('5c. valores de 2/3/4mm continuam corretos e distintos após o merge misto',
+    mergedMix.some(function (r) { return r.esp === 2 && r.custo === 290; }) &&
+    mergedMix.some(function (r) { return r.esp === 3 && r.custo === 350; }) &&
+    mergedMix.some(function (r) { return r.esp === 4 && r.custo === 450; }));
+
+  // O vazamento real em produção: local = CFG_DEFAULT (bootstrap genérico,
+  // nomes que não existem no catálogo real) sendo mesclado contra um cloud
+  // já populado — o chamador (index.html) agora passa [] nesse caso; aqui
+  // provamos que SE alguém passar os itens do bootstrap por engano, eles
+  // aparecem como "extras" (documentando por que a guarda no call site é
+  // obrigatória, não uma opção).
+  var cfgDefaultLike = [
+    { nome: 'Vinil Adesivo Branco', unidade: 'm²', custo: 18, obs: '' },
+    { nome: 'Placa PVC 3mm', unidade: 'm²', custo: 32, obs: '' },
+  ];
+  var mergedLeak = mod._cfgMergeMateriais(clone(cloudMix), clone(cfgDefaultLike), true);
+  ok('5d. [documentação do risco] bootstrap passado por engano APARECE como extra — por isso o call site nunca deve passá-lo',
+    mergedLeak.length === cloudMix.length + cfgDefaultLike.length);
+
+  // Simulação das 3 rodadas reais de merge no boot de uma aba nova
+  // (_cloudIniciar → _cloudLoadAll → _cloudWatch), com a guarda
+  // `_cfgDataLoaded ? local.materiais : []` aplicada em cada uma —
+  // exatamente como index.html agora faz. O catálogo do cloud não pode
+  // inflar em nenhuma rodada.
+  var CFG_DEFAULT_LIKE = [
+    { nome: 'Vinil Adesivo Branco', unidade: 'm²', custo: 18, obs: '' },
+    { nome: 'Placa PVC 3mm', unidade: 'm²', custo: 32, obs: '' },
+    { nome: 'ACM 3mm', unidade: 'm²', custo: 85, obs: '' },
+    { nome: 'Lona 440g', unidade: 'm²', custo: 12, obs: '' },
+    { nome: 'Tinta UV', unidade: 'ml', custo: 0.08, obs: '' },
+  ];
+  var cloudReal = cloudDup.concat([ // 4 dup 2mm + 6/8/10mm corretos = catálogo corrompido real
+    { nome: 'Acrílico Cristal', esp: 6, comp: 122, larg: 244, custo: 650 },
+    { nome: 'Acrílico Cristal', esp: 8, comp: 122, larg: 244, custo: 850 },
+    { nome: 'Acrílico Cristal', esp: 10, comp: 122, larg: 244, custo: 1050 },
+  ]);
+  var _cfgData = null, _cfgDataLoaded = false;
+  function cfgLoadSim() { return _cfgData ? _cfgData : { materiais: clone(CFG_DEFAULT_LIKE) }; }
+  // Rodada 1 — _cloudIniciar (cloudWins=true)
+  var local1 = cfgLoadSim();
+  var merged1 = mod._cfgMergeMateriais(clone(cloudReal), _cfgDataLoaded ? local1.materiais : [], true);
+  _cfgData = { materiais: merged1 };
+  ok('6a. Rodada 1 (_cloudIniciar): sem inflar — 7 materiais (nunca 7+5 do bootstrap)', merged1.length === 7);
+  // Rodada 2 — _cloudLoadAll (cloudWins=true)
+  var local2 = cfgLoadSim();
+  var merged2 = mod._cfgMergeMateriais(clone(cloudReal), _cfgDataLoaded ? local2.materiais : [], true);
+  _cfgData = { materiais: merged2 };
+  _cfgDataLoaded = true; // setado ao fim da rodada 2, como em _cloudLoadAll real
+  ok('6b. Rodada 2 (_cloudLoadAll): ainda 7 materiais', merged2.length === 7);
+  // Rodada 3 — _cloudWatch realtime (cloudWins=false, local já é real agora)
+  var local3 = cfgLoadSim();
+  var merged3 = mod._cfgMergeMateriais(clone(cloudReal), _cfgDataLoaded ? local3.materiais : [], false);
+  ok('6c. Rodada 3 (_cloudWatch): ainda 7 materiais — nenhuma rodada inflou o catálogo', merged3.length === 7);
+  var backfillChanged = mod._cfgBackfillMaterialIds(merged3);
+  ok('6d. após as 3 rodadas + backfill, o que seria salvo tem exatamente os 7 materiais reais, todos com id',
+    merged3.length === 7 && merged3.every(function (r) { return !!r.id; }));
 }
 
 try { fs.unlinkSync(modPath); } catch (e) {}
