@@ -65,6 +65,9 @@ var FN_NAMES = [
   'planAplicar', 'planLimpar', '_planDeleteAuto', '_planEditField',
   '_planRecompute', 'planAddManual', 'planRemoveManual', 'planRenderManual',
   '_planCalcAndMerge',
+  // HOTFIX 2026-08-16 (P0.1-P0.4) — peças efetivas: fonte única de verdade,
+  // nunca mais substituída cegamente pela receita.
+  '_planPieceSlug', '_planReconcilePieces', '_planSeedFromPersisted', '_planBuildAllPecas',
   // Rodada 2.1 (2026-08-08) — teste desatualizado: planAplicar() chama
   // orcAutoLaserSeNecessario() (index.html:8821, refresh de tempo de
   // laser após aplicar a planificação — não participa do cálculo de
@@ -92,6 +95,7 @@ var src = [
   'var _planIdx = null;',
   'var planManualPieces = [];',
   'var _planEditPieces = [];',
+  'var _planSeedPersistedJson = null;',
   FN_NAMES.map(extractFn).join('\n\n'),
   wrapBlock,
   // acessores só para o teste — leem o valor ATUAL das vars do módulo,

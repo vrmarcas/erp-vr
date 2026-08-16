@@ -9778,6 +9778,17 @@ function planAbrir(idx) {
     try { planManualPieces = JSON.parse(rowEl.dataset.planPecasManual)||[]; } catch(e){}
   }
   planRenderManual();
+  // HOTFIX 2026-08-16 (P0.1) — reset OBRIGATÓRIO a cada abertura: sem isto,
+  // uma peça excluída do item A (mesmo nome/slug) podia "vazar" para o item
+  // B ao reconciliar contra o array ainda em memória do item anterior (ver
+  // _planReconcilePieces). _planEditPieces só pode carregar estado dentro
+  // da MESMA sessão de edição do MESMO item.
+  _planEditPieces = [];
+  // Semente para a próxima chamada de planCalc() (logo abaixo, se já houver
+  // dimensões salvas): se o item já foi aplicado antes, o catálogo efetivo
+  // nasce do snapshot persistido (peça excluída não está nele — nunca da
+  // receita crua). Ver _planSeedFromPersisted().
+  _planSeedPersistedJson = (rowEl && rowEl.dataset.planPecas) ? rowEl.dataset.planPecas : null;
 
   // SVG template do produto — suporta múltiplas espessuras
   var _planSvgBox = document.getElementById('planSvgBox');
@@ -9961,12 +9972,22 @@ function planCalc() {
   var pieces = rec.pieces(L, A, P, e, extra);
   var totalArea = 0, totalQty = 0;
 
-  // Inicializar array editável (preserva edições anteriores se recalcular)
-  _planEditPieces = pieces.map(function(pc) {
-    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100, esp:pc.esp||'', tipo:pc.tipo||''};
-  });
+  // HOTFIX 2026-08-16 (P0.1-P0.4) — fonte única de verdade: nunca substituir
+  // _planEditPieces cegamente. Na 1ª chamada após planAbrir() de um item já
+  // salvo, semeia do snapshot persistido (peça excluída não está lá — ver
+  // _planSeedFromPersisted); em qualquer outra chamada (mudança de
+  // dimensão/campo extra), reconcilia com o que já está em memória,
+  // preservando `_deleted` (ver _planReconcilePieces). Isso é o que garante
+  // que uma peça excluída NUNCA volta, em nenhum dos dois casos.
+  if(!_planEditPieces.length && _planSeedPersistedJson) {
+    _planEditPieces = _planSeedFromPersisted(pieces, _planSeedPersistedJson, espMm) || _planReconcilePieces(pieces, espMm);
+  } else {
+    _planEditPieces = _planReconcilePieces(pieces, espMm);
+  }
+  _planSeedPersistedJson = null; // consumido — próximas chamadas reconciliam contra a memória
 
   _planEditPieces.forEach(function(pc, pci) {
+    if(pc._deleted) return; // excluída pelo vendedor — nunca renderiza, nunca soma
     var areaPc = pc.larg * pc.alt * pc.qty;
     totalArea += areaPc;
     totalQty  += pc.qty;
@@ -10038,9 +10059,11 @@ function planCalc() {
   // store for aplicar
   sumBox.dataset.totalArea = totalArea;
   sumBox.dataset.totalQty  = totalQty;
-  sumBox.dataset.pcs       = JSON.stringify(pieces.map(function(pc){
-    return {nome:pc.nome, qty:pc.qty, larg:Math.round(pc.larg*100)/100, alt:Math.round(pc.alt*100)/100, esp:pc.esp||'', tipo:pc.tipo||''};
-  }));
+  // HOTFIX 2026-08-16 (P0.3) — layout/canvas lê deste dataset; tem que ser
+  // exatamente o mesmo array pós-reconciliação da tabela (_planEditPieces
+  // filtrado sem _deleted), nunca a lista crua da receita, senão uma peça
+  // excluída some da tabela mas continua desenhada no layout de corte.
+  sumBox.dataset.pcs       = JSON.stringify(_planEditPieces.filter(function(p){ return !p._deleted; }));
 
   if(btn) { btn.disabled = false; btn.style.opacity = '1'; }
   setTimeout(planDrawCanvas, 0);
@@ -10065,10 +10088,11 @@ function planAplicar() {
     // do modal de planificação (nunca perdidos, nunca recalculados com a
     // receita vigente — só usados para re-popular os inputs).
     row.dataset.planCamposExtras = JSON.stringify(planLerCamposExtras());
-    // planPecas = TODAS (catálogo + extras) — usado pelo cálculo de laser
-    var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
-      .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
-    row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+    // planPecas = TODAS (catálogo + extras) — usado pelo cálculo de laser.
+    // HOTFIX 2026-08-16 — fonte única _planBuildAllPecas() (mesma usada por
+    // _planSincronizarComItem); antes essa lógica estava duplicada byte a
+    // byte nos dois lugares, risco de divergência numa próxima mudança.
+    row.dataset.planPecas = JSON.stringify(_planBuildAllPecas());
     // RODADA 6, seção 8/10 — no momento em que o vendedor confirma a
     // planificação, congela a receita vigente (productId/recipeVersion/
     // recipeSnapshot) no item. É este o único ponto em que um NOVO
@@ -31757,7 +31781,74 @@ function planExportSVG() {
 // ────────────────────────────────────────────────────────────────────────────
 
 // ── Edição de peças auto-geradas ────────────────────────────────────
+// HOTFIX 2026-08-16 — peça excluída não pode ressuscitar (P0.1-P0.4).
+// `_planEditPieces` é a fonte única de verdade da planificação em edição.
+// Identidade estável por peça automática = slug do nome (as receitas atuais
+// nunca repetem nome dentro da mesma receita) — nunca índice de array, que
+// muda a cada regeneração. `planCalc()`/`_planCalcOrig` (que roda a cada
+// mudança de dimensão/campo extra) NUNCA mais substitui `_planEditPieces`
+// cegamente: sempre reconcilia via _planReconcilePieces(), que preserva
+// `_deleted` de uma peça já existente. Na reabertura do modal
+// (planAbrir()), quando o item já tem `row.dataset.planPecas` persistido
+// (aplicado antes), o catálogo nasce direto do snapshot persistido
+// (_planSeedFromPersisted) — nunca da receita crua — porque uma peça
+// excluída é removida do array persistido (nunca gravada como
+// `_deleted:true`), então "ausente no snapshot" = "foi excluída".
 var _planEditPieces = [];
+var _planSeedPersistedJson = null; // consumido 1x por planCalc() após planAbrir() semear
+
+function _planPieceSlug(nome) {
+  return String(nome||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_');
+}
+// `defaultEspMm` = espessura do material selecionado para o item (mm). As
+// receitas built-in (PLAN_RECIPES) nunca preenchem `esp` por peça — só
+// receitas customizadas/snapshot e peças manuais têm essa granularidade —
+// então, sem isto, toda peça automática nascia sem espessura própria
+// (achado real, P0.5: a OS precisa mostrar a espessura de CADA peça).
+function _planReconcilePieces(freshPieces, defaultEspMm) {
+  var prevByKey = {};
+  (_planEditPieces||[]).forEach(function(p){ if(p&&p.id) prevByKey[p.id]=p; });
+  return (freshPieces||[]).map(function(pc){
+    var id = 'auto_' + _planPieceSlug(pc.nome);
+    var prev = prevByKey[id];
+    return {
+      id: id, nome: pc.nome, qty: pc.qty,
+      larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
+      esp: pc.esp || defaultEspMm || '', tipo: pc.tipo||'',
+      _deleted: prev ? !!prev._deleted : false
+    };
+  });
+}
+function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
+  var persisted;
+  try { persisted = JSON.parse(planPecasJson||'[]'); } catch(e) { return null; }
+  if(!persisted || !persisted.length) return null;
+  var byId = {};
+  persisted.filter(function(p){ return p && p.origem==='AUTOMATICA'; })
+    .forEach(function(p){ byId['auto_'+_planPieceSlug(p.nome)] = p; });
+  return (freshPieces||[]).map(function(pc){
+    var id = 'auto_' + _planPieceSlug(pc.nome);
+    var saved = byId[id];
+    return {
+      id: id, nome: pc.nome,
+      qty:  saved ? saved.qty  : pc.qty,
+      larg: saved ? saved.larg : Math.round(pc.larg*100)/100,
+      alt:  saved ? saved.alt  : Math.round(pc.alt*100)/100,
+      esp:  saved ? (saved.esp || defaultEspMm || '') : (pc.esp || defaultEspMm || ''),
+      tipo: pc.tipo||'',
+      _deleted: !saved // ausente no snapshot persistido = foi excluída
+    };
+  });
+}
+// Fonte única do array persistido em row.dataset.planPecas — usada tanto por
+// planAplicar() quanto por _planSincronizarComItem() (antes duplicado byte
+// a byte nos dois lugares).
+function _planBuildAllPecas() {
+  return (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; })
+    .map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
+    .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; })
+      .map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
+}
 
 function _planDeleteAuto(pci) {
   if(_planEditPieces && _planEditPieces[pci]) {
@@ -31765,6 +31856,7 @@ function _planDeleteAuto(pci) {
     var row = document.getElementById('planAutoRow_'+pci);
     if(row) row.style.display='none';
     _planRecompute();
+    if(typeof _planSincronizarComItem==='function') _planSincronizarComItem();
   }
 }
 
@@ -31779,6 +31871,10 @@ function _planEditField(input) {
   var aEl = document.getElementById('planEditArea_'+pci);
   if (aEl) aEl.textContent = ((p.larg*p.alt*p.qty)/10000).toFixed(4);
   _planRecompute();
+  // HOTFIX 2026-08-16 (P0.4) — editar qty/larg/alt de uma peça automática
+  // tem que refletir no total do orçamento em tempo real, igual já
+  // acontecia para peça manual (ver _planCalcAndMerge).
+  if(typeof _planSincronizarComItem==='function') _planSincronizarComItem();
 }
 
 function _planRecompute() {
@@ -31849,7 +31945,9 @@ function _planRecompute() {
 
   sumBox.dataset.totalArea = totalArea;
   sumBox.dataset.totalQty  = totalQty;
-  sumBox.dataset.pcs = JSON.stringify(_planEditPieces);
+  // HOTFIX 2026-08-16 (P0.3) — mesmo motivo do write em planCalc(): nunca
+  // deixar uma peça _deleted vazar para o canvas/SVG de corte.
+  sumBox.dataset.pcs = JSON.stringify(_planEditPieces.filter(function(p){ return !p._deleted; }));
   sumBox.dataset.planManualMatCost = _manualCostRpc;
   sumBox.dataset.planManualAreaM2  = _manualAreaM2Rpc;
   sumBox.style.display='flex';
@@ -31891,9 +31989,7 @@ function _planSincronizarComItem() {
   row.dataset.planLarg = (document.getElementById('planLarg')||{}).value||'';
   row.dataset.planAlt  = (document.getElementById('planAlt')||{}).value||'';
   row.dataset.planProf = (document.getElementById('planProf')||{}).value||'';
-  var _allPlanPecas = (_planEditPieces||[]).filter(function(p){ return !p._deleted && parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'AUTOMATICA'});})
-    .concat((planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; }).map(function(p){return Object.assign({},p,{espessuraMm:parseInt(p.esp||0)||null,origem:'MANUAL'});}));
-  row.dataset.planPecas = JSON.stringify(_allPlanPecas);
+  row.dataset.planPecas = JSON.stringify(_planBuildAllPecas());
   var _onlyManual = (planManualPieces||[]).filter(function(p){ return parseFloat(p.larg)>0&&parseFloat(p.alt)>0; });
   row.dataset.planPecasManual = JSON.stringify(_onlyManual);
   row.dataset.planManualMatCost = parseFloat(sumBox.dataset.planManualMatCost)||0;
