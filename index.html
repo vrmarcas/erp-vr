@@ -10399,7 +10399,11 @@ function orcRecalc() {
   if (tv) {
     tv.textContent = orcFmt(finalPrice);
     const ul = document.getElementById('orcUnitLbl');
-    if(ul) ul.textContent = qtyTotal>1 ? orcFmt(finalPrice/qtyTotal)+' / unidade' : '';
+    // HOTFIX 2026-08-16 (P0.11) — "R$X / unidade" removido: com produtos
+    // diferentes no mesmo orçamento (Caixa+Display+Bandeja), um "valor
+    // unitário médio" do TOTAL geral não tem significado útil e confundia
+    // o vendedor. Preço unitário continua disponível na linha de cada item.
+    if(ul) ul.textContent = '';
     const brk = document.getElementById('orcBreak');
     if(brk) {
       if(finalPrice<=0){ brk.innerHTML=''; }
@@ -10428,7 +10432,8 @@ function orcRecalc() {
   var ul3 = document.getElementById('orcUnitLbl3');
   var b3  = document.getElementById('orcBreak3');
   if(tv3) tv3.textContent = orcFmt(finalPrice);
-  if(ul3) ul3.textContent = qtyTotal>1 ? orcFmt(finalPrice/qtyTotal)+' / unidade' : '';
+  // HOTFIX 2026-08-16 (P0.11) — mesmo motivo do card principal (ver acima).
+  if(ul3) ul3.textContent = '';
   if(b3) {
     var lines3 = '';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal)+'</span></div>';
