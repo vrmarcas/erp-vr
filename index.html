@@ -9555,6 +9555,34 @@ function orcItemVRRestaurarDados(itemSalvo) {
     planPecasManual: (itemSalvo.pieces || []).filter(function (p) { return p && p.origem === 'MANUAL'; }),
   };
 }
+// HOTFIX 2026-08-16 (P0.5) — achado real: um item pode ter peças
+// automáticas numa espessura (ex.: Cristal 3mm) e uma peça adicional
+// manual noutra (ex.: Cristal 4mm), mas `item.mat` sempre foi uma ÚNICA
+// string (o material selecionado no dropdown do item) — a OS/Kanban/PDF
+// mostravam só essa string, nunca as espessuras realmente usadas peça a
+// peça. Deriva um resumo "Nome Xmm + Nome Ymm" a partir das peças reais
+// do item (nunca recalcula — só lê o snapshot já existente: item.pieces,
+// com fallback para item.recipeSnapshot.pecas), deduplicando por
+// espessura. Item sem peças detalhadas (OS antiga anterior a este
+// hotfix, ou item Vitre/catálogo sem planificação) cai no fallback de
+// sempre: item.mat como estava.
+function osItemMateriaisResumo(item) {
+  if (!item) return '—';
+  var pecas = (item.pieces && item.pieces.length) ? item.pieces
+    : ((item.recipeSnapshot && item.recipeSnapshot.pecas) || []);
+  if (!pecas.length) return item.mat || '—';
+  var baseLabel = String(item.mat || '').replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim() || (item.mat || 'Material');
+  var vistos = {}, partes = [];
+  pecas.forEach(function(p) {
+    var espVal = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : null);
+    var chave = espVal != null ? String(espVal) : ' semesp';
+    if (vistos[chave]) return;
+    vistos[chave] = true;
+    partes.push(baseLabel + (espVal != null ? ' ' + espVal + 'mm' : ''));
+  });
+  return partes.length ? partes.join(' + ') : (item.mat || '—');
+}
+
 // Projeção operacional segura do item para a OS (seção 13): Produção
 // nunca recebe custo/preço/margem/markup/desconto/pagamento — mesmo que
 // o item ou o recipeSnapshot carreguem esses dados em algum campo futuro,
@@ -9564,7 +9592,10 @@ function osProjecaoOperacionalItem(item) {
   var seguro = {
     tipoItem: item.tipoItem,
     prod: item.prod, qty: item.qty, larg: item.larg, alt: item.alt,
-    mat: item.mat, det: item.det,
+    // HOTFIX 2026-08-16 (P0.5) — mat congelado já como o resumo completo
+    // de materiais/espessuras (nunca recalculado depois — a OS lê este
+    // campo direto em todos os pontos de exibição/PDF).
+    mat: osItemMateriaisResumo(item), det: item.det,
     planArea: item.planArea, pieces: item.pieces,
     productId: item.productId || null,
     recipeVersion: item.recipeVersion || null,
@@ -12567,11 +12598,18 @@ function kbAbrirPlanificacaoItem(idx){
     ? '<table style="width:100%;border-collapse:collapse;font-size:11px">'
       + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th></tr>'
       + pecas.map(function(p){
+          // HOTFIX 2026-08-16 (P0.6) — achado real: peças automáticas
+          // mostravam "mm" sem número. Causa: p.esp!=null não barra string
+          // vazia (''!=null é true), e nunca caía para p.espessuraMm
+          // (sempre presente ao lado, ver _planBuildAllPecas()). Preserva
+          // 0 como valor válido — só cai no fallback quando REALMENTE não
+          // há espessura registrada em nenhum dos dois campos.
+          var _espVal = (p.esp!=null && p.esp!=='') ? p.esp : (p.espessuraMm!=null ? p.espessuraMm : null);
           return '<tr style="border-top:1px solid var(--border)">'
             + '<td style="padding:4px">'+cfgEsc(p.nome||p.label||'—')+'</td>'
             + '<td style="padding:4px">'+(p.larg||p.l||'—')+'×'+(p.alt||p.a||'—')+' '+(p.unidade||'cm')+'</td>'
             + '<td style="padding:4px">'+(p.qty||1)+'</td>'
-            + '<td style="padding:4px">'+(p.esp!=null?p.esp+'mm':'—')+'</td>'
+            + '<td style="padding:4px">'+(_espVal!=null?_espVal+'mm':'—')+'</td>'
             + '</tr>';
         }).join('')
       + '</table>'
@@ -26414,7 +26452,10 @@ function orcEnvGerarOS(){
   // que a OS/orçamento/financeiro VR (únicos) já foram confirmados pela
   // transação abaixo — nunca cria um segundo orçamento/venda.
   var _vitreItensPayload = (typeof orcMontarPayloadVitreParaOS==='function') ? orcMontarPayloadVitreParaOS(itens) : [];
-  var matLabel=itens.length&&itens[0].mat?itens[0].mat:'—';
+  // HOTFIX 2026-08-16 (P0.5) — os.material (Kanban card + resumo do topo da
+  // OS) precisa mostrar TODAS as espessuras usadas no primeiro item, não só
+  // a string única do material selecionado — ver osItemMateriaisResumo().
+  var matLabel=itens.length?osItemMateriaisResumo(itens[0]):'—';
   var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
   var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
   // Parte 18/19 — checklist de etapas de produção na OS (Kanban continua
