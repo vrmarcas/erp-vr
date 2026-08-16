@@ -24196,16 +24196,25 @@ function orcCondicaoPagamentoAtual(o){
 // osId) para o histórico — os MESMOS documentos que orçamento/CR/Caixa
 // já usam, nunca um terceiro lugar novo para "recebimentos".
 function orcFinanceiroReal(o){
-  var totalCents = moneyToCents(o.valorFinal||0);
   var osFin = (o && o.osRef && typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[o.osRef] : null;
-  var recebidoCents, saldoCents;
+  var totalCents, recebidoCents, saldoCents;
   if(osFin && typeof osFin.restante!=='undefined'){
-    // OS já existe — saldo é o valor REAL vivo em kb_os_fin (mesclado),
-    // nunca recalculado a partir de um snapshot antigo do orçamento.
+    // OS já existe — total E saldo vêm do valor REAL vivo em kb_os_fin
+    // (mesclado), nunca recalculado a partir de um snapshot antigo do
+    // orçamento. HOTFIX 2026-08-16: "Recebido" era total(o.valorFinal,
+    // preço-cartão congelado no orçamento) − saldo(osFin.restante, já na
+    // base do pagamento real) — bases diferentes, então "Recebido"
+    // aparecia inflado exatamente pelo desconto do método de pagamento
+    // (ex.: PIX 5,14%) sempre que o pagamento real divergia do preço de
+    // cartão. Total agora usa a MESMA base de osFin que o saldo, mantendo
+    // a identidade recebido+saldo=total sempre consistente com o que foi
+    // de fato cobrado.
+    totalCents = moneyToCents(osFin.valor || osFin.totalGeral || o.valorFinal || 0);
     saldoCents = moneyToCents(osFin.restante||0);
     recebidoCents = Math.max(0, totalCents - saldoCents);
   } else {
     // Orçamento ainda não confirmado/sem OS — nada foi recebido ainda.
+    totalCents = moneyToCents(o.valorFinal||0);
     recebidoCents = 0;
     saldoCents = totalCents;
   }
