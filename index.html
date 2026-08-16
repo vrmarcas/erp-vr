@@ -12701,7 +12701,8 @@ function kbOpen(id) {
     <div class="kb-os-field"><div class="kb-os-field-lbl">Cidade</div><div class="kb-os-field-val">${_cidade}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Material</div><div class="kb-os-field-val">${_mat}</div></div>
     <div class="kb-os-field"><div class="kb-os-field-lbl">Medidas · Qtd</div><div class="kb-os-field-val">${_med} · ${_qty}un</div></div>
-    <div class="kb-os-field"><div class="kb-os-field-lbl">Entrega</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
+    ${os.prazoPrometidoTexto ? '<div class="kb-os-field"><div class="kb-os-field-lbl">Prazo enviado ao cliente</div><div class="kb-os-field-val" style="font-size:12px;color:var(--muted)">'+cfgEsc(os.prazoPrometidoTexto)+'</div></div>' : ''}
+    <div class="kb-os-field"><div class="kb-os-field-lbl">${os.prazoPrometidoTexto?'Data sugerida/definida':'Entrega'}</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
     ${_maquinasField}
   `;
   kbRenderItensDetalhe(os);
@@ -25460,6 +25461,19 @@ async function _orcSalvarOrcamentoImpl() {
     prazo: (document.getElementById('orcPrazoEntrega')||{}).value||'',
     prazoDias: (document.getElementById('orcPrazoDias')||{}).value||'',
     prazoDiasMax: (document.getElementById('orcPrazoDiasMax')||{}).value||'',
+    // HOTFIX 2026-08-16 (P0.8) — texto histórico do prazo prometido ao
+    // cliente ("De X a Y dias úteis"), congelado AGORA (no momento em que
+    // o orçamento é salvo) — nunca recalculado depois. orcGetPrazoTexto()
+    // (usado no PDF/WhatsApp) deriva o mesmo texto ao vivo da configuração
+    // atual; este campo é a fonte que a OS deve usar, para que uma OS
+    // antiga continue mostrando o prazo que foi REALMENTE prometido,
+    // mesmo que a receita/configuração de prazo mude depois.
+    prazoTextoPromessa: (function(){
+      var _d = parseInt((document.getElementById('orcPrazoDias')||{}).value||'0');
+      var _dm = parseInt((document.getElementById('orcPrazoDiasMax')||{}).value||'0');
+      if(_d<=0) return '';
+      return _dm>_d ? ('De '+_d+' a '+_dm+' dias úteis') : (_d+' dia'+(_d!==1?'s úteis':' útil'));
+    })(),
     dataPedido: (document.getElementById('orcDataPedido')||{}).value||new Date().toISOString().slice(0,10),
     // Hash não-reversível — nunca grava overhead/VRML/imposto em texto puro
     // no orçamento (documento lido pelo perfil Comercial). Ver cfgHashNaoReversivel.
@@ -26448,6 +26462,30 @@ function orcEnvGerarOS(){
 
   var hoje=new Date();
   var dia=hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
+  // HOTFIX 2026-08-16 (P0.8/P0.9) — achado real: os.prazo/os.entrega
+  // nasciam iguais à data de HOJE (a mesma variável `dia` usada só como
+  // data de criação da OS), sem nenhuma relação com o prazo que o
+  // vendedor prometeu ao cliente no orçamento — o.prazoDias/prazoDiasMax
+  // eram lidos em NENHUM lugar aqui. Corrige: a data sugerida agora é
+  // calculada em dias úteis a partir de HOJE (dia da geração da OS) — é
+  // só uma recomendação operacional inicial, continua 100% editável
+  // depois (drag-and-drop no Kanban, kbSalvarPrazo() — nenhum dos dois
+  // foi alterado). O texto histórico (prazoPrometidoTexto) é congelado à
+  // parte e nunca sobrescrito por essas edições operacionais.
+  var _prazoDiasOS = parseInt(o.prazoDias||'0')||0;
+  var _prazoDiasMaxOS = parseInt(o.prazoDiasMax||'0')||_prazoDiasOS;
+  var diaSugerido = dia;
+  if(_prazoDiasOS > 0) {
+    var _dtSug = new Date(hoje);
+    var _uSug = 0;
+    while(_uSug < _prazoDiasMaxOS) {
+      _dtSug.setDate(_dtSug.getDate()+1);
+      var _dwSug = _dtSug.getDay();
+      if(_dwSug!==0 && _dwSug!==6) _uSug++;
+    }
+    diaSugerido = _dtSug.getDate().toString().padStart(2,'0')+'/'+(_dtSug.getMonth()+1).toString().padStart(2,'0')+'/'+_dtSug.getFullYear();
+  }
+  var prazoPrometidoTextoOS = o.prazoTextoPromessa || '';
   var prodNome=o.produto||'Produto';
   var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
   var itens=o.itens||[];
@@ -26521,7 +26559,12 @@ function orcEnvGerarOS(){
       id:newIdLocal,num:String(nLocal),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
       cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
       material:matLabel,medidas:medidasStr,qty:qtyTotal,
-      status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
+      // HOTFIX 2026-08-16 (P0.8/P0.9) — entrega nasce como a data SUGERIDA
+      // (dias úteis a partir de hoje), não mais igual à data de criação da
+      // OS; prazoPrometidoTexto é o histórico congelado do orçamento,
+      // nunca sobrescrito por drag-and-drop/kbSalvarPrazo() depois.
+      status:tipo==='50-50'?'aguardando_saldo':'iniciada',prazo:diaSugerido,entrega:diaSugerido,
+      prazoPrometidoTexto:prazoPrometidoTextoOS,
       valor:valorTotal,prog:0,pronto:false,
       checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
       parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
@@ -26608,7 +26651,11 @@ function orcEnvGerarOS(){
           // parcial (ou até zero) e "futuro" (sem pagamento algum) caíam
           // direto em "iniciada", inconsistente com o próprio valor de
           // `restante` calculado logo acima.
-          status:restante>0?'aguardando_saldo':'iniciada',prazo:dia,entrega:dia,
+          // HOTFIX 2026-08-16 (P0.8/P0.9) — mesmo motivo do write local
+          // acima: entrega = data sugerida (dias úteis), nunca a data de
+          // criação; prazoPrometidoTexto é o histórico congelado.
+          status:restante>0?'aguardando_saldo':'iniciada',prazo:diaSugerido,entrega:diaSugerido,
+          prazoPrometidoTexto:prazoPrometidoTextoOS,
           prog:0,pronto:false,
           checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
           clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
