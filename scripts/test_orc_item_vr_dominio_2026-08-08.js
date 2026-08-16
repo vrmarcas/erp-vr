@@ -36,7 +36,7 @@ function extractFn(name) {
 
 var FN_NAMES = [
   'receitaSnapshotParaItem', 'receitaResolverParaCalculo',
-  'orcItemVRConstruir', 'orcItemVRRestaurarDados', 'osProjecaoOperacionalItem',
+  'orcItemVRConstruir', 'orcItemVRRestaurarDados', 'osItemMateriaisResumo', 'osProjecaoOperacionalItem',
 ];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),

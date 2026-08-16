@@ -57,8 +57,13 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco J — Kanban: zero dado financeiro
     /Valor Total/.test(srcKbOpen), false);
   test('2. kbOpen() não computa mais _valorFmt a partir de os.valor (o campo financeiro mesclado de kb_os_fin)',
     /_valorFmt/.test(srcKbOpen), false);
-  test('3. regressão — kbOpen() continua mostrando os campos operacionais legítimos (Cliente/Cidade/Material/Medidas/Entrega)',
-    /Cliente<\/div>/.test(srcKbOpen) && /Material<\/div>/.test(srcKbOpen) && /Entrega<\/div>/.test(srcKbOpen), true);
+  // HOTFIX 2026-08-16 (P0.8) — o rótulo do campo de data passou a ser
+  // condicional ("Entrega" OU "Data sugerida/definida", quando a OS tem
+  // prazo prometido histórico — ver os.prazoPrometidoTexto) — o CAMPO
+  // continua lá, só o rótulo virou dinâmico; regex atualizado para aceitar
+  // qualquer um dos dois, nunca a ausência do campo.
+  test('3. regressão — kbOpen() continua mostrando os campos operacionais legítimos (Cliente/Cidade/Material/Medidas/Entrega ou Data sugerida)',
+    /Cliente<\/div>/.test(srcKbOpen) && /Material<\/div>/.test(srcKbOpen) && (/Entrega<\/div>/.test(srcKbOpen) || /'Entrega'/.test(srcKbOpen)), true);
 }
 
 // ── 4-6. Execução real: _kbFornOsMsgText() nunca mais inclui valor de venda ──
