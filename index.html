@@ -9627,6 +9627,84 @@ function osProjecaoOperacionalItem(item) {
   return seguro;
 }
 
+// HOTFIX 2026-08-16 (P0.12-P0.13) — achado real (auditoria estática):
+// editar e salvar um orçamento que já tem OS gerada (o.osRef) NUNCA
+// atualizava a OS — _orcSalvarOrcamentoImpl() não tocava em KB_OS em
+// nenhum ponto (orcEnvEditar() já avisava disso via toast, mas o
+// comportamento nunca foi corrigido). Chamada UMA vez, no fim do save do
+// orçamento (depois de orcSetEnviados(lista), com orc.itens já
+// finalizado). Reusa osProjecaoOperacionalItem()/osItemMateriaisResumo()
+// — a MESMA whitelist/derivação usadas na criação da OS — nunca uma
+// segunda implementação divergente.
+//
+// Antes de produção iniciar (sem os.producaoStartId/os.matProd e
+// status != 'producao'/'pronta'/'entregue'): sincroniza automaticamente,
+// sem perguntar nada — nenhum trabalho físico começou ainda.
+//
+// Depois de produção iniciada: NUNCA atualiza silenciosamente. Só se
+// algo operacional realmente mudou, pede confirmação explícita
+// (confirm()); se confirmado, registra a revisão em
+// os.revisoesPosProducao[] (usuário/timestamp/itens antes/depois) e marca
+// os.revisadaAposProducao=true (indicador visual); se recusado, preserva
+// o snapshot anterior da OS integralmente — nenhuma escrita acontece.
+function _orcSincronizarOSVinculada(orc) {
+  if (!orc || !orc.osRef) return;
+  if (typeof KB_OS === 'undefined' || !KB_OS || !KB_OS[orc.osRef]) return;
+  var os = KB_OS[orc.osRef];
+
+  var novosItensOS = (orc.itens || []).map(function(it) {
+    return (typeof osProjecaoOperacionalItem === 'function') ? osProjecaoOperacionalItem(it) : it;
+  });
+  var novoMatLabel = (novosItensOS.length && typeof osItemMateriaisResumo === 'function')
+    ? osItemMateriaisResumo(novosItensOS[0]) : os.material;
+  var novaMedidasStr = novosItensOS.length && novosItensOS[0].larg && novosItensOS[0].alt
+    ? (novosItensOS[0].larg + '×' + novosItensOS[0].alt + 'cm') : os.medidas;
+  var novoQtyTotal = novosItensOS.reduce(function(s, i) { return s + (parseInt(i.qty) || 1); }, 0) || (os.qty || 1);
+
+  var jaEmProducao = !!(os.producaoStartId || os.matProd || os.status === 'producao' || os.status === 'pronta' || os.status === 'entregue');
+  var novoPrazoTexto = orc.prazoTextoPromessa || os.prazoPrometidoTexto || '';
+
+  function aplicarSnapshot() {
+    os.itens = novosItensOS;
+    os.material = novoMatLabel;
+    os.medidas = novaMedidasStr;
+    os.qty = novoQtyTotal;
+    os.prazoPrometidoTexto = novoPrazoTexto;
+  }
+
+  if (!jaEmProducao) {
+    aplicarSnapshot();
+    if (typeof kbSaveKbos === 'function') kbSaveKbos();
+    if (typeof kbRender === 'function') try { kbRender(); } catch (e) {}
+    if (typeof renderOsTable === 'function') try { renderOsTable(); } catch (e) {}
+    return;
+  }
+
+  // Produção já iniciada — só interrompe o vendedor se algo operacional
+  // REALMENTE mudou (nunca incomoda à toa num save sem mudança técnica).
+  var mudouItens = JSON.stringify(os.itens || []) !== JSON.stringify(novosItensOS);
+  var mudouMaterial = (os.material || '') !== (novoMatLabel || '');
+  if (!mudouItens && !mudouMaterial) return;
+
+  var msg = 'Esta OS já está em produção. O orçamento possui alterações que afetam a fabricação. Deseja enviar uma revisão para produção?';
+  if (typeof confirm === 'function' && !confirm(msg)) return; // preserva o snapshot anterior — nenhuma escrita
+
+  os.revisoesPosProducao = (os.revisoesPosProducao || []).concat([{
+    ts: Date.now(),
+    usuario: (typeof _currentSession !== 'undefined' && _currentSession && _currentSession.email) || '—',
+    itensAnteriores: os.itens || [],
+    itensNovos: novosItensOS,
+    materialAnterior: os.material || '',
+    materialNovo: novoMatLabel || ''
+  }]);
+  aplicarSnapshot();
+  os.revisadaAposProducao = true;
+  if (typeof kbSaveKbos === 'function') kbSaveKbos();
+  if (typeof secAuditLog === 'function') secAuditLog('os_revisao_pos_producao', 'OS #' + os.num + ' revisada após início da produção — orçamento #' + orc.num);
+  if (typeof kbRender === 'function') try { kbRender(); } catch (e) {}
+  if (typeof renderOsTable === 'function') try { renderOsTable(); } catch (e) {}
+}
+
 // RODADA 5, seção 9 — achado de segurança: esta função usava Function()
 // (execução arbitrária de JS) protegida só por um regex de whitelist. Isso
 // é exatamente o padrão que o enunciado desta rodada proíbe explicitamente
@@ -12657,7 +12735,12 @@ function kbOpen(id) {
   document.getElementById('kbOsNum').textContent  = 'OS #' + os.num;
   const sm = _kbStatusMap[os.status] || { cls:'si', txt:os.status };
   const stag = document.getElementById('kbOsStag');
-  stag.className = 'stag ' + sm.cls; stag.textContent = sm.txt;
+  stag.className = 'stag ' + sm.cls;
+  // HOTFIX 2026-08-16 (P0.13) — indicador visual obrigatório: OS que
+  // recebeu uma revisão operacional DEPOIS de produção iniciada (ver
+  // _orcSincronizarOSVinculada) precisa ficar claramente marcada, nunca
+  // silenciosa.
+  stag.textContent = sm.txt + (os.revisadaAposProducao ? ' ⚠️ revisada' : '');
   const mb = document.getElementById('kbOsMarca');
   mb.className = 'badge ' + (os.mk==='vr'?'bvr':'bvit'); mb.textContent = os.marca;
 
@@ -12704,6 +12787,9 @@ function kbOpen(id) {
     ${os.prazoPrometidoTexto ? '<div class="kb-os-field"><div class="kb-os-field-lbl">Prazo enviado ao cliente</div><div class="kb-os-field-val" style="font-size:12px;color:var(--muted)">'+cfgEsc(os.prazoPrometidoTexto)+'</div></div>' : ''}
     <div class="kb-os-field"><div class="kb-os-field-lbl">${os.prazoPrometidoTexto?'Data sugerida/definida':'Entrega'}</div><div class="kb-os-field-val" style="color:${_late?'#DC2626':'var(--text)'};font-weight:${_late?'700':'400'}">${_entrega}${_prazoStatus}</div></div>
     ${_maquinasField}
+    ${(os.revisoesPosProducao && os.revisoesPosProducao.length) ? '<div class="kb-os-field" style="grid-column:1/-1"><details><summary style="cursor:pointer;font-size:11px;font-weight:800;color:#D97706">⚠️ '+os.revisoesPosProducao.length+' revisão(ões) após início da produção</summary><div style="margin-top:6px;font-size:11px;color:var(--muted)">'
+      + os.revisoesPosProducao.slice().reverse().map(function(r){ return '<div style="padding:4px 0;border-top:1px solid var(--border)">'+new Date(r.ts).toLocaleString('pt-BR')+' · '+cfgEsc(r.usuario||'—')+(r.materialAnterior!==r.materialNovo?' · material: '+cfgEsc(r.materialAnterior)+' → '+cfgEsc(r.materialNovo):'')+'</div>'; }).join('')
+      + '</div></details></div>' : ''}
   `;
   kbRenderItensDetalhe(os);
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
@@ -13456,6 +13542,10 @@ function kbRender() {
     _etHtml+='</div>';
     card.innerHTML=cbHtml
       +prazoBadge
+      // HOTFIX 2026-08-16 (P0.10/P0.13) — indicador compacto no próprio
+      // card (não só no modal) de que a OS foi revisada após produção
+      // iniciada — produção precisa ver isso sem abrir a OS.
+      +(os.revisadaAposProducao ? '<div style="font-size:9px;font-weight:800;color:#D97706;margin-bottom:3px">⚠️ Revisada pós-produção</div>' : '')
       +'<div class="kcard-title">'+(os.titulo||os.cliente||'OS')+'</div>'
       +'<div class="kcard-sub">📍 '+(os.cidade||'—')+' · '+(isVt?'Vitre':'VR Marcas')+'<br>'+(os.material||'—')+' · '+(os.medidas||'—')+' · '+(os.qty||1)+'un'
       +(os.tempoProd ? ' · ⏱️ '+os.tempoProd+'h' : '')
@@ -25521,6 +25611,11 @@ async function _orcSalvarOrcamentoImpl() {
   window._orcSessaoAtualId = orc.id;
   if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
   orcSetEnviados(lista);
+  // HOTFIX 2026-08-16 (P0.12-P0.13) — sincroniza a OS já gerada (se
+  // houver) com os dados operacionais recém-salvos deste orçamento. Ver
+  // _orcSincronizarOSVinculada() para as regras de antes/depois da
+  // produção iniciar.
+  if (typeof _orcSincronizarOSVinculada === 'function') _orcSincronizarOSVinculada(orc);
   // Dual-write: além do array legado (erp_vr/orcamentos, ainda a fonte de
   // verdade lida pela UI existente), grava também o núcleo comercial deste
   // orçamento em erp_vr_orcamentos/{id} — só campos voltados ao cliente,
