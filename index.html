@@ -13531,13 +13531,19 @@ function kbRender() {
     var sm=_kbStatusMap[os.status]||smMap[os.status]||{cls:'si',txt:os.status||'Iniciada'};
     var cbHtml=_KB_SEL_MODE?'<input type="checkbox" '+(selecionado?'checked':'')+' onclick="event.stopPropagation();kbToggleSel(\''+osId+'\')" style="position:absolute;top:8px;right:8px;width:17px;height:17px;cursor:pointer;accent-color:#6366F1">':'';
     card.style.position='relative';
-    // Etapas de produção
-    var _etapas=os._etapas||{};
-    var _etNms=['Corte','Gravar','Montar','Acab.','Embal.']; var _etKs=['corte','gravacao','montagem','acabamento','embalagem'];
+    // Etapas de produção — HOTFIX 2026-08-16 (Kanban×TodasOS): lê/escreve
+    // no mesmo array canônico os._ck (índice 0-4, mesma ordem de
+    // OPERACOES_PADRAO) usado pelo checklist do modal (kbToggle) e por
+    // kbEtapaAtual()/kbChecklistCompleto() — antes este chip do card escrevia
+    // num campo paralelo (etapas soltas por chave) que nunca era lido em nenhum outro
+    // lugar, causando desync real: marcar aqui não refletia em "Todas as
+    // OS" nem habilitava "Marcar como Pronta".
+    var _etNms=['Corte','Gravar','Montar','Acab.','Embal.'];
+    var _osCk=os._ck||[];
     var _etHtml='<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap">';
     _etNms.forEach(function(e,i){
-      var d=!!_etapas[_etKs[i]];
-      _etHtml+='<span onclick="event.stopPropagation();kbToggleEtapa(\''+osId+'\',\''+_etKs[i]+'\',this)" style="cursor:pointer;font-size:9px;padding:2px 5px;border-radius:3px;border:1px solid '+(d?'#059669':'var(--border)')+';background:'+(d?'#059669':'transparent')+';color:'+(d?'#fff':'var(--muted)')+'">'+(d?'✓ ':'')+e+'</span>';
+      var d=!!_osCk[i];
+      _etHtml+='<span onclick="event.stopPropagation();kbToggleEtapa(\''+osId+'\','+i+',this)" style="cursor:pointer;font-size:9px;padding:2px 5px;border-radius:3px;border:1px solid '+(d?'#059669':'var(--border)')+';background:'+(d?'#059669':'transparent')+';color:'+(d?'#fff':'var(--muted)')+'">'+(d?'✓ ':'')+e+'</span>';
     });
     _etHtml+='</div>';
     card.innerHTML=cbHtml
@@ -13839,16 +13845,24 @@ function kbNormalizarDatas() {
 }
 
 // ── Toggle etapa no card ──────────────────────────────────────────────────────
-function kbToggleEtapa(osId, key, el) {
+// HOTFIX 2026-08-16 (Kanban×TodasOS): opera sobre os._ck[idx] — o mesmo
+// array canônico do checklist do modal (kbToggle) — nunca mais sobre um
+// campo paralelo. `idx` é a posição fixa (0-4) nas 5 etapas canônicas
+// (OPERACOES_PADRAO), que são sempre os 5 primeiros itens de os.checks.
+function kbToggleEtapa(osId, idx, el) {
   var os=KB_OS[osId]; if(!os) return;
-  os._etapas=os._etapas||{};
-  os._etapas[key]=!os._etapas[key];
-  var done=os._etapas[key];
+  if(os.status==='pronta' || os.status==='entregue') return;
+  os._ck = os._ck || (os.checks||[]).map(function(){ return false; });
+  os._ck[idx]=!os._ck[idx];
+  var done=os._ck[idx];
   el.style.background=done?'#059669':'transparent';
   el.style.borderColor=done?'#059669':'var(--border)';
   el.style.color=done?'#fff':'var(--muted)';
-  el.textContent=(done?'✓ ':'')+{corte:'Corte',gravacao:'Gravar',montagem:'Montar',acabamento:'Acab.',embalagem:'Embal.'}[key];
-  if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
+  var _etNms=['Corte','Gravar','Montar','Acab.','Embal.'];
+  el.textContent=(done?'✓ ':'')+_etNms[idx];
+  kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
+  if (typeof kbRenderOsList==='function') kbRenderOsList();
+  if (typeof renderOsTable==='function') renderOsTable();
 }
 
 function kbEditarMatProd() {
