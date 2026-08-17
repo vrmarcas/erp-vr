@@ -9986,6 +9986,34 @@ function _matGetRsm2(matKey, idx) {
   return el ? (parseFloat(el.value)||100) : 100;
 }
 
+// RODADA CIRÚRGICA — peças AUTOMÁTICAS de uma receita cadastrada pelo
+// usuário (ou importada de SVG) podem declarar espessura própria
+// (`esp`) diferente da do material selecionado no item (achado: peças
+// manuais já eram precificadas por espessura própria via precoM2; peças
+// automáticas eram todas cobradas ao preço/m² único do item). Resolve o
+// preço/m² de uma peça cuja espessura diverge, procurando no MESMO
+// cadastro filtrado que _matGetRsm2()/orcConstruirMatOpts() já usam uma
+// entrada da mesma família (nome-base, sem o "Xmm" final) na espessura
+// pedida. Devolve null (nunca 0) quando não encontra — quem chama decide
+// o fallback (preço do material do item, nunca quebra o orçamento nem
+// inventa um preço).
+function _matResolverPrecoFamiliaEspessura(matKeyItem, espAlvoMm) {
+  if (!matKeyItem || matKeyItem.indexOf('cfg_') !== 0 || !(espAlvoMm > 0)) return null;
+  try {
+    var _mats = (cfgLoad().materiais || []).filter(function(m){ return m.nome && m.nome!=='Novo material'; });
+    var _mi = parseInt(matKeyItem.replace('cfg_',''));
+    var _matItem = _mats[_mi];
+    if (!_matItem) return null;
+    var _norm = function(nome){ return String(nome||'').replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim().toLowerCase(); };
+    var _espDe = function(m){ return parseFloat(m.esp) || (function(){ var mm=String(m.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):0; })(); };
+    var _nomeBase = _norm(_matItem.nome);
+    var _cand = _mats.find(function(m){ return _norm(m.nome)===_nomeBase && _espDe(m)===espAlvoMm; });
+    if (!_cand) return null;
+    var _rsm2 = _cand.rsm2 || ((_cand.comp && _cand.larg && _cand.custo) ? (_cand.custo/(_cand.comp*_cand.larg/10000)) : 0);
+    return _rsm2 > 0 ? _rsm2 : null;
+  } catch(e) { return null; }
+}
+
 function orcMatChanged(idx) {
   var sel = document.getElementById('oi_mat_'+idx);
   if (!sel) return;
@@ -10392,11 +10420,46 @@ function orcRecalc() {
     const planManualMatCost = parseFloat(row.dataset.planManualMatCost)||0;
     const planManualAreaM2  = planArea>0 ? (parseFloat(row.dataset.planManualAreaM2)||0) : 0;
     const baseAreaM2 = Math.max(0, useArea/10000 - planManualAreaM2);
-    const matCost = (baseAreaM2 * priceM2 + planManualMatCost) * qty;
+    // RODADA CIRÚRGICA — correção por peça com espessura diferente da do
+    // material selecionado no item: baseAreaM2*priceM2 acima cobra TODAS
+    // as peças automáticas ao preço/m² único do item (comportamento
+    // preservado — é o correto quando nenhuma peça diverge, cobre os 14
+    // produtos do catálogo). Esta soma é só um DELTA de correção: para
+    // cada peça automática cuja espessura própria (peca.esp) diverge da
+    // espessura do material do item, troca a contribuição dessa peça do
+    // preço único para o preço/m² real da espessura dela — nunca duas
+    // fórmulas de preço, só um ajuste sobre a mesma base. Peça sem esp
+    // própria (ou igual à do item) contribui delta=0 — herda o material
+    // principal, como já acontecia. Peças MANUAIS (origem:'MANUAL') não
+    // entram aqui — já são precificadas por espessura própria acima, via
+    // planManualMatCost.
+    var _itemEspMm = parseFloat(document.getElementById('oi_esp_'+idx)?.value) || 0;
+    var _deltaEspecificoPecas = 0;
+    if (planArea > 0) {
+      var _pecasPlanRaw = [];
+      try { _pecasPlanRaw = JSON.parse(row.dataset.planPecas || '[]'); } catch(_e) {}
+      _pecasPlanRaw.forEach(function(p){
+        if (p.origem !== 'AUTOMATICA') return;
+        var _espP = parseFloat((p.esp!=null && p.esp!=='') ? p.esp : p.espessuraMm) || 0;
+        if (!_espP || _espP === _itemEspMm) return; // sem override, ou já é a espessura do item — nada a corrigir
+        var _areaPecaM2 = ((parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1))/10000;
+        var _precoResolvido = _matResolverPrecoFamiliaEspessura(matKey, _espP);
+        if (_precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item (fallback seguro)
+        _deltaEspecificoPecas += _areaPecaM2 * (_precoResolvido - priceM2);
+      });
+    }
+    const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
     matTotal  += matCost;
     areaTotal += useArea*qty;
     qtyTotal  += qty;
-    itemRows.push({idx:idx, qty:qty, matCost:matCost});
+    // RODADA CIRÚRGICA — extras "➕ deste Item" (acabamento/instalação/
+    // outros) são item-local desde a captura (ORC_ITEM_EXTRAS[idx]), mas
+    // orcGetItemExtrasTotal() os poola num total único do PEDIDO — o
+    // PASS 3 (mais abaixo) precisa saber o valor PRÓPRIO de cada item
+    // para nunca deixar o extra de um item vazar no preço de outro.
+    var _exItem = (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[idx]) || {};
+    var itemExtrasSoma = (_exItem.acabamento||0)+(_exItem.instalacao||0)+(_exItem.outros||0);
+    itemRows.push({idx:idx, qty:qty, matCost:matCost, itemExtrasSoma:itemExtrasSoma});
   });
 
   // consumíveis
@@ -10485,23 +10548,36 @@ function orcRecalc() {
     }
   });
 
-  // preço final
-  let finalPrice = 0;
-  if (factor>0 && totalCostParaMarkup>0) finalPrice = ((totalCostParaMarkup/factor) + (itemAjusteDeltaCents/100)) * (1-descPct) - descRS;
   // Acréscimo
   var _acresTipo=(document.getElementById('orcAcresTipo')?.value)||'pct';
   var _acresVal=parseFloat(document.getElementById('orcAcres')?.value)||0;
   var acresPct=_acresTipo==='pct'?_acresVal/100:0;
   var acresRS =_acresTipo==='rs' ?_acresVal:0;
-  if(finalPrice>0) finalPrice = finalPrice*(1+acresPct)+acresRS;
   // Só Corte override
   var _soCorte = !!(document.getElementById('orcSoCorte')?.checked);
   var _soCorteMin = _soCorte ? Math.max(30, parseFloat(document.getElementById('orcSoCorteMin')?.value)||30) : 0;
-  if(_soCorte) {
-    finalPrice = _soCorteMin * (130/60);
-    var scEl = document.getElementById('soCorteValor');
-    if(scEl) scEl.textContent = 'R$ '+finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  // RODADA CIRÚRGICA — mesma fórmula de sempre (desconto → acréscimo → Só
+  // Corte), extraída para função só para poder ser chamada DUAS VEZES: uma
+  // com o totalCostParaMarkup REAL (finalPriceVR de verdade) e outra com os
+  // extras-por-item zerados (finalPriceVR "sem extras"). A diferença entre
+  // as duas é exatamente a contribuição, já transformada por desconto/
+  // acréscimo, dos extras de TODOS os itens somados — usada no PASS 3 para
+  // atribuir a cada item só o que é seu, sem vazar pros outros.
+  function _calcularFinalPriceVR(_totalCostParaMarkupX) {
+    var fp = 0;
+    if (factor>0 && _totalCostParaMarkupX>0) fp = ((_totalCostParaMarkupX/factor) + (itemAjusteDeltaCents/100)) * (1-descPct) - descRS;
+    if (fp>0) fp = fp*(1+acresPct)+acresRS;
+    if (_soCorte) fp = _soCorteMin * (130/60);
+    return fp;
   }
+  var finalPriceVR = _calcularFinalPriceVR(totalCostParaMarkup);
+  var finalPriceVR_semItemExtras = _calcularFinalPriceVR(totalCostParaMarkup - itemExtrasTotal);
+  var somaExtrasTransformada = finalPriceVR - finalPriceVR_semItemExtras;
+  if(_soCorte) {
+    var scEl = document.getElementById('soCorteValor');
+    if(scEl) scEl.textContent = 'R$ '+finalPriceVR.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  let finalPrice = finalPriceVR;
 
   // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre somam
   // ao total do MESMO pedido (nunca um segundo orçamento/financeiro) —
@@ -10510,31 +10586,32 @@ function orcRecalc() {
   // material a marcar. `finalPriceVR` preserva o total só-VR para a
   // margem exibida abaixo continuar correta.
   var vitreItensPedidoTotal = (typeof orcVitreItensPedidoTotal==='function') ? orcVitreItensPedidoTotal(_orcVitreItensPedido) : 0;
-  var finalPriceVR = finalPrice;
   // Gravação soma ao preço final DEPOIS de markup/desconto/acréscimo/Vitre —
   // adicional fixo (custo×2), nunca marcado up nem descontado.
   finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda;
 
   // PASS 3 — preço final unitário efetivo do item (fonte canônica única):
-  // cada item VR recebe sua fatia proporcional (peso = tsRaw do PASS 2, já
-  // com o ajuste comercial do item) do total VR real do pedido — agora
-  // incluindo máquinas, consumíveis, montagem, deslocamento, desconto/
-  // acréscimo global e Gravação (tudo que antes só aparecia no resumo
-  // lateral, nunca na linha "Itens do Orçamento"). Itens Vitre (catálogo,
-  // preço já final) não são linhas desta tabela e ficam fora da partilha.
-  // MESMA técnica de rateio que orcColetarItensDistribuidos() já usa para
-  // PDF/WhatsApp (peso = valor "cru" do item ÷ soma dos pesos) — ao
-  // escrever aqui o mesmo valor final, PDF/WhatsApp (que leem oi_tot_ como
-  // peso e redistribuem o total já com condição de pagamento) passam a
-  // devolver exatamente este número sempre que nenhuma condição especial
-  // de pagamento estiver ativa — sem precisar duplicar a fórmula lá.
-  var _totalVRParaRepartir = finalPriceVR + gravacaoAdicionalVenda;
+  // cada item VR recebe (a) sua fatia proporcional (peso = tsRaw do PASS 2,
+  // SEM os extras — material + ajuste do item) do "pool" comum do pedido —
+  // material, máquinas, consumíveis, montagem, deslocamento, desconto/
+  // acréscimo global e Gravação — MAIS (b) o valor dos SEUS PRÓPRIOS
+  // extras "➕ deste Item" (achado da rodada anterior: extras de um item
+  // vazavam parcialmente pro preço de outros, porque entravam só no pool
+  // comum, rateado por um peso que não sabia de quem era o extra).
+  // Itens Vitre (catálogo, preço já final) não são linhas desta tabela e
+  // ficam fora da partilha. MESMA técnica de rateio que
+  // orcColetarItensDistribuidos() já usa para PDF/WhatsApp — ao escrever
+  // aqui o mesmo valor final, PDF/WhatsApp continuam devolvendo o mesmo
+  // número, sem duplicar fórmula.
+  var _totalVRParaRepartir = finalPriceVR_semItemExtras + gravacaoAdicionalVenda;
   var _rawTotalVR = 0;
   itemRows.forEach(function(item){ _rawTotalVR += (item.tsRaw||0); });
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
     var share = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
-    var itemTotalFinal = _totalVRParaRepartir*share;
+    var itemPoolComum = _totalVRParaRepartir*share;
+    var itemExtrasProprio = (itemExtrasTotal>0) ? (item.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
+    var itemTotalFinal = itemPoolComum + itemExtrasProprio;
     var itemUnitFinal  = item.qty>0 ? itemTotalFinal/item.qty : itemTotalFinal;
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');

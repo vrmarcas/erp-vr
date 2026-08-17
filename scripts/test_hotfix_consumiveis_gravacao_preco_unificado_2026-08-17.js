@@ -290,7 +290,13 @@ function rodarCenario(opts) {
   ok('G4. base do markup exclui o custo da Gravação (totalCostParaMarkup = totalCost - imp)', /totalCostParaMarkup\s*=\s*totalCost\s*-\s*imp/.test(orcRecalcSrc));
   ok('G5. finalPrice usa totalCostParaMarkup (não totalCost) na fórmula de markup', /totalCostParaMarkup\/factor/.test(orcRecalcSrc));
   ok('G6. Gravação é somada ao preço final DEPOIS do markup/desconto/acréscimo/Vitre', /finalPrice\s*=\s*finalPriceVR\s*\+\s*vitreItensPedidoTotal\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc));
-  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final redistribuído (fonte canônica única)', /_totalVRParaRepartir\s*=\s*finalPriceVR\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc));
+  // RODADA CIRÚRGICA 2026-08-17 (3/3) — _totalVRParaRepartir passou a usar
+  // finalPriceVR_semItemExtras (não finalPriceVR puro) para isolar extras
+  // por item (ver test_hotfix_espessura_extras_2026-08-17.js) — a
+  // asserção original checava o texto exato da fórmula antiga; o que
+  // importa (PASS 3 escreve oi_unit_/oi_tot_ com o preço final
+  // redistribuído a partir de finalPriceVR) continua verdadeiro.
+  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final redistribuído (fonte canônica única, agora com extras isolados por item)', /_totalVRParaRepartir\s*=\s*finalPriceVR_semItemExtras\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc) && /eu=document\.getElementById\('oi_unit_'\+item\.idx\)/.test(orcRecalcSrc));
 
   var cfgRenderSrc = extractFn('cfgRenderTables');
   ok('G8. cfgRenderTables() nunca deixa os campos de preço do adesivo em branco/0 (evita reintroduzir o bug ao salvar Config de novo)', /cfgAdesivoPrecoCm2/.test(cfgRenderSrc) && /parseFloat\(elAdhCm2\.value\)>0/.test(cfgRenderSrc));
