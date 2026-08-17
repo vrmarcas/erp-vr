@@ -104,7 +104,10 @@ else
     # Auto-detecção: todo scripts/test_*.js que NÃO depende de emulador ou
     # de credencial admin de produção (mesmo critério usado para montar a
     # suíte leve nesta rodada: 125/149 arquivos, ~27s no total).
-    mapfile -t TESTES < <(grep -LE "FIRESTORE_EMULATOR_HOST|firebase-admin|_prod_admin_credential|getProdApp" scripts/test_*.js)
+    # (usa while-read em vez de `mapfile` para funcionar também no bash 3.2
+    # do macOS, que não tem mapfile/readarray)
+    TESTES=()
+    while IFS= read -r arquivo; do TESTES+=("$arquivo"); done < <(grep -LE "FIRESTORE_EMULATOR_HOST|firebase-admin|_prod_admin_credential|getProdApp" scripts/test_*.js)
     echo "Suíte leve auto-detectada (sem emulador/admin SDK): ${#TESTES[@]} arquivo(s)."
   fi
 
