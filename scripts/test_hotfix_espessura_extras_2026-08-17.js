@@ -65,7 +65,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
+var FN_NAMES = ['cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   '_matResolverPrecoFamiliaEspessura', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),

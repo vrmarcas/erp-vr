@@ -10014,6 +10014,28 @@ function _matResolverPrecoFamiliaEspessura(matKeyItem, espAlvoMm) {
   } catch(e) { return null; }
 }
 
+// RODADA CIRÚRGICA (consistência da planificação) — mesmo delta de
+// correção por espessura que orcRecalc() já usa para o custo canônico do
+// item (ver comentário lá), reaproveitado aqui pelos PREVIEWS da
+// planificação (planCalc/_planCalcAndMerge/_planRecompute) para que o
+// custo mostrado NA TELA, antes de aplicar, já bata com o que o motor
+// canônico vai cobrar — nunca uma fórmula nova, mesma lógica em um só
+// lugar. `pecas` é a lista de peças AUTOMÁTICAS em edição (_planEditPieces
+// — peças manuais têm seu próprio preço/m² e não entram aqui).
+function _planDeltaEspecificoPecas(pecas, matKeyItem, espItemMm, priceM2Item) {
+  var delta = 0;
+  (pecas||[]).forEach(function(pc){
+    if (pc._deleted) return;
+    var espPc = parseFloat(pc.esp||0)||0;
+    if (!espPc || espPc === espItemMm) return; // sem override, ou já é a espessura do item
+    var areaPcM2 = ((parseFloat(pc.larg)||0)*(parseFloat(pc.alt)||0)*(parseFloat(pc.qty)||1))/10000;
+    var precoResolvido = _matResolverPrecoFamiliaEspessura(matKeyItem, espPc);
+    if (precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item
+    delta += areaPcM2 * (precoResolvido - priceM2Item);
+  });
+  return delta;
+}
+
 function orcMatChanged(idx) {
   var sel = document.getElementById('oi_mat_'+idx);
   if (!sel) return;
@@ -10169,7 +10191,7 @@ function planCalc() {
   var matKey  = matEl ? matEl.value : 'ac3';
   var mObj    = ORC_MATS.find(function(m){return m.key===matKey;});
   var priceM2 = _matGetRsm2(matKey, _planIdx);
-  var custoMat = (totalArea/10000) * priceM2;
+  var custoMat = (totalArea/10000) * priceM2 + _planDeltaEspecificoPecas(_planEditPieces, matKey, espMm, priceM2);
 
   // Selling price using the correct formula: venda = custo / (1 - overhead - impostos - vrml)
   var _cfgFin2=(_cfgData&&_cfgData.financeiro)||{};
@@ -10638,7 +10660,21 @@ function orcRecalc() {
           if((consTotal-imp)>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt((consTotal-imp)/factor*(1-descPct))+'</span></div>';
           if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
           if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
-          if(itemExtrasTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#1EB8D8;font-weight:600">Extras por item</span><span style="color:#1EB8D8;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
+          if(itemExtrasTotal>0) {
+            lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#1EB8D8;font-weight:600">Extras por item</span><span style="color:#1EB8D8;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
+            // RODADA CIRÚRGICA (consistência visual) — decompõe a linha
+            // acima por item, usando o MESMO valor já atribuído a cada um
+            // no PASS 3 (itemExtrasSoma/itemExtrasTotal × somaExtrasTransformada,
+            // ver mais abaixo) — não é uma conta nova nem muda o total
+            // desta linha; só deixa explícito a qual item cada extra
+            // pertence, resolvendo a ambiguidade do agregado.
+            var _extrasPorItemTxt = itemRows.filter(function(it){ return (it.itemExtrasSoma||0)>0; }).map(function(it){
+              var _prodNomeExtra = (document.getElementById('oi_prod_'+it.idx)||{}).value || ('Item '+it.idx);
+              var _valorItemExtra = itemExtrasTotal>0 ? (it.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
+              return cfgEsc(_prodNomeExtra)+': +'+orcFmt(_valorItemExtra);
+            }).join(' · ');
+            if(_extrasPorItemTxt) lines += '<div style="padding:0 0 3px 10px;font-size:9.5px;color:var(--muted)">'+_extrasPorItemTxt+'</div>';
+          }
         }
         if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
         if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl+'</span></div>'; }
@@ -31937,6 +31973,7 @@ function _planCalcAndMerge() {
   var _matElM = _planIdx!==null ? document.getElementById('oi_mat_'+_planIdx) : null;
   var _matKeyM = _matElM ? _matElM.value : 'ac3';
   var _priceM2M = _matGetRsm2(_matKeyM, _planIdx);
+  var _espItemM = parseFloat((document.getElementById('oi_esp_'+_planIdx)||{}).value) || 0;
   var manualCost = 0;
   planManualPieces.forEach(function(p){
     if(p.larg>0 && p.alt>0) {
@@ -31976,7 +32013,9 @@ function _planCalcAndMerge() {
   var newArea = prevTot + manualArea;
   var newQty  = prevQty + manualQty;
   // Custo base (área base × preço do material principal) + custo peças manuais
-  var baseCost = (prevTot/10000) * _priceM2M;
+  // + correção por peça automática com espessura própria diferente da do
+  // item (mesma técnica de orcRecalc(), reaproveitada via _planDeltaEspecificoPecas).
+  var baseCost = (prevTot/10000) * _priceM2M + _planDeltaEspecificoPecas(_planEditPieces, _matKeyM, _espItemM, _priceM2M);
   var totalCusto = baseCost + manualCost;
   if(sumBox) {
     sumBox.dataset.totalArea = newArea;          // FIX: inclui área manual agora
@@ -32381,10 +32420,13 @@ function _planRecompute() {
   var matKey2= matEl2 ? matEl2.value : 'ac3';
   var mObj2  = ORC_MATS.find(function(m){return m.key===matKey2;});
   var priceM2= _matGetRsm2(matKey2, _planIdx);
-  // Custo base (peças automáticas) × preço do material principal
+  var _espItemRpc = parseFloat((document.getElementById('oi_esp_'+_planIdx)||{}).value) || 0;
+  // Custo base (peças automáticas) × preço do material principal + correção
+  // por peça automática com espessura própria diferente da do item (mesma
+  // técnica de orcRecalc(), reaproveitada via _planDeltaEspecificoPecas).
   var _baseAreaRpc = 0;
   _planEditPieces.forEach(function(p){ if(!p._deleted) _baseAreaRpc += p.larg*p.alt*p.qty; });
-  var _baseCostRpc = (_baseAreaRpc/10000) * priceM2;
+  var _baseCostRpc = (_baseAreaRpc/10000) * priceM2 + _planDeltaEspecificoPecas(_planEditPieces, matKey2, _espItemRpc, priceM2);
   // Custo peças manuais × preço da espessura de cada peça
   var _manualCostRpc = 0, _manualAreaM2Rpc = 0;
   planManualPieces.forEach(function(p){
