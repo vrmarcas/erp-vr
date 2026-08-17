@@ -49,7 +49,7 @@ console.log('\n=== GATE 4 — WhatsApp/PDF: fixture determinística Display Acr�
 
 var FN_NAMES = [
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
-  'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
+  'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
   'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',
   'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',

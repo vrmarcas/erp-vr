@@ -9953,14 +9953,28 @@ function _matGetRsm2(matKey, idx) {
     var _selEl = idx!=null ? document.getElementById('oi_mat_'+idx) : null;
     var _stored = _selEl ? parseFloat(_selEl.dataset.rsm2||'0') : 0;
     if(_stored > 0) return _stored;
-    // Recalcular do cfgLoad
+    // RODADA CIRÚRGICA 2026-08-17 — causa raiz comprovada da divergência de
+    // preço entre produtos com a mesma área/material (ex.: Placa vs
+    // Display): este fallback só roda quando dataset.rsm2 ainda não foi
+    // populado (orcMatChanged nunca disparou — acontece sempre que a
+    // receita do produto não declara materialPadrao/materiaisPermitidos,
+    // ver orcAplicarMaterialReceita). Antes, indexava cfgLoad().materiais
+    // CRU por matKey ("cfg_N"), mas "cfg_N" é o índice na lista FILTRADA
+    // que orcConstruirMatOpts() usa para montar o <select> (sem materiais
+    // sem nome/"Novo material") — qualquer entrada assim no cadastro
+    // deslocava o índice e lia o material ERRADO (preço de outro material
+    // inteiramente). Também ignorava m.rsm2 quando configurado à mão.
+    // Corrigido para usar exatamente o MESMO filtro e a MESMA prioridade
+    // (m.rsm2 primeiro, senão custo/área) que orcConstruirMatOpts() já usa
+    // — nunca uma fórmula nova, só a mesma fonte de verdade em ambos os
+    // lugares.
     try {
-      var _mats = cfgLoad().materiais || [];
+      var _mats = (cfgLoad().materiais || []).filter(function(m){ return m.nome && m.nome!=='Novo material'; });
       var _mi = parseInt(matKey.replace('cfg_',''));
       var _mr = _mats[_mi];
       if(_mr) {
-        var _area = (_mr.comp||0)*(_mr.larg||0)/10000;
-        return _area > 0 && _mr.custo > 0 ? _mr.custo/_area : (_mr.custo||100);
+        var _rsm2Calc = _mr.rsm2 || ((_mr.comp && _mr.larg && _mr.custo) ? (_mr.custo/(_mr.comp*_mr.larg/10000)) : 0);
+        return _rsm2Calc > 0 ? _rsm2Calc : (_mr.custo || 100);
       }
     } catch(e) {}
     return 100;
@@ -24347,6 +24361,37 @@ function orcFinanceiroReal(o){
   };
 }
 
+// RODADA CIRÚRGICA 2026-08-17 (medidas na descrição comercial) — fonte
+// canônica única da descrição comercial de um item, usada por
+// orcColetarItensDistribuidos() (logo abaixo) e portanto por PDF e
+// WhatsApp ao mesmo tempo. As medidas vêm de row.dataset.planLarg/
+// planAlt/planProf — a mesma fonte de verdade técnica já gravada por
+// planAplicar()/_planSincronizarComItem() (não das colunas legadas
+// oi_larg_/oi_alt_, que hoje ficam sempre vazias em orçamentos novos).
+// Rótulos seguem a nomenclatura do próprio modal de planificação
+// (planLarg="Comprimento", planAlt="Largura", planProf="Altura" — a
+// profundidade só existe em receitas 3D, por isso só aparece quando > 0).
+// Nenhuma dimensão ausente/zero é exibida — nunca "0cm"/"undefined"/"—".
+function orcItemDescricaoComercial(d) {
+  d = d || {};
+  var desc = d.prod || '';
+  function fmtDim(v){ return (v % 1 === 0 ? String(v) : v.toFixed(1).replace('.', ',')) + 'cm'; }
+  var pLarg = parseFloat(d.planLarg)||0, pAlt = parseFloat(d.planAlt)||0, pProf = parseFloat(d.planProf)||0;
+  var medidas = [];
+  if (pAlt  > 0) medidas.push(fmtDim(pAlt)  + ' largura');
+  if (pLarg > 0) medidas.push(fmtDim(pLarg) + ' comprimento');
+  if (pProf > 0) medidas.push(fmtDim(pProf) + ' altura');
+  if (medidas.length) {
+    desc += ' ' + medidas.join(' × ');
+  } else if (d.larg && d.alt) {
+    // Fallback legado — orçamento salvo antes de existir planificação, ou item nunca planificado.
+    desc += ' ' + d.larg + '×' + d.alt + 'cm';
+  }
+  if (d.matResumo) desc += ' em ' + d.matResumo;
+  if (d.det) desc += ' — ' + d.det;
+  return desc;
+}
+
 // Fonte única de itens (descrição completa + qty + valor unitário + total),
 // já com o valor final redistribuído proporcionalmente entre os itens —
 // usada pelo PDF E pelo WhatsApp, para os dois nunca mostrarem números
@@ -24371,11 +24416,25 @@ function orcColetarItensDistribuidos(baseEfetiva){
     // descrição voltada ao cliente.
     var matOptSel = matEl ? matEl.options[matEl.selectedIndex] : null;
     var matLbl= matOptSel ? (matOptSel.dataset && matOptSel.dataset.nome ? matOptSel.dataset.nome : matOptSel.text) : '';
+    var matEsp = matOptSel && matOptSel.dataset ? matOptSel.dataset.esp : '';
+    // Medidas efetivamente planificadas (fonte de verdade técnica já usada
+    // pelo motor de precificação) — não as colunas legadas oi_larg_/oi_alt_.
+    var planLarg = row.dataset.planLarg || '';
+    var planAlt  = row.dataset.planAlt  || '';
+    var planProf = row.dataset.planProf || '';
+    var pecasPlan = [];
+    try { pecasPlan = JSON.parse(row.dataset.planPecas || '[]'); } catch(e) {}
+    // Reaproveita osItemMateriaisResumo() (já usada e testada para a OS) —
+    // dedupe por espessura quando o item tem peças planificadas em mais de
+    // uma espessura; senão, nome + espessura simples do material do item.
+    var matResumo = pecasPlan.length
+      ? osItemMateriaisResumo({ mat: matLbl, pieces: pecasPlan })
+      : (matLbl + (matEsp ? ' ' + matEsp + 'mm' : ''));
     var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
     var totRawTxt = (document.getElementById('oi_tot_'+idx)||{}).textContent||'0';
     var totRaw = parseFloat(totRawTxt.replace(/[^\d,]/g,'').replace(',','.').replace(/\./g,function(m,o,s){return o<s.lastIndexOf('.')?'':'.'})) || 0;
     _matTotalRaw += totRaw;
-    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, matLbl:matLbl, det:det, totRaw:totRaw});
+    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw});
   });
   // RODADA 6, seção 10/3 — Híbrido VR+Vitre: achado real da auditoria de
   // paridade PDF/WhatsApp — itens do catálogo Vitre vivem em
@@ -24397,10 +24456,7 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);
     var itemTotal = _totalParaDistribuir * share;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
-    var desc = item.prod;
-    if(item.larg && item.alt) desc += ' ' + item.larg + '×' + item.alt + 'cm';
-    if(item.matLbl) desc += ' em ' + item.matLbl;
-    if(item.det) desc += ' — ' + item.det;
+    var desc = orcItemDescricaoComercial(item);
     return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal };
   });
 }

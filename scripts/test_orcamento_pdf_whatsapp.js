@@ -54,7 +54,7 @@ function extractFn(name) {
 }
 var FN_NAMES = [
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
-  'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
+  'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
   'orcProximoNumeroAtomico', 'orcObterNumeroOficial', 'orcLimparNumeroOficial',
   'orcGetValidadeDias', 'orcMotorPagamento',
   // SPRINT PRÉ-GO-LIVE, Bloco E — orcCalcCondicoesPagamento() agora usa o

@@ -202,7 +202,7 @@ console.log('='.repeat(72) + '\n');
 {
   var FN_NAMES = [
     'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
-    'orcGetPrazoTexto', 'orcGetResponsavel', 'orcColetarItensDistribuidos',
+    'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
     'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',
     'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
     // HOTFIX pós-homologação (2026-08-10) — orcEnviarOrcamentoWA() usa

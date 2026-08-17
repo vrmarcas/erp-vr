@@ -110,7 +110,7 @@ console.log('\n=== RODADA 6 — Híbrido VR+Vitre: carrinho único (seção 10) 
 //    do PDF/WhatsApp SEM os itens Vitre, mesmo o total já incluindo o
 //    valor deles. Testa por EXECUÇÃO real (não só regex) com um DOM fake.
 {
-  var FN_DIST = ['orcColetarItensDistribuidos'];
+  var FN_DIST = ['orcItemDescricaoComercial', 'orcColetarItensDistribuidos'];
   var srcDist = FN_DIST.map(extractFn).join('\n\n') + '\n\nmodule.exports = { coletar: orcColetarItensDistribuidos };';
   var modPathDist = path.join(__dirname, '_hibrido_vr_vitre_distribuidos_extracted.tmp.js');
   fs.writeFileSync(modPathDist, srcDist);
