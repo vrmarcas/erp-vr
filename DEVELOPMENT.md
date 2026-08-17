@@ -121,6 +121,36 @@ for f in scripts/test_*.js; do node "$f" || echo "FALHOU: $f"; done
 > Os caminhos nos `.bat` estão fixos para `C:\Projetos\ERP VR`.
 > Gabriel deve ajustar o caminho se usar um diretório diferente.
 
+## Gate obrigatório de release do Hosting
+
+> ⚠️ **`commit` + `push` NÃO encerra uma rodada que toca `index.html` ou
+> qualquer arquivo servido pelo Hosting.** Só um `git push` bem-sucedido não
+> prova que o Firebase Hosting está servindo essa versão — já aconteceu de
+> commits ficarem em `origin/master` por rodadas inteiras enquanto a
+> produção continuava servindo um commit anterior, sem nenhum erro visível
+> no processo.
+
+Toda rodada que altera algo servido pelo Hosting só está de fato concluída
+depois de rodar:
+
+```bash
+scripts/release_hosting.sh
+```
+
+Esse script (macOS/Linux, bash) é o gate único e obrigatório: valida a
+working tree, confirma que `master` local está sincronizada com
+`origin/master`, roda a suíte de testes leve (auto-detectada, sem
+depender de emulador), faz `firebase deploy --only hosting` e só então
+compara o hash SHA-256 do `index.html` local contra o conteúdo real
+baixado de `https://erp-vrmarcas.web.app` (com cache-busting). Se o hash
+não bater — deploy ausente, incompleto, ou produção desatualizada — o
+script falha com exit code 1 e a rodada **não deve ser considerada
+concluída**.
+
+Detalhes de uso, variáveis de ambiente e o script de verificação isolado
+(`scripts/release_verify_prod.js`) estão documentados no cabeçalho do
+próprio `scripts/release_hosting.sh`.
+
 ## Firestore — coleções importantes
 
 | Coleção | Documento | Conteúdo |
