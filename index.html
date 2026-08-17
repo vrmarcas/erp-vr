@@ -12893,33 +12893,9 @@ function kbOpen(id) {
     }
   }
 
-  var btn = document.getElementById('kbProntoBtn');
-  var isPronta = os.status === 'pronta' || os.status === 'master' || os.status === 'entregue';
   var revBtn=document.getElementById('kbReverterBtn');
   if(revBtn) revBtn.style.display=(os.status==='pronta')?'':'none';
-  if (isPronta) {
-    btn.className = 'kb-pronto-btn done';
-    btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS Pronta';
-    btn.disabled = false;
-    btn.style.display = '';
-    btn.style.opacity = '1';
-    btn.style.cursor = 'pointer';
-    btn.title = '';
-  } else if (os.status !== 'producao') {
-    // GO-LIVE FINAL 2026-08-12, seção 25 — OS ainda não iniciada (nem em
-    // "iniciada"/aguardando material, nem em produção de fato): nunca
-    // pode ser marcada Pronta. Botão fica oculto (não só desabilitado).
-    btn.style.display = 'none';
-  } else {
-    var _pronto = kbChecklistCompleto(os);
-    btn.style.display = '';
-    btn.className = 'kb-pronto-btn';
-    btn.textContent = '✓ Marcar como Pronta';
-    btn.disabled = !_pronto;
-    btn.style.opacity = _pronto ? '1' : '.45';
-    btn.style.cursor = _pronto ? 'pointer' : 'not-allowed';
-    btn.title = _pronto ? '' : 'Marque as 5 etapas do checklist (Corte, Gravação, Montagem, Acabamento, Embalagem) antes de marcar como Pronta.';
-  }
+  kbAtualizarProntoBtn(os); // item #3 — mesma lógica reutilizada por kbToggle/add/del
   // Entregar ao Cliente — só aparece quando a OS está Pronta; some quando já Entregue
   var entBtn = document.getElementById('kbEntregarBtn');
   if(entBtn){
@@ -13397,6 +13373,17 @@ function kbSaveKbos() {
   Object.keys(KB_OS).forEach(function(k){
     var o=Object.assign({},KB_OS[k]);
     delete o.planImg;
+    // HOTFIX CIRÚRGICO 2026-08-16 (item #4) — achado real: _marcandoPronto/
+    // _liberando são travas de concorrência TRANSITÓRIAS (só fazem sentido
+    // durante a operação em memória, nesta aba). Antes deste fix, o objeto
+    // inteiro da OS (inclusive essas travas) era serializado para o
+    // Firestore quando setadas como true; o reset para false, feito só
+    // depois em memória, nunca era regravado se a aba fechasse/recarregasse
+    // (ou outro save acontecesse) entre os dois momentos — deixando a trava
+    // permanentemente "true" no documento. Nunca persiste este estado —
+    // cada sessão sempre começa destravada.
+    delete o._marcandoPronto;
+    delete o._liberando;
     _KB_OS_FIN_FIELDS.forEach(function(f){ delete o[f]; });
     if(Array.isArray(o.itens)){
       o.itens = o.itens.map(function(it){ if(!it) return it; var c=Object.assign({},it); delete c.unit; delete c.total; return c; });
@@ -13627,6 +13614,15 @@ function kbSwitchTab(tab) {
 // mutação (retorna false, o chamador não precisa salvar de novo).
 function kbNormalizarChecklistLegado(os) {
   if (!os) return false;
+  // HOTFIX CIRÚRGICO 2026-08-16 (item #2) — achado real: esta normalização
+  // rodava em TODO kbOpen(), então remover um item do checklist (via
+  // kbCheckDeleteItem) parecia funcionar na hora, mas voltava sozinho ao
+  // reabrir a OS — porque o checklist deixava de bater com OPERACOES_PADRAO
+  // e era "curado" de volta aos 5 itens padrão. Uma OS que o funcionário já
+  // customizou manualmente (add/del) nunca mais deve ser re-mesclada com o
+  // template padrão — a lista atual da OS passa a ser a única fonte de
+  // verdade, do jeito que o funcionário deixou.
+  if (os._checklistCustomizado) return false;
   var canonico = OPERACOES_PADRAO.map(function (op) { return op.label; });
   var checksAtuais = os.checks || [];
   var ckAtuais = os._ck || [];
@@ -13696,6 +13692,40 @@ function kbChecklistCompleto(os) {
   return true;
 }
 
+// HOTFIX CIRÚRGICO 2026-08-16 (item #3) — extraído do bloco antes inline
+// em kbOpen(): calculava o estado do botão "Marcar como Pronta" só na
+// abertura do modal, então marcar/desmarcar um item, ou adicionar/remover
+// etapa, nunca atualizava o botão sem fechar e reabrir a OS. Chamado por
+// kbOpen(), kbToggle(), kbCheckAddItem() e kbCheckDeleteItem() — sempre
+// deriva de kbChecklistCompleto(os), nunca de OPERACOES_PADRAO.
+function kbAtualizarProntoBtn(os) {
+  if (!os) return;
+  var btn = document.getElementById('kbProntoBtn');
+  if (!btn) return;
+  var isPronta = os.status === 'pronta' || os.status === 'master' || os.status === 'entregue';
+  if (isPronta) {
+    btn.className = 'kb-pronto-btn done';
+    btn.textContent = os.status === 'entregue' ? '✓ OS Entregue' : '✓ OS Pronta';
+    btn.disabled = false;
+    btn.style.display = '';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.title = '';
+  } else if (os.status !== 'producao') {
+    btn.style.display = 'none';
+  } else {
+    var _pronto = kbChecklistCompleto(os);
+    var _txtChecklist = (os.checks||[]).join(', ');
+    btn.style.display = '';
+    btn.className = 'kb-pronto-btn';
+    btn.textContent = '✓ Marcar como Pronta';
+    btn.disabled = !_pronto;
+    btn.style.opacity = _pronto ? '1' : '.45';
+    btn.style.cursor = _pronto ? 'pointer' : 'not-allowed';
+    btn.title = _pronto ? '' : (_txtChecklist ? 'Marque todas as etapas do checklist ('+_txtChecklist+') antes de marcar como Pronta.' : 'Adicione e marque etapas do checklist antes de marcar como Pronta.');
+  }
+}
+
 function kbCheckAddItem() {
   var os = KB_OS[_kbOsId]; if (!os) return;
   var input = document.getElementById('kbCheckNewInput');
@@ -13705,8 +13735,10 @@ function kbCheckAddItem() {
   os._ck    = os._ck    || [];
   os.checks.push(txt);
   os._ck.push(false);
+  os._checklistCustomizado = true; // item #2 — nunca mais re-mesclar com OPERACOES_PADRAO
   if (input) input.value = '';
   kbRenderChecklist(os);
+  kbAtualizarProntoBtn(os); // item #3 — reflete imediatamente, sem fechar/reabrir
   kbSaveKbos();
 }
 
@@ -13714,7 +13746,9 @@ function kbCheckDeleteItem(i) {
   var os = KB_OS[_kbOsId]; if (!os) return;
   os.checks.splice(i, 1);
   if (os._ck) os._ck.splice(i, 1);
+  os._checklistCustomizado = true; // item #2 — nunca mais re-mesclar com OPERACOES_PADRAO
   kbRenderChecklist(os);
+  kbAtualizarProntoBtn(os); // item #3 — reflete imediatamente, sem fechar/reabrir
   kbSaveKbos();
 }
 
@@ -13751,6 +13785,7 @@ function kbToggle(i) {
     item.classList.toggle('done', os._ck[i]);
     item.querySelector('input').checked = os._ck[i];
   }
+  kbAtualizarProntoBtn(os); // item #3 — reage a marcar/desmarcar sem fechar/reabrir a OS
   kbSaveKbos();
   if (typeof kbRenderOsList==='function') kbRenderOsList();
   if (typeof renderOsTable==='function') renderOsTable();
@@ -14847,6 +14882,12 @@ function kbReverterProducao(){
   // bloqueiam edição só quando status==='pronta'|'entregue').
   os.revertidoPor = (typeof _currentSession!=='undefined' && _currentSession && _currentSession.user) || '—';
   os.revertidoEm = new Date().toLocaleString('pt-BR');
+  // HOTFIX CIRÚRGICO 2026-08-16 (item #4) — defesa extra além da exclusão
+  // dessas travas em kbSaveKbos(): garante que reverter nunca deixe uma OS
+  // com trava "presa" de uma ação anterior que não tenha limpado a si
+  // mesma (ex.: erro de rede entre setar true e resetar false).
+  os._marcandoPronto = false;
+  os._liberando = false;
   if(typeof kbRenderChecklist==='function') kbRenderChecklist(os);
   var card=document.querySelector('.kcard[data-osid="'+_kbOsId+'"');
   var dest=document.getElementById(os.kbDay||'kbSeg')||document.getElementById('kbSeg');
@@ -14857,8 +14898,7 @@ function kbReverterProducao(){
   if(prog){prog.style.width='70%';prog.style.background='#D97706';}
   document.getElementById('kbOsStag').className='stag sp';
   document.getElementById('kbOsStag').textContent='Em Produção';
-  var btn=document.getElementById('kbProntoBtn');
-  if(btn){btn.className='kb-pronto-btn';btn.textContent='✓ Marcar como Pronta';}
+  kbAtualizarProntoBtn(os); // item #3 — reflete o checklist real da OS, não um texto fixo
   var rb=document.getElementById('kbReverterBtn'); if(rb) rb.style.display='none';
   var entBtnRev=document.getElementById('kbEntregarBtn'); if(entBtnRev) entBtnRev.style.display='none';
   var avisarBox=document.getElementById('kbAvisarClienteBox');
@@ -16127,17 +16167,25 @@ function renderOsTable() {
     btnVer.textContent='Ver'; btnVer.style.cssText='padding:3px 7px;border:1px solid var(--border);background:transparent;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';
     btnVer.onclick=function(){kbOpen(id);};
     actTd.appendChild(btnVer);
+    // HOTFIX pós-homologação (2026-08-10), P0.8/UX — quando há saldo, o
+    // CTA principal passa a ser "Registrar pagamento", antes do
+    // "Entregar" (que nesse caso vira a exceção, não o caminho normal).
+    var _temSaldoTabela = (os.restante||0)>0;
+    // HOTFIX CIRÚRGICO 2026-08-16 (item #6) — achado real: este botão só
+    // aparecia com status==='pronta', então não existia NENHUM caminho na
+    // UI para registrar um pagamento parcial do saldo enquanto a OS ainda
+    // estava em produção (ou já entregue com saldo pendente — exceção do
+    // item #7). osAbrirPagamentoSaldoModal()/finRegistrarRecebimento() só
+    // exigem os.restante>0 — nunca checaram status — este era puramente um
+    // gate artificial da tabela. Fica disponível em qualquer status ativo
+    // (nunca em 'cancelado', onde a cobrança não faz mais sentido).
+    if(_temSaldoTabela && os.status!=='cancelado'){
+      var btnPgto=document.createElement('button');
+      btnPgto.textContent='💰 Pagamento'; btnPgto.style.cssText='padding:3px 7px;border:1px solid #D97706;background:#D97706;color:#fff;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;margin-right:3px';
+      btnPgto.onclick=function(e){e.stopPropagation();osAbrirPagamentoSaldoModal(id);};
+      actTd.appendChild(btnPgto);
+    }
     if(os.status==='pronta'){
-      // HOTFIX pós-homologação (2026-08-10), P0.8/UX — quando há saldo, o
-      // CTA principal passa a ser "Registrar pagamento", antes do
-      // "Entregar" (que nesse caso vira a exceção, não o caminho normal).
-      var _temSaldoTabela = (os.restante||0)>0;
-      if(_temSaldoTabela){
-        var btnPgto=document.createElement('button');
-        btnPgto.textContent='💰 Pagamento'; btnPgto.style.cssText='padding:3px 7px;border:1px solid #D97706;background:#D97706;color:#fff;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;margin-right:3px';
-        btnPgto.onclick=function(e){e.stopPropagation();osAbrirPagamentoSaldoModal(id);};
-        actTd.appendChild(btnPgto);
-      }
       var btnEnt=document.createElement('button');
       btnEnt.textContent=_temSaldoTabela?'Entregar (saldo pendente)':'Entregar';
       btnEnt.style.cssText='padding:3px 7px;border:1px solid #059669;background:transparent;color:#059669;border-radius:5px;font-size:10px;cursor:pointer;margin-right:3px';

@@ -52,7 +52,11 @@ console.log('\n=== HOTFIX — Kanban card × Todas as OS: etapa via _ck único (
 
 // ── 2-8. Execução real: kbToggleEtapa/kbToggle/kbEtapaAtual/kbChecklistCompleto ──
 {
-  var FN_NAMES = ['kbToggleEtapa', 'kbToggle', 'kbEtapaAtual', 'kbChecklistCompleto'];
+  // HOTFIX CIRÚRGICO 2026-08-16 (item #3) — kbToggle() passou a chamar
+  // kbAtualizarProntoBtn(os) (reatividade do botão "Marcar como Pronta"),
+  // então a extração isolada precisa incluir essa função também, senão
+  // kbToggle() quebra com ReferenceError fora do index.html real.
+  var FN_NAMES = ['kbToggleEtapa', 'kbToggle', 'kbEtapaAtual', 'kbChecklistCompleto', 'kbAtualizarProntoBtn'];
   var src = [
     "var KB_OS = {};",
     "var _kbOsId = null;",
@@ -60,7 +64,7 @@ console.log('\n=== HOTFIX — Kanban card × Todas as OS: etapa via _ck único (
     "function kbRenderOsList(){}",
     "function renderOsTable(){}",
     "var _fakeEl = { style:{}, textContent:'' };",
-    "function document_getElementById(id){ return { classList:{toggle:function(){}}, querySelector:function(){ return {checked:false}; } }; }",
+    "function document_getElementById(id){ return { style:{}, classList:{toggle:function(){}}, querySelector:function(){ return {checked:false}; } }; }",
     "var document = { getElementById: document_getElementById };",
     FN_NAMES.map(extractFn).join('\n\n'),
     [
