@@ -9655,8 +9655,8 @@ function _orcSincronizarOSVinculada(orc) {
   var novosItensOS = (orc.itens || []).map(function(it) {
     return (typeof osProjecaoOperacionalItem === 'function') ? osProjecaoOperacionalItem(it) : it;
   });
-  var novoMatLabel = (novosItensOS.length && typeof osItemMateriaisResumo === 'function')
-    ? osItemMateriaisResumo(novosItensOS[0]) : os.material;
+  var novoMatLabel = (orc.itens && orc.itens.length && typeof osItemMateriaisResumo === 'function')
+    ? osItemMateriaisResumo(orc.itens[0]) : os.material;
   var novaMedidasStr = novosItensOS.length && novosItensOS[0].larg && novosItensOS[0].alt
     ? (novosItensOS[0].larg + '×' + novosItensOS[0].alt + 'cm') : os.medidas;
   var novoQtyTotal = novosItensOS.reduce(function(s, i) { return s + (parseInt(i.qty) || 1); }, 0) || (os.qty || 1);
@@ -13898,6 +13898,10 @@ function kbToggleEtapa(osId, idx, el) {
   kbSaveKbos(); // Rodada 2.1 — idem kbDrop()
   if (typeof kbRenderOsList==='function') kbRenderOsList();
   if (typeof renderOsTable==='function') renderOsTable();
+  if (String(_kbOsId)===String(osId)) {
+    if (typeof kbRenderChecklist==='function') kbRenderChecklist(os);
+    if (typeof kbAtualizarProntoBtn==='function') kbAtualizarProntoBtn(os);
+  }
 }
 
 function kbEditarMatProd() {
