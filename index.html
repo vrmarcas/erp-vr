@@ -3134,7 +3134,7 @@ function _authFirebaseError(code){
                   <div class="section-lbl">Consumíveis</div>
                   <div class="cost-row"><div class="cost-name">🩹 Adesivo</div><div class="cost-unit">R$0,0056/cm²</div><select class="cost-inp" id="oc_adh" onchange="orcRecalc()" style="width:65px"><option value="nao">Não</option><option value="sim">Sim</option></select><div class="cost-val" id="ocv_adh">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">⬜ Adh. Branco</div><div class="cost-unit">R$0,0011/cm²</div><select class="cost-inp" id="oc_adhb" onchange="orcRecalc()" style="width:65px"><option value="nao">Não</option><option value="sim">Sim</option></select><div class="cost-val" id="ocv_adhb">R$0,00</div></div>
-                  <div class="cost-row"><div class="cost-name">🖨️ Impressão Digital</div><div class="cost-unit">R$ fixo</div><input class="cost-inp" type="number" id="oc_imp" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_imp">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">🖨️ Gravação</div><div class="cost-unit">custo × 2 (venda)</div><input class="cost-inp" type="number" id="oc_imp" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_imp">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🎨 Spray (un)</div><div class="cost-unit">×R$16</div><input class="cost-inp" type="number" id="oc_spray" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_spray">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">➕ Extra</div><div class="cost-unit">R$ fixo</div><input class="cost-inp" type="number" id="oc_extra" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_extra">R$0,00</div></div>
                 </div>
@@ -5802,7 +5802,7 @@ function _authFirebaseError(code){
             <div class="card-h"><div class="card-h-left">📈 Markup por Categoria</div></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
               <div class="fg"><label>Markup Geral padrão (%)</label><input type="number" id="cfgMkGeral" step="1" min="0" max="500" placeholder="Ex: 100"></div>
-              <div class="fg"><label>Markup Adesivos / Impressão (%)</label><input type="number" id="cfgMkAdesivo" step="1" min="0" max="500" placeholder="Ex: 120"></div>
+              <div class="fg"><label>Markup Adesivos / Gravação (%)</label><input type="number" id="cfgMkAdesivo" step="1" min="0" max="500" placeholder="Ex: 120"></div>
               <div class="fg"><label>Markup Placas / ACM (%)</label><input type="number" id="cfgMkPlaca" step="1" min="0" max="500" placeholder="Ex: 90"></div>
               <div class="fg"><label>Markup Instalação (%)</label><input type="number" id="cfgMkInstalacao" step="1" min="0" max="500" placeholder="Ex: 150"></div>
               <div class="fg"><label>Markup Projetos / Arte (%)</label><input type="number" id="cfgMkArte" step="1" min="0" max="500" placeholder="Ex: 200"></div>
@@ -9375,7 +9375,7 @@ function osMaquinasNecessarias(produto, maquinasDisponiveis) {
 var CONSUMIVEIS_PADRAO = [
   { chave: 'adh', label: 'Adesivo' },
   { chave: 'adhb', label: 'Adh. Branco' },
-  { chave: 'imp', label: 'Impressão' },
+  { chave: 'imp', label: 'Gravação' },
   { chave: 'spray', label: 'Spray' },
   { chave: 'extra', label: 'Extra' },
 ];
@@ -10400,10 +10400,35 @@ function orcRecalc() {
   // mesmo valor que já era hardcoded (migração sem quebrar cálculo).
   var _adhSnap = (typeof window!=='undefined' && window._orcAdhPrecoSnapshot) || null;
   var _cfgFinAdh = (typeof cfgLoad==='function') ? (cfgLoad().financeiro||{}) : {};
-  const adhPrecoCm2  = _adhSnap && typeof _adhSnap.adh==='number'  ? _adhSnap.adh  : (typeof _cfgFinAdh.adesivoPrecoCm2==='number'       ? _cfgFinAdh.adesivoPrecoCm2       : 0.0056);
-  const adhbPrecoCm2 = _adhSnap && typeof _adhSnap.adhb==='number' ? _adhSnap.adhb : (typeof _cfgFinAdh.adesivoBrancoPrecoCm2==='number' ? _cfgFinAdh.adesivoBrancoPrecoCm2 : 0.0011);
+  // HOTFIX 2026-08-17 — causa raiz da regressão do Adesivo/Adh. Branco:
+  // cfgSalvar() grava `parseFloat(el.value)||0` para TODOS os campos de
+  // Config numa única gravação genérica; como os inputs
+  // #cfgAdesivoPrecoCm2/#cfgAdesivoBrancoPrecoCm2 nunca tinham `value` no
+  // HTML nem eram preenchidos com um default em cfgRenderTables, qualquer
+  // "💾 Salvar Alterações" (em QUALQUER aba de Config, não só Consumíveis)
+  // persistia 0 nesses dois campos. Depois disso, `typeof 0==='number'`
+  // era `true`, então o fallback abaixo nunca mais era usado — Adesivo/
+  // Adh. Branco ficavam travados em R$0,00 para sempre. Confirmado em
+  // produção: financeiro.adesivoPrecoCm2/adesivoBrancoPrecoCm2 = 0.
+  // Preço/cm² de adesivo nunca é legitimamente R$0 (é sempre um material
+  // pago), então tratar um valor salvo <=0 como "nunca configurado" (igual
+  // a ausente) é a mesma regra de negócio já existente, só sem o bug de
+  // não distinguir "0 gravado por engano" de "número válido". Ver também
+  // o fallback simétrico em cfgRenderTables (aba Financeiro) que evita o
+  // campo salvar 0 de novo no futuro.
+  const adhPrecoCm2  = _adhSnap && typeof _adhSnap.adh==='number'  ? _adhSnap.adh  : (typeof _cfgFinAdh.adesivoPrecoCm2==='number'       && _cfgFinAdh.adesivoPrecoCm2>0       ? _cfgFinAdh.adesivoPrecoCm2       : 0.0056);
+  const adhbPrecoCm2 = _adhSnap && typeof _adhSnap.adhb==='number' ? _adhSnap.adhb : (typeof _cfgFinAdh.adesivoBrancoPrecoCm2==='number' && _cfgFinAdh.adesivoBrancoPrecoCm2>0 ? _cfgFinAdh.adesivoBrancoPrecoCm2 : 0.0011);
   const adh     = adhYes  ? areaTotal*adhPrecoCm2  : 0;
   const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : 0;
+  // RODADA CIRÚRGICA 2026-08-17 — Gravação (ex-"Impressão", gravação digital
+  // terceirizada) tem regra comercial PRÓPRIA: venda = custo informado × 2,
+  // SEM passar pelo markup geral (overhead/vrml/impostos). `imp` continua
+  // dentro de `consTotal`/`totalCost` (custo real, para o "Custo Total" do
+  // Step 3 e para window._orcCalc.totalCost continuarem corretos), mas é
+  // excluído da BASE do markup via `totalCostParaMarkup` abaixo — e
+  // `gravacaoAdicionalVenda` é somado ao preço final DEPOIS de tudo (nunca
+  // multiplicado por markup, desconto ou acréscimo).
+  const gravacaoAdicionalVenda = imp*2;
   const consTotal = adh+adhb+imp+spray+extra;
   orcSetV('ocv_adh',adh); orcSetV('ocv_adhb',adhb);
   orcSetV('ocv_imp',imp); orcSetV('ocv_spray',spray); orcSetV('ocv_extra',extra);
@@ -10413,8 +10438,12 @@ function orcRecalc() {
   const extras = maqTotal + consTotal + mont + desl;
   const itemExtrasTotal = (typeof orcGetItemExtrasTotal==='function') ? orcGetItemExtrasTotal() : 0;
   const totalCost = matTotal + extras + itemExtrasTotal;
+  const totalCostParaMarkup = totalCost - imp; // base do markup — SEM o custo da Gravação
 
-  // PASS 2: colunas do item mostram APENAS custo de material (extras só no sidebar)
+  // PASS 2: calcula o valor "cru" (material + ajuste do item) de cada
+  // item — usado como PESO na redistribuição do PASS 3, não mais escrito
+  // direto em oi_unit_/oi_tot_ (ver PASS 3, mais abaixo: essas colunas
+  // agora mostram o preço final comercial real do item, não só material).
   // SPRINT PRÉ-GO-LIVE, Bloco D — cada item pode ter um ajuste comercial
   // (R$/% acréscimo/desconto, ver orcItemAplicarAjuste/ORC_ITEM_AJUSTES) já
   // aplicado ao PREÇO DE VENDA da linha (nunca ao custo — o "Custo Total"
@@ -10434,19 +10463,17 @@ function orcRecalc() {
         ? orcItemAplicarAjuste(precoOriginalItemCents, _aj.operacao, _aj.tipo, _aj.valor)
         : { ajusteCents: 0, precoFinalItemCents: precoOriginalItemCents };
       itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
-      var tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item
-      var usFinal = tsFinal / item.qty;                 // preço unitário de venda, já com o ajuste do item
+      var tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item (peso do PASS 3)
       var row = document.getElementById('oir_'+item.idx);
       if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
       var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
-      var eu=document.getElementById('oi_unit_'+item.idx);  if(eu) eu.textContent='R$'+usFinal.toFixed(2).replace('.',',');
-      var et=document.getElementById('oi_tot_'+item.idx);   if(et) et.textContent='R$'+tsFinal.toFixed(2).replace('.',',');
+      item.tsRaw = tsFinal; // PASS 3 usa isto como peso da redistribuição — oi_unit_/oi_tot_ são escritos lá
     }
   });
 
   // preço final
   let finalPrice = 0;
-  if (factor>0 && totalCost>0) finalPrice = ((totalCost/factor) + (itemAjusteDeltaCents/100)) * (1-descPct) - descRS;
+  if (factor>0 && totalCostParaMarkup>0) finalPrice = ((totalCostParaMarkup/factor) + (itemAjusteDeltaCents/100)) * (1-descPct) - descRS;
   // Acréscimo
   var _acresTipo=(document.getElementById('orcAcresTipo')?.value)||'pct';
   var _acresVal=parseFloat(document.getElementById('orcAcres')?.value)||0;
@@ -10470,7 +10497,34 @@ function orcRecalc() {
   // margem exibida abaixo continuar correta.
   var vitreItensPedidoTotal = (typeof orcVitreItensPedidoTotal==='function') ? orcVitreItensPedidoTotal(_orcVitreItensPedido) : 0;
   var finalPriceVR = finalPrice;
-  finalPrice = finalPriceVR + vitreItensPedidoTotal;
+  // Gravação soma ao preço final DEPOIS de markup/desconto/acréscimo/Vitre —
+  // adicional fixo (custo×2), nunca marcado up nem descontado.
+  finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda;
+
+  // PASS 3 — preço final unitário efetivo do item (fonte canônica única):
+  // cada item VR recebe sua fatia proporcional (peso = tsRaw do PASS 2, já
+  // com o ajuste comercial do item) do total VR real do pedido — agora
+  // incluindo máquinas, consumíveis, montagem, deslocamento, desconto/
+  // acréscimo global e Gravação (tudo que antes só aparecia no resumo
+  // lateral, nunca na linha "Itens do Orçamento"). Itens Vitre (catálogo,
+  // preço já final) não são linhas desta tabela e ficam fora da partilha.
+  // MESMA técnica de rateio que orcColetarItensDistribuidos() já usa para
+  // PDF/WhatsApp (peso = valor "cru" do item ÷ soma dos pesos) — ao
+  // escrever aqui o mesmo valor final, PDF/WhatsApp (que leem oi_tot_ como
+  // peso e redistribuem o total já com condição de pagamento) passam a
+  // devolver exatamente este número sempre que nenhuma condição especial
+  // de pagamento estiver ativa — sem precisar duplicar a fórmula lá.
+  var _totalVRParaRepartir = finalPriceVR + gravacaoAdicionalVenda;
+  var _rawTotalVR = 0;
+  itemRows.forEach(function(item){ _rawTotalVR += (item.tsRaw||0); });
+  itemRows.forEach(function(item){
+    if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
+    var share = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
+    var itemTotalFinal = _totalVRParaRepartir*share;
+    var itemUnitFinal  = item.qty>0 ? itemTotalFinal/item.qty : itemTotalFinal;
+    var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
+    var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
+  });
 
   // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
@@ -10490,15 +10544,16 @@ function orcRecalc() {
         if(extras>0){
           lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal/factor*(1-descPct))+'</span></div>';
           if(maqTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Máquinas</span><span>'+orcFmt(maqTotal/factor*(1-descPct))+'</span></div>';
-          if(consTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal/factor*(1-descPct))+'</span></div>';
+          if((consTotal-imp)>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt((consTotal-imp)/factor*(1-descPct))+'</span></div>';
           if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
           if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
           if(itemExtrasTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#1EB8D8;font-weight:600">Extras por item</span><span style="color:#1EB8D8;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
         }
-        if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
+        if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
         if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl+'</span></div>'; }
+        if(gravacaoAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
         if(vitreItensPedidoTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
-        var _margin=finalPriceVR>0?((finalPriceVR-totalCost)/finalPriceVR*100):0;
+        var _margin=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
         lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada (só VR)</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
         lines += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
         brk.innerHTML = lines;
@@ -10519,16 +10574,17 @@ function orcRecalc() {
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal)+'</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Mont+Des</span><span>'+orcFmt(mont+desl)+'</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-top:1px solid var(--border);margin-top:2px"><span style="color:var(--muted)">Custo Total</span><span style="font-weight:700">'+orcFmt(totalCost)+'</span></div>';
-    if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCost>0)?totalCost/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
+    if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
     if(acresPct>0||acresRS>0){ var _acresLbl3=acresRS>0?('+'+orcFmt(acresRS)):('+'+( acresPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl3+'</span></div>'; }
+    if(gravacaoAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação (venda)</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
     if(vitreItensPedidoTotal>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
-    var _margin3=finalPriceVR>0?((finalPriceVR-totalCost)/finalPriceVR*100):0;
+    var _margin3=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin3.toFixed(1)+'%</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid);margin-top:4px"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:18px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
     b3.innerHTML = lines3;
   }
   // payload interno
-  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo };
+  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo, gravacaoCusto: imp, gravacaoAdicionalVenda: gravacaoAdicionalVenda };
   // GO-LIVE 2026-08-11, P0 seção 3 — orcUpdateSummary() só era chamada de
   // dentro de orcStep(n===4); qualquer recálculo feito com a etapa 4 já
   // visitada (edição de item, restauração de orçamento salvo, etc.) nunca
@@ -10860,7 +10916,7 @@ function orcItemExtras(ri) {
   +'</div></div>'
   +[['🩹','Adesivo','R$0,0056/cm²','m_adh','oc_adh',true],
     ['⬜','Adh. Branco','R$0,0011/cm²','m_adhb','oc_adhb',true],
-    ['🖨️','Impressão','R$ fixo','m_imp','oc_imp',false],
+    ['🖨️','Gravação','custo ×2 (venda)','m_imp','oc_imp',false],
     ['🎨','Spray (un)','×R$16','m_spray','oc_spray',false],
     ['➕','Extra','R$ fixo','m_extra','oc_extra',false]
   ].map(function(r){
@@ -27704,6 +27760,16 @@ function cfgRenderTables() {
   var fin = d.financeiro||{};
   var ids = {overhead:'cfgOverhead',vrml:'cfgVrml',cartao:'cfgCartao',pix:'cfgPix',link:'cfgLink',descMax:'cfgDescMax',impostos:'cfgImpostos',comissao:'cfgComissao',despPct:'cfgDespPct',adesivoPrecoCm2:'cfgAdesivoPrecoCm2',adesivoBrancoPrecoCm2:'cfgAdesivoBrancoPrecoCm2'};
   Object.keys(ids).forEach(function(k){ var el=document.getElementById(ids[k]); if(el&&fin[k]!=null) el.value=fin[k]; });
+  // HOTFIX 2026-08-17 — nunca deixar estes dois campos em branco/0 no
+  // modal: um valor <=0 é indistinguível de "nunca configurado" (ver
+  // mesma regra em orcRecalc) e, se o vendedor salvar Config nessa
+  // condição, cfgSalvar() grava 0 permanentemente e zera Adesivo/Adh.
+  // Branco em todo orçamento futuro. Mostra o fallback real (mesma
+  // constante usada por orcRecalc) em vez de branco/0.
+  var elAdhCm2 = document.getElementById('cfgAdesivoPrecoCm2');
+  if(elAdhCm2 && !(parseFloat(elAdhCm2.value)>0)) elAdhCm2.value = (fin.adesivoPrecoCm2>0 ? fin.adesivoPrecoCm2 : 0.0056);
+  var elAdhbCm2 = document.getElementById('cfgAdesivoBrancoPrecoCm2');
+  if(elAdhbCm2 && !(parseFloat(elAdhbCm2.value)>0)) elAdhbCm2.value = (fin.adesivoBrancoPrecoCm2>0 ? fin.adesivoBrancoPrecoCm2 : 0.0011);
   cfgAtualizarMargemPlan();
   cfgRenderLaserSpeeds();
   cfgRenderLaserParams();
