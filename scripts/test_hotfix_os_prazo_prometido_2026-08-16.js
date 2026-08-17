@@ -57,7 +57,14 @@ console.log('\n=== HOTFIX 2026-08-16 (P0.8-P0.9) — prazo prometido preservado 
 
   ok('1a. o bug original (prazo:dia,entrega:dia — igual à data de criação) NÃO existe mais', !/prazo:dia,entrega:dia/.test(gerarOSSrc));
   ok('1b. os.prazo/os.entrega agora usam diaSugerido (data calculada, não a data de hoje)', /prazo:diaSugerido,entrega:diaSugerido/.test(gerarOSSrc));
-  ok('1c. diaSugerido é derivado de o.prazoDias/o.prazoDiasMax (o prazo REALMENTE salvo no orçamento)', /_prazoDiasOS\s*=\s*parseInt\(o\.prazoDias/.test(gerarOSSrc) && /_prazoDiasMaxOS\s*=\s*parseInt\(o\.prazoDiasMax/.test(gerarOSSrc));
+  // HOTFIX CIRÚRGICO 2026-08-16 (rodada planificação/OS, item 7) — achado
+  // real: a versão anterior usava o TETO da faixa (o.prazoDiasMax) como
+  // alvo da contagem, então "5 a 7 dias úteis" sugeria o 7º dia útil em
+  // vez do 5º. Corrigido para usar só o.prazoDias (o INÍCIO da faixa
+  // prometida ao cliente) — prazoDiasMax continua existindo e sendo
+  // restaurado no formulário do orçamento (linha ~26297), só não entra
+  // mais nesta contagem específica.
+  ok('1c. diaSugerido é derivado de o.prazoDias (o INÍCIO da faixa prometida, não o teto)', /_prazoDiasOS\s*=\s*parseInt\(o\.prazoDias/.test(gerarOSSrc) && !/_prazoDiasMaxOS/.test(gerarOSSrc.split('\n').filter(function(l){return !l.trim().startsWith('//');}).join('\n')));
   ok('1d. o cálculo pula sábado/domingo (dias úteis de verdade, não corridos)', /_dwSug!==0 && _dwSug!==6/.test(gerarOSSrc));
   ok('1e. prazoPrometidoTexto é gravado nos DOIS pontos de escrita da OS (local e transacional)', (gerarOSSrc.match(/prazoPrometidoTexto:prazoPrometidoTextoOS/g) || []).length === 2);
   ok('1f. prazoPrometidoTexto vem de o.prazoTextoPromessa (o texto histórico já congelado no orçamento) — nunca recalculado aqui dentro de orcEnvGerarOS', /prazoPrometidoTextoOS\s*=\s*o\.prazoTextoPromessa/.test(gerarOSSrc));

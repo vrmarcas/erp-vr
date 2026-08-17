@@ -26639,12 +26639,19 @@ function orcEnvGerarOS(){
   // foi alterado). O texto histórico (prazoPrometidoTexto) é congelado à
   // parte e nunca sobrescrito por essas edições operacionais.
   var _prazoDiasOS = parseInt(o.prazoDias||'0')||0;
-  var _prazoDiasMaxOS = parseInt(o.prazoDiasMax||'0')||_prazoDiasOS;
   var diaSugerido = dia;
+  // HOTFIX CIRÚRGICO 2026-08-16 (rodada planificação/OS, item 7) — achado
+  // real: esta contagem usava _prazoDiasMaxOS (o TETO da faixa prometida
+  // ao cliente) como alvo, então "5 a 7 dias úteis" sugeria o 7º dia útil,
+  // não o 5º. A data sugerida é só uma recomendação operacional INICIAL
+  // (a Produção decide o ritmo real depois, 100% editável no Kanban) — a
+  // referência correta é o início da faixa prometida (o cenário mais
+  // otimista), nunca o fim dela. prazoPrometidoTextoOS (abaixo) continua
+  // preservando a faixa completa mostrada ao cliente, intocado.
   if(_prazoDiasOS > 0) {
     var _dtSug = new Date(hoje);
     var _uSug = 0;
-    while(_uSug < _prazoDiasMaxOS) {
+    while(_uSug < _prazoDiasOS) {
       _dtSug.setDate(_dtSug.getDate()+1);
       var _dwSug = _dtSug.getDay();
       if(_dwSug!==0 && _dwSug!==6) _uSug++;
