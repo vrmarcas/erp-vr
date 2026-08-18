@@ -63,8 +63,16 @@ console.log('\n=== HOTFIX 2026-08-17 — os.material não duplica espessuras em 
 // extraído ──
 {
   var src = extractFn('_orcSincronizarOSVinculada');
-  ok('1a. novoMatLabel deriva de orc.itens[0] (item bruto do orçamento)', /osItemMateriaisResumo\(orc\.itens\[0\]\)/.test(src));
+  // RODADA 5 — Orçamento comparativo: novoMatLabel passou a derivar de
+  // `_itensOrigFiltrados[0]` em vez de `orc.itens[0]` puro — mesmo item
+  // BRUTO (pré-projeção, nunca `novosItensOS[0]`), só que agora com o
+  // filtro de grupo de opções aplicado ANTES (achado desta rodada: sem o
+  // filtro, uma opção não-escolhida na posição 0 vazava para o rótulo de
+  // material da OS). A propriedade testada aqui — deriva do item bruto,
+  // nunca do já projetado — continua verdadeira.
+  ok('1a. novoMatLabel deriva do item BRUTO do orçamento (filtrado por grupo, nunca já projetado)', /osItemMateriaisResumo\(_itensOrigFiltrados\[0\]\)/.test(src));
   ok('1b. novoMatLabel NÃO deriva mais de novosItensOS[0] (item já projetado — causa raiz do bug)', !/osItemMateriaisResumo\(novosItensOS\[0\]\)/.test(src));
+  ok('1c. o filtro de grupo de opções (RODADA 5) é aplicado ANTES de extrair o item[0] (nunca uma opção não-escolhida)', /_itensOrigFiltrados\s*=\s*\(orc\.itens \|\| \[\]\)\.filter/.test(src));
 }
 
 // ── 2. osItemMateriaisResumo(): extraída e EXECUTADA de verdade — prova

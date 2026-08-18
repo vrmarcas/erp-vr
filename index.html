@@ -8892,7 +8892,7 @@ function orcAddItem() {
     <td style="font-size:11px;font-weight:700;color:var(--muted);text-align:right;white-space:nowrap" id="oi_custo_${orcItemCount}">—</td>
     <td style="font-size:11px;font-weight:700;color:var(--brand-mid);text-align:right;white-space:nowrap" id="oi_unit_${orcItemCount}">—</td>
     <td style="font-size:12px;font-weight:800;color:var(--brand-text);text-align:right;white-space:nowrap" id="oi_tot_${orcItemCount}">—</td>
-    <td style="white-space:nowrap;vertical-align:middle"><button id="oi_planBtn_${orcItemCount}" class="plan-icon-btn" onclick="planAbrir(${orcItemCount})" title="Planificar peças">📐</button><button class="plan-icon-btn" onclick="orcItemExtras(${orcItemCount})" title="Custos extras deste item" style="background:var(--surface);border:1.5px solid var(--border);font-size:12px">➕</button><button class="item-del" onclick="orcRemItem(${orcItemCount})">×</button></td>
+    <td style="white-space:nowrap;vertical-align:middle"><button id="oi_planBtn_${orcItemCount}" class="plan-icon-btn" onclick="planAbrir(${orcItemCount})" title="Planificar peças">📐</button><button class="plan-icon-btn" onclick="orcItemExtras(${orcItemCount})" title="Custos extras deste item" style="background:var(--surface);border:1.5px solid var(--border);font-size:12px">➕</button><button class="plan-icon-btn" onclick="orcDuplicarItemComoOpcao(${orcItemCount})" title="Duplicar como opção alternativa (orçamento comparativo — cliente escolhe uma)" style="background:var(--surface);border:1.5px solid var(--border);font-size:12px">⧉</button><button class="item-del" onclick="orcRemItem(${orcItemCount})">×</button><br><span id="oi_opcaoBadge_${orcItemCount}"></span></td>
   `;
   tbody.appendChild(tr);
   // Hint row for retalho alert
@@ -8909,6 +8909,98 @@ function orcAddItem() {
   orcAutoLaserSeNecessario();
 }
 
+// RODADA 5 — Orçamento comparativo / grupos de opções. "Duplicar como
+// opção" cria uma nova linha no MESMO grupo do item de origem — mesmo
+// motor de preço canônico (orcRecalc), só muda a apresentação/participação
+// no total (ver ORC_ITEM_OPCOES acima). Reaproveita o padrão de
+// reidratação visual de item planificado já usado por orcEnvEditar() ao
+// reabrir um orçamento salvo (badge 📐, tag, esconder larg/alt) — nunca
+// uma segunda implementação divergente.
+function orcDuplicarItemComoOpcao(idxOrig) {
+  var rowOrig = document.getElementById('oir_'+idxOrig);
+  if (!rowOrig) return;
+  // Item de origem ainda cumulativo (1ª vez que ganha uma alternativa) —
+  // vira o grupo, e continua sendo a opção selecionada por padrão: criar
+  // uma alternativa nunca pode zerar/alterar o total do orçamento sozinho.
+  var opOrig = ORC_ITEM_OPCOES[idxOrig];
+  if (!opOrig) {
+    opOrig = { grupoId: 'grp_'+idxOrig+'_'+Date.now().toString(36), selecionada: true };
+    ORC_ITEM_OPCOES[idxOrig] = opOrig;
+  }
+  var getV = function(id){ var el=document.getElementById(id); return el ? el.value : ''; };
+  var setV = function(id,v){ var el=document.getElementById(id); if(el) el.value=v||''; };
+  orcAddItem();
+  var novoIdx = orcItemCount;
+  setV('oi_prod_'+novoIdx, getV('oi_prod_'+idxOrig));
+  setV('oi_qty_'+novoIdx,  getV('oi_qty_'+idxOrig));
+  setV('oi_larg_'+novoIdx, getV('oi_larg_'+idxOrig));
+  setV('oi_alt_'+novoIdx,  getV('oi_alt_'+idxOrig));
+  setV('oi_det_'+novoIdx,  getV('oi_det_'+idxOrig));
+  setV('oi_esp_'+novoIdx,  getV('oi_esp_'+idxOrig));
+  // Material copiado por valor — o caso de uso central ("mesma Caixa em
+  // 2/3/4mm") é justamente o vendedor trocar isso na cópia.
+  var matElOrig = document.getElementById('oi_mat_'+idxOrig);
+  var matElNovo = document.getElementById('oi_mat_'+novoIdx);
+  if (matElOrig && matElNovo) matElNovo.value = matElOrig.value;
+  if (typeof orcMatChanged==='function') orcMatChanged(novoIdx);
+  // Extras/ajuste do item — mesmo deep-clone usado em save/reabertura.
+  if (ORC_ITEM_EXTRAS[idxOrig]) ORC_ITEM_EXTRAS[novoIdx] = JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[idxOrig]));
+  if (ORC_ITEM_AJUSTES[idxOrig]) ORC_ITEM_AJUSTES[novoIdx] = JSON.parse(JSON.stringify(ORC_ITEM_AJUSTES[idxOrig]));
+  // Planificação (peças/medidas) — copia o snapshot já calculado do item de
+  // origem; o vendedor reabre "📐 Editar" na cópia se precisar ajustar.
+  var rowNovo = document.getElementById('oir_'+novoIdx);
+  if (rowNovo && rowOrig.dataset.planArea) {
+    rowNovo.dataset.planArea = rowOrig.dataset.planArea;
+    rowNovo.dataset.planPecas = rowOrig.dataset.planPecas || '[]';
+    rowNovo.dataset.planManualMatCost = rowOrig.dataset.planManualMatCost || '0';
+    rowNovo.dataset.planManualAreaM2 = rowOrig.dataset.planManualAreaM2 || '0';
+    if (rowOrig.dataset.recipeProductId) rowNovo.dataset.recipeProductId = rowOrig.dataset.recipeProductId;
+    if (rowOrig.dataset.recipeVersion) rowNovo.dataset.recipeVersion = rowOrig.dataset.recipeVersion;
+    if (rowOrig.dataset.recipeSnapshot) rowNovo.dataset.recipeSnapshot = rowOrig.dataset.recipeSnapshot;
+    if (rowOrig.dataset.planCamposExtras) rowNovo.dataset.planCamposExtras = rowOrig.dataset.planCamposExtras;
+    if (rowOrig.dataset.planLarg) rowNovo.dataset.planLarg = rowOrig.dataset.planLarg;
+    if (rowOrig.dataset.planAlt)  rowNovo.dataset.planAlt  = rowOrig.dataset.planAlt;
+    if (rowOrig.dataset.planProf) rowNovo.dataset.planProf = rowOrig.dataset.planProf;
+    if (rowOrig.dataset.planPecasManual) rowNovo.dataset.planPecasManual = rowOrig.dataset.planPecasManual;
+    // Mesmo feedback visual de orcEnvEditar() ao reidratar item planificado.
+    var lInput=document.getElementById('oi_larg_'+novoIdx), aInput=document.getElementById('oi_alt_'+novoIdx);
+    if (lInput) lInput.style.display='none';
+    if (aInput) aInput.style.display='none';
+    var lCell=lInput?lInput.closest('td'):null, aCell=aInput?aInput.closest('td'):null;
+    if (lCell && !lCell.querySelector('.plan-badge')) { var _b1=document.createElement('span'); _b1.className='plan-badge'; _b1.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; _b1.textContent='📐'; lCell.appendChild(_b1); }
+    if (aCell && !aCell.querySelector('.plan-badge')) { var _b2=document.createElement('span'); _b2.className='plan-badge'; _b2.style.cssText='font-size:10px;color:var(--brand-mid);font-weight:700'; _b2.textContent='📐'; aCell.appendChild(_b2); }
+    var _tag=document.getElementById('oi_planTag_'+novoIdx);
+    if (_tag) {
+      var _infoEl=document.getElementById('oi_planInfo_'+novoIdx);
+      var _pecasNovo=[]; try { _pecasNovo=JSON.parse(rowNovo.dataset.planPecas||'[]'); } catch(e) {}
+      var _qtyNovo=_pecasNovo.reduce(function(s,p){ return s+(parseInt(p.qty)||0); },0);
+      if (_infoEl) _infoEl.textContent = _qtyNovo+' peças · '+((parseFloat(rowNovo.dataset.planArea)||0)/10000).toFixed(4)+' m²';
+      _tag.classList.add('show');
+    }
+    var _pbtn=document.getElementById('oi_planBtn_'+novoIdx);
+    if (_pbtn) _pbtn.classList.add('active');
+  }
+  // Nova opção entra no MESMO grupo, NÃO selecionada por padrão (o
+  // vendedor troca com orcOpcaoSelecionar() quando o cliente decidir).
+  ORC_ITEM_OPCOES[novoIdx] = { grupoId: opOrig.grupoId, selecionada: false };
+  orcRecalc();
+  if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
+  if (typeof showToast==='function') showToast('Opção duplicada — ajuste material/espessura da nova linha e marque qual o cliente escolheu.', 'ok');
+}
+
+// Troca qual item de um grupo de opções está "escolhida pelo cliente" —
+// nunca mais de um item selecionado por grupo ao mesmo tempo (garantido
+// aqui, não só na UI). Item sem grupo (cumulativo normal) não faz nada.
+function orcOpcaoSelecionar(idx) {
+  var op = ORC_ITEM_OPCOES[idx];
+  if (!op) return;
+  Object.keys(ORC_ITEM_OPCOES).forEach(function(k){
+    if (ORC_ITEM_OPCOES[k].grupoId === op.grupoId) ORC_ITEM_OPCOES[k].selecionada = false;
+  });
+  op.selecionada = true;
+  orcRecalc();
+  if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
+}
 
 // Atualiza os selects de material em linhas já existentes do orçamento (corrige race condition com Firebase)
 function orcRefreshMatSelects() {
@@ -9652,11 +9744,21 @@ function _orcSincronizarOSVinculada(orc) {
   if (typeof KB_OS === 'undefined' || !KB_OS || !KB_OS[orc.osRef]) return;
   var os = KB_OS[orc.osRef];
 
-  var novosItensOS = (orc.itens || []).map(function(it) {
-    return (typeof osProjecaoOperacionalItem === 'function') ? osProjecaoOperacionalItem(it) : it;
-  });
-  var novoMatLabel = (orc.itens && orc.itens.length && typeof osItemMateriaisResumo === 'function')
-    ? osItemMateriaisResumo(orc.itens[0]) : os.material;
+  // RODADA 5 — Orçamento comparativo / grupos de opções: item cumulativo
+  // (sem `grupoOpcao`) sempre entra; item de um grupo só entra se foi a
+  // opção escolhida (`selecionada:true`) — as alternativas apresentadas
+  // e não escolhidas NUNCA geram/atualizam a OS.
+  var novosItensOS = (orc.itens || [])
+    .filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; })
+    .map(function(it) {
+      return (typeof osProjecaoOperacionalItem === 'function') ? osProjecaoOperacionalItem(it) : it;
+    });
+  // RODADA 5 — usa o mesmo `orc.itens` FILTRADO (nunca o [0] cru): sem
+  // isso, se a opção não-escolhida viesse primeiro no array, o rótulo de
+  // material da OS mostraria a alternativa errada (achado desta rodada).
+  var _itensOrigFiltrados = (orc.itens || []).filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; });
+  var novoMatLabel = (_itensOrigFiltrados.length && typeof osItemMateriaisResumo === 'function')
+    ? osItemMateriaisResumo(_itensOrigFiltrados[0]) : os.material;
   var novaMedidasStr = novosItensOS.length && novosItensOS[0].larg && novosItensOS[0].alt
     ? (novosItensOS[0].larg + '×' + novosItensOS[0].alt + 'cm') : os.medidas;
   var novoQtyTotal = novosItensOS.reduce(function(s, i) { return s + (parseInt(i.qty) || 1); }, 0) || (os.qty || 1);
@@ -10174,6 +10276,7 @@ function planCalc() {
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.larg.toFixed(1)+'" min="0" step="0.1" data-planf="larg" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.alt.toFixed(1)+'" min="0" step="0.1" data-planf="alt" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
       '<td class="area-td" id="planEditArea_'+pci+'" style="color:var(--brand-mid);font-weight:700">'+(areaPc/10000).toFixed(4)+'</td>'+
+      '<td style="text-align:center">'+_planAdesivoSelectHtml(pc.adesivo, pci)+'</td>'+
       '<td style="text-align:center"><button onclick="_planDeleteAuto('+pci+')" title="Remover peça" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:14px;padding:2px 4px;line-height:1">🗑</button></td>';
     tbody.appendChild(tr);
   });
@@ -10184,6 +10287,7 @@ function planCalc() {
     '<td colspan="2" style="font-weight:800">TOTAL</td>' +
     '<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">' + totalQty + ' peças</td>' +
     '<td class="area-td" style="font-size:15px">' + (totalArea/10000).toFixed(4) + '</td>' +
+    '<td></td>' +
     '<td></td>' +
     '</tr>';
 
@@ -10337,7 +10441,22 @@ function planLimpar(idx) {
   showToast('Planificação removida','info');
 }
 
-function orcRemItem(idx) { const r=document.getElementById('oir_'+idx); if(r) r.remove(); const h=document.getElementById('oih_'+idx); if(h) h.remove(); const p=document.getElementById('oip_'+idx); if(p) p.remove(); orcRecalc(); }
+function orcRemItem(idx) {
+  const r=document.getElementById('oir_'+idx); if(r) r.remove();
+  const h=document.getElementById('oih_'+idx); if(h) h.remove();
+  const p=document.getElementById('oip_'+idx); if(p) p.remove();
+  // RODADA 5 — limpa os mapas item-local (extras/ajuste/grupo de opções)
+  // do item removido; sem isso ficavam "fantasmas" nesses três Object
+  // globais, indexados por um `idx` que não existe mais na tabela, mas
+  // ainda somados por orcGetItemExtrasTotal()/lidos por orcOpcaoSelecionar()
+  // — achado da investigação desta rodada (bug pré-existente para
+  // extras/ajuste; corrigido junto para não repetir o mesmo problema no
+  // novo ORC_ITEM_OPCOES).
+  if (typeof ORC_ITEM_EXTRAS!=='undefined') delete ORC_ITEM_EXTRAS[idx];
+  if (typeof ORC_ITEM_AJUSTES!=='undefined') delete ORC_ITEM_AJUSTES[idx];
+  if (typeof ORC_ITEM_OPCOES!=='undefined') delete ORC_ITEM_OPCOES[idx];
+  orcRecalc();
+}
 
 function orcFmt(v) { return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function orcSetV(id,v) { const el=document.getElementById(id); if(el) el.textContent='R$'+v.toFixed(2).replace('.',','); }
@@ -10426,6 +10545,21 @@ function orcRecalc() {
   orcSetV('ocv_laser',laser); orcSetV('ocv_dobra',dobra); orcSetV('ocv_pol',pol);
   orcSetV('ocv_uv',uv); orcSetV('ocv_lixa',lixa); orcSetV('ocv_tupia',tupia);
 
+  // Adesivo/Adh. Branco por peça (Rodada 5) — resolução do preço/cm² tem
+  // que vir ANTES do PASS1 porque o delta de adesivo por peça agora é
+  // somado dentro do mesmo forEach que já calcula o delta de espessura.
+  // Preço 100% preservado (snapshot da venda > config atual > fallback
+  // hardcoded) — só o TIMING da leitura mudou, nunca a regra de preço.
+  var _adhSnap = (typeof window!=='undefined' && window._orcAdhPrecoSnapshot) || null;
+  var _cfgFinAdh = (typeof cfgLoad==='function') ? (cfgLoad().financeiro||{}) : {};
+  const adhPrecoCm2  = _adhSnap && typeof _adhSnap.adh==='number'  ? _adhSnap.adh  : (typeof _cfgFinAdh.adesivoPrecoCm2==='number'       && _cfgFinAdh.adesivoPrecoCm2>0       ? _cfgFinAdh.adesivoPrecoCm2       : 0.0056);
+  const adhbPrecoCm2 = _adhSnap && typeof _adhSnap.adhb==='number' ? _adhSnap.adhb : (typeof _cfgFinAdh.adesivoBrancoPrecoCm2==='number' && _cfgFinAdh.adesivoBrancoPrecoCm2>0 ? _cfgFinAdh.adesivoBrancoPrecoCm2 : 0.0011);
+  // Somas em CM² (mesma unidade dos toggles globais legados) das peças
+  // marcadas individualmente — nunca a área total do item, só a soma das
+  // peças com adesivo selecionado. Peças AUTOMÁTICAS e MANUAIS contam
+  // igualmente (adesivo é um acabamento físico, não depende da origem).
+  let adhPecasTotal = 0, adhbPecasTotal = 0;
+
   // PASS 1: coletar custo de material de cada item
   var itemRows = [];
   let matTotal=0, areaTotal=0, qtyTotal=0;
@@ -10469,11 +10603,33 @@ function orcRecalc() {
         if (_precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item (fallback seguro)
         _deltaEspecificoPecas += _areaPecaM2 * (_precoResolvido - priceM2);
       });
+      // Adesivo por peça (Rodada 5) — soma independente da origem
+      // (AUTOMATICA e MANUAL contam) e independente do delta de espessura
+      // acima. Só a área da(s) peça(s) marcada(s) entra na fórmula do
+      // consumível — nunca a área total do item.
+      _pecasPlanRaw.forEach(function(p){
+        var _areaPecaCm2 = (parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1)*qty;
+        if (p.adesivo==='normal') adhPecasTotal += _areaPecaCm2*adhPrecoCm2;
+        else if (p.adesivo==='branco') adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2;
+      });
     }
     const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
-    matTotal  += matCost;
-    areaTotal += useArea*qty;
-    qtyTotal  += qty;
+    // RODADA 5 — Orçamento comparativo / grupos de opções. `_conta` decide
+    // se este item entra no TOTAL REAL do pedido: item sem entrada em
+    // ORC_ITEM_OPCOES é cumulativo (comportamento normal, sempre `_conta
+    // =true`); item com entrada só conta quando `selecionada=true` — as
+    // demais opções do mesmo grupo continuam tendo seu preço INFORMATIVO
+    // calculado (matCost sempre computado, ver itemRows.push abaixo), mas
+    // NUNCA entram em matTotal/areaTotal/qtyTotal (o que alimenta o custo
+    // real do pedido, o consumível de adesivo por área total e a
+    // quantidade agregada).
+    var _opItem = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
+    var _contaItem = !_opItem || _opItem.selecionada;
+    if (_contaItem) {
+      matTotal  += matCost;
+      areaTotal += useArea*qty;
+      qtyTotal  += qty;
+    }
     // RODADA CIRÚRGICA — extras "➕ deste Item" (acabamento/instalação/
     // outros) são item-local desde a captura (ORC_ITEM_EXTRAS[idx]), mas
     // orcGetItemExtrasTotal() os poola num total único do PEDIDO — o
@@ -10481,7 +10637,7 @@ function orcRecalc() {
     // para nunca deixar o extra de um item vazar no preço de outro.
     var _exItem = (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[idx]) || {};
     var itemExtrasSoma = (_exItem.acabamento||0)+(_exItem.instalacao||0)+(_exItem.outros||0);
-    itemRows.push({idx:idx, qty:qty, matCost:matCost, itemExtrasSoma:itemExtrasSoma});
+    itemRows.push({idx:idx, qty:qty, matCost:matCost, itemExtrasSoma: _contaItem?itemExtrasSoma:0, conta:_contaItem});
   });
 
   // consumíveis
@@ -10497,28 +10653,21 @@ function orcRecalc() {
   // (2) um orçamento novo lê o preço atual configurável em Config.
   // Orçamento → Consumíveis (cfgLoad().financeiro), com fallback para o
   // mesmo valor que já era hardcoded (migração sem quebrar cálculo).
-  var _adhSnap = (typeof window!=='undefined' && window._orcAdhPrecoSnapshot) || null;
-  var _cfgFinAdh = (typeof cfgLoad==='function') ? (cfgLoad().financeiro||{}) : {};
-  // HOTFIX 2026-08-17 — causa raiz da regressão do Adesivo/Adh. Branco:
-  // cfgSalvar() grava `parseFloat(el.value)||0` para TODOS os campos de
-  // Config numa única gravação genérica; como os inputs
-  // #cfgAdesivoPrecoCm2/#cfgAdesivoBrancoPrecoCm2 nunca tinham `value` no
-  // HTML nem eram preenchidos com um default em cfgRenderTables, qualquer
-  // "💾 Salvar Alterações" (em QUALQUER aba de Config, não só Consumíveis)
-  // persistia 0 nesses dois campos. Depois disso, `typeof 0==='number'`
-  // era `true`, então o fallback abaixo nunca mais era usado — Adesivo/
-  // Adh. Branco ficavam travados em R$0,00 para sempre. Confirmado em
-  // produção: financeiro.adesivoPrecoCm2/adesivoBrancoPrecoCm2 = 0.
-  // Preço/cm² de adesivo nunca é legitimamente R$0 (é sempre um material
-  // pago), então tratar um valor salvo <=0 como "nunca configurado" (igual
-  // a ausente) é a mesma regra de negócio já existente, só sem o bug de
-  // não distinguir "0 gravado por engano" de "número válido". Ver também
-  // o fallback simétrico em cfgRenderTables (aba Financeiro) que evita o
-  // campo salvar 0 de novo no futuro.
-  const adhPrecoCm2  = _adhSnap && typeof _adhSnap.adh==='number'  ? _adhSnap.adh  : (typeof _cfgFinAdh.adesivoPrecoCm2==='number'       && _cfgFinAdh.adesivoPrecoCm2>0       ? _cfgFinAdh.adesivoPrecoCm2       : 0.0056);
-  const adhbPrecoCm2 = _adhSnap && typeof _adhSnap.adhb==='number' ? _adhSnap.adhb : (typeof _cfgFinAdh.adesivoBrancoPrecoCm2==='number' && _cfgFinAdh.adesivoBrancoPrecoCm2>0 ? _cfgFinAdh.adesivoBrancoPrecoCm2 : 0.0011);
-  const adh     = adhYes  ? areaTotal*adhPrecoCm2  : 0;
-  const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : 0;
+  // (adhPrecoCm2/adhbPrecoCm2/_adhSnap/_cfgFinAdh resolvidos ANTES do PASS1
+  // — ver comentário logo acima do `var itemRows = []` — porque agora
+  // alimentam também o delta de adesivo por peça dentro do próprio loop.)
+  //
+  // RODADA 5 — Adesivo por peça: o toggle global oc_adh/oc_adhb ('sim'/
+  // 'não') vira um FALLBACK LEGADO, nunca mais a única fonte. Se o
+  // vendedor marcar 'Sim' no Step 3 (ou a automação de receita de item
+  // único ligar), cobra a área TOTAL do pedido como sempre cobrou —
+  // preserva 100% o comportamento de orçamentos antigos (reabertos sem
+  // nenhuma peça com campo `adesivo`, onde adhPecasTotal=0). Só quando o
+  // global está 'não' é que a soma por peça (adhPecasTotal/adhbPecasTotal,
+  // acumulada no PASS1 a partir de `peca.adesivo`) passa a valer — nunca
+  // os dois somados (isso evitaria cobrança dupla).
+  const adh     = adhYes  ? areaTotal*adhPrecoCm2  : adhPecasTotal;
+  const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : adhbPecasTotal;
   // RODADA CIRÚRGICA 2026-08-17 — Gravação (ex-"Impressão", gravação digital
   // terceirizada) tem regra comercial PRÓPRIA: venda = custo informado × 2,
   // SEM passar pelo markup geral (overhead/vrml/impostos). `imp` continua
@@ -10561,7 +10710,13 @@ function orcRecalc() {
       var _ajRes = (typeof orcItemAplicarAjuste==='function')
         ? orcItemAplicarAjuste(precoOriginalItemCents, _aj.operacao, _aj.tipo, _aj.valor)
         : { ajusteCents: 0, precoFinalItemCents: precoOriginalItemCents };
-      itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
+      // RODADA 5 — o ajuste comercial (Bloco D) de uma opção NÃO
+      // selecionada nunca pode deslocar o TOTAL REAL do pedido (mesma
+      // regra do matCost acima) — só entra no acumulador global quando o
+      // item conta. O peso `tsFinal` da linha (poucas linhas abaixo)
+      // continua usando o ajuste PRÓPRIO do item, sempre — é o que faz o
+      // preço informativo da opção refletir o ajuste dela mesma.
+      if (item.conta !== false) itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
       var tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item (peso do PASS 3)
       var row = document.getElementById('oir_'+item.idx);
       if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
@@ -10626,17 +10781,46 @@ function orcRecalc() {
   // aqui o mesmo valor final, PDF/WhatsApp continuam devolvendo o mesmo
   // número, sem duplicar fórmula.
   var _totalVRParaRepartir = finalPriceVR_semItemExtras + gravacaoAdicionalVenda;
+  // RODADA 5 — Orçamento comparativo / grupos de opções: `_rawTotalVR` (o
+  // denominador do rateio) soma só os itens que CONTAM para o total real
+  // (item.conta!==false) — exatamente simétrico ao que o PASS 1 já fez em
+  // matTotal/areaTotal/qtyTotal. Uma opção não selecionada nunca entra
+  // aqui, então nunca "rouba" fatia do pool comum dos itens cumulativos.
   var _rawTotalVR = 0;
-  itemRows.forEach(function(item){ _rawTotalVR += (item.tsRaw||0); });
+  itemRows.forEach(function(item){ if(item.conta!==false) _rawTotalVR += (item.tsRaw||0); });
+  // Fator de escala do pool comum por unidade de peso — mesmo valor que
+  // `_totalVRParaRepartir*share` produziria para um item que conta
+  // (identidade algébrica: total*(tsRaw/_rawTotalVR) === tsRaw*_fatorPool),
+  // então o comportamento de orçamentos sem grupos fica bit-a-bit
+  // idêntico ao de antes desta rodada. Para uma opção NÃO selecionada,
+  // este mesmo fator produz um preço INFORMATIVO na mesma escala de preço
+  // por peso dos itens reais do pedido — nunca somado ao total, só exibido
+  // na linha do item (ver oi_tot_/oi_unit_ abaixo).
+  var _fatorPool = _rawTotalVR>0 ? _totalVRParaRepartir/_rawTotalVR : 0;
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
-    var share = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
-    var itemPoolComum = _totalVRParaRepartir*share;
+    var itemPoolComum;
+    if (item.conta===false) {
+      itemPoolComum = _fatorPool>0 ? item.tsRaw*_fatorPool : (itemRows.length ? _totalVRParaRepartir/itemRows.length : 0);
+    } else {
+      var share = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
+      itemPoolComum = _totalVRParaRepartir*share;
+    }
     var itemExtrasProprio = (itemExtrasTotal>0) ? (item.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
     var itemTotalFinal = itemPoolComum + itemExtrasProprio;
     var itemUnitFinal  = item.qty>0 ? itemTotalFinal/item.qty : itemTotalFinal;
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
+    // RODADA 5 — badge/ação de grupo de opções na própria linha do item.
+    // Item cumulativo (sem entrada em ORC_ITEM_OPCOES) nunca mostra nada
+    // aqui — zero mudança visual para o fluxo normal.
+    var _opBadgeEl = document.getElementById('oi_opcaoBadge_'+item.idx);
+    if (_opBadgeEl) {
+      var _opBadge = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[item.idx];
+      if (!_opBadge) { _opBadgeEl.innerHTML = ''; }
+      else if (_opBadge.selecionada) { _opBadgeEl.innerHTML = '<span style="font-size:9px;font-weight:800;color:#16A34A;white-space:nowrap">✓ Opção escolhida</span>'; }
+      else { _opBadgeEl.innerHTML = '<button onclick="orcOpcaoSelecionar(\''+item.idx+'\')" style="font-size:9px;padding:1px 6px;border:1px solid var(--brand-mid);border-radius:8px;background:none;color:var(--brand-mid);cursor:pointer;white-space:nowrap">Marcar escolhida</button>'; }
+    }
   });
 
   // atualiza sidebar
@@ -10861,6 +11045,18 @@ var ORC_ITEM_EXTRAS = {};
 // no snapshot do item ao salvar, restaurado ao reabrir. Formato de cada
 // entrada: { operacao: 'acrescimo'|'desconto'|null, tipo: 'fixo'|'percentual', valor: number }.
 var ORC_ITEM_AJUSTES = {};
+// RODADA 5 — Orçamento comparativo / grupos de opções. Mesmo padrão de
+// ciclo de vida de ORC_ITEM_EXTRAS/ORC_ITEM_AJUSTES acima (mapa global
+// keyed por índice da linha, reset em "Novo Orçamento", gravado no
+// snapshot do item ao salvar, restaurado ao reabrir). Formato de cada
+// entrada: { grupoId: string, selecionada: boolean }. Um item SEM entrada
+// aqui é cumulativo (comportamento normal, 100% preservado — nenhum item
+// de orçamento sem grupo é afetado por nenhuma linha desta rodada). Dentro
+// de um mesmo grupoId, no máximo UM item pode ter selecionada=true por vez
+// (orcOpcaoSelecionar() garante isso) — os demais entram no TOTAL como
+// preço informativo (nunca somado), mas continuam gerando OS quando
+// selecionados.
+var ORC_ITEM_OPCOES = {};
 
 function orcItemExtras(ri) {
   window._extrasRiAtual = ri; // usado por orcExtrasAutoLaser
@@ -11374,7 +11570,14 @@ function orcItemExtrasSalvar(ri){
 }
 
 function orcGetItemExtrasTotal(){
-  return Object.values(ORC_ITEM_EXTRAS).reduce(function(s,ex){
+  // RODADA 5 — extras "➕ deste Item" de uma opção NÃO selecionada (grupo
+  // comparativo) nunca podem entrar no total REAL do pedido — mesma regra
+  // de exclusão do PASS1/PASS3 de orcRecalc(). Iterar por chave (idx) em
+  // vez de Object.values() é o que permite consultar ORC_ITEM_OPCOES[idx].
+  return Object.keys(ORC_ITEM_EXTRAS).reduce(function(s,idx){
+    var _op = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
+    if (_op && !_op.selecionada) return s;
+    var ex = ORC_ITEM_EXTRAS[idx] || {};
     return s+(ex.adesivo||0)+(ex.acabamento||0)+(ex.instalacao||0)+(ex.outros||0);
   },0);
 }
@@ -11405,6 +11608,12 @@ function orcAutoLaser(silencioso){
   var totalSeg = 0;
   document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){
     var ri     = row.dataset.idx;
+    // RODADA 5 — opção NÃO selecionada de um grupo comparativo nunca soma
+    // tempo de laser no total real (mesma regra de exclusão do PASS1 de
+    // orcRecalc() — nunca produzir/cobrar as opções que o cliente não
+    // escolheu).
+    var _opLaser = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[ri];
+    if (_opLaser && !_opLaser.selecionada) return;
     var larg   = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
     var alt    = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
     var qty    = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
@@ -12859,10 +13068,16 @@ function kbPlanificacaoGerarSVG(pecas) {
 function kbAbrirPlanificacaoItem(idx){
   var os = KB_OS[_kbOsId]; if(!os) return;
   var it = (os.itens||[])[idx]; if(!it) return;
-  var pecas = (it.recipeSnapshot && it.recipeSnapshot.pecas) || it.pieces || [];
+  // RODADA 5 — BUG PRÉ-EXISTENTE corrigido: para itens de receita
+  // customizada, `recipeSnapshot.pecas` guarda as FÓRMULAS da receita (ex.:
+  // larg="L - 2*e"), não as peças calculadas — priorizar isso fazia esta
+  // tela renderizar texto de fórmula como medida e nunca mostrar o campo
+  // `adesivo` (que só existe em `it.pieces`, as peças reais calculadas).
+  // Mesma ordem de precedência já usada em osItemMateriaisResumo().
+  var pecas = (it.pieces && it.pieces.length) ? it.pieces : ((it.recipeSnapshot && it.recipeSnapshot.pecas) || []);
   var pecasHtml = pecas.length
     ? '<table style="width:100%;border-collapse:collapse;font-size:11px">'
-      + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th></tr>'
+      + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th><th style="padding:4px">Adesivo</th></tr>'
       + pecas.map(function(p){
           // HOTFIX 2026-08-16 (P0.6) — achado real: peças automáticas
           // mostravam "mm" sem número. Causa: p.esp!=null não barra string
@@ -12871,11 +13086,16 @@ function kbAbrirPlanificacaoItem(idx){
           // 0 como valor válido — só cai no fallback quando REALMENTE não
           // há espessura registrada em nenhum dos dois campos.
           var _espVal = (p.esp!=null && p.esp!=='') ? p.esp : (p.espessuraMm!=null ? p.espessuraMm : null);
+          // RODADA 5 — só rótulo técnico operacional, nunca preço/custo
+          // (esta tela é de produção — ver osProjecaoOperacionalItem, que
+          // já exclui todo campo financeiro do que chega até aqui).
+          var _adhLabel = p.adesivo==='branco' ? '⬜ Branco' : (p.adesivo==='normal' ? '🩹 Normal' : '—');
           return '<tr style="border-top:1px solid var(--border)">'
             + '<td style="padding:4px">'+cfgEsc(p.nome||p.label||'—')+'</td>'
             + '<td style="padding:4px">'+(p.larg||p.l||'—')+'×'+(p.alt||p.a||'—')+' '+(p.unidade||'cm')+'</td>'
             + '<td style="padding:4px">'+(p.qty||1)+'</td>'
             + '<td style="padding:4px">'+(_espVal!=null?_espVal+'mm':'—')+'</td>'
+            + '<td style="padding:4px">'+_adhLabel+'</td>'
             + '</tr>';
         }).join('')
       + '</table>'
@@ -22474,6 +22694,7 @@ function orcResetFormularioVR(){
   orcItemCount=0;
   if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
   if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D — novo pedido nunca herda ajuste comercial do anterior
+  if(typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES={}; // RODADA 5 — novo pedido nunca herda grupo de opções do anterior
   // RODADA 6, seção 10 — Híbrido VR+Vitre: novo pedido nunca herda itens
   // Vitre do pedido anterior.
   _orcVitreItensPedido = [];
@@ -24181,10 +24402,31 @@ async function orcEnviarOrcamentoWA() {
 
   // Itens numerados — mesma fonte usada pelo PDF (orcColetarItensDistribuidos).
   var itensLista = orcColetarItensDistribuidos(totalCartaoWA>0 ? totalCartaoWA : (c.finalPrice||0));
+  // RODADA 5 — Orçamento comparativo / grupos de opções: itens do MESMO
+  // grupoOpcaoId nunca aparecem como itens numerados independentes somados
+  // — viram um bloco único "Escolha uma das opções abaixo", cada opção com
+  // seu próprio preço, separadas por "OU" (nunca um total das opções).
+  // Item cumulativo (grupoOpcaoId ausente) mantém o texto de sempre.
+  var _gruposRenderizadosWA = {};
+  var _nItemWA = 0;
   var itensStr = itensLista.map(function(item, i){
-    var n = String(i+1).padStart(2,'0');
+    if (item.grupoOpcaoId) {
+      if (_gruposRenderizadosWA[item.grupoOpcaoId]) return null; // já virou bloco
+      _gruposRenderizadosWA[item.grupoOpcaoId] = true;
+      var _opcoesWA = itensLista.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
+      _nItemWA++;
+      var nGrp = String(_nItemWA).padStart(2,'0');
+      var _blocoWA = nGrp+'. Escolha uma das opções abaixo (você pode escolher apenas uma):\n';
+      _blocoWA += _opcoesWA.map(function(op, oi){
+        var letra = String.fromCharCode(97+oi); // a, b, c...
+        return '   '+letra+') '+op.desc+(op.opcaoSelecionada?' (selecionada)':'')+'\n      Quantidade: '+op.qty+' | Valor unitário: '+fmtBRLWA(op.unit)+' | Subtotal: '+fmtBRLWA(op.total);
+      }).join('\n   ── OU ──\n');
+      return _blocoWA;
+    }
+    _nItemWA++;
+    var n = String(_nItemWA).padStart(2,'0');
     return n+'. '+item.desc+'\nQuantidade: '+item.qty+'\nValor unitário: '+fmtBRLWA(item.unit)+'\nSubtotal: '+fmtBRLWA(item.total);
-  }).join('\n\n');
+  }).filter(function(s){ return s!==null; }).join('\n\n');
 
   // HOTFIX pós-homologação (2026-08-10), P0.1/P0.3 — nunca mais lido do
   // <select id="orcFormaPgto"> oculto (texto morto, sempre "PIX (100%)"
@@ -24546,8 +24788,17 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var det   = (document.getElementById('oi_det_'+idx)||{}).value||'';
     var totRawTxt = (document.getElementById('oi_tot_'+idx)||{}).textContent||'0';
     var totRaw = parseFloat(totRawTxt.replace(/[^\d,]/g,'').replace(',','.').replace(/\./g,function(m,o,s){return o<s.lastIndexOf('.')?'':'.'})) || 0;
-    _matTotalRaw += totRaw;
-    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw});
+    // RODADA 5 — Orçamento comparativo / grupos de opções. Uma opção NÃO
+    // selecionada tem preço INFORMATIVO em oi_tot_ (já calculado pelo
+    // PASS3 de orcRecalc() na mesma escala do pedido), mas nunca pode
+    // entrar em `_matTotalRaw` — senão "rouba" fatia do total real dos
+    // itens cumulativos/opção escolhida. PDF/WhatsApp usam grupoOpcaoId/
+    // opcaoSelecionada para decidir como apresentar cada item (ver
+    // orcImprimirOrcamentoPDF/orcEnviarOrcamentoWA).
+    var _opColeta = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
+    var _contaColeta = !_opColeta || _opColeta.selecionada;
+    if (_contaColeta) _matTotalRaw += totRaw;
+    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw, conta:_contaColeta, grupoOpcaoId: _opColeta ? _opColeta.grupoId : null, opcaoSelecionada: _contaColeta});
   });
   // RODADA 6, seção 10/3 — Híbrido VR+Vitre: achado real da auditoria de
   // paridade PDF/WhatsApp — itens do catálogo Vitre vivem em
@@ -24565,12 +24816,21 @@ function orcColetarItensDistribuidos(baseEfetiva){
     });
   }
   var _totalParaDistribuir = baseEfetiva || c.finalPrice || 0;
+  // Mesma identidade algébrica do PASS3 de orcRecalc() (ver comentário lá):
+  // total*(totRaw/_matTotalRaw) === totRaw*_fatorPoolColeta para um item
+  // que conta — então nenhum pedido sem grupos muda de valor nesta rodada.
+  var _fatorPoolColeta = _matTotalRaw > 0 ? _totalParaDistribuir/_matTotalRaw : 0;
   return _itensDados.map(function(item){
-    var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);
-    var itemTotal = _totalParaDistribuir * share;
+    var itemTotal;
+    if (item.conta === false) {
+      itemTotal = _fatorPoolColeta>0 ? item.totRaw*_fatorPoolColeta : (_itensDados.length ? _totalParaDistribuir/_itensDados.length : 0);
+    } else {
+      var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);
+      itemTotal = _totalParaDistribuir * share;
+    }
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
     var desc = orcItemDescricaoComercial(item);
-    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal };
+    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false };
   });
 }
 
@@ -24638,7 +24898,31 @@ async function orcImprimirOrcamentoPDF() {
   var _totalParaDistribuir = totalCartaoPDF || c2.finalPrice || 0;
   var fmtBRL = function(v){ return 'R$'+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var itensRows = '';
-  orcColetarItensDistribuidos(totalCartaoPDF).forEach(function(item){
+  // RODADA 5 — Orçamento comparativo / grupos de opções: itens do MESMO
+  // grupoOpcaoId renderizam como um bloco "Escolha uma das opções abaixo",
+  // cada opção com seu próprio preço, separadas por "OU" — NUNCA somadas
+  // num total de bloco. Item cumulativo (sem grupoOpcaoId) mantém a linha
+  // simples de sempre.
+  var _gruposRenderizadosPDF = {};
+  var _itensPDF = orcColetarItensDistribuidos(totalCartaoPDF);
+  _itensPDF.forEach(function(item){
+    if (item.grupoOpcaoId) {
+      if (_gruposRenderizadosPDF[item.grupoOpcaoId]) return; // já virou bloco
+      _gruposRenderizadosPDF[item.grupoOpcaoId] = true;
+      var _opcoesPDF = _itensPDF.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
+      itensRows += '<tr><td colspan="4" style="padding:12px 14px 2px;font-size:10px;font-weight:800;color:#5B21B6;text-transform:uppercase;letter-spacing:.4px">Escolha uma das opções abaixo</td></tr>';
+      _opcoesPDF.forEach(function(op, oi){
+        itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoSelecionada?'<strong>✓ ':'')+op.desc+(op.opcaoSelecionada?'</strong>':'')+'</td>'
+          +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(op.unit)+'</td>'
+          +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+op.qty+'</td>'
+          +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(op.total)+'</td>'
+          +'</tr>';
+        if (oi < _opcoesPDF.length-1) {
+          itensRows += '<tr><td colspan="4" style="padding:0 14px 6px;text-align:center;font-size:10px;font-weight:800;color:#9CA3AF">— OU —</td></tr>';
+        }
+      });
+      return;
+    }
     itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+item.desc+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(item.unit)+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+item.qty+'</td>'
@@ -25749,7 +26033,14 @@ async function _orcSalvarOrcamentoImpl() {
       extras: (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[ri])) : null,
       // SPRINT PRÉ-GO-LIVE, Bloco D — snapshot do ajuste comercial do
       // item; reabrir o orçamento restaura exatamente (ver orcEnvEditar).
-      ajuste: (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_AJUSTES[ri])) : null
+      ajuste: (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_AJUSTES[ri])) : null,
+      // RODADA 5 — snapshot do grupo de opções (orçamento comparativo);
+      // item cumulativo normal salva `null` aqui — zero mudança de
+      // comportamento para quem não usa o recurso. Reabrir restaura
+      // exatamente (ver orcEnvEditar) — inclusive qual opção estava
+      // selecionada, preservando o histórico de "o que foi apresentado
+      // versus o que foi escolhido".
+      grupoOpcao: (typeof ORC_ITEM_OPCOES!=='undefined' && ORC_ITEM_OPCOES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_OPCOES[ri])) : null
     });
   });
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
@@ -26537,6 +26828,7 @@ function orcEnvEditar(id) {
       orcItemCount=0;
       if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
       if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D
+      if(typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES={}; // RODADA 5
       o.itens.forEach(function(it, idxOriginal){
         // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre
         // salvos no mesmo itens[] não são linhas VR — voltam para o
@@ -26575,6 +26867,11 @@ function orcEnvEditar(id) {
         if(it.extras && typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS[ri]=JSON.parse(JSON.stringify(it.extras));
         // SPRINT PRÉ-GO-LIVE, Bloco D — reabertura fiel do ajuste comercial do item.
         if(it.ajuste && typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES[ri]=JSON.parse(JSON.stringify(it.ajuste));
+        // RODADA 5 — reabertura fiel de grupo de opções (mesmo padrão de
+        // extras/ajuste acima): item cumulativo salvo sem `grupoOpcao` não
+        // grava nada em ORC_ITEM_OPCOES, então volta a se comportar
+        // exatamente como um item normal.
+        if(it.grupoOpcao && typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES[ri]=JSON.parse(JSON.stringify(it.grupoOpcao));
         // RODADA 6, seção 11/12 — reabertura fiel: restaura planArea/peças/
         // recipeSnapshot EXATAMENTE como foram salvos (nunca busca a receita
         // vigente de novo aqui — ver orcItemVRRestaurarDados). Fecha o bug
@@ -26890,7 +27187,14 @@ function orcEnvGerarOS(){
   var prazoPrometidoTextoOS = o.prazoTextoPromessa || '';
   var prodNome=o.produto||'Produto';
   var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
-  var itens=o.itens||[];
+  // RODADA 5 — Orçamento comparativo / grupos de opções: item cumulativo
+  // (sem `grupoOpcao`) sempre entra na OS; dentro de um grupo, só a opção
+  // que o cliente escolheu (`grupoOpcao.selecionada:true`) entra — as
+  // demais alternativas apresentadas nunca geram produção, estoque ou
+  // financeiro. Ponto único de filtro: tudo a jusante (payload Vitre,
+  // material/medidas/qty agregados, checklist, as duas gravações — local e
+  // Firestore) deriva deste mesmo array `itens`.
+  var itens=(o.itens||[]).filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; });
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): se
   // o pedido tem itens do catálogo Vitre, eles são classificados (estoque
   // pronto/produzir/ficha pendente) por uma Cloud Function dedicada DEPOIS
@@ -31099,6 +31403,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <th>Peça</th><th style="text-align:center">Qtd</th>
         <th style="text-align:right">Larg cm</th><th style="text-align:right">Alt cm</th>
         <th style="text-align:right">Área m²</th>
+        <th style="text-align:center">Adesivo</th>
         <th style="width:28px"></th>
       </tr></thead>
       <tbody id="planPiecesBody"></tbody>
@@ -31943,7 +32248,7 @@ function planRenderManual() {
       var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
       return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
     }).join('');
-    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr 0.9fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
       +'<select oninput="planManualPieces['+i+'].esp=this.value;planManualPieces['+i+'].precoM2=parseFloat(this.options[this.selectedIndex].dataset.rsm2||0);_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
@@ -31957,6 +32262,11 @@ function planRenderManual() {
       +'<input type="number" placeholder="Qtd" value="'+(p.qty||1)+'" min="1" step="1"'
       +' oninput="planManualPieces['+i+'].qty=parseInt(this.value)||1;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
+      +'<select oninput="planManualPieces['+i+'].adesivo=this.value;_planCalcAndMerge()" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text)">'
+      +'<option value=""'+(!p.adesivo?' selected':'')+'>Sem adesivo</option>'
+      +'<option value="normal"'+(p.adesivo==='normal'?' selected':'')+'>🩹 Normal</option>'
+      +'<option value="branco"'+(p.adesivo==='branco'?' selected':'')+'>⬜ Branco</option>'
+      +'</select>'
       +'<button onclick="planRemoveManual('+i+')" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">✕</button>'
       +'</div>';
   }).join('');
@@ -31988,6 +32298,7 @@ function _planCalcAndMerge() {
         +'<td class="area-td">'+p.larg.toFixed(1)+'</td>'
         +'<td class="area-td">'+p.alt.toFixed(1)+'</td>'
         +'<td class="area-td" style="color:var(--brand-mid);font-weight:700">'+(area/10000).toFixed(4)+'</td>'
+        +'<td style="text-align:center;font-size:10px">'+(p.adesivo==='branco'?'⬜':(p.adesivo==='normal'?'🩹':'—'))+'</td>'
         +'<td></td>';
       if(tbody) tbody.appendChild(tr);
     }
@@ -32323,6 +32634,7 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
       id: id, nome: pc.nome, qty: pc.qty,
       larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
       esp: pc.esp || defaultEspMm || '', tipo: pc.tipo||'',
+      adesivo: prev ? (prev.adesivo||'') : (pc.adesivo||''),
       _deleted: prev ? !!prev._deleted : false
     };
   });
@@ -32344,6 +32656,7 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
       alt:  saved ? saved.alt  : Math.round(pc.alt*100)/100,
       esp:  saved ? (saved.esp || defaultEspMm || '') : (pc.esp || defaultEspMm || ''),
       tipo: pc.tipo||'',
+      adesivo: saved ? (saved.adesivo||'') : (pc.adesivo||''),
       _deleted: !saved // ausente no snapshot persistido = foi excluída
     };
   });
@@ -32368,10 +32681,24 @@ function _planDeleteAuto(pci) {
   }
 }
 
+// Adesivo por peça (Rodada 5) — select reaproveitado nas 3 renderizações de
+// tabela de peças (automática, manual-espelho, manual). Valor vazio = sem
+// adesivo; a área que entra na fórmula do consumível é só a das peças
+// marcadas aqui (ver orcRecalc()), nunca a área total do item.
+function _planAdesivoSelectHtml(val, pci) {
+  val = val || '';
+  return '<select data-planf="adesivo" data-pci="'+pci+'" onchange="_planEditField(this)" '
+    + 'style="font-size:10px;padding:2px;border:1.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text)">'
+    + '<option value=""'+(val===''?' selected':'')+'>Sem</option>'
+    + '<option value="normal"'+(val==='normal'?' selected':'')+'>🩹 Normal</option>'
+    + '<option value="branco"'+(val==='branco'?' selected':'')+'>⬜ Branco</option>'
+    + '</select>';
+}
 function _planEditField(input) {
   var field = input.dataset.planf;
   var pci   = parseInt(input.dataset.pci);
-  var val   = field === 'qty' ? (parseInt(input.value)||1) : (parseFloat(input.value)||0);
+  var val   = field === 'qty' ? (parseInt(input.value)||1)
+    : (field === 'adesivo' ? String(input.value||'') : (parseFloat(input.value)||0));
   if (!_planEditPieces[pci]) return;
   _planEditPieces[pci][field] = val;
   // Atualizar célula de área da linha
@@ -32407,7 +32734,7 @@ function _planRecompute() {
   if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL</td>'
     +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+totalQty+' peças</td>'
     +'<td class="area-td" style="font-size:15px">'+(totalArea/10000).toFixed(4)+'</td>'
-    +'<td></td></tr>';
+    +'<td></td><td></td></tr>';
   var ebEl=document.getElementById('planEspBreakdown');
   if(ebEl){
     var espKeys=Object.keys(espMap).map(Number).sort(function(a,b){return a-b;});

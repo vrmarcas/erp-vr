@@ -201,7 +201,14 @@ console.log('\n-- TESTE D: gerar OS → snapshot estruturalmente igual à planif
   ok('D3. snapshot NUNCA inclui custo/margem interno (privacidade da Produção preservada)', !('custoInterno' in snapshot) && !('margem' in snapshot));
 
   const kbSrc = extractFn('kbAbrirPlanificacaoItem');
-  ok('D4. "Abrir Planificação do Orçamento" na OS lê de it.recipeSnapshot.pecas/it.pieces (o snapshot congelado, nunca recalcula)', /it\.recipeSnapshot && it\.recipeSnapshot\.pecas.*it\.pieces/.test(kbSrc.replace(/\n/g, ' ')));
+  // RODADA 5 — a ORDEM de precedência inverteu (it.pieces passou a vir
+  // PRIMEIRO — bug real corrigido: recipeSnapshot.pecas guarda fórmulas
+  // cruas da receita para itens customizados, não as peças calculadas; ver
+  // mesma correção em osItemMateriaisResumo()), mas a propriedade testada
+  // aqui (lê exclusivamente dos dois campos do snapshot CONGELADO, nunca
+  // recalcula a partir de dado vivo) continua verdadeira — checagem
+  // independente de ordem.
+  ok('D4. "Abrir Planificação do Orçamento" na OS lê de it.pieces/it.recipeSnapshot.pecas (o snapshot congelado, nunca recalcula)', /it\.pieces/.test(kbSrc) && /it\.recipeSnapshot\s*&&\s*it\.recipeSnapshot\.pecas/.test(kbSrc));
   fs.unlinkSync(modPath);
 }
 
