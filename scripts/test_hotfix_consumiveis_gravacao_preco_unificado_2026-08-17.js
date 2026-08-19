@@ -286,8 +286,16 @@ function rodarCenario(opts) {
   var orcRecalcSrc = extractFn('orcRecalc');
   ok('G1. fallback do Adesivo exige >0 (não confunde 0 gravado por engano com "configurado")', /_cfgFinAdh\.adesivoPrecoCm2>0/.test(orcRecalcSrc));
   ok('G2. fallback do Adh. Branco exige >0', /_cfgFinAdh\.adesivoBrancoPrecoCm2>0/.test(orcRecalcSrc));
-  ok('G3. gravacaoAdicionalVenda = custo×2 (imp*2)', /gravacaoAdicionalVenda\s*=\s*imp\*2/.test(orcRecalcSrc));
-  ok('G4. base do markup exclui o custo da Gravação (totalCostParaMarkup = totalCost - imp)', /totalCostParaMarkup\s*=\s*totalCost\s*-\s*imp/.test(orcRecalcSrc));
+  // RODADA 6 — Gravação passou a ser peça-local (`gravacaoCusto`, com
+  // `impLegado` como fallback do campo global antigo); a REGRA testada
+  // aqui (venda = custo×2; base do markup nunca inclui esse custo)
+  // continua idêntica, só o nome da variável de custo mudou.
+  ok('G3. gravacaoAdicionalVenda = custo×2 (gravacaoCusto*2)', /gravacaoAdicionalVenda\s*=\s*gravacaoCusto\*2/.test(orcRecalcSrc));
+  {
+    var _mTcpm = /const totalCostParaMarkup = ([^;]*);/.exec(orcRecalcSrc);
+    var _tcpmFormula = _mTcpm ? _mTcpm[1] : '';
+    ok('G4. base do markup exclui o custo da Gravação (fórmula de totalCostParaMarkup nunca cita gravacaoCusto)', _tcpmFormula==='matTotal + extras + itemExtrasTotal');
+  }
   ok('G5. finalPrice usa totalCostParaMarkup (não totalCost) na fórmula de markup', /totalCostParaMarkup\/factor/.test(orcRecalcSrc));
   ok('G6. Gravação é somada ao preço final DEPOIS do markup/desconto/acréscimo/Vitre', /finalPrice\s*=\s*finalPriceVR\s*\+\s*vitreItensPedidoTotal\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc));
   // RODADA CIRÚRGICA 2026-08-17 (3/3) — _totalVRParaRepartir passou a usar

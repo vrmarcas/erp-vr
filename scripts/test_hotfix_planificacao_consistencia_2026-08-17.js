@@ -53,7 +53,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
-  'cfgEsc', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planDeltaEspecificoPecas', '_planAdesivoSelectHtml',
+  'cfgEsc', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planDeltaEspecificoPecas', '_planConsumiveisChip', '_planConsumiveisCelulaHtml',
   '_planPieceSlug', '_planReconcilePieces', '_planSeedFromPersisted', '_planBuildAllPecas',
   'planCalc', '_planRecompute', '_planCalcAndMerge',
   'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',

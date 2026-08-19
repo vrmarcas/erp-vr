@@ -3130,14 +3130,24 @@ function _authFirebaseError(code){
                   <div class="cost-row"><div class="cost-name">🔧 Lixadeira</div><div class="cost-unit">×R$0,005/min</div><input class="cost-inp" type="number" id="om_lixa" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_lixa">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🔩 Tupia</div><div class="cost-unit">×R$0,01/min</div><input class="cost-inp" type="number" id="om_tupia" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_tupia">R$0,00</div></div>
                 </div>
-                <div>
-                  <div class="section-lbl">Consumíveis</div>
+                <!-- RODADA 6 — "Consumíveis" globais do orçamento saem da UI: passam
+                     a ser configurados por PEÇA na planificação (botão ⚙️ na coluna
+                     Consumíveis da tabela de peças). Os campos oc_adh/oc_adhb/oc_imp/
+                     oc_spray/oc_extra abaixo continuam no DOM (ocultos) só como
+                     FALLBACK LEGADO — orcEnvEditar() ainda os restaura ao reabrir um
+                     orçamento salvo ANTES desta rodada, e orcRecalc() ainda os lê como
+                     fallback quando nenhuma peça tem consumível configurado. Nunca mais
+                     editáveis por aqui — eliminar a segunda fonte de verdade era
+                     requisito explícito desta rodada. -->
+                <div style="display:none">
+                  <div class="section-lbl">Consumíveis (legado)</div>
                   <div class="cost-row"><div class="cost-name">🩹 Adesivo</div><div class="cost-unit">R$0,0056/cm²</div><select class="cost-inp" id="oc_adh" onchange="orcRecalc()" style="width:65px"><option value="nao">Não</option><option value="sim">Sim</option></select><div class="cost-val" id="ocv_adh">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">⬜ Adh. Branco</div><div class="cost-unit">R$0,0011/cm²</div><select class="cost-inp" id="oc_adhb" onchange="orcRecalc()" style="width:65px"><option value="nao">Não</option><option value="sim">Sim</option></select><div class="cost-val" id="ocv_adhb">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🖨️ Gravação</div><div class="cost-unit">custo × 2 (venda)</div><input class="cost-inp" type="number" id="oc_imp" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_imp">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🎨 Spray (un)</div><div class="cost-unit">×R$16</div><input class="cost-inp" type="number" id="oc_spray" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_spray">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">➕ Extra</div><div class="cost-unit">R$ fixo</div><input class="cost-inp" type="number" id="oc_extra" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_extra">R$0,00</div></div>
                 </div>
+                <div style="font-size:10px;color:var(--muted);padding:4px 0;line-height:1.5">🧴 Adesivo, Adh. Branco, Gravação, Spray e Extra agora são configurados por peça — abra "📐 Planificar peças" em cada item e use o botão ⚙️ na coluna Consumíveis.</div>
               </div>
             </div>
 
@@ -10221,7 +10231,7 @@ function planCalc() {
   if(L<=0 || A<=0 || (rec.dim3d && P<=0)) {
     sumBox.style.display='none';
     if(btn) btn.disabled=true;
-    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:16px;font-size:12px">Preencha as dimensões acima para calcular as peças.</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px;font-size:12px">Preencha as dimensões acima para calcular as peças.</td></tr>';
     return;
   }
 
@@ -10276,7 +10286,7 @@ function planCalc() {
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.larg.toFixed(1)+'" min="0" step="0.1" data-planf="larg" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
       '<td class="area-td"><input type="number" '+inp+' value="'+pc.alt.toFixed(1)+'" min="0" step="0.1" data-planf="alt" data-pci="'+pci+'" oninput="_planEditField(this)"></td>' +
       '<td class="area-td" id="planEditArea_'+pci+'" style="color:var(--brand-mid);font-weight:700">'+(areaPc/10000).toFixed(4)+'</td>'+
-      '<td style="text-align:center">'+_planAdesivoSelectHtml(pc.adesivo, pci)+'</td>'+
+      '<td style="text-align:center">'+_planConsumiveisCelulaHtml('auto', pci, pc, false)+'</td>'+
       '<td style="text-align:center"><button onclick="_planDeleteAuto('+pci+')" title="Remover peça" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:14px;padding:2px 4px;line-height:1">🗑</button></td>';
     tbody.appendChild(tr);
   });
@@ -10558,13 +10568,24 @@ function orcRecalc() {
   // marcadas individualmente — nunca a área total do item, só a soma das
   // peças com adesivo selecionado. Peças AUTOMÁTICAS e MANUAIS contam
   // igualmente (adesivo é um acabamento físico, não depende da origem).
-  let adhPecasTotal = 0, adhbPecasTotal = 0;
+  // RODADA 6 — Gravação/Spray/Extra migram para o mesmo modelo peça-local
+  // (soma em R$, direto — não têm unidade de área). Mesmos 3 acumuladores,
+  // mesmo padrão Rota B (peça é fonte ativa; global vira fallback legado).
+  let adhPecasTotal = 0, adhbPecasTotal = 0, gravacaoPecasTotal = 0, sprayPecasTotal = 0, extraPecasTotal = 0;
 
   // PASS 1: coletar custo de material de cada item
   var itemRows = [];
   let matTotal=0, areaTotal=0, qtyTotal=0;
   document.querySelectorAll('#orcItemBody tr').forEach(function(row) {
     const idx = row.dataset.idx; if(!idx) return;
+    // RODADA 5/6 — precisa ser calculado ANTES dos loops de peça abaixo:
+    // consumíveis de peça de uma opção NÃO selecionada (grupo comparativo)
+    // nunca podem somar no total real do pedido — mesma regra que já
+    // exclui matCost/areaTotal/qtyTotal do item não-escolhido (RODADA 5
+    // FECHA um bug pré-existente: antes só o material era excluído do
+    // total, o Adesivo por peça de uma opção não-escolhida vazava).
+    var _opItem = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
+    var _contaItem = !_opItem || _opItem.selecionada;
     const qty  = parseFloat(document.getElementById('oi_qty_'+idx)?.value)||1;
     const larg = parseFloat(document.getElementById('oi_larg_'+idx)?.value)||0;
     const alt  = parseFloat(document.getElementById('oi_alt_'+idx)?.value)||0;
@@ -10603,14 +10624,28 @@ function orcRecalc() {
         if (_precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item (fallback seguro)
         _deltaEspecificoPecas += _areaPecaM2 * (_precoResolvido - priceM2);
       });
-      // Adesivo por peça (Rodada 5) — soma independente da origem
-      // (AUTOMATICA e MANUAL contam) e independente do delta de espessura
-      // acima. Só a área da(s) peça(s) marcada(s) entra na fórmula do
-      // consumível — nunca a área total do item.
+      // Consumíveis por peça (Rodada 5 Adesivo/Adh.Branco; Rodada 6
+      // Gravação/Spray/Extra) — soma independente da origem (AUTOMATICA e
+      // MANUAL contam) e independente do delta de espessura acima. Só a
+      // área/valor da(s) peça(s) marcada(s) entra na fórmula do
+      // consumível — nunca a área/valor total do item. Gated por
+      // `_contaItem`: opção não selecionada de um grupo comparativo nunca
+      // soma consumível de peça no total real (ver comentário no topo do
+      // forEach).
       _pecasPlanRaw.forEach(function(p){
+        if (!_contaItem) return;
         var _areaPecaCm2 = (parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1)*qty;
         if (p.adesivo==='normal') adhPecasTotal += _areaPecaCm2*adhPrecoCm2;
         else if (p.adesivo==='branco') adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2;
+        // RODADA 6 — valor em R$ direto (não é área), sem multiplicar por
+        // qty da peça nem do item: o campo representa o custo TOTAL desta
+        // ocorrência peça×consumível, não um valor por unidade (não há
+        // evidência no código anterior de multiplicação por quantidade
+        // para Gravação/Spray/Extra — ver investigação desta rodada; a
+        // leitura literal preservada é "valor informado = custo total").
+        gravacaoPecasTotal += parseFloat(p.gravacao)||0;
+        sprayPecasTotal    += parseFloat(p.spray)||0;
+        extraPecasTotal    += parseFloat(p.extra)||0;
       });
     }
     const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
@@ -10622,9 +10657,8 @@ function orcRecalc() {
     // calculado (matCost sempre computado, ver itemRows.push abaixo), mas
     // NUNCA entram em matTotal/areaTotal/qtyTotal (o que alimenta o custo
     // real do pedido, o consumível de adesivo por área total e a
-    // quantidade agregada).
-    var _opItem = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
-    var _contaItem = !_opItem || _opItem.selecionada;
+    // quantidade agregada). (`_opItem`/`_contaItem` já calculados no topo
+    // do forEach — ver comentário lá.)
     if (_contaItem) {
       matTotal  += matCost;
       areaTotal += useArea*qty;
@@ -10643,9 +10677,17 @@ function orcRecalc() {
   // consumíveis
   const adhYes  = document.getElementById('oc_adh')?.value==='sim';
   const adhbYes = document.getElementById('oc_adhb')?.value==='sim';
-  const imp     = parseFloat(document.getElementById('oc_imp')?.value)||0;
-  const spray   = (parseFloat(document.getElementById('oc_spray')?.value)||0)*16;
-  const extra   = parseFloat(document.getElementById('oc_extra')?.value)||0;
+  // RODADA 6 — leitura LEGADO (fallback): oc_imp/oc_spray/oc_extra deixam
+  // de ser fonte ATIVA de configuração nesta rodada (UI removida do Step 3
+  // e do modal "⚙️ Custos" — consumíveis agora pertencem à peça). Só
+  // continuam lidos aqui para não perder o valor de orçamentos salvos
+  // ANTES desta rodada (compatibilidade — ver orcEnvEditar/`parametros`).
+  // `oc_spray` legado guarda uma CONTAGEM de unidades (não R$) — a
+  // fórmula ×16 original é preservada só neste ramo; o campo por peça
+  // (Rodada 6) já é direto em R$, seguindo a nova regra comercial.
+  const impLegado       = parseFloat(document.getElementById('oc_imp')?.value)||0;
+  const sprayLegadoUnid = parseFloat(document.getElementById('oc_spray')?.value)||0;
+  const extraLegado     = parseFloat(document.getElementById('oc_extra')?.value)||0;
   // HOTFIX OPERACIONAL 2026-08-12, P0.1 — preço/cm² de Adesivo/Adh. Branco
   // deixou de ser hardcoded (0.0056/0.0011): (1) reabrir um orçamento já
   // salvo usa o SNAPSHOT do preço vigente na venda (window._orcAdhPrecoSnapshot,
@@ -10668,25 +10710,45 @@ function orcRecalc() {
   // os dois somados (isso evitaria cobrança dupla).
   const adh     = adhYes  ? areaTotal*adhPrecoCm2  : adhPecasTotal;
   const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : adhbPecasTotal;
-  // RODADA CIRÚRGICA 2026-08-17 — Gravação (ex-"Impressão", gravação digital
-  // terceirizada) tem regra comercial PRÓPRIA: venda = custo informado × 2,
-  // SEM passar pelo markup geral (overhead/vrml/impostos). `imp` continua
-  // dentro de `consTotal`/`totalCost` (custo real, para o "Custo Total" do
-  // Step 3 e para window._orcCalc.totalCost continuarem corretos), mas é
-  // excluído da BASE do markup via `totalCostParaMarkup` abaixo — e
-  // `gravacaoAdicionalVenda` é somado ao preço final DEPOIS de tudo (nunca
-  // multiplicado por markup, desconto ou acréscimo).
-  const gravacaoAdicionalVenda = imp*2;
-  const consTotal = adh+adhb+imp+spray+extra;
+  // RODADA 6 — Gravação/Spray/Extra por peça: peça é a fonte ATIVA;
+  // fallback legado só quando NENHUMA peça do pedido tem o campo
+  // configurado (soma por peça = 0) — mesmo padrão Rota B do Adesivo.
+  const gravacaoCusto = gravacaoPecasTotal>0 ? gravacaoPecasTotal : impLegado;
+  const sprayCusto     = sprayPecasTotal>0    ? sprayPecasTotal    : (sprayLegadoUnid*16);
+  const extraCusto     = extraPecasTotal>0    ? extraPecasTotal    : extraLegado;
+  // RODADA CIRÚRGICA 2026-08-17 (Gravação) + RODADA 6 (Spray e Extra
+  // passam a seguir a MESMA regra comercial): venda = custo informado × 2,
+  // SEM passar pelo markup geral (overhead/vrml/impostos), somada ao
+  // preço final DEPOIS de tudo (nunca multiplicada por markup, desconto
+  // ou acréscimo). Diferente de Gravação (regra desde a Rodada 1), a
+  // mudança de regra de Spray/Extra (antes dentro do markup geral) vale
+  // pra QUALQUER orçamento recalculado — mesmo precedente já estabelecido
+  // pela própria Gravação: a REGRA de preço é do motor (código), não é
+  // congelada por orçamento; só o PREÇO/CM² do Adesivo é congelado via
+  // snapshot histórico (_orcAdhPrecoSnapshot), nunca a estrutura da
+  // fórmula. `totalCost`/`window._orcCalc.totalCost` continuam refletindo
+  // o custo real (gravacaoCusto/sprayCusto/extraCusto somados abaixo),
+  // só a BASE DO MARKUP (`totalCostParaMarkup`) os exclui.
+  const gravacaoAdicionalVenda = gravacaoCusto*2;
+  const sprayAdicionalVenda    = sprayCusto*2;
+  const extraAdicionalVenda    = extraCusto*2;
+  // `consTotal` agora só soma os consumíveis que continuam dentro da base
+  // do markup geral (Adesivo/Adh.Branco) — Gravação/Spray/Extra saíram
+  // por completo (nunca mais em totalCostParaMarkup).
+  const consTotal = adh+adhb;
   orcSetV('ocv_adh',adh); orcSetV('ocv_adhb',adhb);
-  orcSetV('ocv_imp',imp); orcSetV('ocv_spray',spray); orcSetV('ocv_extra',extra);
+  orcSetV('ocv_imp',gravacaoCusto); orcSetV('ocv_spray',sprayCusto); orcSetV('ocv_extra',extraCusto);
 
   const mont = parseFloat(document.getElementById('orcMontagem')?.value)||0;
   const desl = parseFloat(document.getElementById('orcDesl')?.value)||0;
   const extras = maqTotal + consTotal + mont + desl;
   const itemExtrasTotal = (typeof orcGetItemExtrasTotal==='function') ? orcGetItemExtrasTotal() : 0;
-  const totalCost = matTotal + extras + itemExtrasTotal;
-  const totalCostParaMarkup = totalCost - imp; // base do markup — SEM o custo da Gravação
+  // RODADA 6 — gravacaoCusto/sprayCusto/extraCusto somados aqui (custo
+  // real, para "Custo Total"/window._orcCalc.totalCost), mas EXCLUÍDOS da
+  // base do markup (totalCostParaMarkup) — mesma regra que já existia só
+  // para Gravação, agora uniforme para os três.
+  const totalCost = matTotal + extras + itemExtrasTotal + gravacaoCusto + sprayCusto + extraCusto;
+  const totalCostParaMarkup = matTotal + extras + itemExtrasTotal; // base do markup — SEM Gravação/Spray/Extra
 
   // PASS 2: calcula o valor "cru" (material + ajuste do item) de cada
   // item — usado como PESO na redistribuição do PASS 3, não mais escrito
@@ -10763,9 +10825,10 @@ function orcRecalc() {
   // material a marcar. `finalPriceVR` preserva o total só-VR para a
   // margem exibida abaixo continuar correta.
   var vitreItensPedidoTotal = (typeof orcVitreItensPedidoTotal==='function') ? orcVitreItensPedidoTotal(_orcVitreItensPedido) : 0;
-  // Gravação soma ao preço final DEPOIS de markup/desconto/acréscimo/Vitre —
-  // adicional fixo (custo×2), nunca marcado up nem descontado.
-  finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda;
+  // Gravação/Spray/Extra somam ao preço final DEPOIS de markup/desconto/
+  // acréscimo/Vitre — adicional fixo (custo×2 cada), nunca marcado up nem
+  // descontado (RODADA 6 — Spray/Extra seguem a mesma regra da Gravação).
+  finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
 
   // PASS 3 — preço final unitário efetivo do item (fonte canônica única):
   // cada item VR recebe (a) sua fatia proporcional (peso = tsRaw do PASS 2,
@@ -10780,7 +10843,7 @@ function orcRecalc() {
   // orcColetarItensDistribuidos() já usa para PDF/WhatsApp — ao escrever
   // aqui o mesmo valor final, PDF/WhatsApp continuam devolvendo o mesmo
   // número, sem duplicar fórmula.
-  var _totalVRParaRepartir = finalPriceVR_semItemExtras + gravacaoAdicionalVenda;
+  var _totalVRParaRepartir = finalPriceVR_semItemExtras + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
   // RODADA 5 — Orçamento comparativo / grupos de opções: `_rawTotalVR` (o
   // denominador do rateio) soma só os itens que CONTAM para o total real
   // (item.conta!==false) — exatamente simétrico ao que o PASS 1 já fez em
@@ -10841,7 +10904,7 @@ function orcRecalc() {
         if(extras>0){
           lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal/factor*(1-descPct))+'</span></div>';
           if(maqTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Máquinas</span><span>'+orcFmt(maqTotal/factor*(1-descPct))+'</span></div>';
-          if((consTotal-imp)>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt((consTotal-imp)/factor*(1-descPct))+'</span></div>';
+          if(consTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal/factor*(1-descPct))+'</span></div>';
           if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
           if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
           if(itemExtrasTotal>0) {
@@ -10863,6 +10926,8 @@ function orcRecalc() {
         if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
         if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl+'</span></div>'; }
         if(gravacaoAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
+        if(sprayAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">💨 Spray</span><span>+'+orcFmt(sprayAdicionalVenda)+'</span></div>';
+        if(extraAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">➕ Extra</span><span>+'+orcFmt(extraAdicionalVenda)+'</span></div>';
         if(vitreItensPedidoTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
         var _margin=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
         lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada (só VR)</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
@@ -10888,6 +10953,8 @@ function orcRecalc() {
     if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
     if(acresPct>0||acresRS>0){ var _acresLbl3=acresRS>0?('+'+orcFmt(acresRS)):('+'+( acresPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl3+'</span></div>'; }
     if(gravacaoAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação (venda)</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
+    if(sprayAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">💨 Spray (venda)</span><span>+'+orcFmt(sprayAdicionalVenda)+'</span></div>';
+    if(extraAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">➕ Extra (venda)</span><span>+'+orcFmt(extraAdicionalVenda)+'</span></div>';
     if(vitreItensPedidoTotal>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
     var _margin3=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin3.toFixed(1)+'%</span></div>';
@@ -10895,7 +10962,7 @@ function orcRecalc() {
     b3.innerHTML = lines3;
   }
   // payload interno
-  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo, gravacaoCusto: imp, gravacaoAdicionalVenda: gravacaoAdicionalVenda };
+  window._orcCalc = { totalCost, finalPrice, matTotal, maqTotal, consTotal, mont, desl, descPct, descRS, descTipo: _descTipo, overhead, vrml, impostos, acresPct, acresRS, acresTipo:_acresTipo, gravacaoCusto: gravacaoCusto, gravacaoAdicionalVenda: gravacaoAdicionalVenda, sprayCusto: sprayCusto, sprayAdicionalVenda: sprayAdicionalVenda, extraCusto: extraCusto, extraAdicionalVenda: extraAdicionalVenda };
   // GO-LIVE 2026-08-11, P0 seção 3 — orcUpdateSummary() só era chamada de
   // dentro de orcStep(n===4); qualquer recálculo feito com a etapa 4 já
   // visitada (edição de item, restauração de orçamento salvo, etc.) nunca
@@ -11069,17 +11136,10 @@ function orcItemExtras(ri) {
   window._extrasSalvo = false;
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
-  var larg = parseFloat((document.getElementById('oi_larg_'+ri)||{}).value)||0;
-  var alt  = parseFloat((document.getElementById('oi_alt_'+ri)||{}).value)||0;
-  var qty  = parseFloat((document.getElementById('oi_qty_'+ri)||{}).value)||1;
-  var planArea = parseFloat(row && row.dataset.planArea)||0;
-  var areaCm2  = (planArea>0 ? planArea : (larg*alt)) * qty;
-  var adhFmt   = (areaCm2*0.0056).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   // Pré-calcular contornos a partir das peças planificadas (para pré-popular m_contornos)
   var _planPecasModal = null;
   try { var _ppjModal=row&&row.dataset.planPecas; if(_ppjModal) _planPecasModal=JSON.parse(_ppjModal); } catch(e){}
   var _initContornos = (_planPecasModal&&_planPecasModal.length) ? _planPecasModal.reduce(function(s,p){return s+(parseInt(p.qty)||1);},0) : 1;
-  var adSim = ex.adesivoSim ? 'sim' : 'nao';
 
   // Ler valores atuais dos inputs do Step 3
   var g = function(id){ return (document.getElementById(id)||{}).value||'0'; };
@@ -11226,10 +11286,20 @@ function orcItemExtras(ri) {
   }).join('')
   +'</div>'
 
-  // Consumíveis
+  // RODADA 6 — a seção "🧴 Consumíveis" (Adesivo/Adh.Branco/Gravação/
+  // Spray/Extra) foi REMOVIDA deste modal: esses 5 consumíveis passaram a
+  // ser configurados por PEÇA na planificação (botão ⚙️ na coluna
+  // "Consumíveis" da tabela de peças, dentro de "📐 Planificar peças") —
+  // mantê-los aqui TAMBÉM seria uma segunda fonte de verdade concorrente
+  // com a peça (ver investigação desta rodada: eliminar duplicidade era
+  // requisito explícito). "Só Corte" NÃO é um consumível — é um MODO DE
+  // PRECIFICAÇÃO alternativo do PEDIDO INTEIRO (substitui o preço final
+  // por completo — `fp = _soCorteMin*(130/60)` em orcRecalc(), nunca uma
+  // parcela somada — e nunca teve `ocv_*`/participação em `consTotal`) —
+  // continua aqui, global, exatamente como sempre funcionou.
   +'<div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:10px">'
-  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧴 Consumíveis</div>'
-  +'<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bg2);border-radius:7px;border:1.5px solid var(--border);margin-bottom:6px">'
+  +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">✂️ Modo de Precificação</div>'
+  +'<div style="display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bg2);border-radius:7px;border:1.5px solid var(--border)">'
   +'<input type="checkbox" id="m_soCorte"'+(soCorte?' checked':'')+' onchange="orcExtrasCorteChange()" style="accent-color:var(--brand-mid);width:13px;height:13px;cursor:pointer">'
   +'<div style="flex:1"><div style="font-size:10px;font-weight:800">✂️ Só Corte — R$130/h</div>'
   +'<div style="font-size:9px;color:var(--muted)">Cliente traz o material</div></div>'
@@ -11237,43 +11307,7 @@ function orcItemExtras(ri) {
   +'<input type="number" id="m_soCorteMin" value="'+soCorteMin+'" min="30" step="5" oninput="orcExtrasCalcMaq()" style="'+INP+';width:45px">'
   +'<span style="font-size:9px;color:var(--muted)">min</span>'
   +'</div></div>'
-  +[['🩹','Adesivo','R$0,0056/cm²','m_adh','oc_adh',true],
-    ['⬜','Adh. Branco','R$0,0011/cm²','m_adhb','oc_adhb',true],
-    ['🖨️','Gravação','custo ×2 (venda)','m_imp','oc_imp',false],
-    ['🎨','Spray (un)','×R$16','m_spray','oc_spray',false],
-    ['➕','Extra','R$ fixo','m_extra','oc_extra',false]
-  ].map(function(r){
-    var curVal = g(r[4]);
-    // Parte 1.1 (2026-08-07): antes, marcar Adesivo/Adh.Branco = Sim aqui
-    // não mudava o valor mostrado até clicar "Salvar" (nenhum onchange
-    // existia nestes campos, diferente das Máquinas logo acima, que já
-    // tinham oninput="orcExtrasCalcMaq()"). Agora cada campo grava
-    // imediatamente no campo real do Step 3 (oc_adh/oc_adhb/oc_imp/
-    // oc_spray/oc_extra) e recalcula o orçamento na hora — "Salvar"
-    // continua existindo, mas vira um no-op sobre um valor que já estava
-    // sincronizado, nunca duplica a cobrança.
-    var _handler = ' '+(r[5]?'onchange':'oninput')+'="orcExtrasConsumivelChange(\''+r[3]+'\',\''+r[4]+'\')"';
-    if(r[5]){
-      return '<div style="'+ROW+'">'
-        +'<span style="font-size:11px;width:16px">'+r[0]+'</span>'
-        +'<span style="'+RNAME+'">'+r[1]+'</span>'
-        +'<span style="'+RRATE+'">'+r[2]+'</span>'
-        +'<select id="'+r[3]+'"'+_handler+' style="'+SEL+';width:52px">'
-        +'<option value="nao"'+(curVal==='nao'?' selected':'')+'>Não</option>'
-        +'<option value="sim"'+(curVal==='sim'?' selected':'')+'>Sim</option>'
-        +'</select>'
-        +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
-        +'</div>';
-    } else {
-      return '<div style="'+ROW+'">'
-        +'<span style="font-size:11px;width:16px">'+r[0]+'</span>'
-        +'<span style="'+RNAME+'">'+r[1]+'</span>'
-        +'<span style="'+RRATE+'">'+r[2]+'</span>'
-        +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0"'+_handler+' style="'+INP+'">'
-        +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
-        +'</div>';
-    }
-  }).join('')
+  +'<div style="font-size:9px;color:var(--muted);margin-top:8px;line-height:1.5">🧴 Adesivo, Adh. Branco, Gravação, Spray e Extra agora são configurados por peça — abra "📐 Planificar peças" e use o botão ⚙️ na coluna Consumíveis de cada peça.</div>'
   +'</div>'
 
   +'</div>' // fim col direita
@@ -11310,26 +11344,6 @@ function orcExtrasCalcMaq(){
   var scVal=sc?Math.max(30,scMin)/60*130:0;
   var scEl=document.getElementById('m_soCorte_v');
   if(scEl) scEl.textContent='R$'+scVal.toFixed(2).replace('.',',');
-}
-// Parte 1.1 (2026-08-07) — Consumíveis (Adesivo/Adh.Branco/Impressão/
-// Spray/Extra) em tempo real. Diferente das Máquinas (cujo preview é só
-// local ao modal, escrito de volta no Step 3 apenas ao Salvar), estes
-// campos são order-level (a área usada no cálculo é a soma de TODOS os
-// itens do orçamento, não só deste item — mesma regra que orcRecalc()
-// já usava) — por isso, em vez de um preview local desconectado, o
-// valor digitado aqui é gravado direto no campo real do Step 3 e o
-// orçamento inteiro é recalculado na hora; o preview do modal só espelha
-// o valor que orcRecalc() acabou de computar. "Salvar" continua
-// existindo (grava de novo os mesmos valores, sem efeito) — nunca
-// duplica a cobrança porque escreve o MESMO número, não soma.
-function orcExtrasConsumivelChange(modalId, realId){
-  var modalEl=document.getElementById(modalId);
-  var realEl=document.getElementById(realId);
-  if(modalEl && realEl) realEl.value=modalEl.value;
-  if(typeof orcRecalc==='function') orcRecalc();
-  var realPreview=document.getElementById('ocv_'+modalId.replace('m_',''));
-  var modalPreview=document.getElementById(modalId+'_v');
-  if(realPreview && modalPreview) modalPreview.textContent=realPreview.textContent;
 }
 function orcExtrasCorteChange(){
   var chk=!!(document.getElementById('m_soCorte')||{}).checked;
@@ -11551,11 +11565,12 @@ function orcItemExtrasSalvar(ri){
   ws('om_uv',     (document.getElementById('m_uv')||{}).value||0);
   ws('om_lixa',   (document.getElementById('m_lixa')||{}).value||0);
   ws('om_tupia',  (document.getElementById('m_tupia')||{}).value||0);
-  ws('oc_adh',    (document.getElementById('m_adh')||{}).value||'nao');
-  ws('oc_adhb',   (document.getElementById('m_adhb')||{}).value||'nao');
-  ws('oc_imp',    (document.getElementById('m_imp')||{}).value||0);
-  ws('oc_spray',  (document.getElementById('m_spray')||{}).value||0);
-  ws('oc_extra',  (document.getElementById('m_extra')||{}).value||0);
+  // RODADA 6 — oc_adh/oc_adhb/oc_imp/oc_spray/oc_extra NÃO são mais
+  // escritos aqui: os campos m_adh/m_adhb/m_imp/m_spray/m_extra saíram do
+  // modal (Consumíveis agora é por peça — ver acima). Escrevê-los mesmo
+  // assim sobrescreveria o fallback legado com 'nao'/0 a cada "Salvar"
+  // (os `document.getElementById` desses IDs sempre retornariam null),
+  // apagando silenciosamente o valor histórico de orçamentos antigos.
   wc('orcSoCorte', !!(document.getElementById('m_soCorte')||{}).checked);
   ws('orcSoCorteMin',(document.getElementById('m_soCorteMin')||{}).value||30);
 
@@ -11855,32 +11870,22 @@ function orcOnProdChange(sel) {
     orcAplicarConsumivelReceita(prodNome);
   }
 }
-// RODADA 6, seção 7 — aplica o Adesivo/Adh. Branco obrigatório/não-aplicável
-// da receita ao painel de Consumíveis do orçamento (oc_adh/oc_adhb). Esses
-// campos são GLOBAIS ao orçamento (não por item — limitação pré-existente),
-// então só agimos quando este é o ÚNICO item da lista: com múltiplos itens
-// de receitas diferentes não há uma resposta correta única, e forçar o
-// valor a cada troca de produto sobrescreveria silenciosamente a escolha
-// já feita para outro item.
+// RODADA 6 — DESATIVADA. Esta automação forçava oc_adh/oc_adhb (o toggle
+// GLOBAL do pedido) para 'sim' quando a receita do produto marcava
+// Adesivo/Adh. Branco como 'obrigatoria'. Desde a Rodada 5, esse toggle é
+// só um FALLBACK LEGADO (a peça é a fonte ativa — ver orcRecalc(): `adh =
+// adhYes ? areaTotal*adhPrecoCm2 : adhPecasTotal`) e, nesta rodada, o
+// campo saiu de toda UI editável (Step 3 e modal Custos, ambos ocultos).
+// Deixar esta automação ativa reintroduziria exatamente o bug que a
+// Rodada 5 documentou: `oc_adh='sim'` VENCE a configuração por peça e
+// ignora `adhPecasTotal` por completo — e, sem UI visível, o vendedor não
+// teria como perceber nem corrigir a substituição silenciosa. "Receita
+// força Adesivo obrigatório por PEÇA" fica documentado como evolução
+// futura (a receita é uma restrição do PRODUTO, não tem hoje um mapeamento
+// natural para "qual peça" — decisão de produto fora do escopo desta
+// rodada). Nunca mexe em oc_adh/oc_adhb: nem força 'sim', nem reseta.
 function orcAplicarConsumivelReceita(prodNome) {
-  var totalItens = document.querySelectorAll('#orcItemBody tr[data-idx]').length;
-  if(totalItens !== 1) return;
-  var receita = (planProdLoad()||[]).find(function(p){ return p.nome===prodNome; });
-  var mudou = false;
-  // HOTFIX OPERACIONAL 2026-08-12, P0.1 — achado real: trocar de produto
-  // dentro do MESMO orçamento (único item) mantinha Adesivo/Adh. Branco
-  // em "Sim" herdado do produto anterior sempre que a receita do NOVO
-  // produto não define status para o consumível (valor===null). Regra
-  // canônica: todo novo item nasce Não/Não — só continua Sim se a
-  // receita do produto ATUAL exigir explicitamente ('obrigatoria').
-  // Nunca herda do produto/item anterior.
-  ['adh','adhb'].forEach(function(chave){
-    var valor = receita ? orcConsumivelResolverValor(receita, chave) : null;
-    if(valor===null) valor = 'nao';
-    var el = document.getElementById(chave==='adh' ? 'oc_adh' : 'oc_adhb');
-    if(el && el.value!==valor) { el.value = valor; mudou = true; }
-  });
-  if(mudou && typeof orcRecalc==='function') orcRecalc();
+  return;
 }
 
 function orcCalcDataEntrega() {
@@ -13077,7 +13082,7 @@ function kbAbrirPlanificacaoItem(idx){
   var pecas = (it.pieces && it.pieces.length) ? it.pieces : ((it.recipeSnapshot && it.recipeSnapshot.pecas) || []);
   var pecasHtml = pecas.length
     ? '<table style="width:100%;border-collapse:collapse;font-size:11px">'
-      + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th><th style="padding:4px">Adesivo</th></tr>'
+      + '<tr style="text-align:left;color:var(--muted)"><th style="padding:4px">Peça</th><th style="padding:4px">Medidas</th><th style="padding:4px">Qtd</th><th style="padding:4px">Esp.</th><th style="padding:4px">Consumíveis</th></tr>'
       + pecas.map(function(p){
           // HOTFIX 2026-08-16 (P0.6) — achado real: peças automáticas
           // mostravam "mm" sem número. Causa: p.esp!=null não barra string
@@ -13086,16 +13091,24 @@ function kbAbrirPlanificacaoItem(idx){
           // 0 como valor válido — só cai no fallback quando REALMENTE não
           // há espessura registrada em nenhum dos dois campos.
           var _espVal = (p.esp!=null && p.esp!=='') ? p.esp : (p.espessuraMm!=null ? p.espessuraMm : null);
-          // RODADA 5 — só rótulo técnico operacional, nunca preço/custo
+          // RODADA 5/6 — só rótulo técnico operacional, nunca preço/custo
           // (esta tela é de produção — ver osProjecaoOperacionalItem, que
-          // já exclui todo campo financeiro do que chega até aqui).
-          var _adhLabel = p.adesivo==='branco' ? '⬜ Branco' : (p.adesivo==='normal' ? '🩹 Normal' : '—');
+          // já exclui todo campo financeiro do que chega até aqui). A
+          // produção precisa saber O QUE fazer em cada peça (quais
+          // consumíveis aplicar), nunca quanto isso custou.
+          var _consLabels = [];
+          if (p.adesivo==='normal') _consLabels.push('🩹 Adesivo');
+          else if (p.adesivo==='branco') _consLabels.push('⬜ Adesivo Branco');
+          if ((parseFloat(p.gravacao)||0)>0) _consLabels.push('🖨️ Gravação');
+          if ((parseFloat(p.spray)||0)>0) _consLabels.push('💨 Spray');
+          if ((parseFloat(p.extra)||0)>0) _consLabels.push('➕ Extra');
+          var _consLabel = _consLabels.length ? _consLabels.join(', ') : '—';
           return '<tr style="border-top:1px solid var(--border)">'
             + '<td style="padding:4px">'+cfgEsc(p.nome||p.label||'—')+'</td>'
             + '<td style="padding:4px">'+(p.larg||p.l||'—')+'×'+(p.alt||p.a||'—')+' '+(p.unidade||'cm')+'</td>'
             + '<td style="padding:4px">'+(p.qty||1)+'</td>'
             + '<td style="padding:4px">'+(_espVal!=null?_espVal+'mm':'—')+'</td>'
-            + '<td style="padding:4px">'+_adhLabel+'</td>'
+            + '<td style="padding:4px">'+_consLabel+'</td>'
             + '</tr>';
         }).join('')
       + '</table>'
@@ -31403,7 +31416,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <th>Peça</th><th style="text-align:center">Qtd</th>
         <th style="text-align:right">Larg cm</th><th style="text-align:right">Alt cm</th>
         <th style="text-align:right">Área m²</th>
-        <th style="text-align:center">Adesivo</th>
+        <th style="text-align:center">Consumíveis</th>
         <th style="width:28px"></th>
       </tr></thead>
       <tbody id="planPiecesBody"></tbody>
@@ -32248,7 +32261,7 @@ function planRenderManual() {
       var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
       return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
     }).join('');
-    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr 0.9fr auto;gap:5px;align-items:center;margin-bottom:5px">'
+    return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
       +'<select oninput="planManualPieces['+i+'].esp=this.value;planManualPieces['+i+'].precoM2=parseFloat(this.options[this.selectedIndex].dataset.rsm2||0);_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
@@ -32262,11 +32275,6 @@ function planRenderManual() {
       +'<input type="number" placeholder="Qtd" value="'+(p.qty||1)+'" min="1" step="1"'
       +' oninput="planManualPieces['+i+'].qty=parseInt(this.value)||1;_planCalcAndMerge()"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
-      +'<select oninput="planManualPieces['+i+'].adesivo=this.value;_planCalcAndMerge()" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:6px;font-size:10px;background:var(--bg);color:var(--text)">'
-      +'<option value=""'+(!p.adesivo?' selected':'')+'>Sem adesivo</option>'
-      +'<option value="normal"'+(p.adesivo==='normal'?' selected':'')+'>🩹 Normal</option>'
-      +'<option value="branco"'+(p.adesivo==='branco'?' selected':'')+'>⬜ Branco</option>'
-      +'</select>'
       +'<button onclick="planRemoveManual('+i+')" style="background:none;border:1px solid var(--danger);color:var(--danger);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer">✕</button>'
       +'</div>';
   }).join('');
@@ -32298,7 +32306,7 @@ function _planCalcAndMerge() {
         +'<td class="area-td">'+p.larg.toFixed(1)+'</td>'
         +'<td class="area-td">'+p.alt.toFixed(1)+'</td>'
         +'<td class="area-td" style="color:var(--brand-mid);font-weight:700">'+(area/10000).toFixed(4)+'</td>'
-        +'<td style="text-align:center;font-size:10px">'+(p.adesivo==='branco'?'⬜':(p.adesivo==='normal'?'🩹':'—'))+'</td>'
+        +'<td style="text-align:center;font-size:10px">'+_planConsumiveisCelulaHtml('manual', planManualPieces.indexOf(p), p, false)+'</td>'
         +'<td></td>';
       if(tbody) tbody.appendChild(tr);
     }
@@ -32348,7 +32356,7 @@ function _planCalcAndMerge() {
   if(tfoot) tfoot.innerHTML='<tr class="tot-row"><td colspan="2" style="font-weight:800">TOTAL geral</td>'
     +'<td colspan="2" style="text-align:center;font-size:11px;color:var(--muted)">'+newQty+' peças</td>'
     +'<td class="area-td" style="font-size:15px">'+(newArea/10000).toFixed(4)+'</td>'
-    +'<td></td></tr>';
+    +'<td></td><td></td></tr>';
   setTimeout(planDrawCanvas, 0);
   // ver comentário em _planSincronizarComItem() — chamadores de
   // _planCalcAndMerge() (peça manual add/editar/remover) não passam pelo
@@ -32635,6 +32643,13 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
       larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
       esp: pc.esp || defaultEspMm || '', tipo: pc.tipo||'',
       adesivo: prev ? (prev.adesivo||'') : (pc.adesivo||''),
+      // RODADA 6 — Gravação/Spray/Extra por peça (mesmo padrão do Adesivo
+      // acima): preserva o valor em memória mesmo quando a receita fresca
+      // não o carrega — sem isso, editar larg/alt/qty da peça (que dispara
+      // reconciliação a cada digitação) apagaria a configuração.
+      gravacao: prev ? (prev.gravacao||0) : (pc.gravacao||0),
+      spray: prev ? (prev.spray||0) : (pc.spray||0),
+      extra: prev ? (prev.extra||0) : (pc.extra||0),
       _deleted: prev ? !!prev._deleted : false
     };
   });
@@ -32657,6 +32672,11 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
       esp:  saved ? (saved.esp || defaultEspMm || '') : (pc.esp || defaultEspMm || ''),
       tipo: pc.tipo||'',
       adesivo: saved ? (saved.adesivo||'') : (pc.adesivo||''),
+      // RODADA 6 — restaura Gravação/Spray/Extra do snapshot persistido ao
+      // reabrir (mesmo padrão do Adesivo acima).
+      gravacao: saved ? (saved.gravacao||0) : (pc.gravacao||0),
+      spray: saved ? (saved.spray||0) : (pc.spray||0),
+      extra: saved ? (saved.extra||0) : (pc.extra||0),
       _deleted: !saved // ausente no snapshot persistido = foi excluída
     };
   });
@@ -32681,24 +32701,108 @@ function _planDeleteAuto(pci) {
   }
 }
 
-// Adesivo por peça (Rodada 5) — select reaproveitado nas 3 renderizações de
-// tabela de peças (automática, manual-espelho, manual). Valor vazio = sem
-// adesivo; a área que entra na fórmula do consumível é só a das peças
-// marcadas aqui (ver orcRecalc()), nunca a área total do item.
-function _planAdesivoSelectHtml(val, pci) {
-  val = val || '';
-  return '<select data-planf="adesivo" data-pci="'+pci+'" onchange="_planEditField(this)" '
-    + 'style="font-size:10px;padding:2px;border:1.5px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text)">'
-    + '<option value=""'+(val===''?' selected':'')+'>Sem</option>'
-    + '<option value="normal"'+(val==='normal'?' selected':'')+'>🩹 Normal</option>'
-    + '<option value="branco"'+(val==='branco'?' selected':'')+'>⬜ Branco</option>'
-    + '</select>';
+// RODADA 6 — Consumíveis por peça (Adesivo/Adh.Branco/Gravação/Spray/
+// Extra). Substitui a coluna dedicada "Adesivo" da Rodada 5 (era um
+// <select> direto na célula) por uma coluna geral "Consumíveis": um chip
+// resume o que está configurado + um botão ⚙️ abre um popover pequeno só
+// da peça clicada. Mesmo padrão de overlay singleton já usado por
+// orcItemExtras() (criado uma vez via document.createElement, innerHTML
+// reescrito a cada abertura, display none/flex) — z-index acima do modal
+// de planificação (9990) e sem conflito com os demais overlays do ERP
+// (orcItemExtrasOverlay/osPgtoSaldoModal/orcPagtoSucessoModal em 10001).
+//
+// `origem` é 'auto' (peça de _planEditPieces, ref=índice pci) ou 'manual'
+// (peça de planManualPieces, ref=índice i) — os dois arrays guardam o
+// objeto de peça diretamente, então salvar aqui é só mutar o campo no
+// lugar (mesmo padrão de _planEditField logo abaixo).
+function _planConsumiveisPeca(origem, ref) {
+  return origem==='manual' ? (planManualPieces||[])[ref] : (_planEditPieces||[])[ref];
+}
+function _planConsumiveisChip(p) {
+  p = p || {};
+  var partes = [];
+  if (p.adesivo==='normal') partes.push('🩹');
+  else if (p.adesivo==='branco') partes.push('⬜');
+  if ((parseFloat(p.gravacao)||0)>0) partes.push('🖨️');
+  if ((parseFloat(p.spray)||0)>0) partes.push('💨');
+  if ((parseFloat(p.extra)||0)>0) partes.push('➕');
+  return partes.length ? partes.join(' ') : '<span style="color:var(--muted)">—</span>';
+}
+// Botão + chip reaproveitados nos 4 pontos de renderização da tabela de
+// peças (automática, manual-espelho read-only, manual editável) e no
+// popover em si.
+function _planConsumiveisCelulaHtml(origem, ref, p, readOnly) {
+  var chipId = 'planConsChip_'+origem+'_'+ref;
+  var btn = readOnly ? '' : '<button onclick="_planConsumiveisAbrir(\''+origem+'\','+ref+')" title="Configurar consumíveis desta peça" style="background:none;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:10px;padding:1px 4px;margin-right:3px;line-height:1.4">⚙️</button>';
+  return '<span style="display:inline-flex;align-items:center;white-space:nowrap;font-size:11px">'+btn+'<span id="'+chipId+'">'+_planConsumiveisChip(p)+'</span></span>';
+}
+function _planConsCampoValorHtml(label, id, val) {
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px">'
+    + '<span>'+label+'</span>'
+    + '<span style="display:flex;align-items:center;gap:3px"><span style="color:var(--muted);font-size:11px">R$</span>'
+      + '<input type="number" id="'+id+'" value="'+(parseFloat(val)||0)+'" min="0" step="0.01" style="width:70px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)"></span>'
+    + '</div>';
+}
+function _planConsumiveisAbrir(origem, ref) {
+  var p = _planConsumiveisPeca(origem, ref);
+  if (!p) return;
+  window._planConsOrigem = origem;
+  window._planConsRef = ref;
+  var ov = document.getElementById('planConsumiveisOverlay');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id='planConsumiveisOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:10003;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px 8px';
+    ov.onclick=function(e){ if(e.target===ov) _planConsumiveisFechar(); };
+    document.body.appendChild(ov);
+  }
+  var medidas = (parseFloat(p.larg)||0).toFixed(1)+'×'+(parseFloat(p.alt)||0).toFixed(1)+'cm'+(p.esp?' · '+p.esp+'mm':'');
+  ov.innerHTML = '<div style="background:var(--surface);border-radius:12px;padding:16px 18px;width:min(340px,94vw);max-height:calc(100vh - 24px);overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    + '<div style="font-size:13px;font-weight:800;margin-bottom:2px">🧴 Consumíveis da peça</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">'+cfgEsc(p.nome||'')+' · '+medidas+'</div>'
+    + '<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Adesivo</div>'
+    + '<div style="display:flex;gap:10px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">'
+      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value=""'+(!p.adesivo?' checked':'')+'> Sem</label>'
+      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value="normal"'+(p.adesivo==='normal'?' checked':'')+'> 🩹 Normal</label>'
+      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value="branco"'+(p.adesivo==='branco'?' checked':'')+'> ⬜ Branco</label>'
+    + '</div>'
+    + _planConsCampoValorHtml('🖨️ Gravação', 'planConsGravacao', p.gravacao)
+    + _planConsCampoValorHtml('💨 Spray', 'planConsSpray', p.spray)
+    + _planConsCampoValorHtml('➕ Extra', 'planConsExtra', p.extra)
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">'
+      + '<button class="topbar-btn ghost" onclick="_planConsumiveisFechar()">Cancelar</button>'
+      + '<button onclick="_planConsumiveisSalvar()" style="background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer">✅ Salvar</button>'
+    + '</div>'
+  + '</div>';
+  ov.style.display='flex';
+}
+function _planConsumiveisFechar() {
+  var ov = document.getElementById('planConsumiveisOverlay');
+  if (ov) ov.style.display='none';
+  window._planConsOrigem = null; window._planConsRef = null;
+}
+function _planConsumiveisSalvar() {
+  var origem = window._planConsOrigem, ref = window._planConsRef;
+  var p = _planConsumiveisPeca(origem, ref);
+  if (!p) { _planConsumiveisFechar(); return; }
+  var adesivoEl = document.querySelector('input[name="planConsAdesivo"]:checked');
+  p.adesivo  = adesivoEl ? adesivoEl.value : '';
+  p.gravacao = parseFloat((document.getElementById('planConsGravacao')||{}).value)||0;
+  p.spray    = parseFloat((document.getElementById('planConsSpray')||{}).value)||0;
+  p.extra    = parseFloat((document.getElementById('planConsExtra')||{}).value)||0;
+  _planConsumiveisFechar();
+  // RODADA 6 — atualização imediata: repinta o chip da própria linha sem
+  // esperar um recálculo completo da tabela, e recalcula o preço canônico
+  // (mesmo par de chamadas que _planEditField usa para qty/larg/alt/esp —
+  // ver logo abaixo).
+  var chipEl = document.getElementById('planConsChip_'+origem+'_'+ref);
+  if (chipEl) chipEl.innerHTML = _planConsumiveisChip(p);
+  _planRecompute();
+  if (typeof _planSincronizarComItem==='function') _planSincronizarComItem();
 }
 function _planEditField(input) {
   var field = input.dataset.planf;
   var pci   = parseInt(input.dataset.pci);
-  var val   = field === 'qty' ? (parseInt(input.value)||1)
-    : (field === 'adesivo' ? String(input.value||'') : (parseFloat(input.value)||0));
+  var val   = field === 'qty' ? (parseInt(input.value)||1) : (parseFloat(input.value)||0);
   if (!_planEditPieces[pci]) return;
   _planEditPieces[pci][field] = val;
   // Atualizar célula de área da linha

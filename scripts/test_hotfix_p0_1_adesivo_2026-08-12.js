@@ -65,11 +65,24 @@ ok("5a. orcResetFormularioVR() seta oc_adh='nao'", /setV\('oc_adh','nao'\)/.test
 ok("5b. orcResetFormularioVR() seta oc_adhb='nao'", /setV\('oc_adhb','nao'\)/.test(resetSrc));
 ok('5c. orcResetFormularioVR() limpa window._orcAdhPrecoSnapshot (novo orçamento nunca herda snapshot do anterior)', /_orcAdhPrecoSnapshot\s*=\s*null/.test(resetSrc));
 
-// ── 6. orcAplicarConsumivelReceita() nunca deixa "Sim" sobreviver a uma troca de produto sem receita ──
+// ── 6. RODADA 6 — orcAplicarConsumivelReceita() foi DESATIVADA (virou
+// no-op). Motivo: desde a Rodada 5, oc_adh/oc_adhb são só um FALLBACK
+// LEGADO (a peça é a fonte ativa — orcRecalc(): `adh = adhYes ?
+// areaTotal*adhPrecoCm2 : adhPecasTotal`); e, na Rodada 6, o campo saiu de
+// toda UI editável (Step 3 oculto, seção removida do modal Custos). Uma
+// automação que ainda forçasse oc_adh='sim' reintroduziria exatamente o
+// bug documentado na Rodada 5 — vencendo silenciosamente a configuração
+// por peça, sem nenhuma UI visível para o vendedor perceber ou corrigir.
+// A propriedade original testada aqui ("nunca herda 'sim' resíduo de um
+// produto anterior") continua verdadeira — só que agora por construção:
+// a função não toca em oc_adh/oc_adhb em nenhuma circunstância.
 var aplicarSrc = extractFn('orcAplicarConsumivelReceita');
-ok('6a. orcAplicarConsumivelReceita() força "nao" quando a receita do produto ATUAL não define o consumível (nunca herda do produto anterior)', /if\s*\(valor===null\)\s*valor\s*=\s*'nao'/.test(aplicarSrc));
+ok('6a. orcAplicarConsumivelReceita() foi desativada (no-op) — nunca mais toca em oc_adh/oc_adhb', /^function orcAplicarConsumivelReceita\(prodNome\) \{\s*return;\s*\}$/.test(aplicarSrc));
 
-// ── 7. Execução real: reproduz o cenário do bug — produto A força Sim, produto B (sem receita) deve voltar Não ──
+// ── 7. Execução real: com a automação desativada, oc_adh residual de um
+// produto anterior JAMAIS é tocado por uma troca de produto — nem para
+// forçar 'sim' nem para resetar 'nao' (o campo é legado, só o vendedor
+// através da peça decide o Adesivo de um orçamento novo).
 {
   var FN_NAMES = ['orcConsumivelResolverValor', 'receitaConsumiveisEfetivos', 'orcAplicarConsumivelReceita'];
   var missing = [];
@@ -104,7 +117,7 @@ ok('6a. orcAplicarConsumivelReceita() força "nao" quando a receita do produto A
     };
     var mod = require(modPath);
     mod.orcAplicarConsumivelReceita('Produto B (sem receita de adesivo)');
-    test('7. Trocar para um produto cuja receita NÃO define Adesivo força oc_adh de volta para "nao" (nunca herda "sim" do produto anterior)', _els.oc_adh.value, 'nao');
+    test('7. RODADA 6 — trocar de produto NUNCA mais toca oc_adh (automação desativada; "sim" residual permanece só como dado legado, não reativado nem sobrescrito)', _els.oc_adh.value, 'sim');
     try { fs.unlinkSync(modPath); } catch (e) {}
   }
 }
