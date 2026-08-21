@@ -10126,6 +10126,41 @@ function _matResolverPrecoFamiliaEspessura(matKeyItem, espAlvoMm) {
   } catch(e) { return null; }
 }
 
+// RODADA 7 — causa raiz do bug "trocar material depois de planificado não
+// recalcula o custo": toda peça AUTOMÁTICA gravava `esp` como um valor
+// CONGELADO herdado da espessura do item no instante em que a
+// planificação rodou (`_planReconcilePieces`/`_planSeedFromPersisted`,
+// `esp: pc.esp || defaultEspMm`), sem NENHUM jeito de distinguir "esta
+// peça herda a espessura do item" (a imensa maioria — toda receita
+// built-in) de "esta peça tem override real de espessura" (peça de
+// receita customizada/snapshot com esp própria). O motor de preço tratava
+// QUALQUER `esp` presente como override permanente — trocar o material do
+// item de 4mm pra 2mm sem reabrir o modal deixava `_itemEspMm=2` mas toda
+// peça automática ainda "esp":4 (congelado), então o delta de correção
+// comparava 2 contra 4 e re-precificava CADA peça pelo preço/m² de 4mm —
+// cancelando algebricamente o 2mm da base e mantendo o item preso na
+// espessura antiga.
+//
+// `espOverride` (novo campo na peça, escrito só em
+// _planReconcilePieces/_planSeedFromPersisted a partir da peça FRESCA da
+// receita — nunca do valor persistido) é a fonte de verdade explícita a
+// partir de agora: vazio = herda a espessura ATUAL do item (nunca gera
+// delta, o preço já é o correto porque baseAreaM2*priceM2 usa o material
+// atual); preenchido = override real, gera delta como sempre. Peça
+// persistida ANTES desta rodada não tem o campo — cai no comportamento
+// LEGADO (compara o `esp` cru, como sempre foi) para não regredir
+// orçamentos antigos com espessura mista genuína; o próprio ato de
+// reabrir "📐 Planificar peças" e aplicar de novo já re-deriva o campo
+// corretamente daí em diante.
+function _planPecaEspOverride(p) {
+  if (typeof p.espOverride !== 'undefined') {
+    var espO = parseFloat(p.espOverride||0)||0;
+    return { tem: espO>0, esp: espO };
+  }
+  var espLegado = parseFloat((p.esp!=null && p.esp!=='') ? p.esp : p.espessuraMm) || 0;
+  return { tem: !!espLegado, esp: espLegado };
+}
+
 // RODADA CIRÚRGICA (consistência da planificação) — mesmo delta de
 // correção por espessura que orcRecalc() já usa para o custo canônico do
 // item (ver comentário lá), reaproveitado aqui pelos PREVIEWS da
@@ -10138,14 +10173,109 @@ function _planDeltaEspecificoPecas(pecas, matKeyItem, espItemMm, priceM2Item) {
   var delta = 0;
   (pecas||[]).forEach(function(pc){
     if (pc._deleted) return;
-    var espPc = parseFloat(pc.esp||0)||0;
-    if (!espPc || espPc === espItemMm) return; // sem override, ou já é a espessura do item
+    var _ov = _planPecaEspOverride(pc);
+    if (!_ov.tem || _ov.esp === espItemMm) return; // sem override real, ou já é a espessura do item
     var areaPcM2 = ((parseFloat(pc.larg)||0)*(parseFloat(pc.alt)||0)*(parseFloat(pc.qty)||1))/10000;
-    var precoResolvido = _matResolverPrecoFamiliaEspessura(matKeyItem, espPc);
+    var precoResolvido = _matResolverPrecoFamiliaEspessura(matKeyItem, _ov.esp);
     if (precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item
     delta += areaPcM2 * (precoResolvido - priceM2Item);
   });
   return delta;
+}
+
+// RODADA 7 — ao trocar o material/espessura principal de um item JÁ
+// planificado (sem reabrir o modal), as peças AUTOMÁTICAS que HERDAM a
+// espessura do item (a imensa maioria — toda receita built-in) precisam
+// recalcular também suas MEDIDAS com a nova espessura, não só o preço/m²
+// (algumas fórmulas de peça dependem da espessura — ex.: parede de uma
+// Caixa que "fecha" contra a espessura do material, `P-2e`). Roda de
+// forma HEADLESS: nunca toca em _planIdx/_planEditPieces/planManualPieces
+// (globais que só valem enquanto o MODAL está aberto — possivelmente
+// para OUTRO item nesse instante) — lê e escreve direto em
+// row.dataset.planPecas/planArea. Preserva integralmente (seção 5/6 do
+// escopo desta rodada — nunca regenera do zero): peças excluídas
+// (_deleted), peças MANUAIS (fora da receita, nunca tocadas aqui), peças
+// com override REAL de espessura (a fórmula pode depender da espessura
+// PRÓPRIA da peça, não da do item — nunca recalcula a geometria delas),
+// qty e consumíveis de cada peça (por id). Qualquer ambiguidade (campo
+// extra obrigatório não preenchido, receita sem fórmula de peças, item
+// sem L/A/P ainda, erro na fórmula) → não faz nada; o preço já foi
+// corrigido por orcRecalc() de qualquer forma.
+function _planResincronizarPecasHerdadas(idx) {
+  try {
+    var row = document.getElementById('oir_'+idx);
+    if (!row || !row.dataset.planPecas) return;
+    var persisted;
+    try { persisted = JSON.parse(row.dataset.planPecas || '[]'); } catch(e) { return; }
+    if (!persisted.length) return;
+
+    var prodEl = document.getElementById('oi_prod_'+idx);
+    var produto = prodEl ? prodEl.value : '';
+    var recipeSnapshot = null;
+    try { recipeSnapshot = row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(_e1) {}
+    var rec = (typeof planGetRecipe==='function') ? planGetRecipe(produto, recipeSnapshot) : null;
+    if (!rec || typeof rec.pieces !== 'function') return; // sem fórmula de peças — nada a resincronizar
+
+    var L = parseFloat(row.dataset.planLarg)||0;
+    var A = parseFloat(row.dataset.planAlt)||0;
+    var P = parseFloat(row.dataset.planProf)||0;
+    if (L<=0 || A<=0 || (rec.dim3d && P<=0)) return; // dados insuficientes — não arrisca
+
+    var espMm = parseFloat((document.getElementById('oi_esp_'+idx)||{}).value)||0;
+    if (!espMm) return;
+    var e = espMm/10;
+
+    var extra = {};
+    if (rec.campos && rec.campos.length) {
+      var camposSalvos = {};
+      try { camposSalvos = row.dataset.planCamposExtras ? JSON.parse(row.dataset.planCamposExtras) : {}; } catch(_e2) {}
+      var _camposRes = receitaCamposContexto({ dim3d: rec.dim3d, campos: rec.campos }, camposSalvos);
+      if (_camposRes.faltando.length) return; // campo obrigatório ausente — não arrisca calcular errado
+      extra = _camposRes.ctx;
+    }
+
+    var freshPieces;
+    try { freshPieces = rec.pieces(L, A, P, e, extra) || []; } catch(_e3) { return; } // fórmula falhou — mantém o snapshot existente
+
+    var byId = {};
+    persisted.forEach(function(p){ if (p && p.origem==='AUTOMATICA') byId['auto_'+_planPieceSlug(p.nome)] = p; });
+
+    var mudou = false;
+    var novasAutomaticas = freshPieces.map(function(pc){
+      var id = 'auto_' + _planPieceSlug(pc.nome);
+      var prev = byId[id];
+      var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
+      if (_espOverride) {
+        // Override real — a fórmula pode depender da espessura PRÓPRIA da
+        // peça, nunca da do item; preserva geometria tal como persistida.
+        return prev || Object.assign({}, pc, { espOverride:_espOverride, esp:_espOverride, espessuraMm: parseInt(_espOverride,10)||null, origem:'AUTOMATICA', _deleted:false, adesivo:'', gravacao:0, spray:0, extra:0 });
+      }
+      var novaLarg = Math.round(pc.larg*100)/100, novaAlt = Math.round(pc.alt*100)/100;
+      if (!prev || prev.larg!==novaLarg || prev.alt!==novaAlt) mudou = true;
+      return {
+        id: id, nome: pc.nome, qty: prev ? prev.qty : pc.qty,
+        larg: novaLarg, alt: novaAlt,
+        esp: espMm, espOverride: '', tipo: pc.tipo||'',
+        adesivo: prev ? (prev.adesivo||'') : '',
+        gravacao: prev ? (prev.gravacao||0) : 0,
+        spray: prev ? (prev.spray||0) : 0,
+        extra: prev ? (prev.extra||0) : 0,
+        _deleted: prev ? !!prev._deleted : false,
+        espessuraMm: espMm, origem: 'AUTOMATICA'
+      };
+    });
+    if (!mudou) return; // geometria já bate — não reescreve à toa
+
+    var manuais = persisted.filter(function(p){ return p && p.origem==='MANUAL'; });
+    var novasPecas = novasAutomaticas.concat(manuais);
+    row.dataset.planPecas = JSON.stringify(novasPecas);
+    var novaArea = novasPecas.filter(function(p){ return !p._deleted; }).reduce(function(s,p){ return s + (parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1); }, 0);
+    if (novaArea > 0) row.dataset.planArea = String(novaArea);
+  } catch(_eOuter) {
+    // Nunca deixa um erro de resincronização de geometria quebrar a troca
+    // de material em si — o preço (orcRecalc, chamado por quem chamou
+    // esta função) já está correto de qualquer forma.
+  }
 }
 
 function orcMatChanged(idx) {
@@ -10165,6 +10295,11 @@ function orcMatChanged(idx) {
     if (mObj && mObj.esp && espEl) espEl.value = mObj.esp;
     sel.dataset.rsm2 = '';
   }
+  // RODADA 7 — resincroniza a GEOMETRIA das peças herdadas (medidas que
+  // dependem da espessura) ANTES de recalcular o preço, para que
+  // orcRecalc() já leia a área correta na mesma passada — nunca regenera
+  // a planificação do zero (ver comentário da função acima).
+  _planResincronizarPecasHerdadas(idx);
   orcRecalc();
 }
 
@@ -10615,12 +10750,17 @@ function orcRecalc() {
     if (planArea > 0) {
       var _pecasPlanRaw = [];
       try { _pecasPlanRaw = JSON.parse(row.dataset.planPecas || '[]'); } catch(_e) {}
+      // RODADA 7 — usa _planPecaEspOverride() (fonte única, ver comentário
+      // acima da função) para nunca mais tratar herança congelada como
+      // override: é isso que fazia o item ficar preso no preço/m² da
+      // espessura em que foi planificado, mesmo depois de trocar o
+      // material da linha.
       _pecasPlanRaw.forEach(function(p){
         if (p.origem !== 'AUTOMATICA') return;
-        var _espP = parseFloat((p.esp!=null && p.esp!=='') ? p.esp : p.espessuraMm) || 0;
-        if (!_espP || _espP === _itemEspMm) return; // sem override, ou já é a espessura do item — nada a corrigir
+        var _ov = _planPecaEspOverride(p);
+        if (!_ov.tem || _ov.esp === _itemEspMm) return; // sem override real, ou já é a espessura do item — nada a corrigir
         var _areaPecaM2 = ((parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1))/10000;
-        var _precoResolvido = _matResolverPrecoFamiliaEspessura(matKey, _espP);
+        var _precoResolvido = _matResolverPrecoFamiliaEspessura(matKey, _ov.esp);
         if (_precoResolvido == null) return; // sem material dessa espessura cadastrado — mantém o preço do item (fallback seguro)
         _deltaEspecificoPecas += _areaPecaM2 * (_precoResolvido - priceM2);
       });
@@ -32638,10 +32778,21 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
   return (freshPieces||[]).map(function(pc){
     var id = 'auto_' + _planPieceSlug(pc.nome);
     var prev = prevByKey[id];
+    // RODADA 7 — override real vem SEMPRE da peça FRESCA da receita
+    // (pc.esp), NUNCA de `prev`: era exatamente essa "memória" que
+    // congelava a herança da espessura do item como se fosse um override
+    // permanente (causa raiz do bug de trocar o material principal depois
+    // de já ter planificado — ver _planPecaEspOverride). Receitas
+    // built-in (ex. 'Caixa') nunca emitem esp por peça → espOverride
+    // sempre '' → a peça segue a espessura ATUAL do item automaticamente,
+    // sem nenhum delta de correção. Receita customizada/snapshot com esp
+    // própria por peça continua um override real, preservado.
+    var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
     return {
       id: id, nome: pc.nome, qty: pc.qty,
       larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
-      esp: pc.esp || defaultEspMm || '', tipo: pc.tipo||'',
+      esp: _espOverride || defaultEspMm || '', tipo: pc.tipo||'',
+      espOverride: _espOverride,
       adesivo: prev ? (prev.adesivo||'') : (pc.adesivo||''),
       // RODADA 6 — Gravação/Spray/Extra por peça (mesmo padrão do Adesivo
       // acima): preserva o valor em memória mesmo quando a receita fresca
@@ -32664,12 +32815,19 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
   return (freshPieces||[]).map(function(pc){
     var id = 'auto_' + _planPieceSlug(pc.nome);
     var saved = byId[id];
+    // RODADA 7 — mesma regra de _planReconcilePieces: override vem da
+    // peça FRESCA da receita (pc.esp), nunca do valor persistido
+    // (`saved.esp`) — sem isso, reabrir um item cuja espessura foi
+    // trocada depois de planificado ressuscitava o esp CONGELADO salvo (a
+    // Tampa continuava "4mm" pra sempre, mesmo reabrindo o modal).
+    var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
     return {
       id: id, nome: pc.nome,
       qty:  saved ? saved.qty  : pc.qty,
       larg: saved ? saved.larg : Math.round(pc.larg*100)/100,
       alt:  saved ? saved.alt  : Math.round(pc.alt*100)/100,
-      esp:  saved ? (saved.esp || defaultEspMm || '') : (pc.esp || defaultEspMm || ''),
+      esp:  _espOverride || defaultEspMm || '',
+      espOverride: _espOverride,
       tipo: pc.tipo||'',
       adesivo: saved ? (saved.adesivo||'') : (pc.adesivo||''),
       // RODADA 6 — restaura Gravação/Spray/Extra do snapshot persistido ao

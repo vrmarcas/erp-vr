@@ -61,7 +61,7 @@ function extractBetween(startMarker, endMarker) {
 }
 
 var FN_NAMES = [
-  'planGetRecipe', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planDeltaEspecificoPecas', '_planConsumiveisChip', '_planConsumiveisCelulaHtml', 'planAbrir', 'planFechar', 'planCalc',
+  'planGetRecipe', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planDeltaEspecificoPecas', '_planConsumiveisChip', '_planConsumiveisCelulaHtml', 'planAbrir', 'planFechar', 'planCalc',
   'planAplicar', 'planLimpar', '_planDeleteAuto', '_planEditField',
   '_planRecompute', 'planAddManual', 'planRemoveManual', 'planRenderManual',
   '_planCalcAndMerge',
