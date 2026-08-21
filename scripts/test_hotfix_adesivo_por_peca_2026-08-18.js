@@ -43,7 +43,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = ['cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
-  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos',
+  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos',
   '_planReconcilePieces', '_planSeedFromPersisted', '_planPieceSlug', '_planBuildAllPecas', 'osProjecaoOperacionalItem'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
@@ -197,18 +197,26 @@ var ADH = 0.0056, ADHB = 0.0011; // fallback hardcoded (sem financeiro.adesivo*P
   ];
   var freshPieces = [{ nome: 'Tampa', qty: 1, larg: 42, alt: 30, esp: '3', tipo: '' }]; // larg mudou (usuário editou)
   var reconciliado = mod._planReconcilePieces(freshPieces, 3);
-  test('E1. _planReconcilePieces preserva adesivo="branco" mesmo após editar largura', reconciliado[0].adesivo, 'branco');
+  // RODADA 8 — adesivo normal/branco viraram dois booleans independentes;
+  // a peça de entrada usa o formato LEGADO (`adesivo: 'branco'`, sem os
+  // novos campos) e a saída de _planReconcilePieces já converte para o
+  // formato novo (nunca mais emite o campo `adesivo` antigo) — ver
+  // _planPecaAdesivos(). Propriedade testada (preserva a configuração
+  // mesmo após editar largura) continua verdadeira.
+  test('E1. _planReconcilePieces preserva Adesivo Branco (legado→novo) mesmo após editar largura', { normal: reconciliado[0].adesivoNormal, branco: reconciliado[0].adesivoBranco }, { normal: false, branco: true });
 
   // E2 — _planSeedFromPersisted (reabertura real do orçamento) restaura
-  // `adesivo` a partir do JSON persistido em row.dataset.planPecas.
+  // o adesivo a partir do JSON persistido em row.dataset.planPecas —
+  // testado aqui com o formato LEGADO persistido (adesivo string), que
+  // _planSeedFromPersisted converte para os novos booleans na saída.
   var persistedJson = JSON.stringify([
     { id: 'auto_tampa', nome: 'Tampa', qty: 1, larg: 40, alt: 30, esp: '3', espessuraMm: 3, tipo: '', adesivo: 'normal', origem: 'AUTOMATICA' },
     { id: 'auto_base', nome: 'Base', qty: 1, larg: 40, alt: 30, esp: '3', espessuraMm: 3, tipo: '', adesivo: '', origem: 'AUTOMATICA' }
   ]);
   var freshPieces2 = [{ nome: 'Tampa', qty: 1, larg: 40, alt: 30, esp: '3', tipo: '' }, { nome: 'Base', qty: 1, larg: 40, alt: 30, esp: '3', tipo: '' }];
   var seeded = mod._planSeedFromPersisted(freshPieces2, persistedJson, 3);
-  test('E2. _planSeedFromPersisted restaura adesivo="normal" da Tampa ao reabrir', seeded[0].adesivo, 'normal');
-  test('E3. _planSeedFromPersisted restaura peça sem adesivo (Base) como vazia', seeded[1].adesivo, '');
+  test('E2. _planSeedFromPersisted restaura Adesivo normal (legado→novo) da Tampa ao reabrir', { normal: seeded[0].adesivoNormal, branco: seeded[0].adesivoBranco }, { normal: true, branco: false });
+  test('E3. _planSeedFromPersisted restaura peça sem adesivo (Base) como os dois false', { normal: seeded[1].adesivoNormal, branco: seeded[1].adesivoBranco }, { normal: false, branco: false });
 
   // E4 — determinismo ponta-a-ponta: rodar orcRecalc() duas vezes com o
   // MESMO planPecas restaurado (== reabrir) produz o mesmo valor de adesivo.
@@ -239,7 +247,10 @@ var ADH = 0.0056, ADHB = 0.0011; // fallback hardcoded (sem financeiro.adesivo*P
   // recipeSnapshot.pecas (fórmulas cruas da receita, sem `adesivo`).
   var kbSrc = extractFn('kbAbrirPlanificacaoItem');
   ok('F5. kbAbrirPlanificacaoItem() prioriza it.pieces sobre recipeSnapshot.pecas (mesma ordem de osItemMateriaisResumo)', /var pecas = \(it\.pieces && it\.pieces\.length\) \? it\.pieces : /.test(kbSrc));
-  ok('F6. kbAbrirPlanificacaoItem() exibe o campo adesivo na tabela de peças da OS/Kanban', /p\.adesivo/.test(kbSrc));
+  // RODADA 8 — kbAbrirPlanificacaoItem() passou a ler o adesivo via
+  // _planPecaAdesivos(p) (normal/branco independentes), não mais via
+  // comparação direta `p.adesivo===...`.
+  ok('F6. kbAbrirPlanificacaoItem() exibe o campo adesivo na tabela de peças da OS/Kanban', /_planPecaAdesivos\(p\)/.test(kbSrc));
   ok('F7. a coluna Adesivo na OS/Kanban nunca mostra preço (só rótulo textual ⬜/🩹/—)', !/adhPrecoCm2|R\$.*adesivo/i.test(kbSrc));
 }
 

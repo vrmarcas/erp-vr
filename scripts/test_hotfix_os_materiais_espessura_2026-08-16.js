@@ -45,7 +45,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['osItemMateriaisResumo', 'osProjecaoOperacionalItem', 'kbPlanificacaoGerarSVG', 'kbAbrirPlanificacaoItem'];
+var FN_NAMES = ['osItemMateriaisResumo', 'osProjecaoOperacionalItem', 'kbPlanificacaoGerarSVG', 'kbAbrirPlanificacaoItem', '_planPecaAdesivos'];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v); };
 global.KB_OS = {};

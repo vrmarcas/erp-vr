@@ -75,7 +75,7 @@ function extractVar(name) {
 }
 
 var FN_NAMES = ['cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
-  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planDeltaEspecificoPecas', 'orcGetItemExtrasTotal', 'orcRecalc',
+  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', '_planDeltaEspecificoPecas', 'orcGetItemExtrasTotal', 'orcRecalc',
   'orcColetarItensDistribuidos', '_planPieceSlug', '_planReconcilePieces', '_planSeedFromPersisted', '_planBuildAllPecas',
   'planGetRecipe', 'receitaCamposContexto', 'receitaCamposEfetivos', '_planResincronizarPecasHerdadas',
   'planEvalFormulaCtx', 'receitaFormulaAvaliar', 'receitaFormulaTokenizar', 'receitaFormulaParsear'];
@@ -316,14 +316,17 @@ function simularTrocaDeMaterialSemReabrir(_els, idx, novoEspMm) {
 {
   var pecas = planificarCaixa(4);
   var tampa = pecas.find(function(p){return p.nome==='Tampa';});
-  tampa.adesivo = 'normal'; tampa.spray = 5;
+  // RODADA 8 — Adesivo normal/branco viraram dois booleans independentes
+  // (adesivoNormal/adesivoBranco); campo `adesivo` string antigo não é
+  // mais a fonte ativa para peça já reconciliada (ver _planPecaAdesivos).
+  tampa.adesivoNormal = true; tampa.spray = 5;
   var els = montarDOM([{ idx: '1', qty: 1, matKey: matKeyPara(4), espItem: 4, pecas: pecas }]);
   simularTrocaDeMaterialSemReabrir(els, '1', 2);
   mod.orcRecalc();
   ok('D1. Adesivo continua marcado na Tampa após trocar espessura principal', parseBRL(els.ocv_adh.textContent) > 0);
   ok('D2. Spray (custo, exibido) continua R$5 na Tampa', Math.abs(parseBRL(els.ocv_spray.textContent) - 5) < 0.02);
   var tampaFinal = JSON.parse(els.oir_1.dataset.planPecas).find(function(p){return p.nome==='Tampa';});
-  test('D3. o consumível permanece atribuído à MESMA peça (id) depois da resincronização de geometria', tampaFinal.adesivo, 'normal');
+  test('D3. o consumível permanece atribuído à MESMA peça (id) depois da resincronização de geometria', tampaFinal.adesivoNormal, true);
 }
 
 // ══════════════════════════════════════════════════════════════════════

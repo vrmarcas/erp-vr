@@ -59,6 +59,7 @@ console.log('-- TESTE A: 6 automáticas → excluir 1 → adicionar manual → c
     extractFn('_planReconcilePieces'),
     extractFn('_planSeedFromPersisted'),
     extractFn('_planPieceSlug'),
+    extractFn('_planPecaAdesivos'),
     'var _planEditPieces = [];',
     'var planManualPieces = [];',
     extractFn('_planBuildAllPecas'),

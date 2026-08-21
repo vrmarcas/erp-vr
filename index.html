@@ -10161,6 +10161,23 @@ function _planPecaEspOverride(p) {
   return { tem: !!espLegado, esp: espLegado };
 }
 
+// RODADA 8 — Adesivo normal e Adesivo branco deixam de ser mutuamente
+// exclusivos: a mesma peça pode ter os dois ao mesmo tempo. Formato
+// anterior era um único campo `adesivo: ''|'normal'|'branco'` (exclusivo,
+// confirmado por investigação — nunca era array/booleano). Fonte única de
+// leitura, mesmo padrão de _planPecaEspOverride(): se os novos campos
+// booleanos (`adesivoNormal`/`adesivoBranco`) existem na peça, são a
+// fonte ATIVA; senão (peça persistida ANTES desta rodada), deriva do
+// campo antigo — nunca duas fontes concorrentes, e nunca perde o dado
+// legado. Peça nova (a partir desta rodada) nunca mais escreve o campo
+// `adesivo` antigo — ver _planConsumiveisSalvar().
+function _planPecaAdesivos(p) {
+  if (p.adesivoNormal !== undefined || p.adesivoBranco !== undefined) {
+    return { normal: !!p.adesivoNormal, branco: !!p.adesivoBranco };
+  }
+  return { normal: p.adesivo==='normal', branco: p.adesivo==='branco' };
+}
+
 // RODADA CIRÚRGICA (consistência da planificação) — mesmo delta de
 // correção por espessura que orcRecalc() já usa para o custo canônico do
 // item (ver comentário lá), reaproveitado aqui pelos PREVIEWS da
@@ -10248,15 +10265,16 @@ function _planResincronizarPecasHerdadas(idx) {
       if (_espOverride) {
         // Override real — a fórmula pode depender da espessura PRÓPRIA da
         // peça, nunca da do item; preserva geometria tal como persistida.
-        return prev || Object.assign({}, pc, { espOverride:_espOverride, esp:_espOverride, espessuraMm: parseInt(_espOverride,10)||null, origem:'AUTOMATICA', _deleted:false, adesivo:'', gravacao:0, spray:0, extra:0 });
+        return prev || Object.assign({}, pc, { espOverride:_espOverride, esp:_espOverride, espessuraMm: parseInt(_espOverride,10)||null, origem:'AUTOMATICA', _deleted:false, adesivoNormal:false, adesivoBranco:false, gravacao:0, spray:0, extra:0 });
       }
       var novaLarg = Math.round(pc.larg*100)/100, novaAlt = Math.round(pc.alt*100)/100;
       if (!prev || prev.larg!==novaLarg || prev.alt!==novaAlt) mudou = true;
+      var _adesResync = prev ? _planPecaAdesivos(prev) : { normal:false, branco:false };
       return {
         id: id, nome: pc.nome, qty: prev ? prev.qty : pc.qty,
         larg: novaLarg, alt: novaAlt,
         esp: espMm, espOverride: '', tipo: pc.tipo||'',
-        adesivo: prev ? (prev.adesivo||'') : '',
+        adesivoNormal: _adesResync.normal, adesivoBranco: _adesResync.branco,
         gravacao: prev ? (prev.gravacao||0) : 0,
         spray: prev ? (prev.spray||0) : 0,
         extra: prev ? (prev.extra||0) : 0,
@@ -10775,8 +10793,12 @@ function orcRecalc() {
       _pecasPlanRaw.forEach(function(p){
         if (!_contaItem) return;
         var _areaPecaCm2 = (parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1)*qty;
-        if (p.adesivo==='normal') adhPecasTotal += _areaPecaCm2*adhPrecoCm2;
-        else if (p.adesivo==='branco') adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2;
+        // RODADA 8 — Adesivo normal e Adesivo branco não são mais
+        // mutuamente exclusivos: os dois `if` independentes (nunca
+        // else-if) permitem que a mesma peça some as DUAS parcelas.
+        var _adesPeca = _planPecaAdesivos(p);
+        if (_adesPeca.normal) adhPecasTotal += _areaPecaCm2*adhPrecoCm2;
+        if (_adesPeca.branco) adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2;
         // RODADA 6 — valor em R$ direto (não é área), sem multiplicar por
         // qty da peça nem do item: o campo representa o custo TOTAL desta
         // ocorrência peça×consumível, não um valor por unidade (não há
@@ -13237,8 +13259,12 @@ function kbAbrirPlanificacaoItem(idx){
           // produção precisa saber O QUE fazer em cada peça (quais
           // consumíveis aplicar), nunca quanto isso custou.
           var _consLabels = [];
-          if (p.adesivo==='normal') _consLabels.push('🩹 Adesivo');
-          else if (p.adesivo==='branco') _consLabels.push('⬜ Adesivo Branco');
+          // RODADA 8 — os dois `if` independentes (nunca else-if) fazem a
+          // produção enxergar ambos quando a peça tem Adesivo normal E
+          // Adesivo branco ao mesmo tempo.
+          var _adesOS = _planPecaAdesivos(p);
+          if (_adesOS.normal) _consLabels.push('🩹 Adesivo');
+          if (_adesOS.branco) _consLabels.push('⬜ Adesivo Branco');
           if ((parseFloat(p.gravacao)||0)>0) _consLabels.push('🖨️ Gravação');
           if ((parseFloat(p.spray)||0)>0) _consLabels.push('💨 Spray');
           if ((parseFloat(p.extra)||0)>0) _consLabels.push('➕ Extra');
@@ -32788,12 +32814,14 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
     // sem nenhum delta de correção. Receita customizada/snapshot com esp
     // própria por peça continua um override real, preservado.
     var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
+    // RODADA 8 — Adesivo normal/branco independentes (ver _planPecaAdesivos).
+    var _adesPrev = prev ? _planPecaAdesivos(prev) : _planPecaAdesivos(pc);
     return {
       id: id, nome: pc.nome, qty: pc.qty,
       larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
       esp: _espOverride || defaultEspMm || '', tipo: pc.tipo||'',
       espOverride: _espOverride,
-      adesivo: prev ? (prev.adesivo||'') : (pc.adesivo||''),
+      adesivoNormal: _adesPrev.normal, adesivoBranco: _adesPrev.branco,
       // RODADA 6 — Gravação/Spray/Extra por peça (mesmo padrão do Adesivo
       // acima): preserva o valor em memória mesmo quando a receita fresca
       // não o carrega — sem isso, editar larg/alt/qty da peça (que dispara
@@ -32821,6 +32849,11 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
     // trocada depois de planificado ressuscitava o esp CONGELADO salvo (a
     // Tampa continuava "4mm" pra sempre, mesmo reabrindo o modal).
     var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
+    // RODADA 8 — Adesivo normal/branco independentes (ver _planPecaAdesivos);
+    // mesma regra de compatibilidade legada do espOverride acima: se o
+    // snapshot persistido é do formato antigo (`adesivo` string,
+    // exclusiva), _planPecaAdesivos() converte automaticamente.
+    var _adesSaved = saved ? _planPecaAdesivos(saved) : _planPecaAdesivos(pc);
     return {
       id: id, nome: pc.nome,
       qty:  saved ? saved.qty  : pc.qty,
@@ -32829,7 +32862,7 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
       esp:  _espOverride || defaultEspMm || '',
       espOverride: _espOverride,
       tipo: pc.tipo||'',
-      adesivo: saved ? (saved.adesivo||'') : (pc.adesivo||''),
+      adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
       // RODADA 6 — restaura Gravação/Spray/Extra do snapshot persistido ao
       // reabrir (mesmo padrão do Adesivo acima).
       gravacao: saved ? (saved.gravacao||0) : (pc.gravacao||0),
@@ -32879,8 +32912,11 @@ function _planConsumiveisPeca(origem, ref) {
 function _planConsumiveisChip(p) {
   p = p || {};
   var partes = [];
-  if (p.adesivo==='normal') partes.push('🩹');
-  else if (p.adesivo==='branco') partes.push('⬜');
+  // RODADA 8 — os dois `if` independentes (nunca else-if) fazem o chip
+  // mostrar "🩹 ⬜" quando a peça tem os dois adesivos ao mesmo tempo.
+  var _adesChip = _planPecaAdesivos(p);
+  if (_adesChip.normal) partes.push('🩹');
+  if (_adesChip.branco) partes.push('⬜');
   if ((parseFloat(p.gravacao)||0)>0) partes.push('🖨️');
   if ((parseFloat(p.spray)||0)>0) partes.push('💨');
   if ((parseFloat(p.extra)||0)>0) partes.push('➕');
@@ -32914,14 +32950,18 @@ function _planConsumiveisAbrir(origem, ref) {
     document.body.appendChild(ov);
   }
   var medidas = (parseFloat(p.larg)||0).toFixed(1)+'×'+(parseFloat(p.alt)||0).toFixed(1)+'cm'+(p.esp?' · '+p.esp+'mm':'');
+  // RODADA 8 — Adesivo normal e Adesivo branco deixam de ser exclusivos:
+  // dois checkboxes independentes (não mais um radio group) — "Sem" some
+  // implicitamente quando os dois estão desmarcados, sem precisar de um
+  // terceiro controle (ver _planPecaAdesivos).
+  var _adesPopover = _planPecaAdesivos(p);
   ov.innerHTML = '<div style="background:var(--surface);border-radius:12px;padding:16px 18px;width:min(340px,94vw);max-height:calc(100vh - 24px);overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
     + '<div style="font-size:13px;font-weight:800;margin-bottom:2px">🧴 Consumíveis da peça</div>'
     + '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">'+cfgEsc(p.nome||'')+' · '+medidas+'</div>'
     + '<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Adesivo</div>'
     + '<div style="display:flex;gap:10px;margin-bottom:14px;font-size:12px;flex-wrap:wrap">'
-      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value=""'+(!p.adesivo?' checked':'')+'> Sem</label>'
-      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value="normal"'+(p.adesivo==='normal'?' checked':'')+'> 🩹 Normal</label>'
-      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="radio" name="planConsAdesivo" value="branco"'+(p.adesivo==='branco'?' checked':'')+'> ⬜ Branco</label>'
+      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="planConsAdesivoNormal"'+(_adesPopover.normal?' checked':'')+'> 🩹 Normal</label>'
+      + '<label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="planConsAdesivoBranco"'+(_adesPopover.branco?' checked':'')+'> ⬜ Branco</label>'
     + '</div>'
     + _planConsCampoValorHtml('🖨️ Gravação', 'planConsGravacao', p.gravacao)
     + _planConsCampoValorHtml('💨 Spray', 'planConsSpray', p.spray)
@@ -32942,8 +32982,12 @@ function _planConsumiveisSalvar() {
   var origem = window._planConsOrigem, ref = window._planConsRef;
   var p = _planConsumiveisPeca(origem, ref);
   if (!p) { _planConsumiveisFechar(); return; }
-  var adesivoEl = document.querySelector('input[name="planConsAdesivo"]:checked');
-  p.adesivo  = adesivoEl ? adesivoEl.value : '';
+  // RODADA 8 — dois checkboxes independentes; nunca mais escreve o campo
+  // `adesivo` antigo (exclusivo) — os dois booleans são a única fonte
+  // ativa a partir daqui (ver _planPecaAdesivos).
+  p.adesivoNormal = !!(document.getElementById('planConsAdesivoNormal')||{}).checked;
+  p.adesivoBranco = !!(document.getElementById('planConsAdesivoBranco')||{}).checked;
+  delete p.adesivo;
   p.gravacao = parseFloat((document.getElementById('planConsGravacao')||{}).value)||0;
   p.spray    = parseFloat((document.getElementById('planConsSpray')||{}).value)||0;
   p.extra    = parseFloat((document.getElementById('planConsExtra')||{}).value)||0;
