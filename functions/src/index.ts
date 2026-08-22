@@ -104,3 +104,16 @@ export {
 //    2018-2026 em produção sem GOOGLE_APPLICATION_CREDENTIALS local. Ver
 //    admin_ops.ts para o racional completo. Remover após o uso desta rodada. ──
 export { adminOneTimeOps } from "./admin_ops";
+
+// ── Atendimentos (sprint 2026-08-21) — Inbox ERP × Valéria/Chatvolt.
+//    ChatVolt é só um provider substituível (ai_provider.ts/chatvolt_provider.ts);
+//    dados canônicos ficam em atendimentos/{id} + atendimentos/{id}/mensagens.
+export {
+  atdCriarConversaTeste,
+  atdSimularMensagemCliente,
+  atdEnviarMensagemHumano,
+  atdAssumirAtendimento,
+  atdDevolverParaValeria,
+  atdResolverAtendimento,
+  atdLimparConversaTeste,
+} from "./atendimentos";

@@ -487,6 +487,33 @@ service cloud.firestore {
       allow write: if false; // somente Cloud Functions
     }
 
+    // ── Atendimentos (sprint 2026-08-21) — Inbox ERP × Valéria/Chatvolt ──────
+    // Fonte da verdade do módulo. Só Master/Comercial acessam (Produção e
+    // Financeiro fora por padrão — MODULOS/PERM_DEFAULT no frontend espelha
+    // esta mesma decisão). Toda escrita passa por Cloud Function
+    // (atendimentos.ts, Admin SDK) — nunca escrita direta do client, mesma
+    // fronteira usada por vitre_orcamentos/erp_vr_compras.
+    match /atendimentos/{atendimentoId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions (atendimentos.ts)
+
+      match /mensagens/{mensagemId} {
+        allow read:  if isComercial();
+        allow write: if false; // somente Cloud Functions (atendimentos.ts)
+      }
+    }
+
+    // ── atendimentos_idem: chaves de idempotência — uso interno exclusivo ────
+    match /atendimentos_idem/{key} {
+      allow read, write: if false;
+    }
+
+    // ── atendimentos_audit_log: auditoria — leitura só Master ────────────────
+    match /atendimentos_audit_log/{entryId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+
     // ── Nega por padrão qualquer coleção não listada explicitamente acima ────
     // ACHADO CRÍTICO desta rodada (autodescoberto e autocorrigido): a versão
     // anterior deste catch-all fazia `allow read,write: if isAuthenticated()
