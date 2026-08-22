@@ -143,7 +143,10 @@ console.log('\n=== Rodada cirúrgica 2026-08-16 — checklist/Pronta/lock/pagame
   // Execução real: KB_OS em memória com locks travados em true, kbSaveKbos()
   // não pode deixar nenhum dos dois vazar para o payload salvo.
   var finFieldsSrc = html.slice(html.indexOf('var _KB_OS_FIN_FIELDS'), html.indexOf(';', html.indexOf('var _KB_OS_FIN_FIELDS')) + 1);
-  var runner = new Function('_cloudSave', 'KB_OS', finFieldsSrc + '\n' + saveSrc + '\nreturn kbSaveKbos;');
+  // RODADA 9, Bloco A — kbSaveKbos() agora também lê _cloudLastPayload (para
+  // o diff de merge/conflito por OS); não é exercitado por este teste
+  // específico (fakeCloudSave sempre sucede), mas precisa existir no escopo.
+  var runner = new Function('_cloudSave', 'KB_OS', 'var _cloudLastPayload = {};\n' + finFieldsSrc + '\n' + saveSrc + '\nreturn kbSaveKbos;');
   var capturedPayload = null;
   var fakeCloudSave = function (key, data) { capturedPayload = data; return Promise.resolve({ ok: true }); };
   var KB_OS = { os1: { id: 'os1', status: 'pronta', checks: ['Corte'], _ck: [true], _marcandoPronto: true, _liberando: true } };

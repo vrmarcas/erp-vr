@@ -57,7 +57,7 @@ function rodarCenario(prazoISO, agoraReal) {
   global._kbOsId = 'os1';
   global.KB_OS = { os1: {} };
   global.kbRender = function () {};
-  global.kbSaveKbos = function () {};
+  global.kbSaveKbos = function () { return Promise.resolve({ ok: true }); }; // RODADA 9, Bloco A — kbSalvarPrazo() agora aguarda esta Promise
   global.showToast = function () {};
 
   var RealDate = Date;

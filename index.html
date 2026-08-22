@@ -1558,7 +1558,17 @@ var _cloudSaveQueue = {};
 // rejeita — para que chamadores que precisem reagir a falha possam aguardar
 // sem precisar de try/catch, mas chamadores existentes que ignoram o retorno
 // continuam funcionando exatamente como antes.
-function _cloudSave(key, data) {
+// RODADA 9 (2026-08-22, Bloco A) — opts.silencioso: quando o chamador
+// sabe fazer merge automático em caso de conflito (ex.: kbSaveKbos(),
+// _orcamentosSalvarComMergeContinuar()), o toast genérico de conflito
+// abaixo dispararia mesmo quando o "conflito" é benigno e será resolvido
+// por retry silencioso — mostrando por um instante "não foi salva" para
+// uma mudança que, na verdade, ACABA sendo salva. opts.silencioso=true
+// suprime esse toast intermediário; o chamador é responsável por avisar o
+// usuário no desfecho final (sucesso, conflito real, ou tentativas
+// esgotadas). Default false — preserva 100% do comportamento para todo
+// chamador existente que não passa opts.
+function _cloudSave(key, data, opts) {
   if(!_db) return Promise.resolve({ok:false, reason:'sem-conexao'});
   _homologGuardOrThrow();
   var payload;
@@ -1567,12 +1577,12 @@ function _cloudSave(key, data) {
   if(_cloudLastPayload[key] === payload) return Promise.resolve({ok:true, unchanged:true}); // dado idêntico — nada a gravar
 
   var fila = (_cloudSaveQueue[key] || Promise.resolve()).catch(function(){});
-  var atual = fila.then(function(){ return _cloudSaveExec(key, payload); });
+  var atual = fila.then(function(){ return _cloudSaveExec(key, payload, opts); });
   _cloudSaveQueue[key] = atual;
   return atual;
 }
 
-function _cloudSaveExec(key, payload) {
+function _cloudSaveExec(key, payload, opts) {
   var ref = _db.collection(_COL).doc(key);
   // Lido só agora (depois de aguardar a fila desta chave) — reflete
   // qualquer gravação anterior desta aba que já tenha confirmado, nunca um
@@ -1602,7 +1612,7 @@ function _cloudSaveExec(key, payload) {
         _cloudLastPayload[key] = e.serverPayload;
         var dadoServidor = null;
         try { dadoServidor = JSON.parse(e.serverPayload); } catch(err) {}
-        if (typeof showToast === 'function') showToast('⚠️ "'+key+'" foi alterado por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.', 'warn');
+        if (!(opts && opts.silencioso) && typeof showToast === 'function') showToast('⚠️ "'+key+'" foi alterado por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.', 'warn');
         return {ok:false, reason:'conflito', serverData: dadoServidor};
       }
       var ehErroDeAuth = e && (e.code === 'permission-denied' || e.code === 'unauthenticated' || (e.message||'').indexOf('PERMISSION_DENIED')>=0);
@@ -13803,14 +13813,28 @@ function kbMostrarSugestao(os) {
 }
 
 function kbAceitarSugestaoBtn(btn) {
+  var os = KB_OS[_kbOsId]; if(!os) return;
+  var _osIdSnap = _kbOsId;
+  var _antesEntrega=os.entrega, _antesPrazo=os.prazo, _antesTempo=os.tempoProd;
   var horas   = parseFloat(btn.dataset.h)||0;
   var dateVal = btn.dataset.d||'';
+  var tempoStr = horas % 1 === 0 ? String(horas) : horas.toFixed(1);
   var tempEl  = document.getElementById('kbTempoProd');
   var prazoEl = document.getElementById('kbPrazoEntrega');
-  if(tempEl)  tempEl.value  = horas % 1 === 0 ? String(horas) : horas.toFixed(1);
+  if(tempEl)  tempEl.value  = tempoStr;
   if(prazoEl) prazoEl.value = dateVal;
-  kbSalvarTempo();
-  kbSalvarPrazo();
+  // RODADA 9, Bloco A — achado real: chamar kbSalvarTempo()+kbSalvarPrazo()
+  // (cada uma gravando "kb_os" de forma independente) podia fazer uma
+  // suceder e a outra reportar conflito para a MESMA ação do usuário —
+  // mesmo depois de resolvida a corrida entre chamadas da MESMA chave
+  // (fila em _cloudSaveQueue), as duas ainda eram DUAS gravações
+  // logicamente distintas da MESMA OS, cada uma podendo colidir de forma
+  // diferente com uma mudança concorrente real vinda de outra sessão.
+  // Corrigido: os dois campos são aplicados aqui e persistidos em UMA
+  // única gravação — nunca duas gravações competindo pela mesma OS.
+  os.tempoProd = tempoStr;
+  if(dateVal){ os.entrega = dateVal; os.prazo = dateVal; }
+  if(typeof kbRender==='function') kbRender();
   // Re-aplicar filtro de visão para mover card para coluna correta
   if(typeof _kbView !== 'undefined') {
     if(_kbView === 'week' && typeof kbApplyViewFilter === 'function') kbApplyViewFilter();
@@ -13818,7 +13842,24 @@ function kbAceitarSugestaoBtn(btn) {
   }
   var box = document.getElementById('kbPrazoSugBox');
   if(box) box.style.display='none';
-  showToast('Prazo e tempo estimado definidos! ✅','ok');
+  if(typeof kbSaveKbos!=='function') return;
+  // Sucesso só é reportado depois da confirmação real — nunca
+  // otimisticamente (mesmo achado original: toast aparecia antes da
+  // gravação confirmar). Em falha sem reconciliação automática, desfaz a
+  // mudança otimista local para nunca divergir do que foi persistido.
+  return kbSaveKbos().then(function(res){
+    if(res && res.ok){
+      showToast('Prazo e tempo estimado definidos! ✅','ok');
+      return res;
+    }
+    if(!res || (res.reason!=='conflito_os' && res.reason!=='conflito-persistente')){
+      var osAtual=KB_OS[_osIdSnap];
+      if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; osAtual.tempoProd=_antesTempo; }
+    }
+    if(typeof kbRender==='function') kbRender();
+    if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
+    return res;
+  });
 }
 
 function kbClose() { document.getElementById('kbOsOverlay').classList.remove('open'); _kbOsId = null; }
@@ -13911,14 +13952,30 @@ function kbSaveLink() {
 function kbSalvarTempo() {
   if(!_kbOsId) return;
   var os=KB_OS[_kbOsId]; if(!os) return;
+  var _osIdSnap=_kbOsId, _antes=os.tempoProd;
   os.tempoProd=(document.getElementById('kbTempoProd')||{}).value||'';
-  if(typeof kbSaveKbos==='function') kbSaveKbos(); // Rodada 2.1 — nunca gravar KB_OS bruto em kb_os (vazaria financeiro, ver kbDrop)
+  if(typeof kbSaveKbos!=='function') return;
+  // RODADA 9, Bloco A — nunca gravar KB_OS bruto em kb_os (vazaria
+  // financeiro, ver kbDrop); e nunca deixar o valor otimista em memória se
+  // a gravação de fato falhar (kbSaveKbos() já reconcilia/avisa sozinho em
+  // caso de conflito real — aqui só desfazemos quando NÃO houve
+  // reconciliação automática, para nunca divergir do que foi persistido).
+  return kbSaveKbos().then(function(res){
+    if(res && res.ok) return res;
+    if(!res || (res.reason!=='conflito_os' && res.reason!=='conflito-persistente')){
+      var osAtual=KB_OS[_osIdSnap]; if(osAtual) osAtual.tempoProd=_antes;
+    }
+    if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
+    return res;
+  });
 }
 function kbSalvarPrazo() {
   if(!_kbOsId) return;
   var os=KB_OS[_kbOsId]; if(!os) return;
   var v=(document.getElementById('kbPrazoEntrega')||{}).value||'';
+  var _pSalvar = null;
   if(v){
+    var _osIdSnap=_kbOsId, _antesEntrega=os.entrega, _antesPrazo=os.prazo;
     // Corrigido 2026-08-07 (Rodada Mestre, seção 21) — bug real
     // reproduzido: salvar um novo prazo só repintava o badge do card no
     // lugar ("mantém card na coluna atual, sem mover", comentário
@@ -13931,12 +13988,30 @@ function kbSalvarPrazo() {
     // chegar, apenas confirma o mesmo estado.
     os.entrega=v; os.prazo=v;
     if(typeof kbRender==='function') kbRender();
-    // Persistir no Firebase — via kbSaveKbos() (split kb_os/kb_os_fin),
-    // nunca gravando KB_OS bruto no documento operacional (Rodada 2.1,
-    // mesmo achado de kbDrop()).
-    if(typeof kbSaveKbos==='function') kbSaveKbos();
-    var dataBR2=v.split('-')[2]+'/'+v.split('-')[1]+'/'+v.split('-')[0];
-    showToast('Prazo salvo: '+dataBR2,'ok');
+    // RODADA 9, Bloco A — achado real: o toast "Prazo salvo" aparecia
+    // aqui, ANTES da gravação no Firestore confirmar — quando a gravação
+    // falhava logo em seguida (conflito), a UI mostrava "salvo" e "não
+    // salvo" para a mesma ação. Persistir via kbSaveKbos() (split
+    // kb_os/kb_os_fin, Rodada 2.1, mesmo achado de kbDrop()) e só mostrar
+    // sucesso depois da confirmação real; em falha sem reconciliação
+    // automática (kbSaveKbos() já reconcilia/avisa sozinho em conflito
+    // real), desfaz a mudança otimista para nunca divergir do persistido.
+    if(typeof kbSaveKbos==='function'){
+      _pSalvar = kbSaveKbos().then(function(res){
+        if(res && res.ok){
+          var dataBR2=v.split('-')[2]+'/'+v.split('-')[1]+'/'+v.split('-')[0];
+          showToast('Prazo salvo: '+dataBR2,'ok');
+          return res;
+        }
+        if(!res || (res.reason!=='conflito_os' && res.reason!=='conflito-persistente')){
+          var osAtual=KB_OS[_osIdSnap];
+          if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; }
+        }
+        if(typeof kbRender==='function') kbRender();
+        if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
+        return res;
+      });
+    }
     // Atualizar countdown no modal sem fechar
     var cd=document.getElementById('kbPrazoCd');
     if(cd){
@@ -13956,6 +14031,7 @@ function kbSalvarPrazo() {
       cd.textContent=diff2<0?('⚠️ Atrasado '+Math.abs(diff2)+' dias'):(diff2===0?'🔴 Entrega hoje!':(diff2===1?'⏰ Entrega amanhã':('⏳ '+diff2+' dia(s) restante(s)')));
     }
   }
+  return _pSalvar;
 }
 function kbOpenLink() {
   var url = (document.getElementById('kbFileLinkInput')||{}).value || '';
@@ -14105,7 +14181,33 @@ function kbExcluirSelecionados() {
 // reescritos no documento financeiro. kb_os_fin só é gravado pela rotina
 // canônica de recebimento (finRegistrarRecebimento) e por orcEnvGerarOS,
 // sempre dentro de uma transação que relê o servidor primeiro.
-function kbSaveKbos() {
+// RODADA 9 (2026-08-22, Bloco A) — achado real reproduzido: editar
+// prazo/tempo estimado no Kanban mostrava "Prazo salvo" e, logo em
+// seguida, "kb_os foi alterado por outra sessão — esta mudança não foi
+// salva", mesmo sem nenhuma outra sessão real editando a mesma OS. Causa
+// raiz: kb_os é um ÚNICO documento agregado (todas as OS's do board); o
+// controle de concorrência antigo comparava o payload SERIALIZADO INTEIRO
+// contra o baseline — qualquer gravação concorrente em QUALQUER outra OS
+// (inclusive de rotinas desta MESMA aba que já eram corretas, como
+// kbReceberSaldo/finRegistrarRecebimento/orcEnvGerarOS, que reescrevem
+// kb_os inteiro dentro de suas próprias transações multi-documento) fazia
+// o próximo kbSaveKbos() enxergar o servidor "diferente do baseline" e
+// reportar conflito — mesmo que a OS que o usuário estava editando não
+// tivesse sido tocada por ninguém.
+//
+// Corrigido reaproveitando o MESMO padrão já usado por
+// _orcamentosSalvarComMergeContinuar() (linha ~25746) para o documento
+// agregado "orcamentos": diff por id contra o baseline para descobrir
+// quais OS's EU mudei; em caso de conflito, só é conflito REAL se uma das
+// OS's que eu mudei também mudou no servidor desde a última leitura desta
+// aba — nesse caso reconcilia SÓ aquela OS com a verdade do servidor e
+// avisa claramente; caso contrário (outra OS mudou, não a minha), faz
+// merge automático (servidor fresco + minhas OS's por cima) e tenta de
+// novo, até 5 tentativas. Nunca perde dado silenciosamente, nunca reporta
+// sucesso antes da confirmação real — quem chama (kbSalvarPrazo etc.)
+// agora aguarda esta Promise antes de mostrar qualquer toast de sucesso.
+function kbSaveKbos(tentativas) {
+  tentativas = tentativas || 0;
   if(typeof _cloudSave!=='function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
   var kbCopy={};
   Object.keys(KB_OS).forEach(function(k){
@@ -14128,8 +14230,56 @@ function kbSaveKbos() {
     }
     kbCopy[k]=o;
   });
-  return _cloudSave('kb_os', kbCopy).then(function(res){
-    return {ok: !!(res&&res.ok), kbOk: !!(res&&res.ok), finOk: true};
+
+  var baselineStr = _cloudLastPayload['kb_os'];
+  var baselineById = {};
+  if(baselineStr){ try{ Object.assign(baselineById, JSON.parse(baselineStr)); }catch(e){} }
+  var meusIds = Object.keys(kbCopy).filter(function(id){
+    var antes = baselineById[id];
+    return !antes || JSON.stringify(antes) !== JSON.stringify(kbCopy[id]);
+  });
+
+  return _cloudSave('kb_os', kbCopy, {silencioso:true}).then(function(res){
+    if(res && (res.ok || res.unchanged)) return {ok:true, kbOk:true, finOk:true};
+    if(!res || res.reason!=='conflito' || !res.serverData){
+      return {ok:false, kbOk:false, finOk:true, reason: res && res.reason};
+    }
+    var freshData = res.serverData;
+    // Conflito real: alguma das OS's que EU mudei também mudou no servidor
+    // desde a última vez que esta aba a leu (mesmo critério de
+    // _orcamentosSalvarComMergeContinuar).
+    var idConflito = null;
+    for(var i=0;i<meusIds.length;i++){
+      var id = meusIds[i];
+      var antes = baselineById[id];
+      if(!antes) continue; // era nova para mim — não posso conflitar com o que eu não conhecia
+      var fresca = freshData[id];
+      if(fresca && JSON.stringify(fresca) !== JSON.stringify(antes)) { idConflito = id; break; }
+    }
+    if(idConflito){
+      // Reconcilia com a verdade do servidor — só as OS's que eu não
+      // tinha mudado são sobrescritas; a OS em conflito também é
+      // sobrescrita (a minha mudança local NÃO foi salva).
+      Object.keys(freshData).forEach(function(id){ KB_OS[id] = freshData[id]; });
+      Object.keys(KB_OS).forEach(function(id){ if(!freshData.hasOwnProperty(id) && meusIds.indexOf(id)<0) delete KB_OS[id]; });
+      try{ if(typeof kbRender==='function') kbRender(); }catch(e){}
+      try{ if(typeof renderOsTable==='function') renderOsTable(); }catch(e){}
+      if(typeof showToast==='function') showToast('⚠️ A OS #'+((freshData[idConflito]&&freshData[idConflito].num)||'?')+' foi alterada por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.','warn');
+      return {ok:false, kbOk:false, finOk:true, reason:'conflito_os', osId:idConflito};
+    }
+    if(tentativas >= 5){
+      Object.keys(freshData).forEach(function(id){ if(meusIds.indexOf(id)<0) KB_OS[id] = freshData[id]; });
+      try{ if(typeof kbRender==='function') kbRender(); }catch(e){}
+      if(typeof showToast==='function') showToast('⚠️ Não foi possível salvar o Kanban após múltiplas tentativas — tente novamente.','warn');
+      return {ok:false, kbOk:false, finOk:true, reason:'conflito-persistente'};
+    }
+    // Nenhum conflito real — outra sessão (ou outra rotina desta mesma
+    // aba, ex.: recebimento de saldo) só mexeu em OS's que eu não estava
+    // editando. Reaplica minhas mudanças por cima do estado fresco do
+    // servidor e tenta de novo — nunca perde a mudança do usuário nem a
+    // de quem gravou antes.
+    Object.keys(freshData).forEach(function(id){ if(meusIds.indexOf(id)<0) KB_OS[id] = freshData[id]; });
+    return kbSaveKbos(tentativas+1);
   });
 }
 // ── Kanban full re-render from KB_OS ─────────────────────────────────────────

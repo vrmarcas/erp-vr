@@ -42,7 +42,7 @@ console.log('── Guarda: nenhum caller grava KB_OS bruto em kb_os (P0.6) ─�
   // a partir do fluxo do Kanban (fora das transações atômicas de
   // orcEnvGerarOS()/kbReceberSaldo(), que gravam os dois documentos
   // dentro da mesma transação por outro caminho).
-  var temKbSaveKbos = /function kbSaveKbos\(\)/.test(html);
+  var temKbSaveKbos = /function kbSaveKbos\(/.test(html);
   test('2. kbSaveKbos() ainda existe como funil central', temKbSaveKbos, true);
 
   // As 6 funções afetadas agora chamam kbSaveKbos() (não _cloudSave direto).
