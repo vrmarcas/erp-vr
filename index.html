@@ -34333,9 +34333,40 @@ var _planProdCampos = []; // RODADA 6, seção 1 — campos de entrada além de 
 // inclusive arquivos com extensão .svg mas conteúdo diferente.
 function svgSanitizar(svgText) {
   if(!svgText || typeof svgText!=='string') return null;
-  var texto = svgText.trim();
+  // RODADA 9 (2026-08-22, Bloco F) — achado real: SVG legítimo (ex.:
+  // exportado por CorelDRAW/Illustrator no Windows) era rejeitado como
+  // "não é um SVG válido/seguro". Duas causas concretas na checagem de
+  // prefixo abaixo, ambas sem risco de segurança ao corrigir:
+  // 1) BOM (U+FEFF) no início do arquivo — comum em exports Windows/UTF-8
+  //    com BOM — não é removido por String.trim() (BOM é categoria Unicode
+  //    "Cf", não espaço em branco), então o texto "começava" com um
+  //    caractere invisível antes de "<?xml"/"<svg", falhando o regex.
+  // 2) Comentário do gerador ANTES de <svg> — ex.:
+  //    "<!-- Generator: Adobe Illustrator 24.0.0, SVG Export Plug-In ...  -->"
+  //    — padrão extremamente comum em exports de software vetorial,
+  //    nunca era tolerado pelo regex (só aceitava <?xml?> e <!DOCTYPE>
+  //    opcionais antes de <svg>, nunca comentários).
+  // Corrigido: remove BOM explicitamente e tolera comentários XML
+  // intercalados com <?xml?>/<!DOCTYPE> em QUALQUER ordem (softwares
+  // diferentes exportam em ordens diferentes — ex.: Illustrator coloca o
+  // comentário do gerador ENTRE o <?xml?> e o <!DOCTYPE> — nunca confiar
+  // numa ordem fixa). A validação REAL de segurança continua inteira
+  // abaixo (DOMParser + remoção de tags/atributos perigosos), sempre
+  // sobre o texto completo original — isto só afeta o RECONHECIMENTO de
+  // um SVG bem-formado, nunca afrouxa o que é bloqueado.
+  var texto = svgText.replace(/^\uFEFF/, '').trim();
   if(texto.length > 2000000) return null; // 2MB — evita abuso de payload gigante
-  if(!/^(<\?xml[^>]*>\s*)?(<!DOCTYPE[^>]*(\[[\s\S]*?\])?\s*>\s*)?<svg[\s>]/i.test(texto)) return null;
+  var _cabecalho = texto;
+  for (var _voltas=0; _voltas<10; _voltas++) {
+    var _antesDaVolta = _cabecalho;
+    _cabecalho = _cabecalho
+      .replace(/^\s+/, '')
+      .replace(/^<!--[\s\S]*?-->/, '')
+      .replace(/^<\?xml[^>]*\?>/i, '')
+      .replace(/^<!DOCTYPE[^>[]*(\[[\s\S]*?\])?\s*>/i, '');
+    if (_cabecalho === _antesDaVolta) break; // nada mais a remover
+  }
+  if(!/^<svg[\s>]/i.test(_cabecalho)) return null;
   if(/<!ENTITY/i.test(texto)) return null; // bloqueia XXE/entity expansion por via das dúvidas
   try {
     var doc = new DOMParser().parseFromString(texto, 'image/svg+xml');
