@@ -11506,6 +11506,9 @@ function orcItemExtras(ri) {
   window._extrasSnapshot = JSON.parse(JSON.stringify(ex));
   window._ajusteSnapshot = JSON.parse(JSON.stringify(aj));
   window._extrasSalvo = false;
+  // RODADA 9 (2026-08-22, Bloco E) — mesmo snapshot para om_laser (Step 3,
+  // global) — ver achado logo abaixo, próximo a orcExtrasAutoLaser().
+  window._omLaserSnapshot = (document.getElementById('om_laser')||{}).value;
   var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
   // Pré-calcular contornos a partir das peças planificadas (para pré-popular m_contornos)
@@ -11699,6 +11702,25 @@ function orcItemExtras(ri) {
   // sem precisar clicar em nenhum botão (respeita o ajuste manual, se
   // estiver ativo).
   if(!window._orcLaserAjusteManual && typeof orcExtrasAutoLaser==='function') orcExtrasAutoLaser();
+  // RODADA 9, Bloco E — achado real (perda de R$0,10 no total do
+  // orçamento): orcExtrasAutoLaser() só atualizava o campo LOCAL do modal
+  // (m_laser); o total ao vivo (orcItemExtraPreview → orcRecalc) continua
+  // lendo o om_laser GLOBAL do Step 3, que só era sincronizado com
+  // m_laser no "✅ Salvar" do modal (orcItemExtrasSalvar) — se o
+  // recálculo automático do laser produzisse um valor diferente do
+  // om_laser atual, o total mudava ao salvar o modal mesmo que o
+  // vendedor só tivesse mexido no ajuste comercial, nunca em máquinas.
+  // Sincroniza aqui, na abertura (mesmo valor que "Salvar" aplicaria de
+  // qualquer forma), para que o total ao vivo sempre reflita o que será
+  // persistido — nunca uma surpresa entre "enquanto edito" e "depois de
+  // salvar". Cancelar (orcItemExtrasFechar) reverte via _omLaserSnapshot,
+  // exatamente como já faz para extras/ajuste comercial.
+  var _laserElAuto = document.getElementById('m_laser');
+  var _omLaserElAuto = document.getElementById('om_laser');
+  if(_laserElAuto && _omLaserElAuto && _omLaserElAuto.value !== _laserElAuto.value){
+    _omLaserElAuto.value = _laserElAuto.value;
+    if(typeof orcRecalc==='function') orcRecalc();
+  }
 }
 
 // Helpers do modal de custos
@@ -11853,9 +11875,18 @@ function orcItemExtrasFechar() {
     // Bloco D — mesmo descarte para o ajuste comercial do item.
     if(window._ajusteSnapshot!=null && (window._ajusteSnapshot.operacao||window._ajusteSnapshot.valor)) ORC_ITEM_AJUSTES[window._extrasSnapshotRi] = window._ajusteSnapshot;
     else delete ORC_ITEM_AJUSTES[window._extrasSnapshotRi];
+    // RODADA 9, Bloco E — mesmo descarte para om_laser (Step 3, global):
+    // a sincronização automática feita na abertura do modal (ver
+    // orcItemExtras) também precisa ser desfeita ao cancelar, senão
+    // cancelar mudaria o total do orçamento sem o vendedor ter salvo nada.
+    if(window._omLaserSnapshot!=null){
+      var _omLaserElFechar = document.getElementById('om_laser');
+      if(_omLaserElFechar) _omLaserElFechar.value = window._omLaserSnapshot;
+    }
     if(typeof orcRecalc==='function') orcRecalc();
   }
   window._extrasSnapshotRi = null;
+  window._omLaserSnapshot = null;
 }
 function orcItemExtraPreview(ri){
   var row  = document.getElementById('oir_'+ri);
