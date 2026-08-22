@@ -25,7 +25,14 @@ import axios from "axios";
 import { AIProvider, AIProviderContext, AIProviderResult } from "./ai_provider";
 
 export const VALERIA_AGENT_ID = "cmmmkciwb02j8lcxudbnwv31y";
-const CHATVOLT_QUERY_TIMEOUT_MS = 25_000;
+// Medido em produção no hotfix 2026-08-22 (logs reais de atdSimularMensagemCliente):
+// Agent Query sozinho (sem nenhuma Tool nossa lenta — só 1 chamada de 3.9s a
+// valeriaGetContexto no meio) levou 27.9s e 31.7s em duas mensagens
+// consecutivas da MESMA conversa, crescendo com o tamanho do histórico.
+// 25s cortava essas chamadas antes da resposta chegar (ok:false,
+// CHATVOLT_TIMEOUT, mensagem do cliente sem resposta). 50s dá margem real
+// sobre o pior caso observado.
+const CHATVOLT_QUERY_TIMEOUT_MS = 50_000;
 
 export class ChatVoltProvider implements AIProvider {
   readonly nome = "chatvolt";
@@ -44,8 +51,21 @@ export class ChatVoltProvider implements AIProvider {
       return { ok: false, erro: "TEXTO_VAZIO" };
     }
 
+    // A variável de prompt {conversation-id} do Chatvolt só é substituída em
+    // canais nativos (Web Widget/WhatsApp do próprio Chatvolt) — chamadas
+    // diretas a POST /agents/{id}/query (backend-to-backend, como este
+    // provider faz) NÃO a substituem, ficando literal "{conversation-id}"
+    // em toda chamada de Tool (bug real encontrado e confirmado em produção
+    // no hotfix 2026-08-22: todas as conversas vazavam contexto entre si
+    // porque liam/gravavam no MESMO documento Firestore com essa chave
+    // literal). Por isso injetamos o atendimentoId real como um marcador de
+    // protocolo no início da query — o prompt instrui a Valéria a extrair
+    // esse ID e usá-lo em todo parâmetro conversationId de Tool que chamar
+    // nesta conversa, nunca mostrando o marcador ao cliente.
+    const query = `[ID_ATENDIMENTO: ${ctx.atendimentoId}]\n${ctx.texto}`;
+
     const body: Record<string, unknown> = {
-      query: ctx.texto,
+      query,
       streaming: false,
     };
     if (ctx.providerConversationId) body.conversationId = ctx.providerConversationId;

@@ -106,7 +106,9 @@ export const atdCriarConversaTeste = functions.https.onCall(async (data, context
 
 // ── 2. Simular mensagem do cliente (Master only, dispara a Valéria) ────────
 export const atdSimularMensagemCliente = functions
-  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 60 })
+  // timeoutSeconds acima do CHATVOLT_QUERY_TIMEOUT_MS (50s, ver
+  // chatvolt_provider.ts) + folga para leitura/escrita Firestore.
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 90 })
   .https.onCall(async (data, context) => {
     const caller = await getCallerVerificado(context);
     requireRole(caller, [], "simular mensagem de cliente em Atendimentos");
@@ -187,6 +189,111 @@ export const atdSimularMensagemCliente = functions
       atendimentoId,
       providerMessageId: result.providerMessageId || null,
       idempotencyKey: `${requestId}:resposta`,
+      actorType: "valeria",
+      actorId: null,
+      actorName: "Valéria",
+      text: result.resposta,
+      attachments: [],
+      deliveryStatus: "sent",
+      provider: "chatvolt",
+      createdAt: nowResp,
+    });
+    await snap.ref.set(
+      {
+        providerConversationId: result.providerConversationId || atd.providerConversationId || null,
+        ultimaMensagem: result.resposta,
+        ultimaInteracaoEm: nowResp,
+        updatedAt: nowResp,
+      },
+      { merge: true }
+    );
+
+    return { ok: true, jaProcessado: false, resposta: result.resposta };
+  });
+
+// ── 2b. Retentar mensagem que falhou (retry seguro — seção 5 do hotfix
+//    2026-08-22). NUNCA cria outra mensagem de cliente: reaproveita o
+//    texto da mensagem original a partir do messageId da falha, e
+//    reprocessa somente a chamada ao provider. ─────────────────────────────
+export const atdRetentarMensagem = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 90 })
+  .https.onCall(async (data, context) => {
+    const caller = await getCallerVerificado(context);
+    requireRole(caller, [], "retentar mensagem em Atendimentos");
+
+    const atendimentoId = String(data?.atendimentoId || "").trim();
+    const failedMessageId = String(data?.messageId || "").trim();
+    const requestId = String(data?.requestId || "").trim();
+    if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+    if (!failedMessageId) throw new functions.https.HttpsError("invalid-argument", "messageId obrigatório.");
+    if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+
+    const snap = await carregarAtendimento(atendimentoId);
+    const atd = snap.data()!;
+    if (!atd.isTeste) {
+      throw new functions.https.HttpsError("failed-precondition", "Retentar mensagem só é permitido em conversas de teste.");
+    }
+
+    const acquired = await acquireIdem("atendimentos_idem", `atd_retry:${atendimentoId}:${requestId}`);
+    if (!acquired) return { ok: true, jaProcessado: true };
+
+    const falhaRef = snap.ref.collection(SUB_MSG).doc(failedMessageId);
+    const falhaSnap = await falhaRef.get();
+    if (!falhaSnap.exists) throw new functions.https.HttpsError("not-found", "Mensagem de falha não encontrada.");
+    const falha = falhaSnap.data()!;
+    if (falha.deliveryStatus !== "failed") {
+      throw new functions.https.HttpsError("failed-precondition", "Esta mensagem já não está mais em estado de falha.");
+    }
+
+    const idemBase = String(falha.idempotencyKey || "").replace(/:falha$/, "");
+    const clienteMsgSnap = await snap.ref
+      .collection(SUB_MSG)
+      .where("idempotencyKey", "==", idemBase)
+      .where("actorType", "==", "customer")
+      .limit(1)
+      .get();
+    if (clienteMsgSnap.empty) {
+      throw new functions.https.HttpsError("not-found", "Mensagem original do cliente não encontrada para retry.");
+    }
+    const texto = String(clienteMsgSnap.docs[0].data().text || "");
+
+    const result = await provider.sendMessage({
+      atendimentoId,
+      providerConversationId: atd.providerConversationId || null,
+      texto,
+      contato: { nome: atd.nome },
+    });
+
+    await falhaRef.set({ deliveryStatus: "retried" }, { merge: true });
+
+    if (!result.ok) {
+      const failRef = snap.ref.collection(SUB_MSG).doc();
+      await failRef.set({
+        id: failRef.id,
+        atendimentoId,
+        providerMessageId: null,
+        idempotencyKey: `${idemBase}:falha:${requestId}`,
+        actorType: "system",
+        actorId: null,
+        actorName: "Sistema",
+        text: "Não foi possível obter resposta da Valéria. Tente novamente.",
+        attachments: [],
+        deliveryStatus: "failed",
+        provider: "chatvolt",
+        createdAt: Date.now(),
+        metadata: { erro: result.erro || "ERRO_DESCONHECIDO" },
+      });
+      await writeAudit("atendimentos_audit_log", "retry_falhou", caller.uid, caller.role, { atendimentoId, erro: result.erro });
+      return { ok: false, erro: result.erro || "ERRO_DESCONHECIDO" };
+    }
+
+    const respRef = snap.ref.collection(SUB_MSG).doc();
+    const nowResp = Date.now();
+    await respRef.set({
+      id: respRef.id,
+      atendimentoId,
+      providerMessageId: result.providerMessageId || null,
+      idempotencyKey: `${idemBase}:resposta:${requestId}`,
       actorType: "valeria",
       actorId: null,
       actorName: "Valéria",

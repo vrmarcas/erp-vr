@@ -115,6 +115,7 @@ export { adminOneTimeOps } from "./admin_ops";
 export {
   atdCriarConversaTeste,
   atdSimularMensagemCliente,
+  atdRetentarMensagem,
   atdEnviarMensagemHumano,
   atdAssumirAtendimento,
   atdDevolverParaValeria,

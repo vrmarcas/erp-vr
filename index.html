@@ -31777,12 +31777,32 @@ function atdRenderMsgs(lista){
   wrap.innerHTML = lista.map(function(m){
     var cls = 'atd-msg-'+(m.actorType||'system');
     var falhou = m.deliveryStatus==='failed';
+    var retryBtn = falhou ? '<button type="button" class="atd-retry-btn" onclick="atdRetentar(\''+cfgEsc(m.id)+'\', this)">🔄 Tentar novamente</button>' : '';
     return '<div class="atd-msg '+cls+(falhou?' atd-msg-failed':'')+'">'
       + cfgEsc(m.text||'')
       + '<div class="atd-msg-meta">'+cfgEsc(m.actorName||'')+' · '+atdFmtHora(m.createdAt)+'</div>'
+      + retryBtn
       + '</div>';
   }).join('');
   wrap.scrollTop = wrap.scrollHeight;
+}
+
+function atdRetentar(messageId, btnEl){
+  if(!ATD_SELECTED_ID || (btnEl && btnEl.disabled)) return;
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = 'Tentando…'; }
+  var requestId = atdGerarRequestId();
+  firebase.functions().httpsCallable('atdRetentarMensagem')({ atendimentoId: ATD_SELECTED_ID, messageId: messageId, requestId: requestId })
+    .then(function(res){
+      if(res.data && res.data.ok===false){
+        showToast('Ainda não foi possível obter resposta da Valéria. Tente novamente.','err');
+      }
+    })
+    .catch(function(e){
+      showToast('Erro ao retentar: '+atdErroAmigavel(e),'err');
+    })
+    .finally(function(){
+      if(btnEl){ btnEl.disabled = false; btnEl.textContent = '🔄 Tentar novamente'; }
+    });
 }
 
 function atdComposerKeydown(e){
