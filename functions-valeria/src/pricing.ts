@@ -41,9 +41,16 @@ function getMaterialPriceM2(matKey: string, mats: ErpConfig["materiais"]): numbe
     const idx = parseInt(matKey.replace("cfg_", ""), 10);
     const m   = mats[idx];
     if (!m) return null;
+    // rsm2 (R$/m²) já vem pré-calculado no cadastro do material — fonte
+    // preferencial. Fallback: custo total da chapa / área (campo real do
+    // Firestore é `custo`, não `preco` — `preco` nunca existiu nos dados
+    // reais, motor sempre caía em NEEDS_INFORMATION antes desta correção).
+    if (typeof m.rsm2 === "number" && m.rsm2 > 0) return m.rsm2;
     const area = ((m.comp ?? 0) * (m.larg ?? 0)) / 10000; // cm² → m²
     if (area <= 0) return null;
-    return (m.preco ?? 0) / area;
+    const custo = typeof m.custo === "number" ? m.custo : 0;
+    if (custo <= 0) return null;
+    return custo / area;
   }
   return null; // matKey desconhecido → validação humana
 }

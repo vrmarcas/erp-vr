@@ -197,7 +197,10 @@ export interface ErpConfig {
 export interface MaterialConfig {
   comp?: number;
   larg?: number;
-  preco?: number;
+  /** Custo total da chapa (não o preço/m² — usar rsm2 quando disponível, ou custo/área). */
+  custo?: number;
+  /** Preço por m² já calculado (R$/m²) — fonte preferencial quando presente. */
+  rsm2?: number;
   nome?: string;
   [key: string]: unknown;
 }
