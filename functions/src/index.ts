@@ -88,9 +88,13 @@ export {
   valeriaConsultarOS,
 } from "./valeria";
 
-// ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06) — PREPARAÇÃO
-//    apenas: nenhum destes endpoints foi configurado no Chatvolt ou
-//    conectado a um agente real nesta rodada. Ver relatório final. ──────
+// ── Valéria × Catálogo Vitre (Fase G, Parte C, 2026-08-06; conectadas ao
+//    agente Valéria como HTTP Tools em 2026-08-21/22, sprint Atendimentos).
+//    Auth via erp_vr/valeria_config.secret (Firestore) — checkAuth() em
+//    valeria.ts. Redeployadas em 2026-08-22 sem binding de Secret Manager
+//    (uma revisão órfã anterior estava presa em VALERIA_BEARER_SECRET@2,
+//    quebrada quando esse secret foi rotacionado por incidente de
+//    exposição — ver commit da rotação). ──────
 export {
   valeriaVitreBuscarCatalogo,
   valeriaVitreConsultarProduto,
