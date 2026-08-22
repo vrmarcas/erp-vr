@@ -583,6 +583,72 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .gen-submit:hover{background:var(--brand)}
 
 /* =========================================================
+   ATENDIMENTOS — Inbox Valéria/Chatvolt (sprint 2026-08-21)
+   3 colunas: lista | thread | painel comercial. Reaproveita
+   tokens/classes existentes (--brand-mid, .kb-filter-bar, .badge,
+   .gen-overlay/.gen-modal, .sb-avatar) — nenhum design system novo.
+   ========================================================= */
+.atd-wrap{display:grid;grid-template-columns:300px 1fr 300px;gap:0;height:calc(100vh - 130px);min-height:480px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.atd-col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.atd-col-list{border-right:1px solid var(--border);background:var(--bg)}
+.atd-col-thread{background:var(--surface)}
+.atd-col-painel{border-left:1px solid var(--border);background:var(--bg);overflow-y:auto;padding:14px}
+.atd-list-hdr{padding:14px 14px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.atd-list-scroll{flex:1;overflow-y:auto;padding:0 8px 8px}
+.atd-card{display:flex;gap:9px;padding:10px;border-radius:10px;cursor:pointer;margin-bottom:4px;border:1px solid transparent;position:relative}
+.atd-card:hover{background:var(--surface)}
+.atd-card.on{background:var(--surface);border-color:var(--brand-mid)}
+.atd-card-av{width:36px;height:36px;border-radius:50%;background:var(--brand-mid);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0}
+.atd-card-body{flex:1;min-width:0}
+.atd-card-top{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+.atd-card-nome{font-size:12.5px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.atd-card-hora{font-size:9.5px;color:var(--muted);flex-shrink:0}
+.atd-card-prev{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.atd-card-tags{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.atd-unread{position:absolute;top:10px;right:10px;background:var(--danger);color:#fff;font-size:9px;font-weight:800;border-radius:20px;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.atd-thread-hdr{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.atd-thread-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.atd-msg{max-width:72%;padding:9px 12px;border-radius:12px;font-size:12.5px;line-height:1.5}
+.atd-msg-customer{align-self:flex-start;background:var(--bg);color:var(--text);border-bottom-left-radius:3px}
+.atd-msg-valeria{align-self:flex-end;background:var(--brand-light);color:var(--brand-text);border-bottom-right-radius:3px}
+.atd-msg-human{align-self:flex-end;background:var(--brand-mid);color:#fff;border-bottom-right-radius:3px}
+.atd-msg-system{align-self:center;background:transparent;color:var(--muted);font-size:10.5px;font-style:italic;max-width:100%;text-align:center}
+.atd-msg-failed{border:1px dashed var(--danger);color:var(--danger)}
+.atd-msg-meta{font-size:9px;opacity:.7;margin-top:3px}
+.atd-composer{border-top:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;align-items:flex-end}
+.atd-composer textarea{flex:1;resize:none;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12.5px;font-family:inherit;max-height:100px;min-height:38px}
+.atd-composer textarea:focus{outline:none;border-color:var(--brand-mid)}
+.atd-composer button{background:var(--brand-mid);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:12px;cursor:pointer;flex-shrink:0}
+.atd-composer button:disabled{opacity:.5;cursor:not-allowed}
+.atd-badge-modo{font-size:9.5px;font-weight:800;padding:3px 8px;border-radius:20px}
+.atd-badge-valeria{background:#EDE9FE;color:#5B21B6}
+.atd-badge-humano{background:#DBEAFE;color:#1E40AF}
+.atd-badge-aguardando{background:#FEF3C7;color:#92400E}
+.atd-teste-banner{background:#FEF3C7;color:#92400E;font-size:10.5px;font-weight:800;text-align:center;padding:5px;letter-spacing:.3px}
+.atd-painel-sec{margin-bottom:16px}
+.atd-painel-sec h4{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 8px}
+.atd-painel-row{font-size:12px;color:var(--text);margin-bottom:5px;display:flex;justify-content:space-between;gap:8px}
+.atd-painel-row span:first-child{color:var(--muted)}
+.atd-painel-actions{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.atd-painel-actions button{padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:11px;font-weight:700;cursor:pointer;color:var(--text);text-align:left}
+.atd-painel-actions button:hover{border-color:var(--brand-mid);color:var(--brand-mid)}
+.atd-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12.5px;text-align:center;padding:20px}
+@media (max-width:1024px){
+  .atd-wrap{grid-template-columns:260px 1fr;height:calc(100vh - 110px)}
+  .atd-col-painel{position:fixed;inset:0;left:auto;width:320px;max-width:88vw;z-index:400;display:none;box-shadow:-8px 0 24px rgba(0,0,0,.15)}
+  .atd-col-painel.open{display:flex;flex-direction:column}
+}
+@media (max-width:768px){
+  .atd-wrap{grid-template-columns:1fr;height:calc(100vh - 150px);border-radius:0;border-left:none;border-right:none}
+  .atd-col-list{display:flex}
+  .atd-col-thread{display:none}
+  .atd-wrap.atd-mob-thread .atd-col-list{display:none}
+  .atd-wrap.atd-mob-thread .atd-col-thread{display:flex}
+  .atd-mob-back{display:inline-flex !important}
+}
+.atd-mob-back{display:none;background:none;border:none;font-size:16px;cursor:pointer;color:var(--brand-mid);padding:2px 6px}
+
+/* =========================================================
    BUSCA GLOBAL ⌘K
    ========================================================= */
 .search-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:800;align-items:flex-start;justify-content:center;padding-top:80px}
@@ -2179,6 +2245,7 @@ function _authFirebaseError(code){
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
       <!-- Inteligência Comercial removida a pedido -->
       <div class="sb-item" onclick="nav('crm',this)"><span class="ico">🤝</span> CRM <span class="sb-badge" style="background:var(--vr-light);color:var(--vr-text)">IA</span></div>
+      <div class="sb-item" onclick="nav('atendimentos',this)"><span class="ico">💬</span> Atendimentos <span class="sb-badge red" id="sbBadgeAtend" style="display:none"></span></div>
       <div class="sb-item" onclick="nav('tarefas',this)"><span class="ico">📅</span> Tarefas <span class="sb-badge red" id="sbBadgeTarefas" style="display:none">0</span></div>
       <div class="sb-item" onclick="nav('clientes',this)"><span class="ico">👥</span> Clientes</div>
     </div>
@@ -4665,6 +4732,93 @@ function _authFirebaseError(code){
             <button onclick="crmBasePushKanban()" style="background:#0891B2;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer" title="Adicionar ao pipeline de vendas">📌 → Kanban</button>
           </div>
           <div id="crmBaseIAOutput" style="display:none;background:var(--bg2);border-radius:10px;padding:12px;font-size:12px;line-height:1.7;color:var(--text)"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════
+         PG-ATENDIMENTOS — Inbox Valéria/Chatvolt (sprint 2026-08-21)
+         ERP → Atendimentos → backend VR → provider Chatvolt → Valéria →
+         Tools → ERP/CRM → resposta → Atendimentos. Provider substituível
+         (ver functions/src/ai_provider.ts).
+         ════════════════════════════════════════════════════ -->
+    <div id="pg-atendimentos" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+        <div style="font-size:20px;font-weight:900;color:var(--text)">💬 Atendimentos</div>
+        <button id="atdBtnNovoTeste" onclick="atdAbrirModalNovoTeste()" style="display:none;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:800;cursor:pointer">+ Nova conversa de teste</button>
+      </div>
+
+      <div class="atd-wrap" id="atdWrap">
+        <!-- Coluna 1: lista -->
+        <div class="atd-col atd-col-list">
+          <div class="atd-list-hdr">
+            <input class="kb-search" id="atdSearch" placeholder="🔍 Buscar atendimento..." oninput="atdRenderLista()" style="width:100%">
+          </div>
+          <div class="kb-filter-bar" id="atdFiltros" style="padding:0 12px 8px">
+            <button class="kb-fb on" data-f="todos" onclick="atdFiltro('todos',this)">Todos</button>
+            <button class="kb-fb" data-f="valeria" onclick="atdFiltro('valeria',this)">🤖 Valéria</button>
+            <button class="kb-fb" data-f="aguardando_humano" onclick="atdFiltro('aguardando_humano',this)">⏳ Aguardando</button>
+            <button class="kb-fb" data-f="humano" onclick="atdFiltro('humano',this)">👤 Humano</button>
+            <button class="kb-fb" data-f="nao_lidos" onclick="atdFiltro('nao_lidos',this)">🔵 Não lidos</button>
+            <button class="kb-fb" data-f="resolvidos" onclick="atdFiltro('resolvidos',this)">✓ Resolvidos</button>
+          </div>
+          <div class="atd-list-scroll" id="atdListaBody"><div class="atd-empty">Carregando…</div></div>
+        </div>
+
+        <!-- Coluna 2: thread -->
+        <div class="atd-col atd-col-thread" id="atdColThread">
+          <div class="atd-empty" id="atdThreadEmpty">Selecione um atendimento para ver a conversa.</div>
+          <div id="atdThreadActive" style="display:none;flex-direction:column;height:100%">
+            <div class="atd-thread-hdr">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                <button class="atd-mob-back" onclick="atdMobileVoltar()">←</button>
+                <div style="min-width:0">
+                  <div id="atdThreadNome" style="font-size:13px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+                  <div id="atdThreadSub" style="font-size:10.5px;color:var(--muted)"></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                <span id="atdThreadModoBadge"></span>
+                <button id="atdBtnAssumir" onclick="atdAssumir()" style="display:none;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">👤 Assumir</button>
+                <button id="atdBtnDevolver" onclick="atdDevolver()" style="display:none;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">↩ Devolver p/ Valéria</button>
+                <button id="atdBtnResolver" onclick="atdResolver()" style="display:none;border:1px solid var(--ok);color:var(--ok);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">✓ Resolver</button>
+                <button id="atdBtnPainel" onclick="atdTogglePainelMobile()" style="border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">ℹ️</button>
+                <button id="atdBtnLimparTeste" onclick="atdLimparTeste()" style="display:none;border:1px solid var(--danger);color:var(--danger);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">🗑️ Limpar teste</button>
+              </div>
+            </div>
+            <div id="atdTesteBanner" style="display:none" class="atd-teste-banner">🧪 CONVERSA DE HOMOLOGAÇÃO — não é um cliente real</div>
+            <div class="atd-thread-msgs" id="atdThreadMsgs"></div>
+            <div class="atd-composer" id="atdComposer">
+              <textarea id="atdComposerInput" rows="1" placeholder="Simular mensagem do cliente…" onkeydown="atdComposerKeydown(event)"></textarea>
+              <button id="atdBtnEnviar" onclick="atdEnviar()">Enviar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Coluna 3: painel comercial -->
+        <div class="atd-col atd-col-painel" id="atdColPainel">
+          <div class="atd-empty">Selecione um atendimento.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Nova conversa de teste (Master only) -->
+    <div class="gen-overlay" id="atdNovoTesteOverlay">
+      <div class="gen-modal">
+        <div class="gen-modal-hdr">
+          <strong>🧪 Nova conversa de homologação</strong>
+          <button class="gen-close" onclick="atdFecharModalNovoTeste()">✕</button>
+        </div>
+        <div class="gen-modal-body">
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.5">
+            Cria uma conversa de teste que passa pelo fluxo REAL (ERP → backend → Chatvolt → Valéria → Tools → ERP).
+            Não é uma resposta simulada. Marcada como <strong>isTeste</strong> — não entra em métricas comerciais.
+          </div>
+          <div class="fg">
+            <label>Nome do cliente simulado</label>
+            <input type="text" id="atdNovoTesteNome" placeholder="Ex.: Cliente Teste" value="Cliente Teste">
+          </div>
+          <button class="gen-submit" onclick="atdCriarConversaTesteSubmit()">Criar conversa de teste</button>
         </div>
       </div>
     </div>
@@ -8427,8 +8581,8 @@ document.addEventListener('DOMContentLoaded', function(){ setTimeout(sbRestoreSt
 // como as outras duas listas já faziam.
 var PERFIL_HARD_DENY = {
   comercial:{'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'estoque':1},
-  producao: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1},
-  financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1}
+  producao: {'dashboard':1,'financeiro':1,'relatorios':1,'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'orcamento':1,'orcamentos-enviados':1,'crm':1,'clientes':1,'inteligencia':1,'comercial':1,'atendimentos':1},
+  financeiro:{'config':1,'config-orc':1,'config-plan':1,'config-usr':1,'seguranca':1,'atendimentos':1}
 };
 
 function nav(page, el) {
@@ -8449,7 +8603,7 @@ function nav(page, el) {
   // então só Master alcançava a página pela sidebar, e raramente saía dela
   // sem recarregar). Agora que Produção/Financeiro navegam para Compras
   // rotineiramente, o conteúdo ficava vazando por baixo de outras páginas.
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','vitre-catalogo','comercial','inteligencia','crm','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','vitre-catalogo','comercial','inteligencia','crm','atendimentos','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -8473,6 +8627,7 @@ function nav(page, el) {
     comercial: 'Dashboard Comercial',
     inteligencia: '🧠 Inteligência Comercial',
     crm: 'CRM',
+    atendimentos: '💬 Atendimentos',
     tarefas: '📅 Tarefas & Follow-ups',
     clientes: 'Clientes', estoque: 'Estoque',
     financeiro: 'Dashboard Financeiro',
@@ -8516,6 +8671,7 @@ function nav(page, el) {
   if (page === 'seguranca')  { setTimeout(function(){ secRenderAudit(); }, 0); }
   if (page === 'fornecedores') { setTimeout(function(){ try{ fornSeedDemo(); }catch(e){ console.error('fornSeedDemo falhou:', e); } try{ fornRender(); }catch(e){ console.error('fornRender falhou:', e); } }, 0); }
   if (page === 'crm')        { setTimeout(function(){ if(typeof crmSetBrand==='function') crmSetBrand(crmActiveBrand||'pipeline'); if(typeof crmChecarAlertas==='function') crmChecarAlertas(); if(typeof crmRenderOrcPend==='function') crmRenderOrcPend(); }, 100); }
+  if (page === 'atendimentos') { setTimeout(function(){ if(typeof atdInit==='function') atdInit(); }, 0); }
   if (page === 'tarefas')    { setTimeout(function(){ if(typeof tarefasRender==='function') tarefasRender(); }, 80); }
   if (page === 'marketing')  { setTimeout(function(){ if(typeof mktInit==='function') mktInit(); }, 80); }
   // Log sensitive navigation
@@ -28920,6 +29076,7 @@ var MODULOS = [
   { id:'orcamento',    nome:'Orçamentos' },
   { id:'vitre-catalogo', nome:'Catálogo Vitre' },
   { id:'crm',          nome:'CRM' },
+  { id:'atendimentos', nome:'Atendimentos' },
   { id:'clientes',     nome:'Clientes' },
   { id:'estoque',      nome:'Estoque' },
   { id:'financeiro',   nome:'Financeiro' },
@@ -28930,7 +29087,7 @@ var MODULOS = [
 
 var PERM_DEFAULT = {};
 MODULOS.forEach(function(m){
-  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','vitre-catalogo','crm','clientes','fornecedores'].includes(m.id), producao: ['kanban','os-list','estoque','compras','vitre-catalogo'].includes(m.id), financeiro: ['dashboard','financeiro','os-list','compras'].includes(m.id) };
+  PERM_DEFAULT[m.id] = { master:true, comercial: ['kanban','os-list','orcamento','vitre-catalogo','crm','clientes','fornecedores','atendimentos'].includes(m.id), producao: ['kanban','os-list','estoque','compras','vitre-catalogo'].includes(m.id), financeiro: ['dashboard','financeiro','os-list','compras'].includes(m.id) };
 });
 // Achado real desta rodada: 'compras' nunca esteve em MODULOS — PERM_DEFAULT
 // nunca tinha uma entrada para o módulo, então getPermForMod() (secApplyPerms)
@@ -31109,6 +31266,15 @@ function authLogout(){
   if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
   if(typeof COMPRAS_V2_CACHE!=='undefined') COMPRAS_V2_CACHE=[];
   if(typeof COMPRAS_V2_FINCP_CACHE!=='undefined') COMPRAS_V2_FINCP_CACHE=[];
+  // Mesmo achado da Rodada E.1 (troca de conta na mesma aba não recarrega a
+  // página) aplicado ao Atendimentos: sem isso, dados/seleção da conta
+  // anterior (inclusive de uma conversa já apagada) continuavam visíveis no
+  // painel até a próxima seleção — um perfil sem permissão que loga na
+  // mesma aba não deve herdar nada da sessão anterior.
+  if(typeof ATD_UNSUB!=='undefined' && ATD_UNSUB){ try{ATD_UNSUB();}catch(e){} ATD_UNSUB=null; }
+  if(typeof ATD_MSG_UNSUB!=='undefined' && ATD_MSG_UNSUB){ try{ATD_MSG_UNSUB();}catch(e){} ATD_MSG_UNSUB=null; }
+  if(typeof ATD_CACHE!=='undefined') ATD_CACHE=[];
+  if(typeof ATD_SELECTED_ID!=='undefined') ATD_SELECTED_ID=null;
   // Encerrar sessão Firebase Auth (FASE 5) — só depois que o delete acima
   // (se houver) terminar, nunca em paralelo com ele.
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
@@ -31433,6 +31599,326 @@ function secLimparAudit(){
   secAuditLog('audit_clear','Histórico de auditoria limpo');
   secRenderAudit();
   showToast('Histórico de auditoria limpo','info');
+}
+
+// ══════════════════════════════════════
+// ATENDIMENTOS — Inbox Valéria/Chatvolt (sprint 2026-08-21)
+// ERP → Atendimentos → backend VR (Cloud Functions atd*) → provider
+// Chatvolt (server-side) → agente Valéria → Tools → ERP/CRM → resposta →
+// Atendimentos. Fonte da verdade: coleções Firestore atendimentos +
+// atendimentos/{id}/mensagens — nunca o Chatvolt. Todas as escritas passam
+// por Cloud Function (nunca write direto do client — Rules já fail-closed).
+// ══════════════════════════════════════
+var ATD_CACHE = [];
+var ATD_UNSUB = null;
+var ATD_MSG_UNSUB = null;
+var ATD_SELECTED_ID = null;
+var ATD_FILTRO = 'todos';
+var ATD_SENDING = false;
+var ATD_BUSY = false;
+
+function atdSouMaster(){ return typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master'; }
+
+function atdInit(){
+  var btnNovo = document.getElementById('atdBtnNovoTeste');
+  if(btnNovo) btnNovo.style.display = atdSouMaster() ? '' : 'none';
+  atdListenerInit();
+}
+
+function atdListenerInit(){
+  if(ATD_UNSUB || typeof _db==='undefined' || !_db) return;
+  ATD_UNSUB = _db.collection('atendimentos').orderBy('updatedAt','desc').limit(200).onSnapshot(function(snap){
+    ATD_CACHE = snap.docs.map(function(d){ return d.data(); });
+    atdRenderLista();
+    atdSyncBadge();
+    if(ATD_SELECTED_ID){
+      var atual = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
+      if(atual){ atdRenderThreadHeader(atual); atdRenderPainel(atual); } else { atdFecharThread(); }
+    }
+  }, function(e){ console.error('[Atendimentos] listener falhou:', e); });
+}
+
+function atdSyncBadge(){
+  var el = document.getElementById('sbBadgeAtend'); if(!el) return;
+  var n = ATD_CACHE.filter(function(a){ return a.status==='aguardando_humano'; }).length;
+  if(n>0){ el.textContent=n; el.style.display=''; } else { el.style.display='none'; }
+}
+
+function atdIniciais(nome){
+  var n = (nome||'?').trim();
+  return n ? n[0].toUpperCase() : '?';
+}
+
+function atdFmtHora(ts){
+  if(!ts) return '';
+  var d = new Date(ts);
+  var hoje = new Date();
+  var mesmoDia = d.toDateString()===hoje.toDateString();
+  if(mesmoDia) return d.toTimeString().slice(0,5);
+  return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+}
+
+function atdModoLabel(atd){
+  if(atd.status==='resolvido') return {cls:'bok', txt:'✓ Resolvido'};
+  if(atd.modoAtendimento==='humano') return {cls:'atd-badge-humano', txt:'👤 '+(atd.responsavelNome||'Humano')};
+  if(atd.status==='aguardando_humano') return {cls:'atd-badge-aguardando', txt:'⏳ Aguardando humano'};
+  return {cls:'atd-badge-valeria', txt:'🤖 Valéria'};
+}
+
+function atdFiltro(key, el){
+  ATD_FILTRO = key;
+  document.querySelectorAll('#atdFiltros .kb-fb').forEach(function(b){ b.classList.remove('on'); });
+  if(el) el.classList.add('on');
+  atdRenderLista();
+}
+
+function atdRenderLista(){
+  var wrap = document.getElementById('atdListaBody'); if(!wrap) return;
+  var q = (document.getElementById('atdSearch')||{}).value || '';
+  q = q.toLowerCase().trim();
+  var lista = ATD_CACHE.filter(function(a){
+    if(ATD_FILTRO==='valeria' && !(a.modoAtendimento==='valeria' && a.status!=='resolvido')) return false;
+    if(ATD_FILTRO==='aguardando_humano' && a.status!=='aguardando_humano') return false;
+    if(ATD_FILTRO==='humano' && a.modoAtendimento!=='humano') return false;
+    if(ATD_FILTRO==='nao_lidos' && !(a.naoLidas>0)) return false;
+    if(ATD_FILTRO==='resolvidos' && a.status!=='resolvido') return false;
+    if(q){
+      var alvo = ((a.nome||'')+' '+(a.empresa||'')+' '+(a.ultimaMensagem||'')).toLowerCase();
+      if(alvo.indexOf(q)<0) return false;
+    }
+    return true;
+  });
+  if(!lista.length){ wrap.innerHTML = '<div class="atd-empty">Nenhum atendimento encontrado.</div>'; return; }
+  wrap.innerHTML = lista.map(function(a){
+    var modo = atdModoLabel(a);
+    var testeTag = a.isTeste ? '<span class="badge" style="background:#FEF3C7;color:#92400E">🧪 teste</span>' : '';
+    return '<div class="atd-card'+(a.id===ATD_SELECTED_ID?' on':'')+'" onclick="atdSelecionar(\''+a.id+'\')">'
+      + '<div class="atd-card-av">'+atdIniciais(a.nome)+'</div>'
+      + '<div class="atd-card-body">'
+      + '<div class="atd-card-top"><span class="atd-card-nome">'+cfgEsc(a.nome||'Sem nome')+'</span><span class="atd-card-hora">'+atdFmtHora(a.ultimaInteracaoEm)+'</span></div>'
+      + '<div class="atd-card-prev">'+cfgEsc(a.ultimaMensagem||'Sem mensagens ainda')+'</div>'
+      + '<div class="atd-card-tags"><span class="badge '+modo.cls+'">'+modo.txt+'</span>'+testeTag+'</div>'
+      + '</div>'
+      + (a.naoLidas>0 ? '<span class="atd-unread">'+a.naoLidas+'</span>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function atdSelecionar(id){
+  ATD_SELECTED_ID = id;
+  atdRenderLista();
+  var atd = ATD_CACHE.find(function(a){ return a.id===id; });
+  if(!atd) return;
+  document.getElementById('atdThreadEmpty').style.display = 'none';
+  document.getElementById('atdThreadActive').style.display = 'flex';
+  var wrap = document.getElementById('atdWrap'); if(wrap) wrap.classList.add('atd-mob-thread');
+  atdRenderThreadHeader(atd);
+  atdRenderPainel(atd);
+  atdMsgListenerInit(id);
+}
+
+function atdMobileVoltar(){
+  var wrap = document.getElementById('atdWrap'); if(wrap) wrap.classList.remove('atd-mob-thread');
+}
+
+function atdFecharThread(){
+  ATD_SELECTED_ID = null;
+  if(ATD_MSG_UNSUB){ ATD_MSG_UNSUB(); ATD_MSG_UNSUB=null; }
+  document.getElementById('atdThreadEmpty').style.display = '';
+  document.getElementById('atdThreadActive').style.display = 'none';
+}
+
+function atdRenderThreadHeader(atd){
+  document.getElementById('atdThreadNome').textContent = atd.nome || 'Sem nome';
+  var origemLbl = atd.channel==='erp_web' ? 'Web (ERP)' : atd.channel;
+  document.getElementById('atdThreadSub').textContent = origemLbl + (atd.telefoneE164 ? ' · '+atd.telefoneE164 : '');
+  var modo = atdModoLabel(atd);
+  document.getElementById('atdThreadModoBadge').innerHTML = '<span class="badge '+modo.cls+'">'+modo.txt+'</span>';
+  document.getElementById('atdTesteBanner').style.display = atd.isTeste ? '' : 'none';
+
+  var podeAgir = atdSouMaster() || (typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='comercial');
+  var resolvido = atd.status==='resolvido';
+  document.getElementById('atdBtnAssumir').style.display = (podeAgir && atd.modoAtendimento!=='humano' && !resolvido) ? '' : 'none';
+  document.getElementById('atdBtnDevolver').style.display = (podeAgir && atd.modoAtendimento==='humano' && !resolvido) ? '' : 'none';
+  document.getElementById('atdBtnResolver').style.display = (podeAgir && !resolvido) ? '' : 'none';
+  document.getElementById('atdBtnLimparTeste').style.display = (atdSouMaster() && atd.isTeste) ? '' : 'none';
+
+  var composer = document.getElementById('atdComposer');
+  var input = document.getElementById('atdComposerInput');
+  if(resolvido){
+    composer.style.display='none';
+  } else {
+    composer.style.display='flex';
+    if(atd.modoAtendimento==='humano'){
+      input.placeholder = 'Responder como '+((typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.user)||'atendente')+'…';
+      input.disabled = !podeAgir;
+    } else if(atd.isTeste && atdSouMaster()){
+      input.placeholder = 'Simular mensagem do cliente…';
+      input.disabled = false;
+    } else {
+      input.placeholder = 'Aguardando mensagem do cliente (canal ainda não conectado)…';
+      input.disabled = true;
+    }
+  }
+}
+
+function atdMsgListenerInit(atendimentoId){
+  if(ATD_MSG_UNSUB){ ATD_MSG_UNSUB(); ATD_MSG_UNSUB=null; }
+  if(typeof _db==='undefined' || !_db) return;
+  ATD_MSG_UNSUB = _db.collection('atendimentos').doc(atendimentoId).collection('mensagens').orderBy('createdAt','asc').onSnapshot(function(snap){
+    var lista = snap.docs.map(function(d){ return d.data(); });
+    atdRenderMsgs(lista);
+  }, function(e){ console.error('[Atendimentos] thread listener falhou:', e); });
+}
+
+function atdRenderMsgs(lista){
+  var wrap = document.getElementById('atdThreadMsgs'); if(!wrap) return;
+  if(!lista.length){ wrap.innerHTML = '<div class="atd-empty">Nenhuma mensagem ainda.</div>'; return; }
+  wrap.innerHTML = lista.map(function(m){
+    var cls = 'atd-msg-'+(m.actorType||'system');
+    var falhou = m.deliveryStatus==='failed';
+    return '<div class="atd-msg '+cls+(falhou?' atd-msg-failed':'')+'">'
+      + cfgEsc(m.text||'')
+      + '<div class="atd-msg-meta">'+cfgEsc(m.actorName||'')+' · '+atdFmtHora(m.createdAt)+'</div>'
+      + '</div>';
+  }).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function atdComposerKeydown(e){
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); atdEnviar(); }
+}
+
+function atdGerarRequestId(){
+  return 'atd_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
+}
+
+function atdEnviar(){
+  if(ATD_SENDING || !ATD_SELECTED_ID) return;
+  var input = document.getElementById('atdComposerInput');
+  var texto = (input.value||'').trim();
+  if(!texto) return;
+  var atd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
+  if(!atd) return;
+
+  var btn = document.getElementById('atdBtnEnviar');
+  ATD_SENDING = true; if(btn) btn.disabled = true; input.disabled = true;
+  var requestId = atdGerarRequestId();
+  var fnName = atd.modoAtendimento==='humano' ? 'atdEnviarMensagemHumano' : 'atdSimularMensagemCliente';
+
+  firebase.functions().httpsCallable(fnName)({ atendimentoId: ATD_SELECTED_ID, texto: texto, requestId: requestId })
+    .then(function(res){
+      input.value = '';
+      if(res.data && res.data.ok===false){
+        showToast('Não foi possível obter resposta da Valéria. Tente novamente.','err');
+      }
+    })
+    .catch(function(e){
+      showToast('Erro ao enviar: '+atdErroAmigavel(e),'err');
+    })
+    .finally(function(){
+      ATD_SENDING = false; if(btn) btn.disabled = false;
+      var atualAtd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
+      input.disabled = !!(atualAtd && atualAtd.status==='resolvido');
+      input.focus();
+    });
+}
+
+function atdErroAmigavel(e){
+  var msg = (e && e.message) || '';
+  if(msg.indexOf('CHATVOLT_API_KEY_NAO_CONFIGURADA')>=0) return 'Integração com a Valéria ainda não configurada (CHATVOLT_API_KEY pendente).';
+  if(msg.indexOf('CHATVOLT_TIMEOUT')>=0 || msg.indexOf('CHATVOLT_INDISPONIVEL')>=0) return 'A Valéria demorou para responder — tente novamente.';
+  if(msg) return msg;
+  return 'erro desconhecido';
+}
+
+function atdAssumir(){
+  if(!ATD_SELECTED_ID || ATD_BUSY) return; ATD_BUSY = true;
+  firebase.functions().httpsCallable('atdAssumirAtendimento')({ atendimentoId: ATD_SELECTED_ID })
+    .then(function(){ showToast('Você assumiu o atendimento.','ok'); })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
+}
+
+function atdDevolver(){
+  if(!ATD_SELECTED_ID || ATD_BUSY) return; ATD_BUSY = true;
+  firebase.functions().httpsCallable('atdDevolverParaValeria')({ atendimentoId: ATD_SELECTED_ID })
+    .then(function(){ showToast('Atendimento devolvido para a Valéria.','ok'); })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
+}
+
+function atdResolver(){
+  if(!ATD_SELECTED_ID || ATD_BUSY) return;
+  if(!_e2eDlgConfirm('Marcar este atendimento como resolvido?')) return;
+  ATD_BUSY = true;
+  firebase.functions().httpsCallable('atdResolverAtendimento')({ atendimentoId: ATD_SELECTED_ID })
+    .then(function(){ showToast('Atendimento resolvido.','ok'); })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
+}
+
+function atdLimparTeste(){
+  if(!ATD_SELECTED_ID || ATD_BUSY) return;
+  if(!_e2eDlgConfirm('Apagar esta conversa de teste e todas as mensagens? Não pode ser desfeito.')) return;
+  ATD_BUSY = true;
+  firebase.functions().httpsCallable('atdLimparConversaTeste')({ atendimentoId: ATD_SELECTED_ID })
+    .then(function(){ showToast('Conversa de teste removida.','ok'); atdFecharThread(); })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
+}
+
+function atdTogglePainelMobile(){
+  var el = document.getElementById('atdColPainel'); if(el) el.classList.toggle('open');
+}
+
+function atdRenderPainel(atd){
+  var wrap = document.getElementById('atdColPainel'); if(!wrap) return;
+  var classifLabel = {catalogo:'Catálogo', recompra:'Recompra', projeto_sob_medida:'Projeto sob medida', nao_classificado:'Não classificado'}[atd.classificacao] || 'Não classificado';
+  var marcaLabel = {vitre:'Vitre', vr:'VR', misto:'Misto', indefinido:'Indefinido'}[atd.marca] || 'Indefinido';
+  var html = '';
+  html += '<div class="atd-painel-sec"><h4>Contato</h4>';
+  html += '<div class="atd-painel-row"><span>Nome</span><span>'+cfgEsc(atd.nome||'—')+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Telefone</span><span>'+cfgEsc(atd.telefoneE164||'—')+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Empresa</span><span>'+cfgEsc(atd.empresa||'—')+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Responsável</span><span>'+cfgEsc(atd.responsavelNome||'Valéria')+'</span></div>';
+  html += '</div>';
+  html += '<div class="atd-painel-sec"><h4>Classificação</h4>';
+  html += '<div class="atd-painel-row"><span>Demanda</span><span>'+classifLabel+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Marca</span><span>'+marcaLabel+'</span></div>';
+  html += '</div>';
+  if(atd.resumo){
+    html += '<div class="atd-painel-sec"><h4>Necessidade</h4><div style="font-size:12px;color:var(--text);line-height:1.5">'+cfgEsc(atd.resumo)+'</div></div>';
+  }
+  html += '<div class="atd-painel-sec"><h4>CRM</h4>';
+  html += '<div class="atd-painel-row"><span>Lead/Oportunidade</span><span>'+(atd.leadId?'vinculado':'—')+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Cliente</span><span>'+(atd.clienteId?'vinculado':'não cadastrado')+'</span></div>';
+  html += '<div class="atd-painel-row"><span>Orçamento</span><span>'+(atd.orcamentoId?'vinculado':'—')+'</span></div>';
+  html += '</div>';
+  html += '<div class="atd-painel-sec"><h4>Ações</h4><div class="atd-painel-actions">';
+  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button disabled style="opacity:.5;cursor:default">👤 Abrir cliente</button>';
+  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button disabled style="opacity:.5;cursor:default">🤝 Abrir oportunidade</button>';
+  html += '</div></div>';
+  wrap.innerHTML = html;
+}
+
+function atdAbrirModalNovoTeste(){
+  var ov = document.getElementById('atdNovoTesteOverlay'); if(ov) ov.classList.add('open');
+}
+function atdFecharModalNovoTeste(){
+  var ov = document.getElementById('atdNovoTesteOverlay'); if(ov) ov.classList.remove('open');
+}
+function atdCriarConversaTesteSubmit(){
+  if(ATD_BUSY) return; ATD_BUSY = true;
+  var nome = (document.getElementById('atdNovoTesteNome').value||'Cliente Teste').trim();
+  firebase.functions().httpsCallable('atdCriarConversaTeste')({ nomeClienteSimulado: nome })
+    .then(function(res){
+      atdFecharModalNovoTeste();
+      showToast('Conversa de teste criada.','ok');
+      if(res.data && res.data.id){ setTimeout(function(){ atdSelecionar(res.data.id); }, 300); }
+    })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -35493,6 +35979,7 @@ async function mktForceSync() {
   <div class="mdrw-item" id="mspItem-vitre-catalogo" onclick="mobilePanelNav('vitre-catalogo')"><span class="mdrw-ico">🌸</span> Catálogo Vitre</div>
   <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
   <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
+  <div class="mdrw-item" id="mspItem-atendimentos" onclick="mobilePanelNav('atendimentos')"><span class="mdrw-ico">💬</span> Atendimentos</div>
   <div class="mdrw-item" id="mspItem-tarefas" onclick="mobilePanelNav('tarefas')"><span class="mdrw-ico">📅</span> Tarefas</div>
   <div class="mdrw-item" id="mspItem-clientes" onclick="mobilePanelNav('clientes')"><span class="mdrw-ico">👥</span> Clientes</div>
   <!-- Nav: Financeiro -->
