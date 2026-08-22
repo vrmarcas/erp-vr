@@ -101,6 +101,11 @@ export {
   valeriaVitreSimularOrcamento,
   valeriaVitreCriarRascunho,
   valeriaVitreEncaminharVR,
+  // RODADA 9, FECHAMENTO (2026-08-23) — achado real: já registradas como
+  // Tools no agente e documentadas no prompt ativo (V0.3), mas as Cloud
+  // Functions nunca existiam (404 em produção). Implementadas agora.
+  valeriaVitreAtualizarRascunho,
+  valeriaVitreConsultarRascunho,
 } from "./valeria_vitre";
 
 // ── Admin ops (Rodada 3.1, 2026-08-08) — caminho administrativo temporário

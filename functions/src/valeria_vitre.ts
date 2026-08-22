@@ -278,6 +278,119 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+// RODADA 9, FECHAMENTO (2026-08-23) — achado real: as Tools
+// atualizar_rascunho_vitre/consultar_rascunho_vitre já estavam registradas
+// no agente (scripts/sync_chatvolt_valeria_tools.js) e documentadas como
+// obrigatórias no prompt ativo (VALERIA_PROMPT_V0.3, seção "ATUALIZAR
+// RASCUNHO"/"CONSULTAR RASCUNHO") — mas as Cloud Functions correspondentes
+// nunca tinham sido implementadas (404 em produção se a IA tentasse
+// chamá-las). Não são legado/órfãs: são parte ativa do fluxo documentado.
+// Implementadas agora seguindo exatamente o mesmo padrão de
+// valeriaVitreCriarRascunho (mesma idempotência, isolamento por
+// conversationId/organizationId, nunca aceita preço externo).
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── 4b. valeriaVitreAtualizarRascunho — POST atualiza um rascunho Vitre já
+//    criado (cliente mudou de ideia antes do envio). Só edita enquanto
+//    status==='rascunho' (ORCAMENTO_NAO_EDITAVEL depois disso — nunca
+//    sobrescreve um orçamento já enviado/formalizado). Isolado por
+//    conversationId/organizationId — só a MESMA conversa que criou o
+//    rascunho pode editá-lo. requestId nunca deve ser reutilizado entre
+//    atualizações (diferente de criar: aqui um requestId repetido só
+//    devolve o estado atual, sem reaplicar — protege contra duplo clique/
+//    retry aplicar a mesma edição duas vezes).
+export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (req, res) => {
+  cors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (!await checkAuth(req, res)) return;
+  if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
+
+  const body = req.body as {
+    orcamentoId?: string; itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>;
+    descontoPct?: number; frete?: number; requestId?: string;
+  };
+  const env = requireEnv(body as unknown as Record<string, unknown>);
+  if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
+  const requestId = String(body.requestId || "").trim();
+  if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }
+  const orcamentoId = String(body.orcamentoId || "").trim();
+  if (!orcamentoId) { res.status(400).json({ ok: false, error: "orcamentoId obrigatório" }); return; }
+  const itensInput = Array.isArray(body.itens) ? body.itens : [];
+  if (!itensInput.length) { res.status(400).json({ ok: false, error: "itens obrigatório" }); return; }
+
+  const idemKey = `valeria_orc_upd:${env.conversationId}:${requestId}`;
+  const acquired = await acquireIdem(COL_IDEM, idemKey);
+  const db_ = admin.firestore();
+  if (!acquired) {
+    const atualDoc = await db_.collection(COL_ORC).doc(orcamentoId).get();
+    if (atualDoc.exists) { res.json({ ok: true, jaProcessado: true, id: orcamentoId, total: atualDoc.data()?.total ?? null }); return; }
+  }
+
+  const docRef = db_.collection(COL_ORC).doc(orcamentoId);
+  const snapAtual = await docRef.get();
+  if (!snapAtual.exists) { res.json({ ok: false, error: "ORCAMENTO_NAO_ENCONTRADO" }); return; }
+  const atual = snapAtual.data()!;
+  if (atual.conversationId !== env.conversationId || atual.organizationId !== env.organizationId) {
+    // Não revela que o orçamento existe (pertence a outra conversa) — mesmo tratamento de "não encontrado".
+    res.json({ ok: false, error: "ORCAMENTO_NAO_ENCONTRADO" }); return;
+  }
+  if (atual.status !== "rascunho") { res.json({ ok: false, error: "ORCAMENTO_NAO_EDITAVEL" }); return; }
+
+  const itensSnapshot: Array<{ sku: string; nomeSnapshot: string; precoSnapshot: number; qtd: number; adicionais: Array<{ nome: string; preco: number }> }> = [];
+  const adicionaisRejeitadosGlobal: Array<{ sku: string; nome: string }> = [];
+  for (const it of itensInput) {
+    const sku = String(it.sku || "").trim();
+    const qtd = Number(it.qtd) || 1;
+    const snap = await db_.collection(COL_PRODUTOS).doc(sku).get();
+    if (!snap.exists) { res.json({ ok: false, error: "PRODUTO_NAO_ENCONTRADO:" + sku }); return; }
+    const p = snap.data() as VitreProdutoValeria;
+    if (!produtoElegivelValeria(p)) { res.json({ ok: false, error: "PRODUTO_NAO_ELEGIVEL:" + sku }); return; }
+    const { aplicados, rejeitados } = resolverAdicionais(p, it.adicionais);
+    rejeitados.forEach((nome) => adicionaisRejeitadosGlobal.push({ sku, nome }));
+    itensSnapshot.push({ sku, nomeSnapshot: p.nome, precoSnapshot: p.precoVenda as number, qtd, adicionais: aplicados });
+  }
+  const descontoPct = Math.max(0, Math.min(100, Number(body.descontoPct) || 0));
+  const frete = Math.max(0, Number(body.frete) || 0);
+  const subtotal = itensSnapshot.reduce((s, it) => s + (it.precoSnapshot + it.adicionais.reduce((a, ad) => a + ad.preco, 0)) * it.qtd, 0);
+  const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
+  const total = +(subtotal - valorDesconto + frete).toFixed(2);
+
+  await docRef.set({ itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total, atualizadoEm: Date.now() }, { merge: true });
+  await writeAudit(COL_AUDIT, "orcamento_atualizado_valeria", "valeria", "valeria_agent", { id: orcamentoId, total, conversationId: env.conversationId });
+  res.json({ ok: true, jaProcessado: false, id: orcamentoId, total, adicionaisRejeitados: adicionaisRejeitadosGlobal });
+});
+
+// ── 4c. valeriaVitreConsultarRascunho — GET resumo de um rascunho já
+//    criado ("como ficou meu orçamento?"). Só a MESMA conversa que criou
+//    o rascunho pode consultá-lo — nunca vaza orçamento de outro cliente
+//    (tratado como "não encontrado", nunca revela que pertence a outra
+//    conversa).
+export const valeriaVitreConsultarRascunho = functions.https.onRequest(async (req, res) => {
+  cors(res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (!await checkAuth(req, res)) return;
+  if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
+
+  const env = requireEnv(req.query as unknown as Record<string, unknown>);
+  if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
+  const orcamentoId = String(req.query.orcamentoId || "").trim();
+  if (!orcamentoId) { res.status(400).json({ ok: false, error: "orcamentoId obrigatório" }); return; }
+
+  const snap = await admin.firestore().collection(COL_ORC).doc(orcamentoId).get();
+  if (!snap.exists) { res.json({ ok: true, encontrado: false }); return; }
+  const orc = snap.data()!;
+  if (orc.conversationId !== env.conversationId || orc.organizationId !== env.organizationId) {
+    res.json({ ok: true, encontrado: false }); return;
+  }
+  res.json({
+    ok: true, encontrado: true, id: orcamentoId, status: orc.status,
+    clienteNome: orc.clienteNome, itens: orc.itens, subtotal: orc.subtotal,
+    descontoPct: orc.descontoPct, valorDesconto: orc.valorDesconto, frete: orc.frete,
+    total: orc.total, prazoValidadeDias: orc.prazoValidadeDias, validoAte: orc.validoAte,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
 // 5. valeriaVitreEncaminharVR — POST registra que a demanda saiu das
 //    regras de catálogo (C1) e precisa do fluxo Personalizado VR com um
 //    humano — nunca tenta "resolver" sozinha. Grava um registro de
