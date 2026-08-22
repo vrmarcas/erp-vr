@@ -9196,11 +9196,20 @@ function orcRefreshMatSelects() {
   if(!orcItemCount) return;
   var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
   if(!_cfgMats.length) return; // Firebase ainda não respondeu, aguardar
-  var newOpts = _cfgMats.map(function(m,i){
-    var _esp = m.esp||(function(){ var mm=String(m.nome||'').match(/(\d+(?:\.\d+)?)\s*mm/i); return mm?parseFloat(mm[1]):3; })();
-    var _rsm2 = m.rsm2||(m.comp&&m.larg&&m.custo?(m.custo/(m.comp*m.larg/10000)):0);
-    return '<option value="cfg_'+i+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'">'+m.nome+'</option>';
-  }).join('');
+  // RODADA 9 (2026-08-22, Bloco D) — achado real: esta função reimplementava
+  // sua própria versão simplificada das <option> (só m.nome, sem espessura/
+  // preço/data-nome) — diferente da usada por orcConstruirMatOpts() em todo
+  // o resto do orçamento (duas fontes de verdade divergentes) — e tentava
+  // preservar a seleção comparando pelo TEXTO completo, que aqui NUNCA
+  // batia (texto antigo tinha espessura+preço, o novo não tinha nada
+  // disso), perdendo a seleção do usuário sempre que um material era
+  // adicionado ao catálogo com um orçamento aberto: o <select> recaía no
+  // primeiro item da lista silenciosamente — mesmas entradas do usuário,
+  // material (e custo) diferente. Corrigido: reusa orcConstruirMatOpts()
+  // (fonte canônica) e preserva a seleção pelo nome limpo (data-nome),
+  // estável entre as duas montagens — nunca pelo texto completo (muda de
+  // formato) nem pelo índice posicional (muda quando o catálogo cresce).
+  var newOpts = orcConstruirMatOpts(null);
   for(var idx=1;idx<=orcItemCount;idx++){
     var sel=document.getElementById('oi_mat_'+idx);
     if(!sel) continue;
@@ -9209,11 +9218,13 @@ function orcRefreshMatSelects() {
     var isPending = firstVal==='pending';
     var hasFewerOpts = sel.options.length < _cfgMats.length;
     if(!isPending && !hasFewerOpts) continue;
-    var selectedName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+    var _optAntiga = sel.options[sel.selectedIndex];
+    var selectedNome = _optAntiga ? (_optAntiga.getAttribute('data-nome')||_optAntiga.text) : '';
     sel.innerHTML=newOpts;
-    if(selectedName){
+    if(selectedNome){
       for(var j=0;j<sel.options.length;j++){
-        if(sel.options[j].text===selectedName){ sel.selectedIndex=j; break; }
+        var _nomeNovo = sel.options[j].getAttribute('data-nome')||sel.options[j].text;
+        if(_nomeNovo===selectedNome){ sel.selectedIndex=j; break; }
       }
     }
     orcMatChanged(idx);
@@ -10242,6 +10253,26 @@ function _matGetRsm2(matKey, idx) {
   if(matKey && matKey.indexOf('cfg_') === 0) {
     // Material da Config Orçamento
     var _selEl = idx!=null ? document.getElementById('oi_mat_'+idx) : null;
+    // RODADA 9 (2026-08-22, Bloco D) — achado real: "mesmo orçamento,
+    // custo diferente" — a fonte PRIMÁRIA aqui era _selEl.dataset.rsm2,
+    // um cache no próprio <select> só escrito por orcMatChanged(); itens
+    // cujo produto não declara materialPadrao/materiaisPermitidos nunca
+    // disparam orcMatChanged() na criação (orcAplicarMaterialReceita()
+    // retorna cedo), então caíam DIRETO no fallback abaixo — que reindexa
+    // cfgLoad().materiais por POSIÇÃO a cada chamada; se o catálogo for
+    // reordenado/mutado em segundo plano (ex.: o listener de erp_config,
+    // que já dispara auto-migrações que regravam o próprio documento)
+    // enquanto o orçamento está aberto, "cfg_N" passa a apontar para OUTRO
+    // material sem aviso — mesmas entradas do usuário, resultado diferente.
+    // Corrigido: fonte primária agora é o data-rsm2 da PRÓPRIA <option>
+    // selecionada, gravado por orcConstruirMatOpts() no momento em que o
+    // <select> foi montado — preso ao nó DOM específico, nunca precisa de
+    // orcMatChanged() e nunca refaz um índice que pode ter deslocado
+    // (mesmo padrão já usado para espessura, ver leitura de opt.dataset.esp
+    // em _planResincronizarPecasHerdadas()).
+    var _optSelecionada = (_selEl && _selEl.options) ? _selEl.options[_selEl.selectedIndex] : null;
+    var _doOption = _optSelecionada ? parseFloat(_optSelecionada.getAttribute('data-rsm2')||'0') : 0;
+    if(_doOption > 0) return _doOption;
     var _stored = _selEl ? parseFloat(_selEl.dataset.rsm2||'0') : 0;
     if(_stored > 0) return _stored;
     // RODADA CIRÚRGICA 2026-08-17 — causa raiz comprovada da divergência de
