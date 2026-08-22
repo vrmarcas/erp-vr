@@ -487,6 +487,20 @@ service cloud.firestore {
       allow write: if false; // somente Cloud Functions
     }
 
+    // RODADA 9 (2026-08-22, Bloco H) — valeria_briefings: dados estruturados
+    // que a ValerIA extrai da conversa (produto/medidas/material/prazo etc.,
+    // ver functions-valeria/src/briefing.ts), chave = atendimentoId (mesmo
+    // id do documento em /atendimentos — protocolo [ID_ATENDIMENTO:] em
+    // chatvolt_provider.ts). Antes desta regra a coleção não tinha NENHUMA
+    // regra própria (Firestore nega por padrão sem regra) — o painel de
+    // Atendimentos não conseguia ler o briefing já extraído. Mesma
+    // fronteira das demais coleções valeria_*: leitura só Comercial/Master,
+    // escrita só Cloud Function (valeriaAtualizarBriefing, Admin SDK).
+    match /valeria_briefings/{docId} {
+      allow read:  if isComercial();
+      allow write: if false; // somente Cloud Functions (valeriaAtualizarBriefing)
+    }
+
     // ── Atendimentos (sprint 2026-08-21) — Inbox ERP × Valéria/Chatvolt ──────
     // Fonte da verdade do módulo. Só Master/Comercial acessam (Produção e
     // Financeiro fora por padrão — MODULOS/PERM_DEFAULT no frontend espelha

@@ -31979,6 +31979,10 @@ var ATD_SELECTED_ID = null;
 var ATD_FILTRO = 'todos';
 var ATD_SENDING = false;
 var ATD_BUSY = false;
+// RODADA 9, Bloco H — briefing estruturado (produto/medidas/material/prazo
+// etc.) extraído pela ValerIA durante a conversa, ver atdBriefingListenerInit.
+var ATD_BRIEFING_UNSUB = null;
+var ATD_BRIEFING_CACHE = null;
 
 function atdSouMaster(){ return typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master'; }
 
@@ -32078,6 +32082,7 @@ function atdSelecionar(id){
   atdRenderThreadHeader(atd);
   atdRenderPainel(atd);
   atdMsgListenerInit(id);
+  atdBriefingListenerInit(id);
 }
 
 function atdMobileVoltar(){
@@ -32087,8 +32092,33 @@ function atdMobileVoltar(){
 function atdFecharThread(){
   ATD_SELECTED_ID = null;
   if(ATD_MSG_UNSUB){ ATD_MSG_UNSUB(); ATD_MSG_UNSUB=null; }
+  if(ATD_BRIEFING_UNSUB){ ATD_BRIEFING_UNSUB(); ATD_BRIEFING_UNSUB=null; }
+  ATD_BRIEFING_CACHE = null;
   document.getElementById('atdThreadEmpty').style.display = '';
   document.getElementById('atdThreadActive').style.display = 'none';
+}
+
+// RODADA 9, Bloco H — lê o briefing estruturado que a ValerIA já extrai da
+// conversa (functions-valeria/src/briefing.ts, valeriaAtualizarBriefing),
+// persistido em valeria_briefings/{atendimentoId} — MESMO id do documento
+// em /atendimentos (protocolo [ID_ATENDIMENTO:], chatvolt_provider.ts).
+// Dado já existe hoje; só nunca era lido pelo painel. Falha graciosamente
+// (nunca quebra a tela) se a regra de leitura ainda não estiver deployada
+// ou o briefing ainda não existir para esta conversa.
+function atdBriefingListenerInit(atendimentoId){
+  if(ATD_BRIEFING_UNSUB){ ATD_BRIEFING_UNSUB(); ATD_BRIEFING_UNSUB=null; }
+  ATD_BRIEFING_CACHE = null;
+  if(typeof _db==='undefined' || !_db) return;
+  ATD_BRIEFING_UNSUB = _db.collection('valeria_briefings').doc(atendimentoId).onSnapshot(function(doc){
+    ATD_BRIEFING_CACHE = doc.exists ? doc.data() : null;
+    if(ATD_SELECTED_ID===atendimentoId){
+      var atdAtual = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+      if(atdAtual) atdRenderPainel(atdAtual);
+    }
+  }, function(e){
+    console.warn('[Atendimentos] briefing indisponível (regra ainda não deployada ou sem dado):', e && e.code);
+    ATD_BRIEFING_CACHE = null;
+  });
 }
 
 function atdRenderThreadHeader(atd){
@@ -32273,16 +32303,158 @@ function atdRenderPainel(atd){
   if(atd.resumo){
     html += '<div class="atd-painel-sec"><h4>Necessidade</h4><div style="font-size:12px;color:var(--text);line-height:1.5">'+cfgEsc(atd.resumo)+'</div></div>';
   }
+  // RODADA 9, Bloco H — painel estruturado: dados que a ValerIA já extrai
+  // da conversa em tempo real (valeria_briefings/{atendimentoId}), com
+  // status por campo (✅ confirmado / ❌ faltando — a fonte não distingue
+  // "confirmado explicitamente" de "inferido"; ver relatório final) e
+  // prontidão para orçamento. O atendente não precisa reler a conversa
+  // inteira para achar largura/quantidade/produto/prazo/material.
+  html += atdBriefingHtml(ATD_BRIEFING_CACHE);
   html += '<div class="atd-painel-sec"><h4>CRM</h4>';
   html += '<div class="atd-painel-row"><span>Lead/Oportunidade</span><span>'+(atd.leadId?'vinculado':'—')+'</span></div>';
   html += '<div class="atd-painel-row"><span>Cliente</span><span>'+(atd.clienteId?'vinculado':'não cadastrado')+'</span></div>';
   html += '<div class="atd-painel-row"><span>Orçamento</span><span>'+(atd.orcamentoId?'vinculado':'—')+'</span></div>';
   html += '</div>';
   html += '<div class="atd-painel-sec"><h4>Ações</h4><div class="atd-painel-actions">';
-  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button disabled style="opacity:.5;cursor:default">👤 Abrir cliente</button>';
-  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button disabled style="opacity:.5;cursor:default">🤝 Abrir oportunidade</button>';
+  // RODADA 9, Bloco G/I — a conversa não pode ficar isolada: liga
+  // ATENDIMENTO → CONTATO → CLIENTE → LEAD/OPORTUNIDADE → ORÇAMENTO. Se já
+  // vinculado, abre; senão, oferece CRIAR (pré-preenchido, nunca inventa —
+  // o atendente sempre revisa antes de salvar, mesmo padrão já usado pelo
+  // resto do CRM). _crmVincularCliente (chamado por crmSalvarNovoLead)
+  // já evita duplicar cliente existente pelo telefone.
+  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button onclick="atdCriarOuAbrirLead('+JSON.stringify(atd.id)+')">➕ Criar/Abrir cliente</button>';
+  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button onclick="atdCriarOuAbrirLead('+JSON.stringify(atd.id)+')">➕ Criar/Abrir oportunidade</button>';
+  html += atd.orcamentoId ? '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento</button>' : '<button onclick="atdRevisarCriarOrcamento('+JSON.stringify(atd.id)+')">📝 Revisar e criar orçamento</button>';
   html += '</div></div>';
   wrap.innerHTML = html;
+}
+
+// RODADA 9, Bloco H — HTML do painel de briefing estruturado. Separado de
+// atdRenderPainel() para poder ser re-renderizado sozinho quando o
+// listener do briefing atualiza, sem precisar reconstruir o painel todo.
+function atdBriefingHtml(briefing){
+  var CAMPOS = [
+    ['produto','Produto'], ['familia','Família'], ['quantidade','Quantidade'],
+    ['material','Material'], ['acabamento','Acabamento'], ['larguraMm','Largura (mm)'],
+    ['alturaMm','Altura (mm)'], ['prazo','Prazo'], ['referencia','Referência'], ['observacoes','Observações']
+  ];
+  if(!briefing){
+    return '<div class="atd-painel-sec"><h4>Pedido identificado</h4>'
+      + '<div style="font-size:11px;color:var(--muted)">Ainda sem dados estruturados extraídos desta conversa.</div></div>';
+  }
+  var faltando = Array.isArray(briefing.camposFaltando) ? briefing.camposFaltando : [];
+  var completude = (typeof briefing.completude==='number') ? briefing.completude : null;
+  var classifDemanda = {catalogo:'Catálogo', semi_personalizada:'Semi-personalizada', personalizada:'Personalizada'}[briefing.classificacao] || null;
+  var html = '<div class="atd-painel-sec"><h4>Pedido identificado</h4>';
+  CAMPOS.forEach(function(c){
+    var chave=c[0], label=c[1];
+    var v = briefing[chave];
+    var temValor = v!==undefined && v!==null && String(v).trim()!=='';
+    var faltandoEsteCampo = faltando.indexOf(chave)>=0;
+    // Nunca torna todos os campos obrigatórios — só marca ❌ os que a
+    // extração da ValerIA considera essenciais e ainda faltam (ver
+    // functions-valeria/src/briefing.ts, CAMPOS_ESSENCIAIS); um campo fora
+    // dessa lista e sem valor simplesmente não aparece, em vez de alarmar.
+    if(!temValor && !faltandoEsteCampo) return;
+    var status = temValor ? '✅' : '❌';
+    html += '<div class="atd-painel-row"><span>'+status+' '+label+'</span><span>'+(temValor?cfgEsc(String(v)):'faltando')+'</span></div>';
+  });
+  if(classifDemanda) html += '<div class="atd-painel-row"><span>Tipo de demanda</span><span>'+classifDemanda+'</span></div>';
+  if(completude!=null){
+    var essenciais = CAMPOS.length - 1; // observacoes é o único não listado como obrigatório na UX, mas entra na conta do backend — mantém a mesma base de cálculo dele
+    html += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:11px;font-weight:700;color:'+(completude>=100?'#059669':'var(--muted)')+'">'
+      + (completude>=100 ? '✅ Dados suficientes para orçamento' : '⏳ '+completude+'% das informações coletadas' + (faltando.length ? ' — faltam: '+faltando.join(', ') : ''))
+      + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// RODADA 9, Bloco I — "Criar/Abrir Cliente" e "Criar/Abrir Oportunidade"
+// levam ao MESMO lugar: o modal já existente de Novo Lead (crmNovoLeadOverlay),
+// pré-preenchido com os dados já confirmados da conversa (nome/telefone/
+// produto identificado) — nunca cria nada sozinho, o atendente sempre
+// revisa e confirma. Reaproveita 100% o fluxo já existente de
+// criação/dedupe de lead+cliente (crmSalvarNovoLead → _crmVincularCliente,
+// que já evita duplicar cliente pelo telefone) — nenhuma lógica nova de
+// CRM, só o atalho a partir do Atendimento.
+function atdCriarOuAbrirLead(atendimentoId){
+  var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+  if(!atd) return;
+  if(typeof crmAbrirNovoLead==='function') crmAbrirNovoLead();
+  var elNome = document.getElementById('nlNome'); if(elNome) elNome.value = atd.nome || '';
+  var elTel  = document.getElementById('nlTel');  if(elTel)  elTel.value  = atd.telefoneE164 || '';
+  var b = ATD_BRIEFING_CACHE;
+  var elProd = document.getElementById('nlProduto');
+  if(elProd) elProd.value = (b && b.produto) || '';
+  var elObs = document.getElementById('nlObs');
+  if(elObs){
+    var partes = [];
+    if(atd.resumo) partes.push(atd.resumo);
+    if(b){
+      if(b.material) partes.push('Material: '+b.material);
+      if(b.larguraMm && b.alturaMm) partes.push('Medidas: '+b.larguraMm+'×'+b.alturaMm+'mm');
+      if(b.quantidade) partes.push('Quantidade: '+b.quantidade);
+      if(b.prazo) partes.push('Prazo: '+b.prazo);
+    }
+    elObs.value = partes.join(' · ') || '';
+  }
+  var elMarca = document.getElementById('nlMarca');
+  if(elMarca && (atd.marca==='vr' || atd.marca==='vitre')) elMarca.value = atd.marca;
+  showToast('Confira os dados e clique em Salvar — nada é criado automaticamente.','info');
+}
+
+// RODADA 9, Bloco I, Modo 2 — "Revisar e criar orçamento": abre Novo
+// Orçamento já preenchido com os dados CONFIRMADOS da conversa (cliente +
+// primeiro item, quando o briefing tiver produto/medidas). Campos ausentes
+// ficam vazios para o vendedor completar — nunca inventa informação. O
+// cálculo continua sendo feito pelo motor oficial do orçamento
+// (orcRecalc), a IA aqui só estruturou os dados de entrada.
+function atdRevisarCriarOrcamento(atendimentoId){
+  var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+  if(!atd) return;
+  var b = ATD_BRIEFING_CACHE;
+  nav('orcamento', null);
+  setTimeout(function(){
+    var nomeEl = document.getElementById('orcClientNome');
+    var telEl  = document.getElementById('orcClientTel');
+    if(nomeEl) nomeEl.value = atd.nome || '';
+    if(telEl)  telEl.value  = atd.telefoneE164 || '';
+    if(b){
+      var qtyEl = document.getElementById('oi_qty_1');
+      if(qtyEl && b.quantidade>0) qtyEl.value = b.quantidade;
+      var largEl = document.getElementById('oi_larg_1');
+      if(largEl && b.larguraMm>0) largEl.value = (b.larguraMm/10).toFixed(1); // mm → cm, mesma unidade do orçamento
+      var altEl = document.getElementById('oi_alt_1');
+      if(altEl && b.alturaMm>0) altEl.value = (b.alturaMm/10).toFixed(1);
+      var detEl = document.getElementById('oi_det_1');
+      if(detEl){
+        var detPartes = [];
+        if(b.material) detPartes.push('Material: '+b.material);
+        if(b.acabamento) detPartes.push('Acabamento: '+b.acabamento);
+        if(b.prazo) detPartes.push('Prazo: '+b.prazo);
+        if(b.referencia) detPartes.push('Ref.: '+b.referencia);
+        if(b.observacoes) detPartes.push(b.observacoes);
+        detEl.value = detPartes.join(' · ');
+      }
+      // Produto: só seleciona se existir uma opção EXATA no dropdown (nunca
+      // adivinha por aproximação) — senão fica em "Personalizado", com o
+      // nome identificado preservado nos Detalhes acima para conferência.
+      if(b.produto){
+        var prodEl = document.getElementById('oi_prod_1');
+        if(prodEl){
+          var achou = Array.prototype.some.call(prodEl.options, function(o){
+            if(o.text.trim().toLowerCase()===String(b.produto).trim().toLowerCase()){ prodEl.value = o.value; return true; }
+            return false;
+          });
+          if(!achou && detEl) detEl.value = 'Produto identificado: '+b.produto+(detEl.value?' · '+detEl.value:'');
+          if(typeof orcOnProdChange==='function') orcOnProdChange(prodEl);
+        }
+      }
+      if(typeof orcRecalc==='function') orcRecalc();
+    }
+    showToast('Dados da conversa carregados no orçamento — confira antes de enviar.','ok');
+  }, 300);
 }
 
 function atdAbrirModalNovoTeste(){
