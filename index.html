@@ -26537,7 +26537,19 @@ function orcGetValidadeDias(){
 var _orcSalvarEmVoo = null;
 function orcSalvarOrcamento() {
   if(_orcSalvarEmVoo) return _orcSalvarEmVoo;
-  _orcSalvarEmVoo = _orcSalvarOrcamentoImpl().finally(function(){ _orcSalvarEmVoo = null; });
+  var _p = _orcSalvarOrcamentoImpl();
+  // RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2, Ação 3: quando este
+  // orçamento nasceu de "Revisar e criar orçamento" (Atendimentos), vincula
+  // o orcamentoId de volta na conversa DEPOIS que o orçamento real existe —
+  // nunca antes, nunca inventado. Hook aditivo lido sobre a MESMA promise
+  // (nunca substitui o valor resolvido); _orcSalvarOrcamentoImpl() (Bloco
+  // D/E, já estabilizado) permanece intocada.
+  _p.then(function(orc){
+    if(orc && orc.id && window._atdOrigemAtendimentoId && typeof atdVincularOrcamentoAposSalvar==='function'){
+      atdVincularOrcamentoAposSalvar(window._atdOrigemAtendimentoId, orc.id);
+    }
+  });
+  _orcSalvarEmVoo = _p.finally(function(){ _orcSalvarEmVoo = null; });
   return _orcSalvarEmVoo;
 }
 // SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — decide se editar o valor de um
@@ -32322,9 +32334,23 @@ function atdRenderPainel(atd){
   // o atendente sempre revisa antes de salvar, mesmo padrão já usado pelo
   // resto do CRM). _crmVincularCliente (chamado por crmSalvarNovoLead)
   // já evita duplicar cliente existente pelo telefone.
-  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button onclick="atdCriarOuAbrirLead('+JSON.stringify(atd.id)+')">➕ Criar/Abrir cliente</button>';
-  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button onclick="atdCriarOuAbrirLead('+JSON.stringify(atd.id)+')">➕ Criar/Abrir oportunidade</button>';
-  html += atd.orcamentoId ? '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento</button>' : '<button onclick="atdRevisarCriarOrcamento('+JSON.stringify(atd.id)+')">📝 Revisar e criar orçamento</button>';
+  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button id="atdBtnCliente_'+atd.id+'" onclick="atdCriarOuAbrirCliente('+JSON.stringify(atd.id)+')">➕ Criar/Abrir cliente</button>';
+  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button id="atdBtnOportunidade_'+atd.id+'" onclick="atdCriarOuAbrirOportunidade('+JSON.stringify(atd.id)+')">➕ Criar/Abrir oportunidade</button>';
+  if(atd.orcamentoId){
+    // RODADA 9, FECHAMENTO — número/valor podem já estar no cache (recém
+    // vinculado nesta sessão) ou precisar de fallback no array global de
+    // orçamentos enviados (após reload — o vínculo em si já persiste
+    // independente disso, ver atdVincularOrcamentoAposSalvar).
+    var orcRef = (typeof atd.orcamentoNum!=='undefined') ? atd
+      : (typeof _ORC_ENVIADOS_DATA!=='undefined' ? _ORC_ENVIADOS_DATA.find(function(o){ return o.id===atd.orcamentoId; }) : null) || {};
+    var orcNumVal = orcRef.orcamentoNum!=null ? orcRef.orcamentoNum : orcRef.num;
+    var orcTotVal = typeof orcRef.orcamentoTotal==='number' ? orcRef.orcamentoTotal : orcRef.valorFinal;
+    var orcNum = orcNumVal ? '#'+orcNumVal : '';
+    var orcVal = (typeof orcTotVal==='number') ? ' — R$ '+orcTotVal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+    html += '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento '+orcNum+orcVal+'</button>';
+  } else {
+    html += '<button onclick="atdRevisarCriarOrcamento('+JSON.stringify(atd.id)+')">📝 Revisar e criar orçamento</button>';
+  }
   html += '</div></div>';
   wrap.innerHTML = html;
 }
@@ -32370,38 +32396,68 @@ function atdBriefingHtml(briefing){
   return html;
 }
 
-// RODADA 9, Bloco I — "Criar/Abrir Cliente" e "Criar/Abrir Oportunidade"
-// levam ao MESMO lugar: o modal já existente de Novo Lead (crmNovoLeadOverlay),
-// pré-preenchido com os dados já confirmados da conversa (nome/telefone/
-// produto identificado) — nunca cria nada sozinho, o atendente sempre
-// revisa e confirma. Reaproveita 100% o fluxo já existente de
-// criação/dedupe de lead+cliente (crmSalvarNovoLead → _crmVincularCliente,
-// que já evita duplicar cliente pelo telefone) — nenhuma lógica nova de
-// CRM, só o atalho a partir do Atendimento.
-function atdCriarOuAbrirLead(atendimentoId){
+// RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2, Ações 1/2: os botões
+// eram só visuais (abriam um modal pré-preenchido, mas nada persistia —
+// achado real reportado em produção). Agora chamam as Cloud Functions
+// dedicadas (atdVincularCliente/atdVincularOportunidade,
+// functions/src/atendimentos.ts) — únicas capazes de escrever em
+// atendimentos/{id} (a Rule bloqueia write direto do client, de
+// propósito). Nunca duplica: a Function primeiro procura cliente/
+// oportunidade já vinculado ou por telefone antes de criar. Vínculo
+// persiste em Firestore — sobrevive a reload/outra sessão.
+var ATD_ACAO_EM_VOO = {};
+function _atdBtnBusy(atendimentoId, sufixo, textoCarregando){
+  var btn = document.getElementById('atdBtn'+sufixo+'_'+atendimentoId);
+  if(!btn) return null;
+  var original = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = textoCarregando;
+  return function(){ btn.disabled = false; btn.innerHTML = original; };
+}
+function atdCriarOuAbrirCliente(atendimentoId){
+  if(ATD_ACAO_EM_VOO[atendimentoId+':cliente']) return;
   var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
   if(!atd) return;
-  if(typeof crmAbrirNovoLead==='function') crmAbrirNovoLead();
-  var elNome = document.getElementById('nlNome'); if(elNome) elNome.value = atd.nome || '';
-  var elTel  = document.getElementById('nlTel');  if(elTel)  elTel.value  = atd.telefoneE164 || '';
-  var b = ATD_BRIEFING_CACHE;
-  var elProd = document.getElementById('nlProduto');
-  if(elProd) elProd.value = (b && b.produto) || '';
-  var elObs = document.getElementById('nlObs');
-  if(elObs){
-    var partes = [];
-    if(atd.resumo) partes.push(atd.resumo);
-    if(b){
-      if(b.material) partes.push('Material: '+b.material);
-      if(b.larguraMm && b.alturaMm) partes.push('Medidas: '+b.larguraMm+'×'+b.alturaMm+'mm');
-      if(b.quantidade) partes.push('Quantidade: '+b.quantidade);
-      if(b.prazo) partes.push('Prazo: '+b.prazo);
-    }
-    elObs.value = partes.join(' · ') || '';
+  if(atd.clienteId){ cliOpenDetalhe(atd.clienteId); return; }
+  if(!atd.nome || !atd.telefoneE164){
+    showToast('Faltam dados para criar o cliente: '+[!atd.nome?'nome':null, !atd.telefoneE164?'telefone':null].filter(Boolean).join(', ')+'. Aguarde a conversa confirmar ou edite manualmente.','warn');
+    return;
   }
-  var elMarca = document.getElementById('nlMarca');
-  if(elMarca && (atd.marca==='vr' || atd.marca==='vitre')) elMarca.value = atd.marca;
-  showToast('Confira os dados e clique em Salvar — nada é criado automaticamente.','info');
+  ATD_ACAO_EM_VOO[atendimentoId+':cliente'] = true;
+  var restaurar = _atdBtnBusy(atendimentoId, 'Cliente', '⏳ Vinculando…');
+  firebase.functions().httpsCallable('atdVincularCliente')({ atendimentoId: atendimentoId })
+    .then(function(res){
+      var r = res.data||{};
+      atd.clienteId = r.clienteId;
+      atdRenderPainel(atd);
+      showToast(r.criado ? '✅ Cliente criado e vinculado à conversa.' : '📋 Cliente já existente vinculado à conversa.', 'ok');
+      if(r.clienteId) cliOpenDetalhe(r.clienteId);
+    })
+    .catch(function(e){ showToast('Não foi possível vincular o cliente: '+(atdErroAmigavel?atdErroAmigavel(e):(e&&e.message||e)),'err'); })
+    .finally(function(){ delete ATD_ACAO_EM_VOO[atendimentoId+':cliente']; if(restaurar) restaurar(); });
+}
+function atdCriarOuAbrirOportunidade(atendimentoId){
+  if(ATD_ACAO_EM_VOO[atendimentoId+':oportunidade']) return;
+  var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+  if(!atd) return;
+  if(atd.leadId){ crmOpenCard(atd.leadId); return; }
+  if(!atd.nome || !atd.telefoneE164){
+    showToast('Faltam dados para criar a oportunidade: '+[!atd.nome?'nome':null, !atd.telefoneE164?'telefone':null].filter(Boolean).join(', ')+'. Aguarde a conversa confirmar ou edite manualmente.','warn');
+    return;
+  }
+  var b = ATD_BRIEFING_CACHE;
+  ATD_ACAO_EM_VOO[atendimentoId+':oportunidade'] = true;
+  var restaurar = _atdBtnBusy(atendimentoId, 'Oportunidade', '⏳ Vinculando…');
+  firebase.functions().httpsCallable('atdVincularOportunidade')({ atendimentoId: atendimentoId, produto: (b&&b.produto)||'' })
+    .then(function(res){
+      var r = res.data||{};
+      atd.leadId = r.leadId;
+      if(r.clienteId) atd.clienteId = r.clienteId;
+      atdRenderPainel(atd);
+      showToast(r.criado ? '✅ Oportunidade criada e vinculada à conversa.' : '📋 Oportunidade já existente vinculada à conversa.', 'ok');
+      if(r.leadId) crmOpenCard(r.leadId);
+    })
+    .catch(function(e){ showToast('Não foi possível vincular a oportunidade: '+(atdErroAmigavel?atdErroAmigavel(e):(e&&e.message||e)),'err'); })
+    .finally(function(){ delete ATD_ACAO_EM_VOO[atendimentoId+':oportunidade']; if(restaurar) restaurar(); });
 }
 
 // RODADA 9, Bloco I, Modo 2 — "Revisar e criar orçamento": abre Novo
@@ -32414,6 +32470,10 @@ function atdRevisarCriarOrcamento(atendimentoId){
   var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
   if(!atd) return;
   var b = ATD_BRIEFING_CACHE;
+  // RODADA 9, FECHAMENTO — marca a origem para orcSalvarOrcamento() vincular
+  // o orcamentoId de volta na conversa assim que o orçamento REAL for salvo
+  // (nunca antes — ver hook em orcSalvarOrcamento()).
+  window._atdOrigemAtendimentoId = atendimentoId;
   nav('orcamento', null);
   setTimeout(function(){
     var nomeEl = document.getElementById('orcClientNome');
@@ -32455,6 +32515,30 @@ function atdRevisarCriarOrcamento(atendimentoId){
     }
     showToast('Dados da conversa carregados no orçamento — confira antes de enviar.','ok');
   }, 300);
+}
+
+// RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2, Ação 3 (parte 2/2):
+// chamado por orcSalvarOrcamento() só DEPOIS que o orçamento real já foi
+// salvo pelo motor oficial (orcRecalc/_orcSalvarOrcamentoImpl, intocados).
+// Persiste orcamentoId em atendimentos/{id} via Cloud Function (mesma
+// fronteira de write das outras ações) — nunca falha silenciosamente: se
+// a vinculação falhar, o orçamento já está salvo e íntegro (nada é
+// desfeito), só avisa que o vínculo com a conversa não foi registrado.
+function atdVincularOrcamentoAposSalvar(atendimentoId, orcamentoId){
+  window._atdOrigemAtendimentoId = null; // consome — nunca vincula duas vezes por engano
+  firebase.functions().httpsCallable('atdVincularOrcamento')({ atendimentoId: atendimentoId, orcamentoId: orcamentoId })
+    .then(function(res){
+      var r = res.data||{};
+      var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+      if(atd){
+        atd.orcamentoId = orcamentoId;
+        atd.orcamentoNum = r.numero;
+        atd.orcamentoTotal = r.total;
+        if(ATD_SELECTED_ID===atendimentoId) atdRenderPainel(atd);
+      }
+      showToast('📝 Orçamento #'+(r.numero||'')+' vinculado à conversa.','ok');
+    })
+    .catch(function(e){ showToast('Orçamento salvo, mas não foi possível vinculá-lo à conversa: '+(atdErroAmigavel?atdErroAmigavel(e):(e&&e.message||e)),'warn'); });
 }
 
 function atdAbrirModalNovoTeste(){

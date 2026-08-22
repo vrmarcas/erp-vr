@@ -121,4 +121,12 @@ export {
   atdDevolverParaValeria,
   atdResolverAtendimento,
   atdLimparConversaTeste,
+  // RODADA 9, Fechamento (2026-08-23) — Bloqueador 2: liga atendimento →
+  // cliente/oportunidade/orçamento persistindo os IDs de volta (writes
+  // diretos do client já são bloqueados pela Rule de atendimentos, de
+  // propósito) + fecha o handoff (status='aguardando_humano').
+  atdVincularCliente,
+  atdVincularOportunidade,
+  atdVincularOrcamento,
+  atdSolicitarHumano,
 } from "./atendimentos";

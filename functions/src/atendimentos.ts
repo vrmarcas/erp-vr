@@ -21,7 +21,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import { getCallerVerificado, requireRole, acquireIdem, writeAudit } from "./auth_helper";
+import { getCallerVerificado, requireRole, acquireIdem, writeAudit, parseDoc } from "./auth_helper";
 import { ChatVoltProvider } from "./chatvolt_provider";
 import { AIProvider } from "./ai_provider";
 
@@ -451,4 +451,275 @@ export const atdLimparConversaTeste = functions.https.onCall(async (data, contex
   await batch.commit();
   await writeAudit("atendimentos_audit_log", "limpar_teste", caller.uid, caller.role, { atendimentoId });
   return { ok: true };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2: os botões "Criar/Abrir
+// cliente", "Criar/Abrir oportunidade" e "Revisar e criar orçamento" do
+// painel de Atendimentos eram só front-end — nada persistia clienteId/
+// leadId/orcamentoId no atendimento porque a Rule de `atendimentos` já
+// bloqueia (corretamente) escrita direta do client, e não existia nenhuma
+// Cloud Function para fazer esse write com Admin SDK. As 3 funções abaixo
+// fecham esse elo, sempre gravando de volta em atendimentos/{id} — o
+// vínculo passa a sobreviver a reload/outra sessão.
+//
+// erp_vr/clientes é um ARRAY agregado (CLIENTES_DATA no client) — dedupe
+// pelo MESMO critério já usado por _crmBuscarClienteDuplicado() no
+// index.html (nome normalizado OU e-mail OU telefone normalizado com
+// >=8 dígitos, containment) — nunca uma fórmula nova.
+// erp_vr/crm_leads é um OBJETO agregado keyed por id (CRM_LEADS no
+// client, mesmo documento que valeriaCriarOportunidade usa do lado
+// Chatvolt) — dedupe por telefone normalizado, mesmo critério.
+// ══════════════════════════════════════════════════════════════════════════
+
+const COL_ERP = "erp_vr";
+
+interface ClienteRegistro {
+  id: string; nome: string; tipo: string; marca: string; tel: string; email: string;
+  cidade: string; ultimoPedido: string; os: string[]; obs?: string;
+}
+interface LeadRegistro {
+  nome: string; tipo: string; marca: string; sub: string; contato: string; tel: string; email: string;
+  temp: string; score: number; resumo_ia: string; valor_potencial: string; cor: string;
+  origem: string; etapa: string; tempo: string; dores: string[];
+  intencao: { produto: string; material: string; medidas: string; quantidade: string };
+  clienteId?: string; atendimentoId?: string;
+}
+
+export function normTelAtd(tel: string): string {
+  return (tel || "").replace(/\D/g, "");
+}
+export function normNomeAtd(nome: string): string {
+  return (nome || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+export function encontrarClienteDuplicado(lista: ClienteRegistro[], nome: string, tel: string, email: string): ClienteRegistro | null {
+  const nNorm = normNomeAtd(nome);
+  const tNorm = normTelAtd(tel);
+  const eNorm = (email || "").toLowerCase().trim();
+  return (
+    lista.find((c) => {
+      if (normNomeAtd(c.nome) === nNorm && nNorm) return true;
+      if (eNorm && eNorm.length > 3 && (c.email || "").toLowerCase() === eNorm) return true;
+      if (tNorm.length >= 8 && normTelAtd(c.tel).includes(tNorm)) return true;
+      return false;
+    }) || null
+  );
+}
+
+// ── 8. Vincular/criar cliente a partir de um atendimento ───────────────────
+// Mesma regra pedida: se já existe cliente vinculado (atd.clienteId), só
+// devolve para abrir. Senão, procura duplicado pelos dados JÁ CONFIRMADOS
+// da conversa; se não achar, cria com os dados mínimos disponíveis — nunca
+// inventa nome/telefone.
+export const atdVincularCliente = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "vincular cliente a partir de um atendimento");
+
+  const atendimentoId = String(data?.atendimentoId || "").trim();
+  if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+  const atdSnap = await carregarAtendimento(atendimentoId);
+  const atd = atdSnap.data()!;
+
+  if (atd.clienteId) {
+    return { ok: true, clienteId: atd.clienteId as string, criado: false, encontrado: false };
+  }
+
+  const nome = String(data?.nome || atd.nome || "").trim();
+  const tel = String(data?.telefoneE164 || atd.telefoneE164 || "").trim();
+  const email = String(data?.email || "").trim();
+  if (!nome || !tel) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Nome e telefone são obrigatórios para criar cliente — ainda faltam na conversa."
+    );
+  }
+  const marca = atd.marca === "vitre" ? "vitre" : "vr";
+
+  const db_ = db();
+  const resultado = await db_.runTransaction(async (tx) => {
+    const ref = db_.collection(COL_ERP).doc("clientes");
+    const snap = await tx.get(ref);
+    const lista = parseDoc<ClienteRegistro[]>(snap, []);
+
+    const dup = encontrarClienteDuplicado(lista, nome, tel, email);
+    if (dup) return { id: dup.id, criado: false };
+
+    const novoId = "atd_cli_" + atdSnap.ref.id.slice(0, 8) + "_" + Date.now().toString(36);
+    const hoje = new Date();
+    const dataHoje =
+      String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") + "/" + hoje.getFullYear();
+    const novoCliente: ClienteRegistro = {
+      id: novoId, nome, tipo: marca === "vr" ? "PJ" : "PF", marca,
+      tel, email: email || "—", cidade: "—", ultimoPedido: dataHoje, os: [],
+      obs: "Cadastro criado a partir do Atendimento " + atendimentoId + ".",
+    };
+    lista.push(novoCliente);
+    tx.set(ref, { data: JSON.stringify(lista), ts: Date.now() });
+    return { id: novoId, criado: true };
+  });
+
+  await atdSnap.ref.set({ clienteId: resultado.id, updatedAt: Date.now() }, { merge: true });
+  await writeAudit("atendimentos_audit_log", "vincular_cliente", caller.uid, caller.role, {
+    atendimentoId, clienteId: resultado.id, criado: resultado.criado,
+  });
+  return { ok: true, clienteId: resultado.id, criado: resultado.criado, encontrado: !resultado.criado };
+});
+
+// ── 9. Vincular/criar oportunidade a partir de um atendimento ──────────────
+// Mesma arquitetura já usada por valeriaCriarOportunidade (dedupe por
+// telefone no MESMO documento erp_vr/crm_leads que o Kanban do CRM usa) —
+// aqui só o caminho de auth muda (usuário real do ERP, não o agente).
+// Também garante o cliente (reaproveita a mesma lógica de
+// atdVincularCliente) e grava a origem como "atendimento".
+export const atdVincularOportunidade = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "vincular oportunidade a partir de um atendimento");
+
+  const atendimentoId = String(data?.atendimentoId || "").trim();
+  if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+  const atdSnap = await carregarAtendimento(atendimentoId);
+  const atd = atdSnap.data()!;
+
+  if (atd.leadId) {
+    return { ok: true, leadId: atd.leadId as string, criado: false };
+  }
+
+  const nome = String(data?.nome || atd.nome || "").trim();
+  const tel = String(data?.telefoneE164 || atd.telefoneE164 || "").trim();
+  const email = String(data?.email || "").trim();
+  if (!nome || !tel) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Nome e telefone são obrigatórios para criar oportunidade — ainda faltam na conversa."
+    );
+  }
+  const marca = atd.marca === "vitre" ? "vitre" : "vr";
+  const produto = String(data?.produto || "").trim();
+
+  const db_ = db();
+  const resultado = await db_.runTransaction(async (tx) => {
+    const refLeads = db_.collection(COL_ERP).doc("crm_leads");
+    const refClientes = db_.collection(COL_ERP).doc("clientes");
+    const [snapLeads, snapClientes] = await Promise.all([tx.get(refLeads), tx.get(refClientes)]);
+    const leads = parseDoc<Record<string, LeadRegistro>>(snapLeads, {});
+    const clientes = parseDoc<ClienteRegistro[]>(snapClientes, []);
+
+    const tNorm = normTelAtd(tel);
+    let leadIdExistente: string | null = null;
+    for (const [id, l] of Object.entries(leads)) {
+      if (l.atendimentoId === atendimentoId) { leadIdExistente = id; break; }
+      if (tNorm.length >= 8 && normTelAtd(l.tel).includes(tNorm)) { leadIdExistente = id; break; }
+    }
+    if (leadIdExistente) return { id: leadIdExistente, criado: false, clienteId: leads[leadIdExistente].clienteId || null };
+
+    // Garante o cliente (mesma regra de atdVincularCliente) antes de criar a oportunidade.
+    let clienteId = (atd.clienteId as string) || null;
+    let clientesMudou = false;
+    if (!clienteId) {
+      const dup = encontrarClienteDuplicado(clientes, nome, tel, email);
+      if (dup) {
+        clienteId = dup.id;
+      } else {
+        const novoIdCli = "atd_cli_" + atdSnap.ref.id.slice(0, 8) + "_" + Date.now().toString(36);
+        const hoje = new Date();
+        const dataHoje =
+          String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") + "/" + hoje.getFullYear();
+        clientes.push({
+          id: novoIdCli, nome, tipo: marca === "vr" ? "PJ" : "PF", marca,
+          tel, email: email || "—", cidade: "—", ultimoPedido: dataHoje, os: [],
+          obs: "Cadastro criado a partir do Atendimento " + atendimentoId + ".",
+        });
+        clienteId = novoIdCli;
+        clientesMudou = true;
+      }
+    }
+
+    const novoIdLead = "atd_lead_" + atdSnap.ref.id.slice(0, 8) + "_" + Date.now().toString(36);
+    const novoLead: LeadRegistro = {
+      nome, tipo: marca === "vr" ? "B2B" : "B2C", marca,
+      sub: produto || tel, contato: nome, tel, email: email || "—",
+      temp: "quente", score: 60,
+      resumo_ia: (atd.resumo as string) || "Oportunidade criada a partir do Atendimento.",
+      valor_potencial: "A definir", cor: "#FCA5A5",
+      origem: "atendimento", etapa: "ia_novo", tempo: "agora",
+      dores: produto ? [produto] : [],
+      intencao: { produto: produto || "—", material: "—", medidas: "—", quantidade: "—" },
+      clienteId: clienteId || undefined, atendimentoId,
+    };
+    leads[novoIdLead] = novoLead;
+
+    tx.set(refLeads, { data: JSON.stringify(leads), ts: Date.now() });
+    if (clientesMudou) tx.set(refClientes, { data: JSON.stringify(clientes), ts: Date.now() });
+    return { id: novoIdLead, criado: true, clienteId };
+  });
+
+  const patch: Record<string, unknown> = { leadId: resultado.id, updatedAt: Date.now() };
+  if (resultado.clienteId && !atd.clienteId) patch.clienteId = resultado.clienteId;
+  await atdSnap.ref.set(patch, { merge: true });
+  await writeAudit("atendimentos_audit_log", "vincular_oportunidade", caller.uid, caller.role, {
+    atendimentoId, leadId: resultado.id, criado: resultado.criado,
+  });
+  return { ok: true, leadId: resultado.id, criado: resultado.criado, clienteId: resultado.clienteId || null };
+});
+
+// ── 10. Vincular orçamento já salvo a um atendimento ────────────────────────
+// O cálculo/salvamento do orçamento em si continua 100% o fluxo oficial já
+// existente (Novo Orçamento → orcRecalc → salvar) — esta função só grava
+// de volta a referência, depois que o orçamento real já existe.
+export const atdVincularOrcamento = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "vincular orçamento a um atendimento");
+
+  const atendimentoId = String(data?.atendimentoId || "").trim();
+  const orcamentoId = String(data?.orcamentoId || "").trim();
+  if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+  if (!orcamentoId) throw new functions.https.HttpsError("invalid-argument", "orcamentoId obrigatório.");
+  const atdSnap = await carregarAtendimento(atendimentoId);
+
+  const orcSnap = await db().collection(COL_ERP).doc("orcamentos").get();
+  const orcamentos = parseDoc<Array<{ id: string; num?: unknown; total?: unknown }>>(orcSnap, []);
+  const orc = orcamentos.find((o) => o.id === orcamentoId);
+  if (!orc) {
+    throw new functions.https.HttpsError("not-found", "Orçamento não encontrado — não é possível vincular.");
+  }
+
+  await atdSnap.ref.set({ orcamentoId, updatedAt: Date.now() }, { merge: true });
+  await writeAudit("atendimentos_audit_log", "vincular_orcamento", caller.uid, caller.role, { atendimentoId, orcamentoId });
+  return { ok: true, orcamentoId, numero: orc.num ?? null, total: orc.total ?? null };
+});
+
+// ── 11. Solicitar humano (handoff) ──────────────────────────────────────────
+// Fecha o elo documentado como pendente na rodada anterior: nada gravava
+// status='aguardando_humano' em atendimentos/{id} — o badge/filtro do
+// frontend já existiam, só nunca acendiam. Chamável pelo próprio ERP (um
+// atendente pode marcar "precisa de humano" manualmente); a ValerIA
+// pedir isso sozinha via Tool do Chatvolt é a integração externa que falta
+// (ver relatório final — fora do escopo desta rodada: exige registrar uma
+// nova Tool no agente, ação de sincronização externa mais arriscada).
+export const atdSolicitarHumano = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial"], "solicitar humano em um atendimento");
+
+  const atendimentoId = String(data?.atendimentoId || "").trim();
+  if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+  const motivo = String(data?.motivo || "").trim().slice(0, 300);
+  const atdSnap = await carregarAtendimento(atendimentoId);
+  const atd = atdSnap.data()!;
+
+  if (atd.status === "aguardando_humano" || atd.modoAtendimento === "humano" || atd.status === "resolvido") {
+    return { ok: true, jaSolicitado: true };
+  }
+
+  const now = Date.now();
+  await atdSnap.ref.set({ status: "aguardando_humano", updatedAt: now }, { merge: true });
+  const sysRef = atdSnap.ref.collection(SUB_MSG).doc();
+  await sysRef.set({
+    id: sysRef.id, atendimentoId, providerMessageId: null, idempotencyKey: null,
+    actorType: "system", actorId: caller.uid, actorName: "Sistema",
+    text: motivo ? `Atendimento humano solicitado — ${motivo}` : "Atendimento humano solicitado.",
+    attachments: [], deliveryStatus: "sent", provider: "erp", createdAt: now,
+  });
+  await writeAudit("atendimentos_audit_log", "solicitar_humano", caller.uid, caller.role, { atendimentoId, motivo });
+  return { ok: true, jaSolicitado: false };
 });

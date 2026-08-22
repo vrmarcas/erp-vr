@@ -15,26 +15,24 @@
  *   já existente, com status ✅ (confirmado) / ❌ (faltando, só para os
  *   campos que o backend já considera essenciais) e prontidão para
  *   orçamento (% + lista do que falta).
- * - atdCriarOuAbrirLead(): pré-preenche o modal JÁ EXISTENTE de Novo Lead
- *   (crmNovoLeadOverlay) com nome/telefone/produto da conversa — nunca
- *   cria nada sozinho, reaproveita 100% o dedupe de cliente já existente
- *   (_crmVincularCliente, chamado por crmSalvarNovoLead).
+ * - Ações de criar/abrir cliente/oportunidade: ver
+ *   scripts/test_hotfix_atendimentos_botoes_acao_2026-08-23.js e
+ *   scripts/test_hotfix_atendimentos_functions_vinculo_2026-08-23.js
+ *   (RODADA 9, Fechamento — redesenhadas para persistir de verdade via
+ *   Cloud Function, não mais só pré-preencher um modal).
  * - atdRevisarCriarOrcamento(): abre Novo Orçamento pré-preenchido com
  *   cliente + primeiro item (quando o briefing tiver produto/medidas/
  *   material) — nunca inventa dado ausente, o cálculo continua sendo do
  *   motor oficial (orcRecalc).
  *
- * IMPORTANTE (pré-condição de infraestrutura, documentada no relatório
- * final): a leitura de valeria_briefings exige a regra do Firestore
- * adicionada nesta rodada (firestore.rules) — comitada mas o deploy de
- * `firebase deploy --only firestore:rules` NÃO foi executado
- * automaticamente (ação de infraestrutura fora do escopo de deploy
- * autônomo desta rodada, que é só scripts/release_hosting.sh). Até esse
- * deploy acontecer, o listener falha graciosamente (catch abaixo) e o
- * painel simplesmente mostra "sem dados estruturados" — nunca quebra.
+ * ATUALIZAÇÃO (Rodada 9, Fechamento, 2026-08-23): a regra de
+ * valeria_briefings JÁ foi deployada (`firebase deploy --only
+ * firestore:rules`, ver relatório final) — o comentário original abaixo
+ * ficou obsoleto; o listener continua com o mesmo catch defensivo por
+ * segurança, mas a leitura já deve funcionar em produção.
  *
  * Funções sob teste extraídas de index.html (nunca reimplementadas):
- * atdBriefingHtml, atdRenderPainel, atdCriarOuAbrirLead, atdRevisarCriarOrcamento.
+ * atdBriefingHtml, atdRenderPainel, atdRevisarCriarOrcamento.
  *
  * Uso: node scripts/test_hotfix_atendimentos_briefing_crm_orcamento_2026-08-22.js
  */
@@ -62,7 +60,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdCriarOuAbrirLead', 'atdRevisarCriarOrcamento'];
+var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdRevisarCriarOrcamento'];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 
@@ -150,19 +148,13 @@ console.log('\n=== RODADA 9, Blocos G/H/I — briefing estruturado + CRM/orçame
   assertTrue(/Abrir orçamento/.test(out) && !/Revisar e criar/.test(out), '15. com orcamentoId já vinculado: botão vira "Abrir orçamento"');
 })();
 
-// ── atdCriarOuAbrirLead: pré-preenche sem criar nada sozinho ──────────────
-(function () {
-  reset();
-  global.ATD_CACHE = [{ id: 'atd3', nome: 'João Silva', telefoneE164: '+5562988887777', resumo: 'Quer 2 placas de acrílico' }];
-  global.ATD_BRIEFING_CACHE = { produto: 'Placa', material: 'Acrílico', larguraMm: 300, alturaMm: 200, quantidade: 2, prazo: '3 dias' };
-  mod.atdCriarOuAbrirLead('atd3');
-  assertTrue(global._crmAbriuModal === true, '16. abre o modal JÁ EXISTENTE de Novo Lead — nunca cria um novo formulário paralelo');
-  test('17. nome pré-preenchido com o nome confirmado da conversa', _els.nlNome.value, 'João Silva');
-  test('18. telefone pré-preenchido', _els.nlTel.value, '+5562988887777');
-  test('19. produto identificado pré-preenchido (revisável, não travado)', _els.nlProduto.value, 'Placa');
-  assertTrue(_els.nlObs.value.indexOf('Acrílico') >= 0 && _els.nlObs.value.indexOf('300×200mm') >= 0 && _els.nlObs.value.indexOf('3 dias') >= 0, '20. observações reúnem contexto útil (material/medidas/prazo) para o atendente revisar antes de salvar');
-  assertTrue(_toasts.some(function (t) { return /nada é criado automaticamente/i.test(t.msg); }), '21. deixa claro que nada foi criado sozinho — o atendente decide (mesmo princípio já usado em outras sugestões do ERP)');
-})();
+// RODADA 9, FECHAMENTO (2026-08-23) — atdCriarOuAbrirLead() foi removida:
+// os botões "Criar/Abrir cliente"/"Criar/Abrir oportunidade" deixaram de
+// só pré-preencher um modal (achado real: nada persistia) e passaram a
+// chamar Cloud Functions dedicadas que persistem o vínculo de verdade —
+// ver scripts/test_hotfix_atendimentos_botoes_acao_2026-08-23.js e
+// scripts/test_hotfix_atendimentos_functions_vinculo_2026-08-23.js, que
+// cobrem esse comportamento (novo) por completo.
 
 // ── atdRevisarCriarOrcamento: prefill correto, nunca inventa ─────────────
 (function () {
