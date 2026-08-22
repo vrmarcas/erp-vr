@@ -1506,13 +1506,18 @@ function _stockAplicarSnapshot(doc){
     }
   }
 }
+// RODADA 9 (2026-08-22, Bloco B) — mesmo achado do _CLOUD_WATCH_ERROR:
+// falha aqui era só console.warn, indistinguível de "estoque vazio de
+// verdade" para quem abre o modal "Iniciar Produção" (ver _kbOpenProdOverlay).
+var _STOCK_LOAD_ERROR = false;
 _CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
   function(doc){
     // Marcar como confirmado quando o dado vier do servidor (não do cache IndexedDB)
     if(doc.metadata && !doc.metadata.fromCache) _stockServerConfirmed = true;
+    _STOCK_LOAD_ERROR = false;
     try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); }
   },
-  function(e){ console.warn('[Stock] onSnapshot erro:',e); }
+  function(e){ console.warn('[Stock] onSnapshot erro:',e); _STOCK_LOAD_ERROR = true; }
 ));
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
@@ -1707,6 +1712,13 @@ function _cloudLoad(key, cb) {
   }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); cb(null); });
 }
 
+// RODADA 9 (2026-08-22, Bloco B) — achado real: erro de leitura de
+// qualquer coleção observada por _cloudWatch() (ex.: "retalhos") era só
+// console.warn — o operador nunca via nada além de uma lista vazia
+// (indistinguível de "não há retalhos cadastrados"). Rastreado aqui para
+// telas que precisam diferenciar "vazio de verdade" de "falhou ao
+// carregar" (ver _kbOpenProdOverlay).
+var _CLOUD_WATCH_ERROR = {};
 // Listener em tempo real
 function _cloudWatch(key, callback) {
   if(!_db) return;
@@ -1716,12 +1728,13 @@ function _cloudWatch(key, callback) {
       try {
         var raw = doc.data().data;
         _cloudLastPayload[key] = raw; // registrar para o anti-eco
+        _CLOUD_WATCH_ERROR[key] = false;
         // Passa fromCache como 2º argumento — callbacks que não precisam ignoram silenciosamente
         var fromCache = doc.metadata ? doc.metadata.fromCache : false;
         callback(JSON.parse(raw), fromCache);
       } catch(e){}
     }
-  }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); });
+  }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); _CLOUD_WATCH_ERROR[key] = true; });
   _CLOUD_UNSUBS.push(unsub); // [S4] acumular para cleanup no pagehide
   return unsub;
 }
@@ -14857,31 +14870,113 @@ function kbRetalhoCabeGeometricamente(dimsNecessarias, dimsRetalho, margemCm) {
   var nw = dimsNecessarias.w + margemCm, nh = dimsNecessarias.h + margemCm;
   return (dimsRetalho.w >= nw && dimsRetalho.h >= nh) || (dimsRetalho.w >= nh && dimsRetalho.h >= nw);
 }
+// RODADA 9 (2026-08-22, Bloco C) — kbNecessidadeDimsOS() só enxerga UMA
+// dimensão (item único, sem quebrar em peças) — inútil para o caso comum
+// de um item planificado em várias peças. Lê a lista real de peças da
+// planificação efetiva do item principal (fonte de verdade — nunca
+// reconstrução manual): item.pieces quando existe (peças automáticas +
+// manuais já resolvidas, RODADA 5-8), senão recipeSnapshot.pecas (OS
+// antigas, mesmo fallback de osItemMateriaisResumo). Cada entrada:
+// {w,h,qty}. Fallback ao comportamento anterior (uma única dimensão, qty
+// do item) quando não há peças detalhadas — nunca regride o caso hoje já
+// coberto por kbNecessidadeDimsOS/kbSugerirMaterial.
+// RODADA 9, Bloco C — achado real (pedido explícito): o operador
+// escolhendo manualmente um retalho não tinha nenhuma indicação de
+// compatibilidade real com a planificação. Anota "atende toda a
+// planificação" / "atende N de M peças" quando o material atualmente
+// selecionado no modal é conhecido; usado tanto na abertura quanto ao
+// trocar de material (kbProdOnMatChange) — nunca reordena a lista (o
+// índice É a referência persistida em os.matProd.retalhoIdx; reordenar
+// quebraria reabrir a edição de uma seleção já salva).
+function _kbRetalhoOptionLabel(os, r) {
+  var base = r.label + ' · ' + r.dims + ' cm (' + r.qty + ' un)';
+  var matSelAtual = (document.getElementById('kbProdMatSel')||{}).value || '';
+  if (!matSelAtual || r.mat !== matSelAtual) return base;
+  var necessidades = kbNecessidadesPecasOS(os);
+  if (!necessidades) return base;
+  var dr = kbParseDimsWH(r.dims);
+  var cob = dr ? kbRetalhoCobertura(necessidades, dr, kbMargemSegurancaRetalhoCm()) : null;
+  if (!cob) return base;
+  return base + (cob.total ? ' — ✅ atende toda a planificação' : (cob.pecasQueCabem>0 ? ' — ⚠ atende '+cob.pecasQueCabem+'/'+cob.totalPecas+' peças' : ' — ✗ não atende'));
+}
+function kbNecessidadesPecasOS(os) {
+  var itens = (os.itens || []).filter(function (it) { return it && it.prod; });
+  if (itens.length !== 1) return null;
+  var it = itens[0];
+  var pecas = (it.pieces && it.pieces.length) ? it.pieces : ((it.recipeSnapshot && it.recipeSnapshot.pecas) || null);
+  if (pecas && pecas.length) {
+    var out = pecas.map(function (p) {
+      var w = parseFloat(p.larg) || 0, h = parseFloat(p.alt) || 0, qty = parseInt(p.qty) || 1;
+      return (w > 0 && h > 0) ? { w: w, h: h, qty: qty } : null;
+    }).filter(Boolean);
+    return out.length ? out : null;
+  }
+  var dims = kbNecessidadeDimsOS(os);
+  return dims ? [{ w: dims.w, h: dims.h, qty: parseInt(it.qty) || 1 }] : null;
+}
+// RODADA 9, Bloco C — achado real (pedido explícito): o ERP não pode
+// afirmar "retalho suficiente" para a OS inteira quando ele só serve para
+// UMA peça da planificação. Classifica um retalho contra a lista real de
+// necessidades: cobertura TOTAL exige que a MAIOR peça caiba
+// geometricamente (com margem) E que a área do retalho comporte a área
+// total necessária (aproximação honesta — o ERP não faz nesting real);
+// cobertura PARCIAL conta quantas peças (respeitando quantidade) cabem
+// INDIVIDUALMENTE no retalho, sem prometer que cabem todas juntas.
+function kbRetalhoCobertura(necessidades, dimsRetalho, margemCm) {
+  if (!necessidades || !necessidades.length || !dimsRetalho) return null;
+  var totalPecas = necessidades.reduce(function (s, n) { return s + n.qty; }, 0);
+  var maior = necessidades.reduce(function (m, n) { return (n.w * n.h > m.w * m.h) ? n : m; }, necessidades[0]);
+  var areaRetalho = dimsRetalho.w * dimsRetalho.h;
+  var areaNecessaria = necessidades.reduce(function (s, n) { return s + n.w * n.h * n.qty; }, 0);
+  var maiorCabe = kbRetalhoCabeGeometricamente({ w: maior.w, h: maior.h }, dimsRetalho, margemCm);
+  var cobreTudo = maiorCabe && areaRetalho >= areaNecessaria * 1.02; // mesma tolerância de 2% já usada em kbSugerirMaterial
+  var pecasQueCabem = 0;
+  necessidades.forEach(function (n) {
+    if (kbRetalhoCabeGeometricamente({ w: n.w, h: n.h }, dimsRetalho, margemCm)) pecasQueCabem += n.qty;
+  });
+  return { total: cobreTudo, pecasQueCabem: pecasQueCabem, totalPecas: totalPecas };
+}
 function kbSugerirMaterial(os, matKey) {
   var areaNecessaria = kbCalcAreaOS(os);
   if (!areaNecessaria || !matKey || !STOCK[matKey]) return null;
   var margemCm = kbMargemSegurancaRetalhoCm();
   var dimsNecessarias = kbNecessidadeDimsOS(os);
-  // Retalhos compatíveis: mesmo material E compatível com a necessidade.
-  // Com dimensões de peça conhecidas (item único), exige encaixe
-  // geométrico real (largura×altura + margem de segurança) — nunca só
-  // área. Sem dimensões conhecidas (múltiplos itens), mantém a
-  // comparação por área com pequena tolerância de 2% (comportamento
-  // anterior, ainda válido como aproximação quando não há como isolar
-  // uma dimensão única).
-  var rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
-    if (r.qty <= 0 || r.mat !== matKey) return false;
-    if (dimsNecessarias) {
+  // RODADA 9, Bloco C — quando a planificação tem várias peças
+  // detalhadas, a sugestão AUTOMÁTICA só recomenda um retalho como
+  // substituto de chapa nova quando ele cobre a planificação INTEIRA
+  // (kbRetalhoCobertura().total) — nunca afirma "retalho suficiente" para
+  // a OS inteira baseado em uma peça só. Retalhos que atendem só
+  // parcialmente continuam disponíveis no dropdown para escolha manual
+  // (ver _kbOpenProdOverlay), só não são a sugestão automática.
+  var necessidades = kbNecessidadesPecasOS(os);
+  var rCompativeis;
+  if (necessidades && necessidades.length > 1) {
+    rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
+      if (r.qty <= 0 || r.mat !== matKey) return false;
       var dr = kbParseDimsWH(r.dims);
-      return dr && kbRetalhoCabeGeometricamente(dimsNecessarias, dr, margemCm);
-    }
-    return kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
-  }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); }); // menor retalho que ainda serve, primeiro
+      if (!dr) return false;
+      var cobertura = kbRetalhoCobertura(necessidades, dr, margemCm);
+      return cobertura && cobertura.total;
+    }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); });
+  } else {
+    // Item único/uma peça — mesmo critério de antes (encaixe geométrico
+    // direto), sem regressão.
+    rCompativeis = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) {
+      if (r.qty <= 0 || r.mat !== matKey) return false;
+      if (dimsNecessarias) {
+        var dr = kbParseDimsWH(r.dims);
+        return dr && kbRetalhoCabeGeometricamente(dimsNecessarias, dr, margemCm);
+      }
+      return kbParseDimsArea(r.dims) >= areaNecessaria * 0.98;
+    }).sort(function (a, b) { return kbParseDimsArea(a.dims) - kbParseDimsArea(b.dims); }); // menor retalho que ainda serve, primeiro
+  }
   if (rCompativeis.length) {
     var r = rCompativeis[0];
-    var motivoTxt = dimsNecessarias
-      ? ('cabe a peça de ' + dimsNecessarias.w + '×' + dimsNecessarias.h + ' cm + ' + margemCm + 'cm de margem')
-      : ('cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²');
+    var motivoTxt = (necessidades && necessidades.length > 1)
+      ? ('atende toda a planificação — ' + necessidades.reduce(function(s,n){return s+n.qty;},0) + ' peça(s) + ' + margemCm + 'cm de margem')
+      : (dimsNecessarias
+        ? ('cabe a peça de ' + dimsNecessarias.w + '×' + dimsNecessarias.h + ' cm + ' + margemCm + 'cm de margem')
+        : ('cobre a área planificada de ' + areaNecessaria.toFixed(2) + ' m²'));
     return { tipo: 'retalho', retalho: r, texto: '💡 Sugestão: usar retalho ' + (r.codigo || '—') + ' — ' + r.dims + ' cm (' + motivoTxt + ').' };
   }
   var s = STOCK[matKey];
@@ -14918,6 +15013,19 @@ function kbProdOnMatChange() {
   var os = KB_OS[_kbOsId];
   var matKey = (document.getElementById('kbProdMatSel') || {}).value || '';
   var sugBox = document.getElementById('kbProdSugestaoBox');
+  // RODADA 9, Bloco C — re-rotula o select de retalhos com a compatibilidade
+  // contra o material recém-selecionado (nunca reordena — ver
+  // _kbRetalhoOptionLabel).
+  if (os) {
+    var _retSelRelabel = document.getElementById('kbProdRetalhoSel');
+    if (_retSelRelabel) {
+      var _valorAtualRetalho = _retSelRelabel.value;
+      var _rListRelabel = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function (r) { return r.qty > 0; });
+      _retSelRelabel.innerHTML = '<option value="">— Selecionar retalho —</option>'
+        + _rListRelabel.map(function(r,i){ return '<option value="'+i+'">'+_kbRetalhoOptionLabel(os, r)+'</option>'; }).join('');
+      _retSelRelabel.value = _valorAtualRetalho;
+    }
+  }
   var sug = (os && matKey && !_kbProdEditMode) ? kbSugerirMaterial(os, matKey) : null;
   if (sug) {
     if (sugBox) { sugBox.style.display = ''; sugBox.innerHTML = kbSugestaoHtml(sug); }
@@ -14941,6 +15049,17 @@ function _kbOpenProdOverlay(os) {
   // Subtitle
   var sub = document.getElementById('kbProdSubtitle');
   if (sub) sub.textContent = 'OS #' + (os.num||os.id) + ' — ' + (os.titulo||'');
+  // RODADA 9, Bloco B — achado real: quando o listener de estoque/retalhos
+  // falhava (permissão, rede), o operador só via os dropdowns vazios, sem
+  // nenhuma explicação — indistinguível de "não há nada cadastrado".
+  // Avisa explicitamente quando a causa é uma falha de carregamento
+  // conhecida, nunca um silêncio.
+  if (typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR && typeof showToast === 'function') {
+    showToast('⚠️ Não foi possível carregar o Estoque de chapas — verifique sua conexão/permissão e tente novamente.', 'err');
+  }
+  if (typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos'] && typeof showToast === 'function') {
+    showToast('⚠️ Não foi possível carregar os Retalhos — verifique sua conexão/permissão e tente novamente.', 'err');
+  }
   // Populate material select from STOCK
   var matSel = document.getElementById('kbProdMatSel');
   if (matSel) {
@@ -14952,11 +15071,19 @@ function _kbOpenProdOverlay(os) {
           var espTag = s.esp ? ' — ' + s.esp + 'mm' : '';
           return '<option value="'+k+'"' + (s.qty<=0?' style="color:#DC2626"':'') + '>' + s.label + (s.cor?' '+s.cor:'') + espTag + avail + '</option>';
         }).join('');
-    // Pre-select if editing, else auto-match por espessura da OS
+    // Pre-select if editing, else auto-match por espessura (+ nome, para
+    // desempate) herdados da planificação — RODADA 9, Bloco B: só
+    // pré-seleciona quando o resultado é inequívoco; nunca escolhe errado
+    // silenciosamente, o operador sempre pode trocar manualmente.
     if (_kbProdEditMode && os.matProd && os.matProd.matKey) {
       matSel.value = os.matProd.matKey;
     } else if (!_kbProdEditMode && os.esp) {
       var _espKeys = Object.keys(STOCK).filter(function(k){ return STOCK[k].esp == os.esp && STOCK[k].qty > 0; });
+      if (_espKeys.length > 1 && os.matNomeBase) {
+        var _termoBusca = String(os.matNomeBase).toLowerCase().split(' ')[0];
+        var _porNome = _espKeys.filter(function(k){ return STOCK[k].label && STOCK[k].label.toLowerCase().indexOf(_termoBusca) >= 0; });
+        if (_porNome.length === 1) _espKeys = _porNome;
+      }
       if (_espKeys.length === 1) matSel.value = _espKeys[0];
     }
   }
@@ -14965,9 +15092,7 @@ function _kbOpenProdOverlay(os) {
   if (retSel) {
     var rList = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
     retSel.innerHTML = '<option value="">— Selecionar retalho —</option>'
-      + rList.map(function(r,i){
-          return '<option value="'+i+'">'+r.label+' · '+r.dims+' cm ('+r.qty+' un)</option>';
-        }).join('');
+      + rList.map(function(r,i){ return '<option value="'+i+'">'+_kbRetalhoOptionLabel(os, r)+'</option>'; }).join('');
     if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) retSel.value = os.matProd.retalhoIdx;
   }
   // Qty
@@ -27691,6 +27816,22 @@ function orcEnvGerarOS(){
   // a string única do material selecionado — ver osItemMateriaisResumo().
   var matLabel=itens.length?osItemMateriaisResumo(itens[0]):'—';
   var medidasStr=itens.length&&itens[0].larg&&itens[0].alt?(itens[0].larg+'×'+itens[0].alt+'cm'):'—';
+  // RODADA 9 (2026-08-22, Bloco B) — achado real: o modal "Iniciar
+  // Produção" tenta pré-selecionar o material no Estoque usando os.esp
+  // (_kbOpenProdOverlay), mas esse campo nunca era escrito na criação da
+  // OS — sempre undefined, tornando a pré-seleção/sugestão automática
+  // (kbSugerirMaterial) permanentemente inoperante; o operador sempre
+  // precisava reconstruir manualmente o que o orçamento/planificação já
+  // sabia. Herda a espessura da planificação efetiva (peças reais do item
+  // principal) SÓ quando ela é única e inequívoca — nunca inventa uma
+  // espessura quando o item tem múltiplas (o operador escolhe manualmente
+  // nesse caso, como hoje). matNomeBase é o nome "limpo" do material
+  // (sem "Nmm"/preço), usado só para desempatar quando mais de uma chapa
+  // no Estoque tem a mesma espessura.
+  var _pecasItem0 = itens.length ? ((itens[0].pieces && itens[0].pieces.length) ? itens[0].pieces : ((itens[0].recipeSnapshot && itens[0].recipeSnapshot.pecas) || [])) : [];
+  var _espsItem0 = _pecasItem0.map(function(p){ return p.espessuraMm!=null ? p.espessuraMm : p.esp; }).filter(function(e){ return e!=null && e!==''; });
+  var _espUnica = (_espsItem0.length && _espsItem0.every(function(e){ return String(e)===String(_espsItem0[0]); })) ? parseFloat(_espsItem0[0]) : null;
+  var _matNomeBase = (matLabel && matLabel!=='—' && matLabel.indexOf('+')<0) ? matLabel.replace(/\s*[\d.,]+\s*mm\s*$/i,'').trim() : '';
   var qtyTotal=itens.reduce(function(s,i){return s+(parseInt(i.qty)||1);},0)||1;
   // Parte 18/19 — checklist de etapas de produção na OS (Kanban continua
   // sendo a visão de ENTREGA/prazo, nunca reflete etapa interna). Checklist
@@ -27836,6 +27977,12 @@ function orcEnvGerarOS(){
           id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
           cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
           material:matLabel,medidas:medidasStr,qty:qtyTotal,
+          // RODADA 9, Bloco B — herdados da planificação efetiva para o
+          // modal "Iniciar Produção" pré-selecionar/sugerir o material no
+          // Estoque (ver _kbOpenProdOverlay/kbSugerirMaterial); ausentes
+          // (undefined) quando o item tem múltiplas espessuras — o
+          // operador continua escolhendo manualmente nesse caso, como hoje.
+          esp:(_espUnica!=null?_espUnica:undefined), matNomeBase:(_matNomeBase||undefined),
           // Regra corrigida (2026-08-07): o status depende do SALDO
           // REALMENTE pendente, não do tipo escolhido no modal — antes só
           // "50-50" ganhava aguardando_saldo; "parcial" com entrada
