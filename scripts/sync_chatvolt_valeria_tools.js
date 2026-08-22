@@ -132,6 +132,14 @@ const DESIRED_TOOLS = [
 
 function log(msg) { console.log(msg); }
 
+// Este script já não loga config/headers/valores de nenhuma Tool — só
+// nomes e rótulos de ação (CRIAR/ATUALIZAR/INTACTA). Se um modo de debug
+// que precise inspecionar o objeto completo de uma Tool for adicionado no
+// futuro, SEMPRE passar por scripts/lib/redact_util.js (redact()) antes de
+// logar — ver scripts/test_redact_util.js para o incidente real que
+// motivou isso (2026-08-21/22: um redator que só olhava nome de
+// propriedade JS não pegava o schema real {key,value} do Chatvolt).
+
 async function chatvoltFetch(path, opts) {
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (!apiKey) {
