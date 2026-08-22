@@ -333,6 +333,51 @@ export const valeriaCatalogo = RUN_OPTS.https.onRequest(async (req, res) => {
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 3b. MATERIAIS DISPONÍVEIS (VR personalizado — read-only, nunca custo/margem)
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaListarMateriais = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaListarMateriais");
+    if (!ppl) return;
+
+    try {
+      const doc = await admin.firestore().collection(COL).doc("erp_config").get();
+      const raw = doc.exists ? doc.data()?.data : null;
+      let cfg: { materiais?: Array<{ comp?: number; larg?: number; custo?: number; rsm2?: number; nome?: string }> } | null = null;
+      try { cfg = raw ? JSON.parse(raw) : null; } catch { cfg = null; }
+
+      // Mesma regra de pricing.ts:getMaterialPriceM2 — rsm2 pré-calculado é a
+      // fonte preferencial; fallback custo/área (campo real é `custo`, não
+      // `preco`, que nunca existiu nos dados reais do ERP).
+      const materiais = (cfg?.materiais ?? [])
+        .map((m, i) => {
+          let precoM2: number | null = null;
+          if (typeof m.rsm2 === "number" && m.rsm2 > 0) {
+            precoM2 = m.rsm2;
+          } else {
+            const area = ((m.comp ?? 0) * (m.larg ?? 0)) / 10000; // cm² → m²
+            if (area > 0 && typeof m.custo === "number" && m.custo > 0) precoM2 = m.custo / area;
+          }
+          if (precoM2 === null) return null;
+          return {
+            matKey: `cfg_${i}`,
+            nome: m.nome || `Material ${i + 1}`,
+            precoM2: Math.round(precoM2 * 100) / 100,
+          };
+        })
+        .filter((m): m is { matKey: string; nome: string; precoM2: number } => m !== null);
+
+      res.json(ok(
+        { materiais, total: materiais.length },
+        { communicableToCustomer: true, verified: true }
+      ));
+    } catch (e) {
+      console.error("[valeriaListarMateriais]", (e as Error).message);
+      res.status(500).json(QUOTE_RESPONSES.temporarilyUnavailable());
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4. CALCULAR ORÇAMENTO (motor oficial — retorna simulationId, não total exposto)
 // ─────────────────────────────────────────────────────────────────────────────
 export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res) => {

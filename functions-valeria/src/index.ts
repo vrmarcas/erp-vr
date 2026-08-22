@@ -21,6 +21,7 @@ export {
   valeriaGetContexto,
   valeriaUpsertCliente,
   valeriaCatalogo,
+  valeriaListarMateriais,
   valeriaCalcularOrcamento,
   valeriaCriarOrcamento,
   valeriaCriarOportunidade,

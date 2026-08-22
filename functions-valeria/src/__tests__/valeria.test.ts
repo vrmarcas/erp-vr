@@ -316,7 +316,9 @@ describe("PRICING — evaluateQuoteEligibility", () => {
       data: JSON.stringify({
         financeiro: { overhead: 41.16, vrml: 20, impostos: 0 },
         materiais: [
-          { comp: 183, larg: 122, preco: 180, nome: "Acrílico 3mm Fictício" },
+          // Campos reais do Firestore: `custo` (total da chapa) + `rsm2`
+          // pré-calculado (R$/m²) — `preco` nunca existiu em produção.
+          { comp: 183, larg: 122, custo: 180, rsm2: 8.05, nome: "Acrílico 3mm Fictício" },
         ],
       }),
     };
@@ -518,7 +520,7 @@ describe("ISOLATION — conversationId isola dados entre clientes", () => {
     _firestoreData["erp_config"] = {
       data: JSON.stringify({
         financeiro: { overhead: 41.16, vrml: 20, impostos: 0 },
-        materiais: [{ comp: 183, larg: 122, preco: 180 }],
+        materiais: [{ comp: 183, larg: 122, custo: 180, rsm2: 8.05 }],
       }),
     };
     const r = await evaluateQuoteEligibility([{ larg: 100, alt: 100, qty: 1, matKey: "cfg_0" }]);
