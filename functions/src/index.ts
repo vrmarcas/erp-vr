@@ -134,4 +134,8 @@ export {
   atdVincularOportunidade,
   atdVincularOrcamento,
   atdSolicitarHumano,
+  // Rodada curta pós-9 (fechamento do handoff automático) — Tool HTTP que a
+  // própria ValerIA chama (Bearer auth), reaproveitando o mesmo núcleo de
+  // atdSolicitarHumano acima.
+  atdSolicitarHumanoValeria,
 } from "./atendimentos";

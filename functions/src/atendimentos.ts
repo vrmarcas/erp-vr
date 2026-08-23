@@ -24,6 +24,7 @@ import * as admin from "firebase-admin";
 import { getCallerVerificado, requireRole, acquireIdem, writeAudit, parseDoc } from "./auth_helper";
 import { ChatVoltProvider } from "./chatvolt_provider";
 import { AIProvider } from "./ai_provider";
+import { checkAuth } from "./valeria";
 
 const COL_ATD = "atendimentos";
 const SUB_MSG = "mensagens";
@@ -690,13 +691,53 @@ export const atdVincularOrcamento = functions.https.onCall(async (data, context)
 });
 
 // ── 11. Solicitar humano (handoff) ──────────────────────────────────────────
-// Fecha o elo documentado como pendente na rodada anterior: nada gravava
-// status='aguardando_humano' em atendimentos/{id} — o badge/filtro do
-// frontend já existiam, só nunca acendiam. Chamável pelo próprio ERP (um
-// atendente pode marcar "precisa de humano" manualmente); a ValerIA
-// pedir isso sozinha via Tool do Chatvolt é a integração externa que falta
-// (ver relatório final — fora do escopo desta rodada: exige registrar uma
-// nova Tool no agente, ação de sincronização externa mais arriscada).
+// Núcleo único reaproveitado pelas DUAS fronteiras de auth que precisam
+// disparar o mesmo handoff: o próprio ERP (atendente marca manualmente,
+// onCall/Firebase Auth) e a ValerIA (onRequest/Bearer — ver
+// atdSolicitarHumanoValeria abaixo). Nunca duplicar esta lógica.
+//
+// Transacional (get+set atômico) — antes desta rodada era get() e set()
+// separados; sob duas chamadas verdadeiramente concorrentes (Teste D da
+// Rodada Handoff), ambas liam o estado antigo antes de qualquer write
+// terminar e cada uma gravava sua PRÓPRIA mensagem de sistema, duplicando
+// o aviso mesmo com o status final correto. A transação serializa as duas
+// e garante uma única mensagem de sistema por handoff efetivo.
+async function solicitarHumanoCore(
+  atendimentoId: string,
+  motivo: string,
+  actorId: string,
+  actorRole: string
+): Promise<{ ok: true; jaSolicitado: boolean }> {
+  const db_ = db();
+  const ref = db_.collection(COL_ATD).doc(atendimentoId);
+  const now = Date.now();
+
+  const jaSolicitado = await db_.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Atendimento não encontrado.");
+    }
+    const atd = snap.data()!;
+    if (atd.status === "aguardando_humano" || atd.modoAtendimento === "humano" || atd.status === "resolvido") {
+      return true;
+    }
+    tx.set(ref, { status: "aguardando_humano", updatedAt: now }, { merge: true });
+    const sysRef = ref.collection(SUB_MSG).doc();
+    tx.set(sysRef, {
+      id: sysRef.id, atendimentoId, providerMessageId: null, idempotencyKey: null,
+      actorType: "system", actorId, actorName: "Sistema",
+      text: motivo ? `Atendimento humano solicitado — ${motivo}` : "Atendimento humano solicitado.",
+      attachments: [], deliveryStatus: "sent", provider: "erp", createdAt: now,
+    });
+    return false;
+  });
+
+  await writeAudit("atendimentos_audit_log", "solicitar_humano", actorId, actorRole, { atendimentoId, motivo });
+  return { ok: true, jaSolicitado };
+}
+
+// Chamável pelo próprio ERP — um atendente pode marcar "precisa de humano"
+// manualmente (Master/Comercial, sessão Firebase Auth real).
 export const atdSolicitarHumano = functions.https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, ["comercial"], "solicitar humano em um atendimento");
@@ -704,22 +745,52 @@ export const atdSolicitarHumano = functions.https.onCall(async (data, context) =
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
   const motivo = String(data?.motivo || "").trim().slice(0, 300);
-  const atdSnap = await carregarAtendimento(atendimentoId);
-  const atd = atdSnap.data()!;
+  return solicitarHumanoCore(atendimentoId, motivo, caller.uid, caller.role);
+});
 
-  if (atd.status === "aguardando_humano" || atd.modoAtendimento === "humano" || atd.status === "resolvido") {
-    return { ok: true, jaSolicitado: true };
+// ── 12. Solicitar humano — chamado pela própria ValerIA (Tool HTTP) ────────
+// Fecha o elo que ficou documentado como pendente na rodada anterior: a
+// ValerIA (Chatvolt) não é um usuário do ERP com sessão Firebase — é um
+// serviço externo autenticado só pelo Bearer compartilhado, mesmo padrão
+// de auth já usado por todas as Tools HTTP em valeria_vitre.ts
+// (checkAuth/erp_vr/valeria_config.secret — nunca write direto client-side
+// no Firestore). `conversationId` aqui É o atendimentoId do próprio ERP —
+// a ValerIA sempre ecoa o marcador [ID_ATENDIMENTO: x] injetado em cada
+// mensagem (ver prompt, seção "IDENTIFICADOR DO ATENDIMENTO"), então o
+// mesmo valor que as outras Tools (atualizar_briefing etc.) já recebem
+// como conversationId serve para localizar o documento aqui.
+// acquireIdem cobre retry de rede da própria ValerIA (mesma chamada
+// reenviada); a transação em solicitarHumanoCore cobre concorrência real
+// entre chamadas diferentes (Teste D).
+export const atdSolicitarHumanoValeria = functions.https.onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (!(await checkAuth(req, res))) return;
+  if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
+
+  const body = req.body as { conversationId?: string; organizationId?: string; motivo?: string; requestId?: string };
+  const atendimentoId = String(body?.conversationId || "").trim();
+  const organizationId = String(body?.organizationId || "").trim();
+  const requestId = String(body?.requestId || "").trim();
+  if (!atendimentoId || !organizationId) {
+    res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios" });
+    return;
   }
+  if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório" }); return; }
 
-  const now = Date.now();
-  await atdSnap.ref.set({ status: "aguardando_humano", updatedAt: now }, { merge: true });
-  const sysRef = atdSnap.ref.collection(SUB_MSG).doc();
-  await sysRef.set({
-    id: sysRef.id, atendimentoId, providerMessageId: null, idempotencyKey: null,
-    actorType: "system", actorId: caller.uid, actorName: "Sistema",
-    text: motivo ? `Atendimento humano solicitado — ${motivo}` : "Atendimento humano solicitado.",
-    attachments: [], deliveryStatus: "sent", provider: "erp", createdAt: now,
-  });
-  await writeAudit("atendimentos_audit_log", "solicitar_humano", caller.uid, caller.role, { atendimentoId, motivo });
-  return { ok: true, jaSolicitado: false };
+  const idemKey = `atd_solicitar_humano_ai:${atendimentoId}:${requestId}`;
+  if (!(await acquireIdem("atendimentos_idem", idemKey))) { res.json({ ok: true, jaSolicitado: true }); return; }
+
+  const motivo = String(body?.motivo || "").trim().slice(0, 300);
+  try {
+    const resultado = await solicitarHumanoCore(atendimentoId, motivo, "valeria", "valeria_agent");
+    res.json(resultado);
+  } catch (e) {
+    const httpErr = e as { code?: string; message?: string };
+    if (httpErr.code === "not-found") {
+      res.status(404).json({ ok: false, error: "Atendimento não encontrado." });
+      return;
+    }
+    res.status(500).json({ ok: false, error: httpErr.message || "Erro interno." });
+  }
 });
