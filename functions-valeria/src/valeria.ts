@@ -23,6 +23,9 @@ import { randomUUID } from "crypto";
 import { pipeline } from "./pipeline";
 import { withIdempotency, extractIdempotencyKey } from "./idempotency";
 import { evaluateQuoteEligibility } from "./pricing";
+import { calculatePersonalizedProduct, describeProductFields } from "./quote_core";
+import { nextCommercialAction, computeQuoteReadiness } from "./orchestrator";
+import { estimateProductionDeadline, checkUrgentFit } from "./deadline";
 import { ok, err, QUOTE_RESPONSES } from "./response";
 import { paraE164BR, encontrarPorTelefone } from "./telefone";
 
@@ -213,6 +216,28 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       const etapaValeria = lead?.valeria?.status ?? null;
       const etapaKanban  = lead?.etapa ?? null;
 
+      // Sprint P0.2 — orquestração determinística (orchestrator.ts): o
+      // atendimento (functions/ default codebase, MESMO projeto Firestore)
+      // é lido aqui só para saber se já existe orçamento vinculado — nunca
+      // retroceder para discovery depois disso. ctx.conversationId ==
+      // atendimentoId desde o hotfix do marcador [ID_ATENDIMENTO: X].
+      let orcamentoJaCriado = false;
+      try {
+        const atdDoc = await db.collection("atendimentos").doc(ctx.conversationId).get();
+        orcamentoJaCriado = atdDoc.exists && !!atdDoc.data()?.orcamentoId;
+      } catch { /* atendimento pode não existir (canal fora do módulo Atendimentos) — não bloqueia */ }
+
+      const briefingTyped = briefing as import("./types").BriefingData | null;
+      const nextAction = nextCommercialAction({
+        briefing: briefingTyped,
+        cliente,
+        lead,
+        channelPhone: ctx.channelPhone ?? null,
+        temHistoricoConversa: !!briefing || !!cliente || !!lead,
+        orcamentoJaCriado,
+      });
+      const quoteReadiness = computeQuoteReadiness(briefingTyped, cliente, lead, ctx.channelPhone ?? null);
+
       res.json(ok(
         {
           conversationId: ctx.conversationId,
@@ -224,6 +249,11 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
           etapaKanban,
           camposFaltando: (briefing as { camposFaltando?: string[] } | null)?.camposFaltando ?? null,
           classificacao:  (briefing as { classificacao?: string } | null)?.classificacao ?? null,
+          // P0.24 — Tool Output orientado à ação: a Valéria segue
+          // nextAction.nextAction, não decide sozinha o próximo passo.
+          quoteReadiness,
+          nextAction: nextAction.nextAction,
+          nextActionReason: nextAction.reason,
         },
         { communicableToCustomer: false, verified: !!cliente }
       ));
@@ -447,6 +477,173 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
     );
 
     res.status(result.success ? 200 : 422).json(result);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4b. PREPARAR PRODUTO PERSONALIZADO (discovery — sprint P0.2 2026-08-23)
+// Descobre dinamicamente quais campos são obrigatórios para um produto
+// específico ANTES de perguntar ao cliente — nunca hardcoded no prompt.
+// Read-only, sem custo/margem.
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaPrepararProdutoPersonalizado = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaPrepararProdutoPersonalizado");
+    if (!ppl) return;
+
+    const body = req.body as Record<string, unknown>;
+    const produto = String(body["produto"] || "").trim();
+    if (!produto) {
+      res.status(400).json(err("VALIDATION_ERROR", "produto é obrigatório.", { missingFields: ["produto"] }));
+      return;
+    }
+
+    try {
+      const info = describeProductFields(produto);
+      res.json(ok(info, { communicableToCustomer: true, verified: true }));
+    } catch (e) {
+      console.error("[valeriaPrepararProdutoPersonalizado]", (e as Error).message);
+      res.status(500).json(QUOTE_RESPONSES.temporarilyUnavailable());
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4c. CALCULAR PRODUTO PERSONALIZADO MULTI-PEÇA (sprint P0.2 2026-08-23)
+// Usa quote_core.ts (geometria PLAN_RECIPES pura + motor oficial de preço,
+// nunca reimplementa matemática). Gera simulação no MESMO formato/coleção
+// de valeriaCalcularOrcamento — valeriaCriarOrcamento (já existente, sem
+// alteração) persiste o orçamento formal a partir do simulationId.
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaCalcularProdutoPersonalizado");
+    if (!ppl) return;
+    const { ctx } = ppl;
+    if (req.method !== "POST") { res.status(405).json(err("METHOD_NOT_ALLOWED", "Use POST.")); return; }
+
+    const body = req.body as Record<string, unknown>;
+    const produto = String(body["produto"] || "").trim();
+    const larg = parseFloat(String(body["larg"]));
+    const alt = parseFloat(String(body["alt"]));
+    const prof = body["prof"] != null ? parseFloat(String(body["prof"])) : undefined;
+    const esp = parseFloat(String(body["esp"]));
+    const matKey = String(body["matKey"] || "").trim();
+    const qty = parseFloat(String(body["qty"])) || 1;
+
+    const missing: string[] = [];
+    if (!produto) missing.push("produto");
+    if (!(larg > 0)) missing.push("larg");
+    if (!(alt > 0)) missing.push("alt");
+    if (!(esp > 0)) missing.push("esp");
+    if (!matKey) missing.push("matKey");
+    if (missing.length > 0) {
+      res.status(400).json(err("VALIDATION_ERROR", "Campos obrigatórios ausentes.", { missingFields: missing }));
+      return;
+    }
+
+    const idempKey = extractIdempotencyKey(req);
+    const result = await withIdempotency(
+      { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCalcularProdutoPersonalizado" },
+      async () => {
+        const calc = await calculatePersonalizedProduct({ produto, larg, alt, prof, esp, matKey, qty });
+        const pricing = calc.pricing;
+
+        switch (pricing.eligibility) {
+          case "NEEDS_INFORMATION":
+            return QUOTE_RESPONSES.needsInformation(pricing.missingFields ?? []);
+          case "HUMAN_VALIDATION_REQUIRED":
+            return QUOTE_RESPONSES.humanValidationRequired(
+              `Validação humana necessária: ${(pricing.missingFields ?? []).join(", ")}`
+            );
+          case "UNSUPPORTED":
+            return QUOTE_RESPONSES.unsupported(produto);
+          case "TEMPORARILY_UNAVAILABLE":
+            return QUOTE_RESPONSES.temporarilyUnavailable();
+          case "ELIGIBLE": {
+            const simId = pricing.simulationId ?? uid("sim");
+            const simNow = Date.now();
+            const itensNormalizados = calc.pieces.map((p) => ({
+              larg: p.larg, alt: p.alt, qty: p.qtyTotal, matKey, descricao: p.nome,
+            }));
+            const sim: PricingSimulation = {
+              simulationId: simId,
+              conversationId: ctx.conversationId,
+              itensNormalizados: itensNormalizados as unknown as QuoteItem[],
+              finalPrice: pricing.finalPrice!,
+              pricingVersion: pricing.pricingVersion!,
+              createdAt: simNow,
+              expiresAt: simNow + SIM_TTL_MS,
+              origem: "valeria",
+              usado: false,
+            };
+            await saveSimulation(sim);
+
+            return ok(
+              {
+                simulationId: simId,
+                produto,
+                dim3d: calc.dim3d,
+                pieces: calc.pieces,
+                finalPrice: pricing.finalPrice,
+                pricingVersion: pricing.pricingVersion,
+                warnings: calc.warnings,
+                conversationId: ctx.conversationId,
+              },
+              { communicableToCustomer: true, verified: true }
+            );
+          }
+        }
+      }
+    );
+
+    res.status(result.success ? 200 : 422).json(result);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4d. CONSULTAR PRAZO DE PRODUÇÃO (sprint P0.2, P0.20 — read-only)
+// Nunca expõe custo/margem/capacidade interna sensível. Hoje sempre
+// canEstimate:false (ver deadline.ts) — comportamento correto, não um
+// bug: não existe fonte real de capacidade no ERP ainda.
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaConsultarPrazoProducao = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaConsultarPrazoProducao");
+    if (!ppl) return;
+
+    const body = req.body as Record<string, unknown>;
+    const produto = String(body["produto"] || "").trim();
+    if (!produto) {
+      res.status(400).json(err("VALIDATION_ERROR", "produto é obrigatório.", { missingFields: ["produto"] }));
+      return;
+    }
+    const areaTotalM2 = body["areaTotalM2"] != null ? parseFloat(String(body["areaTotalM2"])) : undefined;
+    const quantidade = body["quantidade"] != null ? parseFloat(String(body["quantidade"])) : undefined;
+
+    const estimativa = estimateProductionDeadline({ produto, areaTotalM2, quantidade });
+    res.json(ok(estimativa, { communicableToCustomer: true, verified: true }));
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4e. VERIFICAR ENCAIXE DE URGÊNCIA (sprint P0.2, P0.21 — read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaVerificarEncaixeProducao = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaVerificarEncaixeProducao");
+    if (!ppl) return;
+
+    const body = req.body as Record<string, unknown>;
+    const produto = String(body["produto"] || "").trim();
+    const requestedDateISO = String(body["dataNecessidadeCliente"] || "").trim();
+    if (!produto || !requestedDateISO) {
+      res.status(400).json(err("VALIDATION_ERROR", "produto e dataNecessidadeCliente são obrigatórios.", {
+        missingFields: [!produto ? "produto" : null, !requestedDateISO ? "dataNecessidadeCliente" : null].filter(Boolean) as string[],
+      }));
+      return;
+    }
+    const areaTotalM2 = body["areaTotalM2"] != null ? parseFloat(String(body["areaTotalM2"])) : undefined;
+    const quantidade = body["quantidade"] != null ? parseFloat(String(body["quantidade"])) : undefined;
+
+    const resultado = checkUrgentFit({ produto, requestedDateISO, areaTotalM2, quantidade });
+    res.json(ok(resultado, { communicableToCustomer: true, verified: true }));
   }
 );
 
