@@ -19,6 +19,9 @@ export { getGoogleAuthUrl, handleGoogleCallback } from "./googleAds";
 // ── Sync automático + Manual ──────────────────────────────────────────────────
 export { syncMarketingMetricsData, forceMarketingSync } from "./syncMetrics";
 
+// ── Backup automático diário (Rodada curta pós-9, Objetivo 2) ─────────────────
+export { erpBackupDiario } from "./backup";
+
 // ── Admin User Management (FASE 5) ───────────────────────────────────────────
 export {
   adminCreateUser,

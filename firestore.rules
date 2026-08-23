@@ -78,6 +78,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── erp_backups: snapshot diário gerado por Cloud Function agendada ────
+    // (Rodada curta pós-9, Objetivo 2). Causa raiz do "[Backup] Falhou":
+    // esta coleção nunca teve Rule própria — caía no catch-all
+    // `allow read, write: if false` do fim deste arquivo, negando até o
+    // master. Corrigida com Rule mínima e por role, mesmo padrão de
+    // marketing_sync_logs acima: só master lê (contém um snapshot completo
+    // de dados sensíveis — estoque, clientes, financeiro), escrita sempre
+    // negada ao client — só erpBackupDiario (Admin SDK, functions/src/
+    // backup.ts) grava, agendada, nunca no navegador do usuário.
+    match /erp_backups/{docId} {
+      allow read:  if isMaster();
+      allow write: if false;
+    }
+
     // ── erp_vr: coleção principal do ERP ───────────────────────────────────
     // Modelo de dados: cada "tabela" lógica é UM ÚNICO documento contendo um
     // array inteiro serializado em JSON (campo "data", string). Isso significa
@@ -207,32 +221,31 @@ service cloud.firestore {
       // financeiro de uma OS.
       allow read, write: if (isMaster() || isFinanceiro() || isComercial()) && docId == 'kb_os_fin';
 
-      // ── RULES CANDIDATAS (preparadas, NÃO publicadas — auditoria Fase F,
-      // FASE 2-8, 2026-08-05) ──────────────────────────────────────────────
-      // Achado: 'stock'/'erp_stock_log'/'retalhos' são documentos agregados
-      // (blob JSON em `data`) — Rules não conseguem validar campo a campo
-      // (não dá para permitir escrever `qty` mas negar zerar o documento
-      // inteiro). A única forma de fechar o bypass de verdade é mover TODA
-      // escrita para Cloud Functions (feito nesta rodada — ver
-      // functions/src/estoque.ts e producao.ts, todas usando Admin SDK, que
-      // sempre ignora Rules) e negar escrita client-side aqui.
+      // ── Estoque/retalhos: leitura por role, escrita SÓ por Cloud Function
+      // (auditoria Fase F, FASE 2-8, 2026-08-05; publicadas na Rodada 9,
+      // Fechamento, 2026-08-23) ───────────────────────────────────────────
+      // Achado original: 'stock'/'erp_stock_log'/'retalhos' são documentos
+      // agregados (blob JSON em `data`) — Rules não conseguem validar campo
+      // a campo (não dá para permitir escrever `qty` mas negar zerar o
+      // documento inteiro). A única forma de fechar o bypass de verdade é
+      // mover TODA escrita para Cloud Functions (ver functions/src/
+      // estoque.ts e producao.ts, todas usando Admin SDK, que sempre ignora
+      // Rules) e negar escrita client-side aqui — feito e já em produção.
       //
-      // ⚠️ BLOQUEADOR DE DEPLOY CONHECIDO, documentado e não escondido: o
-      // fluxo LEGADO de recebimento de Compras v1 (comprasReceberModal(),
-      // ramo `else` — ativo quando _HOMOLOG_MODE é false, ou seja, é o que
-      // roda em PRODUÇÃO hoje, já que _HOMOLOG_MODE só liga com
-      // localhost+?emulator=1) ainda escreve 'stock' diretamente do cliente
-      // ao registrar recebimento (index.html, dentro de comprasReceberModal,
-      // incremento de STOCK[item.material].qty). Publicar este `allow
-      // write: if false` em produção QUEBRARIA esse fluxo legado ainda
-      // ativo. Isso não foi migrado nesta rodada porque pertence à migração
-      // maior, já rastreada separadamente, de Compras v1 → v2 (documento-
-      // por-registro) — mesma arquitetura do bloco erp_vr_compras* abaixo.
-      // Publicar esta Rule específica requer primeiro migrar ou aposentar
-      // esse ramo legado. Ver relatório final desta rodada, item de
-      // pendências.
+      // O bloqueador de deploy que existia (fluxo legado de recebimento de
+      // Compras v1, comprasReceberModal() ramo `else`, escrevendo 'stock'
+      // direto do cliente) deixou de existir antes mesmo desta Rule ser
+      // publicada: `_COMPRAS_V2_OFICIAL = true` incondicional (index.html)
+      // já tornava esse ramo código morto, inalcançável em qualquer
+      // ambiente. O único outro write client-side remanescente para
+      // 'stock' (_stockApplyTomb()/stockSaveData(), limpeza automática de
+      // itens tombados) foi removido na Rodada curta pós-9, Objetivo 3 —
+      // era um mecanismo obsoleto (o problema que ele corrigia, um client
+      // antigo sobrescrevendo 'stock' inteiro, já está estruturalmente
+      // prevenido por esta mesma Rule) e sempre falhava silenciosamente
+      // contra ela.
       // Escrita client-side ausente de propósito para estes 5 docIds — nenhum
-      // 'allow write' os cobre mais, então o deny-by-default do Firestore se
+      // 'allow write' os cobre, então o deny-by-default do Firestore se
       // aplica (mesma convenção do restante deste arquivo — ver nota no fim
       // do bloco: "Nega tudo o mais por padrão"). Só Admin SDK (Cloud
       // Functions) escreve, via estoque.ts/producao.ts.
