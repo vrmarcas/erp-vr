@@ -27454,7 +27454,12 @@ function orcEnvEditar(id) {
   var lista = orcGetEnviados();
   var o = lista.find(function(x){ return x.id===id; });
   if(!o){ showToast('Orçamento não encontrado','warn'); return; }
-  document.getElementById('orcEnvModal').style.display='none';
+  // RODADA 9, FECHAMENTO (2026-08-23) — achado real de smoke test: chamado
+  // agora também a partir de Atendimentos ("Abrir orçamento"), onde o modal
+  // de Orçamentos Enviados nunca foi aberto nesta sessão (ele só é criado
+  // dinamicamente em orcEnvVerDetalhe) — sem o guard, .style em null quebrava
+  // a navegação inteira. Mesmo padrão if(el) já usado no resto da função.
+  var _envModal = document.getElementById('orcEnvModal'); if(_envModal) _envModal.style.display='none';
   if(o.osRef) showToast('Atenção: este orçamento já tem uma OS gerada — editar os itens aqui NÃO atualiza a OS/financeiro já criados.','warn');
   // Navegar para a aba de orçamento
   nav('orcamento');
