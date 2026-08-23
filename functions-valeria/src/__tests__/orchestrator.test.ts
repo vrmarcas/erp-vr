@@ -200,4 +200,30 @@ describe("ORCHESTRATOR — Bloco F: technicalBriefing como fonte de verdade (pro
     });
     expect(r.nextAction).toBe("present_quote");
   });
+
+  test("18. P0.7 — calculate_quote sempre traz toolToCall='calcular_produto_personalizado', nunca deixa o LLM escolher entre Tools parecidas", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+    });
+    expect(r.nextAction).toBe("calculate_quote");
+    expect(r.actionPayload.toolToCall).toBe("calcular_produto_personalizado");
+  });
+
+  test("19. P0.8 — actionPayload.askPermission é SEMPRE false, em toda ação possível (nunca existe estado de 'pedir permissão')", () => {
+    const cenarios: Array<Parameters<typeof nextCommercialAction>[0]> = [
+      { briefing: null, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: false, orcamentoJaCriado: false },
+      { briefing: { observacoes: "oi" }, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false },
+      { briefing: { produto: "Caixa" }, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false },
+      { briefing: briefingCompleto, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false },
+      { briefing: briefingCompleto, cliente: clienteConfirmado, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false },
+      { briefing: null, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: true },
+      { briefing: null, cliente: null, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false, handoffReasonCode: "CUSTOMER_REQUESTED_HUMAN" },
+      { briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null, temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto },
+    ];
+    for (const cenario of cenarios) {
+      const r = nextCommercialAction(cenario);
+      expect(r.actionPayload.askPermission).toBe(false);
+    }
+  });
 });

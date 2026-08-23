@@ -14,6 +14,46 @@ import { emptyTechnicalBriefing, computeTechnicalReadiness } from "./technical_b
 
 const COL = "valeria_technical_briefings";
 
+/**
+ * Sprint P0.4 — a ÚNICA fonte de verdade de qual simulação é a "última
+ * elegível" desta conversa. O LLM NUNCA decide/gera este valor — ele só
+ * é escrito por valeriaCalcularProdutoPersonalizado logo após uma
+ * simulação ELIGIBLE, e lido por valeriaCriarOrcamento, que ignora
+ * qualquer simulationId que o modelo tente enviar. `fingerprint` é o
+ * technicalBriefingFingerprint() calculado NO MOMENTO do cálculo — se o
+ * briefing atual da conversa gerar um fingerprint diferente na hora de
+ * criar o orçamento, a simulação é tratada como desatualizada (P0.4).
+ */
+export interface LastEligibleSimulation {
+  simulationId: string;
+  createdAt: number;
+  productId: string;
+  finalPrice: number;
+  fingerprint: string;
+}
+
+export async function saveLastEligibleSimulation(conversationId: string, rec: LastEligibleSimulation): Promise<void> {
+  await admin.firestore().collection(COL).doc(conversationId).set(
+    { lastEligibleSimulation: rec, updatedAt: Date.now() },
+    { merge: true }
+  );
+}
+
+export async function loadLastEligibleSimulation(conversationId: string): Promise<LastEligibleSimulation | null> {
+  const doc = await admin.firestore().collection(COL).doc(conversationId).get();
+  if (!doc.exists) return null;
+  const data = doc.data() as { lastEligibleSimulation?: LastEligibleSimulation } | undefined;
+  return data?.lastEligibleSimulation ?? null;
+}
+
+/** Consumida (orçamento criado) — nunca reutilizável de novo, mesmo que o fingerprint ainda bata. */
+export async function clearLastEligibleSimulation(conversationId: string): Promise<void> {
+  await admin.firestore().collection(COL).doc(conversationId).set(
+    { lastEligibleSimulation: admin.firestore.FieldValue.delete(), updatedAt: Date.now() },
+    { merge: true }
+  );
+}
+
 export async function loadTechnicalBriefing(conversationId: string): Promise<TechnicalBriefing> {
   const doc = await admin.firestore().collection(COL).doc(conversationId).get();
   if (!doc.exists) return emptyTechnicalBriefing();
@@ -41,6 +81,8 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
     ...(patch.quantity !== undefined ? { quantity: patch.quantity } : {}),
     ...(patch.materialId !== undefined ? { materialId: patch.materialId } : {}),
     ...(patch.thicknessMm !== undefined ? { thicknessMm: patch.thicknessMm } : {}),
+    ...(patch.adesivo !== undefined ? { adesivo: patch.adesivo } : {}),
+    ...(patch.adesivoBranco !== undefined ? { adesivoBranco: patch.adesivoBranco } : {}),
     dimensions: {
       larguraMm: patch.dimensions?.larguraMm !== undefined ? patch.dimensions.larguraMm : atual.dimensions.larguraMm,
       alturaMm: patch.dimensions?.alturaMm !== undefined ? patch.dimensions.alturaMm : atual.dimensions.alturaMm,

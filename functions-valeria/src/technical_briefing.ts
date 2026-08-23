@@ -39,6 +39,14 @@ export interface TechnicalBriefing {
   quantity: number | null;
   materialId: string | null;  // = matKey (cfg_N)
   thicknessMm: number | null; // esp
+  /**
+   * Sprint P0.4 — consumíveis que afetam preço (Bloco C), rastreados aqui
+   * para que technicalBriefingFingerprint() detecte mudança neles também
+   * (nunca só geometria/material). null/undefined = nunca informado
+   * nesta conversa (equivalente a false para fins de preço).
+   */
+  adesivo?: boolean | null;
+  adesivoBranco?: boolean | null;
   confirmedFields: string[];
   missingRequiredFields: string[];
 }
@@ -194,4 +202,29 @@ export function toQuoteCoreInput(b: TechnicalBriefing): {
 
 export function materiaisParaResolucao(materiais: MaterialConfig[]): Array<{ matKey: string; nome: string }> {
   return materiais.map((m, i) => ({ matKey: `cfg_${i}`, nome: m.nome || `Material ${i + 1}` }));
+}
+
+/**
+ * Sprint P0.4 (P0.2) — fingerprint determinístico dos campos que afetam
+ * PREÇO, nunca dos campos derivados (confirmedFields/missingRequiredFields/
+ * recipeVersion). Usado para detectar se uma simulação já calculada ainda
+ * corresponde ao briefing ATUAL da conversa — se qualquer campo aqui
+ * mudar (quantidade, material, espessura, largura, altura, profundidade,
+ * adesivo, adesivoBranco), o fingerprint muda e a simulação anterior é
+ * tratada como desatualizada. Não é um hash criptográfico — só precisa
+ * ser determinístico e sensível a qualquer mudança real, uma string JSON
+ * normalizada já cumpre isso e fica auditável em log.
+ */
+export function technicalBriefingFingerprint(b: TechnicalBriefing): string {
+  return JSON.stringify({
+    productId: b.productId,
+    larguraMm: b.dimensions.larguraMm,
+    alturaMm: b.dimensions.alturaMm,
+    profundidadeMm: b.dimensions.profundidadeMm,
+    quantity: b.quantity,
+    materialId: b.materialId,
+    thicknessMm: b.thicknessMm,
+    adesivo: !!b.adesivo,
+    adesivoBranco: !!b.adesivoBranco,
+  });
 }
