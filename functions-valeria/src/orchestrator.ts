@@ -13,6 +13,8 @@
  */
 
 import type { BriefingData, Cliente, CrmLead } from "./types";
+import type { TechnicalBriefing } from "./technical_briefing";
+import { computeTechnicalReadiness } from "./technical_briefing";
 
 export type NextCommercialAction =
   | "greet"
@@ -52,6 +54,13 @@ export interface NextActionResult {
   nextAction: NextCommercialAction;
   missingFields: string[];
   reason: string;
+  /**
+   * Bloco F (sprint P0.3) — payload estruturado por ação, não só o nome.
+   * O LLM lê isto para saber exatamente o que fazer a seguir (quais campos
+   * pedir, com que reasonCode encaminhar) — nunca infere a partir do nome
+   * da ação sozinho.
+   */
+  actionPayload: Record<string, unknown>;
 }
 
 // Campos mínimos para QUALQUER produto ter preço calculável — subconjunto
@@ -72,20 +81,41 @@ function telefoneConfirmado(cliente: Cliente | null, lead: CrmLead | null, chann
  * quoteReadiness() — avaliador canônico (P0.8). Determina objetivamente
  * se já dá para calcular/gerar orçamento, sem depender de julgamento do
  * LLM.
+ *
+ * Bloco F (sprint P0.3) — quando existe um `technicalBriefing` com
+ * `productId` já definido (fluxo de produto VR personalizado, MESMO
+ * schema que quote_core.ts exige), a readiness técnica
+ * (computeTechnicalReadiness, technical_briefing.ts) é a fonte de
+ * verdade — nunca a checagem genérica de BriefingData, que usa nomes/
+ * unidades diferentes (larguraMm solto vs dimensions.larguraMm,
+ * material texto livre vs materialId resolvido). Sem technicalBriefing
+ * ainda (ex.: antes do cliente escolher um produto), cai no fallback
+ * genérico — preserva 100% o comportamento de catálogo/Vitre/
+ * classificação, que nunca passam por technical_briefing.
  */
 export function computeQuoteReadiness(
   briefing: BriefingData | null,
   cliente: Cliente | null,
   lead: CrmLead | null,
-  channelPhone: string | null
+  channelPhone: string | null,
+  technicalBriefing?: TechnicalBriefing | null
 ): QuoteReadiness {
-  const b = briefing || {};
-  const missingRequiredFields = CAMPOS_BLOQUEANTES.filter((f) => !isPreenchido(b[f]));
-  const optionalFields = CAMPOS_OPCIONAIS.filter((f) => !isPreenchido(b[f]));
-
   const nome = nomeConfirmado(cliente, lead);
   const tel = telefoneConfirmado(cliente, lead, channelPhone);
   const customerIdentityReady = !!nome && !!tel;
+
+  let missingRequiredFields: string[];
+  let optionalFields: string[];
+
+  if (technicalBriefing && technicalBriefing.productId) {
+    const tr = computeTechnicalReadiness(technicalBriefing);
+    missingRequiredFields = tr.missingRequiredFields;
+    optionalFields = [];
+  } else {
+    const b = briefing || {};
+    missingRequiredFields = CAMPOS_BLOQUEANTES.filter((f) => !isPreenchido(b[f]));
+    optionalFields = CAMPOS_OPCIONAIS.filter((f) => !isPreenchido(b[f]));
+  }
 
   const ready = missingRequiredFields.length === 0;
   let blockingReason: string | null = null;
@@ -130,37 +160,62 @@ export function nextCommercialAction(params: {
   temHistoricoConversa: boolean;
   orcamentoJaCriado: boolean;
   handoffReasonCode?: HandoffReasonCode | null;
+  technicalBriefing?: TechnicalBriefing | null;
 }): NextActionResult {
   if (params.handoffReasonCode) {
-    return { nextAction: "handoff", missingFields: [], reason: params.handoffReasonCode };
+    return {
+      nextAction: "handoff", missingFields: [], reason: params.handoffReasonCode,
+      actionPayload: { reasonCode: params.handoffReasonCode },
+    };
   }
 
   if (params.orcamentoJaCriado) {
-    return { nextAction: "present_quote", missingFields: [], reason: "Orçamento já foi criado — nunca retroceder para discovery." };
+    // Bloco F — nunca retroceder: mesmo que o cliente volte a falar de
+    // medidas/produto depois disso, a ação permanece present_quote.
+    return {
+      nextAction: "present_quote", missingFields: [], reason: "Orçamento já foi criado — nunca retroceder para discovery.",
+      actionPayload: {},
+    };
   }
 
-  const readiness = computeQuoteReadiness(params.briefing, params.cliente, params.lead, params.channelPhone);
+  const readiness = computeQuoteReadiness(
+    params.briefing, params.cliente, params.lead, params.channelPhone, params.technicalBriefing
+  );
 
   if (readiness.ready && !readiness.customerIdentityReady) {
-    return { nextAction: "identify_customer", missingFields: [], reason: "Dados de especificação completos — falta identificar o cliente antes de orçar." };
+    return {
+      nextAction: "identify_customer", missingFields: [], reason: "Dados de especificação completos — falta identificar o cliente antes de orçar.",
+      actionPayload: {},
+    };
   }
 
   if (readiness.canGenerateQuote) {
-    return { nextAction: "calculate_quote", missingFields: [], reason: "Todos os campos obrigatórios e identificação do cliente confirmados." };
+    // Bloco F — regra explícita: o LLM NÃO deve pedir mais nada aqui, deve
+    // chamar a Tool de cálculo (calcular_produto_personalizado /
+    // calcular_orcamento_vr) diretamente.
+    return {
+      nextAction: "calculate_quote", missingFields: [], reason: "Todos os campos obrigatórios e identificação do cliente confirmados.",
+      actionPayload: { instrucao: "Chamar a Tool de cálculo agora — não pedir mais informação ao cliente." },
+    };
   }
 
   if (!params.temHistoricoConversa && readiness.missingRequiredFields.length === CAMPOS_BLOQUEANTES.length) {
-    return { nextAction: "greet", missingFields: [], reason: "Primeira mensagem, nenhum dado ainda." };
+    return { nextAction: "greet", missingFields: [], reason: "Primeira mensagem, nenhum dado ainda.", actionPayload: {} };
   }
 
   const b = params.briefing;
-  if (!isPreenchido(b?.produto)) {
-    return { nextAction: "classify_demand", missingFields: ["produto"], reason: "Produto ainda não identificado — classificar antes de pedir medidas." };
+  const temProdutoTecnico = !!params.technicalBriefing?.productId;
+  if (!temProdutoTecnico && !isPreenchido(b?.produto)) {
+    return {
+      nextAction: "classify_demand", missingFields: ["produto"], reason: "Produto ainda não identificado — classificar antes de pedir medidas.",
+      actionPayload: { fields: ["produto"] },
+    };
   }
 
   return {
     nextAction: "ask_required_fields",
     missingFields: readiness.missingRequiredFields,
     reason: "Produto já identificado — faltam campos obrigatórios para calcular.",
+    actionPayload: { fields: readiness.missingRequiredFields },
   };
 }

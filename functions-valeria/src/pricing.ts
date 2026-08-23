@@ -24,7 +24,7 @@ const COL = "erp_vr";
 
 // ── Leitura de configuração ────────────────────────────────────────────────────
 
-async function loadErpConfig(): Promise<ErpConfig | null> {
+export async function loadErpConfig(): Promise<ErpConfig | null> {
   const db  = admin.firestore();
   const doc = await db.collection(COL).doc("erp_config").get();
   if (!doc.exists) return null;
@@ -66,6 +66,16 @@ export async function evaluateQuoteEligibility(
     acresPct?: number;
     acresRS?: number;
     descricao?: string;
+    /**
+     * Adesivo/Adesivo branco (Rodada 5/8 do wizard, portado aqui fielmente):
+     * dois flags INDEPENDENTES — a mesma peça pode ter os dois (nunca
+     * mutuamente exclusivos). Cobrado sobre a área TOTAL informada (cm²),
+     * dentro da base do markup (como o wizard trata Adesivo — diferente de
+     * Gravação/Spray/Extra, que ficam fora da base e não estão neste motor
+     * ainda: exigem custo operacional informado por humano, sem preço/cm²
+     * configurável, e nunca devem ser "chutados" pela IA — ver quote_core.ts).
+     */
+    adesivo?: { normal?: boolean; branco?: boolean; areaTotalCm2: number };
   } = {}
 ): Promise<PricingResult> {
   // 1. Carregar configuração
@@ -147,8 +157,20 @@ export async function evaluateQuoteEligibility(
     return { eligibility: "NEEDS_INFORMATION", missingFields };
   }
 
-  // 4. Aplicar extras, descontos e acréscimos
-  const extrasTotal = parseFloat(String(opts.extras ?? 0));
+  // 4. Adesivo/Adesivo branco — mesma fórmula/fallback do wizard (orcRecalc):
+  // preço/cm² configurável em cfg.financeiro, com fallback hardcoded quando
+  // ausente ou zero (nunca preço zero silencioso — 0 no cadastro significa
+  // "usar o padrão do motor", igual ao wizard).
+  let adesivoCusto = 0;
+  if (opts.adesivo && opts.adesivo.areaTotalCm2 > 0 && (opts.adesivo.normal || opts.adesivo.branco)) {
+    const adhPrecoCm2  = fin.adesivoPrecoCm2       && fin.adesivoPrecoCm2       > 0 ? fin.adesivoPrecoCm2       : 0.0056;
+    const adhbPrecoCm2 = fin.adesivoBrancoPrecoCm2 && fin.adesivoBrancoPrecoCm2 > 0 ? fin.adesivoBrancoPrecoCm2 : 0.0011;
+    if (opts.adesivo.normal) adesivoCusto += opts.adesivo.areaTotalCm2 * adhPrecoCm2;
+    if (opts.adesivo.branco) adesivoCusto += opts.adesivo.areaTotalCm2 * adhbPrecoCm2;
+  }
+
+  // 5. Aplicar extras, descontos e acréscimos
+  const extrasTotal = parseFloat(String(opts.extras ?? 0)) + adesivoCusto;
   const totalCost   = matTotal + extrasTotal;
   const descPct     = parseFloat(String(opts.descPct  ?? 0));
   const descRS      = parseFloat(String(opts.descRS   ?? 0));
@@ -166,9 +188,10 @@ export async function evaluateQuoteEligibility(
     factor:   Math.round(factor * 10000) / 100,
     extrasTotal,
     matTotal: Math.round(matTotal * 100) / 100,
+    adesivoCusto: Math.round(adesivoCusto * 100) / 100,
   };
 
-  // 5. Versão da regra (fingerprint da config financeira)
+  // 6. Versão da regra (fingerprint da config financeira)
   const pricingVersion = [fin.overhead, fin.vrml, fin.impostos].join("_");
 
   return {

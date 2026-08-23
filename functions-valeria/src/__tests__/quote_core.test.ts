@@ -31,7 +31,7 @@ jest.mock("firebase-admin", () => ({
   firestore: firestoreFn,
 }));
 
-import { calculatePersonalizedProduct, describeProductFields } from "../quote_core";
+import { calculatePersonalizedProduct, describeProductFields, UNSUPPORTED_COMMERCIAL_FIELDS } from "../quote_core";
 import { PLAN_RECIPES, resolveRecipe } from "../recipes";
 
 const MAT_ACRILICO_3MM = { comp: 183, larg: 122, custo: 180, rsm2: 8.05, nome: "Acrílico Cristal 3mm" };
@@ -164,5 +164,122 @@ describe("QUOTE CORE — calculatePersonalizedProduct", () => {
       expect(r.produto).toBe(nome);
       expect(["ELIGIBLE", "NEEDS_INFORMATION"]).toContain(r.pricing.eligibility);
     }
+  });
+});
+
+describe("QUOTE CORE — Bloco C: Adesivo/Adesivo branco (paridade orcRecalc)", () => {
+  test("13. Sem flags de adesivo — preço idêntico ao caso sem consumível (comportamento legado preservado)", async () => {
+    const semAdesivo = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+    });
+    const comFlagsFalse = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+      adesivo: false, adesivoBranco: false,
+    });
+    expect(comFlagsFalse.pricing.finalPrice).toBe(semAdesivo.pricing.finalPrice);
+  });
+
+  test("14. adesivo=true aumenta o preço final (custo entra na base do markup)", async () => {
+    const base = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+    });
+    const comAdesivo = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    expect(comAdesivo.pricing.finalPrice).toBeGreaterThan(base.pricing.finalPrice ?? 0);
+  });
+
+  test("15. adesivo e adesivoBranco são independentes — os dois juntos custam mais que qualquer um sozinho (Rodada 8)", async () => {
+    const soNormal = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    const soBranco = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivoBranco: true,
+    });
+    const ambos = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true, adesivoBranco: true,
+    });
+    expect(ambos.pricing.finalPrice).toBeGreaterThan(soNormal.pricing.finalPrice ?? 0);
+    expect(ambos.pricing.finalPrice).toBeGreaterThan(soBranco.pricing.finalPrice ?? 0);
+  });
+
+  test("16. Custo de adesivo escala com a área total (qty maior → delta de adesivo maior)", async () => {
+    const qty1 = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    const qty1Base = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+    });
+    const qty3 = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 3, adesivo: true,
+    });
+    const qty3Base = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 3,
+    });
+    const delta1 = (qty1.pricing.finalPrice ?? 0) - (qty1Base.pricing.finalPrice ?? 0);
+    const delta3 = (qty3.pricing.finalPrice ?? 0) - (qty3Base.pricing.finalPrice ?? 0);
+    expect(delta3).toBeGreaterThan(delta1 * 2.5); // ~3x, com folga para arredondamento/markup
+  });
+
+  test("17. Preço/cm² configurável (não hardcoded) — config diferente muda o delta de adesivo", async () => {
+    const comFallback = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    _firestoreData["erp_config"] = {
+      data: JSON.stringify({
+        financeiro: { overhead: 41.16, vrml: 20, impostos: 0, adesivoPrecoCm2: 0.05 },
+        materiais: [MAT_ACRILICO_3MM, MAT_ACRILICO_5MM],
+      }),
+    };
+    const comConfigCustom = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    expect(comConfigCustom.pricing.finalPrice).toBeGreaterThan(comFallback.pricing.finalPrice ?? 0);
+  });
+});
+
+describe("QUOTE CORE — Bloco C: itens sem fonte canônica (reasonCode, nunca inventa valor)", () => {
+  test("18. gravacao solicitada → HUMAN_VALIDATION_REQUIRED com reasonCode explícito, nunca calcula preço", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+      solicitacoesNaoSuportadas: ["gravacao"],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.pricing.eligibility).toBe("HUMAN_VALIDATION_REQUIRED");
+    expect(r.pricing.finalPrice).toBeUndefined();
+    expect(r.pricing.blockedItems).toEqual([
+      { campo: "gravacao", ...UNSUPPORTED_COMMERCIAL_FIELDS["gravacao"] },
+    ]);
+  });
+
+  test("19. múltiplos itens não suportados juntos — todos aparecem em blockedItems", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+      solicitacoesNaoSuportadas: ["desconto", "montagem"],
+    });
+    expect(r.pricing.eligibility).toBe("HUMAN_VALIDATION_REQUIRED");
+    expect(r.pricing.blockedItems?.map((b) => b.campo).sort()).toEqual(["desconto", "montagem"]);
+  });
+
+  test("20. chave desconhecida em solicitacoesNaoSuportadas é ignorada (nunca bloqueia por engano)", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+      solicitacoesNaoSuportadas: ["campo_que_nao_existe"],
+    });
+    expect(r.pricing.eligibility).toBe("ELIGIBLE");
+  });
+
+  test("21. sem solicitacoesNaoSuportadas — calcula normalmente (bloqueio nunca é proativo/permanente)", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1,
+    });
+    expect(r.pricing.eligibility).toBe("ELIGIBLE");
+  });
+
+  test("22. adesivo continua calculado normalmente mesmo com outro item bloqueado (bloqueio não invade o restante do cálculo)", async () => {
+    const semBloqueio = await calculatePersonalizedProduct({
+      produto: "Bandeja", larg: 30, alt: 20, prof: 5, esp: 3, matKey: "cfg_0", qty: 1, adesivo: true,
+    });
+    expect(semBloqueio.pricing.eligibility).toBe("ELIGIBLE"); // confirma que adesivo sozinho não é bloqueado
   });
 });

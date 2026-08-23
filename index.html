@@ -6212,6 +6212,22 @@ function _authFirebaseError(code){
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
           </div>
+          <!-- Bloco E (sprint P0.3, 2026-08-23) — capacidade de produção
+               para o motor de prazo da Valéria (functions-valeria/deadline.ts).
+               Só Master edita. Ausência de qualquer campo (ou valor 0) mantém
+               o motor honesto (canEstimate:false) — nunca um número inventado. -->
+          <div class="card" style="margin-top:18px">
+            <div class="card-h"><div class="card-h-left">🚚 Capacidade de Produção (prazo — Valéria)</div></div>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 14px">Usado pelo motor de prazo da Valéria para estimar quando um pedido fica pronto. Deixe em branco/0 para o motor nunca estimar prazo automaticamente (segue pedindo confirmação da equipe de produção).</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
+              <div class="fg"><label>Lead time base (dias úteis)</label><input type="number" id="cfgLeadTimeBaseDias" step="1" min="0" placeholder="Ex: 3" title="Dias de produção padrão para 1 OS típica, sem fila"></div>
+              <div class="fg"><label>Capacidade (OS/dia útil)</label><input type="number" id="cfgCapacidadeOsPorDia" step="0.5" min="0" placeholder="Ex: 5" title="Quantas OS a produção consegue processar por dia útil"></div>
+              <div class="fg"><label>Buffer de segurança (dias)</label><input type="number" id="cfgBufferDias" step="1" min="0" placeholder="Ex: 1" title="Margem extra somada ao prazo calculado"></div>
+            </div>
+            <div style="text-align:right;margin-top:12px">
+              <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
+            </div>
+          </div>
           <div class="card" style="margin-top:18px">
             <div class="card-h">
               <div class="card-h-left">🧑‍🔧 Mão de Obra & Serviços</div>
@@ -30144,6 +30160,12 @@ function cfgRenderTables() {
   if(elAdhCm2 && !(parseFloat(elAdhCm2.value)>0)) elAdhCm2.value = (fin.adesivoPrecoCm2>0 ? fin.adesivoPrecoCm2 : 0.0056);
   var elAdhbCm2 = document.getElementById('cfgAdesivoBrancoPrecoCm2');
   if(elAdhbCm2 && !(parseFloat(elAdhbCm2.value)>0)) elAdhbCm2.value = (fin.adesivoBrancoPrecoCm2>0 ? fin.adesivoBrancoPrecoCm2 : 0.0011);
+  // Bloco E (sprint P0.3) — capacidade de produção (motor de prazo da
+  // Valéria). Sem fallback: campo vazio/0 significa "não configurado",
+  // nunca um valor plausível inventado.
+  var prod = d.producao||{};
+  var prodIds = {leadTimeBaseDias:'cfgLeadTimeBaseDias', capacidadeOsPorDia:'cfgCapacidadeOsPorDia', bufferDias:'cfgBufferDias'};
+  Object.keys(prodIds).forEach(function(k){ var el=document.getElementById(prodIds[k]); if(el&&prod[k]!=null) el.value=prod[k]; });
   cfgAtualizarMargemPlan();
   cfgRenderLaserSpeeds();
   cfgRenderLaserParams();
@@ -30546,6 +30568,10 @@ function cfgSalvar() {
   var mkIds = {geral:'cfgMkGeral',adesivo:'cfgMkAdesivo',placa:'cfgMkPlaca',instalacao:'cfgMkInstalacao',arte:'cfgMkArte',mob:'cfgMkMob'};
   if(!_cfgData.markup) _cfgData.markup={};
   Object.keys(mkIds).forEach(function(k){ var el=document.getElementById(mkIds[k]); if(el) _cfgData.markup[k]=parseFloat(el.value)||0; });
+  // Bloco E (sprint P0.3) — capacidade de produção (motor de prazo da Valéria)
+  var prodIds = {leadTimeBaseDias:'cfgLeadTimeBaseDias', capacidadeOsPorDia:'cfgCapacidadeOsPorDia', bufferDias:'cfgBufferDias'};
+  if(!_cfgData.producao) _cfgData.producao={};
+  Object.keys(prodIds).forEach(function(k){ var el=document.getElementById(prodIds[k]); if(el) _cfgData.producao[k]=parseFloat(el.value)||0; });
   // HOTFIX 2026-08-13 — rsm2 é campo DERIVADO (custo/área), nunca deve ser
   // persistido desatualizado: sem isto, editar custo/comp/larg e salvar na
   // hora gravava o R$/m² antigo (só corrigia depois de um reload, quando o

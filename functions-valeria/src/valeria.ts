@@ -26,6 +26,8 @@ import { evaluateQuoteEligibility } from "./pricing";
 import { calculatePersonalizedProduct, describeProductFields } from "./quote_core";
 import { nextCommercialAction, computeQuoteReadiness } from "./orchestrator";
 import { estimateProductionDeadline, checkUrgentFit } from "./deadline";
+import { parseFlexibleLength, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness } from "./technical_briefing";
+import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing } from "./technical_briefing_store";
 import { ok, err, QUOTE_RESPONSES } from "./response";
 import { paraE164BR, encontrarPorTelefone } from "./telefone";
 
@@ -228,6 +230,11 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       } catch { /* atendimento pode não existir (canal fora do módulo Atendimentos) — não bloqueia */ }
 
       const briefingTyped = briefing as import("./types").BriefingData | null;
+      // Bloco F — carrega o MESMO schema técnico que quote_core.ts usa
+      // (nunca a checagem genérica de BriefingData quando já existe um
+      // produto VR personalizado em andamento nesta conversa).
+      const technicalBriefing = await loadTechnicalBriefing(ctx.conversationId);
+      const technicalBriefingParaOrchestrator = technicalBriefing.productId ? technicalBriefing : null;
       const nextAction = nextCommercialAction({
         briefing: briefingTyped,
         cliente,
@@ -235,8 +242,11 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         channelPhone: ctx.channelPhone ?? null,
         temHistoricoConversa: !!briefing || !!cliente || !!lead,
         orcamentoJaCriado,
+        technicalBriefing: technicalBriefingParaOrchestrator,
       });
-      const quoteReadiness = computeQuoteReadiness(briefingTyped, cliente, lead, ctx.channelPhone ?? null);
+      const quoteReadiness = computeQuoteReadiness(
+        briefingTyped, cliente, lead, ctx.channelPhone ?? null, technicalBriefingParaOrchestrator
+      );
 
       res.json(ok(
         {
@@ -254,6 +264,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
           quoteReadiness,
           nextAction: nextAction.nextAction,
           nextActionReason: nextAction.reason,
+          nextActionPayload: nextAction.actionPayload,
         },
         { communicableToCustomer: false, verified: !!cliente }
       ));
@@ -481,6 +492,69 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 4a2. ATUALIZAR BRIEFING TÉCNICO (sprint P0.3, Bloco A) — schema canônico
+// progressivo para produto VR personalizado. O LLM nunca calcula unidade/
+// resolve material sozinho: manda valores em linguagem livre com unidade
+// (ex.: "15cm", "150mm") e um texto de material — a Function normaliza
+// (technical_briefing.ts) e devolve o estado técnico real + o que ainda
+// falta, no MESMO vocabulário que quote_core exige (elimina o gap
+// larguraMm/material-texto vs larg/matKey identificado na sprint anterior).
+// ─────────────────────────────────────────────────────────────────────────────
+export const valeriaAtualizarBriefingTecnico = RUN_OPTS.https.onRequest(async (req, res) => {
+    const ppl = await pipeline(req, res, "valeriaAtualizarBriefingTecnico");
+    if (!ppl) return;
+    const { ctx } = ppl;
+
+    try {
+      const body = req.body as Record<string, unknown>;
+      const atual = await loadTechnicalBriefing(ctx.conversationId);
+
+      let materialId: string | undefined;
+      if (body["material"] != null && String(body["material"]).trim()) {
+        const doc = await admin.firestore().collection(COL).doc("erp_config").get();
+        const raw = doc.exists ? doc.data()?.data : null;
+        let cfg: { materiais?: Array<{ nome?: string }> } | null = null;
+        try { cfg = raw ? JSON.parse(raw) : null; } catch { cfg = null; }
+        const materiaisReais = materiaisParaResolucao((cfg?.materiais ?? []) as never[]);
+        const resolvido = resolveMaterialId(String(body["material"]), materiaisReais);
+        if (resolvido) materialId = resolvido;
+      }
+
+      const patch = {
+        ...(body["produto"] != null ? { productId: String(body["produto"]).trim() } : {}),
+        ...(body["quantidade"] != null ? { quantity: parseInt(String(body["quantidade"]), 10) || undefined } : {}),
+        ...(materialId ? { materialId } : {}),
+        ...(body["espessura"] != null ? { thicknessMm: parseFlexibleLength(String(body["espessura"])) ?? undefined } : {}),
+        dimensions: {
+          larguraMm: body["largura"] != null ? (parseFlexibleLength(String(body["largura"])) ?? undefined) : undefined,
+          alturaMm: body["altura"] != null ? (parseFlexibleLength(String(body["altura"])) ?? undefined) : undefined,
+          profundidadeMm: body["profundidade"] != null ? (parseFlexibleLength(String(body["profundidade"])) ?? undefined) : undefined,
+        },
+      };
+
+      const atualizado = mergeTechnicalBriefing(atual, patch as never);
+      await saveTechnicalBriefing(ctx.conversationId, atualizado);
+
+      const materialNaoResolvido = body["material"] != null && String(body["material"]).trim() && !materialId;
+
+      res.json(ok(
+        {
+          technicalBriefing: atualizado,
+          readiness: computeTechnicalReadiness(atualizado),
+          avisoMaterialNaoResolvido: materialNaoResolvido
+            ? "O material informado não bateu com nenhum cadastro real ou é ambíguo — chame consultar_materiais_vr e use o matKey exato retornado."
+            : null,
+        },
+        { communicableToCustomer: false, verified: true }
+      ));
+    } catch (e) {
+      console.error("[valeriaAtualizarBriefingTecnico]", (e as Error).message);
+      res.status(500).json(QUOTE_RESPONSES.temporarilyUnavailable());
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4b. PREPARAR PRODUTO PERSONALIZADO (discovery — sprint P0.2 2026-08-23)
 // Descobre dinamicamente quais campos são obrigatórios para um produto
 // específico ANTES de perguntar ao cliente — nunca hardcoded no prompt.
@@ -489,6 +563,7 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
 export const valeriaPrepararProdutoPersonalizado = RUN_OPTS.https.onRequest(async (req, res) => {
     const ppl = await pipeline(req, res, "valeriaPrepararProdutoPersonalizado");
     if (!ppl) return;
+    const { ctx } = ppl;
 
     const body = req.body as Record<string, unknown>;
     const produto = String(body["produto"] || "").trim();
@@ -499,7 +574,14 @@ export const valeriaPrepararProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
 
     try {
       const info = describeProductFields(produto);
-      res.json(ok(info, { communicableToCustomer: true, verified: true }));
+      // Bloco A — inicia/atualiza o briefing técnico canônico com o produto
+      // escolhido, para que o orchestrator (mesmo schema) já enxergue o que
+      // falta a partir daqui, sem esperar a Tool de cálculo.
+      const atual = await loadTechnicalBriefing(ctx.conversationId);
+      const atualizado = mergeTechnicalBriefing(atual, { productId: produto } as never);
+      await saveTechnicalBriefing(ctx.conversationId, atualizado);
+
+      res.json(ok({ ...info, technicalBriefing: atualizado }, { communicableToCustomer: true, verified: true }));
     } catch (e) {
       console.error("[valeriaPrepararProdutoPersonalizado]", (e as Error).message);
       res.status(500).json(QUOTE_RESPONSES.temporarilyUnavailable());
@@ -514,6 +596,27 @@ export const valeriaPrepararProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
 // de valeriaCalcularOrcamento — valeriaCriarOrcamento (já existente, sem
 // alteração) persiste o orçamento formal a partir do simulationId.
 // ─────────────────────────────────────────────────────────────────────────────
+// Bloco A — aceita número puro (comportamento legado, já testado em E2E:
+// larg/alt/prof em cm, esp em mm) OU string com unidade explícita
+// ("150mm", "15cm", "0.15m") via parseFlexibleLength. Só desvia do parseFloat
+// legado quando a string contém letra (unidade explícita) — nunca reinterpreta
+// um número puro que já funcionava, preservando 100% de compatibilidade com
+// as chamadas já homologadas.
+function parseCmFlexivel(v: unknown): number {
+  if (typeof v === "string" && /[a-zA-Z]/.test(v)) {
+    const mm = parseFlexibleLength(v);
+    return mm != null ? mm / 10 : NaN;
+  }
+  return parseFloat(String(v));
+}
+function parseMmFlexivel(v: unknown): number {
+  if (typeof v === "string" && /[a-zA-Z]/.test(v)) {
+    const mm = parseFlexibleLength(v);
+    return mm != null ? mm : NaN;
+  }
+  return parseFloat(String(v));
+}
+
 export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(async (req, res) => {
     const ppl = await pipeline(req, res, "valeriaCalcularProdutoPersonalizado");
     if (!ppl) return;
@@ -522,12 +625,33 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
 
     const body = req.body as Record<string, unknown>;
     const produto = String(body["produto"] || "").trim();
-    const larg = parseFloat(String(body["larg"]));
-    const alt = parseFloat(String(body["alt"]));
-    const prof = body["prof"] != null ? parseFloat(String(body["prof"])) : undefined;
-    const esp = parseFloat(String(body["esp"]));
-    const matKey = String(body["matKey"] || "").trim();
+    const larg = parseCmFlexivel(body["larg"]);
+    const alt = parseCmFlexivel(body["alt"]);
+    const prof = body["prof"] != null ? parseCmFlexivel(body["prof"]) : undefined;
+    const esp = parseMmFlexivel(body["esp"]);
+    const matKeyBruto = String(body["matKey"] || "").trim();
+    let matKey = matKeyBruto;
+    if (matKeyBruto) {
+      const doc = await admin.firestore().collection(COL).doc("erp_config").get();
+      const raw = doc.exists ? doc.data()?.data : null;
+      let cfg: { materiais?: Array<{ nome?: string }> } | null = null;
+      try { cfg = raw ? JSON.parse(raw) : null; } catch { cfg = null; }
+      const materiaisReais = materiaisParaResolucao((cfg?.materiais ?? []) as never[]);
+      const resolvido = resolveMaterialId(matKeyBruto, materiaisReais);
+      if (resolvido) matKey = resolvido;
+    }
     const qty = parseFloat(String(body["qty"])) || 1;
+    const adesivo = body["adesivo"] === true || String(body["adesivo"]).toLowerCase() === "sim";
+    const adesivoBranco = body["adesivoBranco"] === true || String(body["adesivoBranco"]).toLowerCase() === "sim";
+    // Bloco C — a Tool aceita `solicitacoesNaoSuportadas` (array de chaves:
+    // gravacao/spray/extra/maquinas/montagem/deslocamento/desconto/acrescimo)
+    // para o LLM sinalizar explicitamente o que o cliente pediu além do
+    // produto em si. Nunca calculado/ignorado silenciosamente — vira
+    // HUMAN_VALIDATION_REQUIRED com reasonCode por item.
+    const solicitacoesNaoSuportadasRaw = body["solicitacoesNaoSuportadas"];
+    const solicitacoesNaoSuportadas = Array.isArray(solicitacoesNaoSuportadasRaw)
+      ? solicitacoesNaoSuportadasRaw.map((x) => String(x).trim().toLowerCase())
+      : [];
 
     const missing: string[] = [];
     if (!produto) missing.push("produto");
@@ -544,7 +668,23 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCalcularProdutoPersonalizado" },
       async () => {
-        const calc = await calculatePersonalizedProduct({ produto, larg, alt, prof, esp, matKey, qty });
+        // Bloco A — sincroniza o briefing técnico canônico com os valores
+        // efetivamente usados neste cálculo, para o orchestrator (mesmo
+        // schema) enxergar o estado real independentemente de qual Tool
+        // o modelo chamou por último.
+        const atualBriefing = await loadTechnicalBriefing(ctx.conversationId);
+        const briefingSincronizado = mergeTechnicalBriefing(atualBriefing, {
+          productId: produto,
+          dimensions: { larguraMm: larg * 10, alturaMm: alt * 10, profundidadeMm: prof != null ? prof * 10 : undefined },
+          thicknessMm: esp,
+          materialId: matKey,
+          quantity: qty,
+        } as never);
+        await saveTechnicalBriefing(ctx.conversationId, briefingSincronizado);
+
+        const calc = await calculatePersonalizedProduct({
+          produto, larg, alt, prof, esp, matKey, qty, adesivo, adesivoBranco, solicitacoesNaoSuportadas,
+        });
         const pricing = calc.pricing;
 
         switch (pricing.eligibility) {
@@ -552,7 +692,10 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
             return QUOTE_RESPONSES.needsInformation(pricing.missingFields ?? []);
           case "HUMAN_VALIDATION_REQUIRED":
             return QUOTE_RESPONSES.humanValidationRequired(
-              `Validação humana necessária: ${(pricing.missingFields ?? []).join(", ")}`
+              pricing.blockedItems && pricing.blockedItems.length > 0
+                ? `Preciso de aprovação humana para: ${pricing.blockedItems.map((b) => b.campo).join(", ")}.`
+                : `Validação humana necessária: ${(pricing.missingFields ?? []).join(", ")}`,
+              pricing.blockedItems
             );
           case "UNSUPPORTED":
             return QUOTE_RESPONSES.unsupported(produto);
@@ -574,6 +717,9 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
               expiresAt: simNow + SIM_TTL_MS,
               origem: "valeria",
               usado: false,
+              // Bloco D — congela o briefing técnico usado NESTE cálculo
+              // específico (nunca o "ao vivo", que pode mudar depois).
+              technicalBriefingSnapshot: briefingSincronizado as unknown as Record<string, unknown>,
             };
             await saveSimulation(sim);
 
@@ -618,7 +764,7 @@ export const valeriaConsultarPrazoProducao = RUN_OPTS.https.onRequest(async (req
     const areaTotalM2 = body["areaTotalM2"] != null ? parseFloat(String(body["areaTotalM2"])) : undefined;
     const quantidade = body["quantidade"] != null ? parseFloat(String(body["quantidade"])) : undefined;
 
-    const estimativa = estimateProductionDeadline({ produto, areaTotalM2, quantidade });
+    const estimativa = await estimateProductionDeadline({ produto, areaTotalM2, quantidade });
     res.json(ok(estimativa, { communicableToCustomer: true, verified: true }));
   }
 );
@@ -642,7 +788,7 @@ export const valeriaVerificarEncaixeProducao = RUN_OPTS.https.onRequest(async (r
     const areaTotalM2 = body["areaTotalM2"] != null ? parseFloat(String(body["areaTotalM2"])) : undefined;
     const quantidade = body["quantidade"] != null ? parseFloat(String(body["quantidade"])) : undefined;
 
-    const resultado = checkUrgentFit({ produto, requestedDateISO, areaTotalM2, quantidade });
+    const resultado = await checkUrgentFit({ produto, requestedDateISO, areaTotalM2, quantidade });
     res.json(ok(resultado, { communicableToCustomer: true, verified: true }));
   }
 );
@@ -723,6 +869,30 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
         const orcamentos = (await fsRead<OrcamentoEnviado[]>("orcamentos")) ?? [];
         const maxN = orcamentos.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
 
+        // Bloco D — lê o atendimento real (cross-codebase, read-only) para
+        // herdar leadId/clienteId/oportunidadeId já vinculados na conversa,
+        // nunca inventados aqui. Best-effort: se o atendimento não existir
+        // (ex.: chamada de teste direta fora do fluxo real), o orçamento
+        // ainda é criado normalmente, só sem esses vínculos.
+        let leadId: string | null = null, clienteId: string | null = null, oportunidadeId: string | null = null;
+        let atdRef: FirebaseFirestore.DocumentReference | null = null;
+        try {
+          atdRef = admin.firestore().collection("atendimentos").doc(ctx.conversationId);
+          const atdSnap = await atdRef.get();
+          if (atdSnap.exists) {
+            const atdData = atdSnap.data() ?? {};
+            leadId = (atdData.leadId as string) ?? null;
+            clienteId = (atdData.clienteId as string) ?? null;
+            oportunidadeId = (atdData.oportunidadeId as string) ?? null;
+          } else {
+            atdRef = null; // não cria atendimento novo por engano — link só se já existir
+          }
+        } catch (e) {
+          console.error("[valeriaCriarOrcamento] falha ao ler atendimento para herdar vínculos:", (e as Error).message);
+        }
+
+        const briefingSnap = (sim.technicalBriefingSnapshot ?? null) as { productId?: string; recipeVersion?: number } | null;
+
         const orc: OrcamentoEnviado = {
           id:                    uid("orc"),
           n:                     maxN + 1,
@@ -744,6 +914,13 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
           conversationId:        ctx.conversationId,
           agentId:               ctx.agentId,
           organizationId:        ctx.organizationId,
+          // Bloco D — linkage completa para rastreabilidade/reabertura no ERP
+          atendimentoId:         ctx.conversationId,
+          leadId,
+          clienteId,
+          oportunidadeId,
+          recipeSnapshot:        briefingSnap ? { productId: briefingSnap.productId ?? null, recipeVersion: briefingSnap.recipeVersion ?? null } : null,
+          technicalBriefingSnapshot: sim.technicalBriefingSnapshot ?? null,
         };
 
         orcamentos.unshift(orc);
@@ -751,6 +928,26 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
         await admin.firestore().collection("valeria_conversations")
           .doc(ctx.conversationId)
           .set({ orcamentoId: orc.id, updatedAt: Date.now() }, { merge: true });
+
+        // Bloco D — vincula de volta no atendimento REAL (mesmo campo que a
+        // UI do ERP lê para mostrar "📝 Abrir orçamento") para que um
+        // orçamento criado autonomamente pela Valéria fique visível e
+        // reabrível no ERP como qualquer outro — nunca cria atendimento novo
+        // (atdRef só é não-nulo se já existia), nunca derruba a criação do
+        // orçamento se este passo falhar (best-effort, mesma filosofia do
+        // atdVincularOrcamentoAposSalvar humano).
+        if (atdRef) {
+          try {
+            await atdRef.set({ orcamentoId: orc.id, updatedAt: Date.now() }, { merge: true });
+            await admin.firestore().collection("atendimentos_audit_log").add({
+              action: "vincular_orcamento", callerUid: "valeria", callerRole: "ai_agent",
+              detail: { atendimentoId: ctx.conversationId, orcamentoId: orc.id, origem: "valeria_autonomous" },
+              timestamp: Date.now(),
+            });
+          } catch (e) {
+            console.error("[valeriaCriarOrcamento] orçamento criado, mas falhou ao vincular no atendimento:", (e as Error).message);
+          }
+        }
 
         return ok(
           { orcamentoId: orc.id, n: orc.n, total: orc.total, pricingVersion: orc.pricingVersion },
