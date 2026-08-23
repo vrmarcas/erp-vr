@@ -89,7 +89,25 @@ console.log('\n=== RODADA 9, FECHAMENTO — botões de ação do painel de Atend
 
 (async function main(){
 
-// ── atdRenderPainel: botões chamam as funções corretas (regressão simples) ──
+// RODADA 9, FECHAMENTO (2026-08-23) — achado real de smoke test AUTENTICADO
+// em produção: os 3 botões abaixo usavam JSON.stringify(atd.id) dentro de
+// um atributo onclick="..." (aspas duplas) — o próprio JSON.stringify
+// também envolve a string em aspas duplas, quebrando o HTML no meio
+// ("onclick=\"fn(\"" + atributo bogus solto). O botão NUNCA disparava
+// nada ao clicar de verdade — só passava despercebido porque os testes
+// anteriores checavam a STRING com regex (que ainda contém o nome da
+// função), nunca se o onclick resultante é HTML válido. Este teste
+// verifica explicitamente que o valor de onclick, uma vez extraído do
+// HTML como um atributo real, está bem formado (aspas fechadas
+// corretamente, sem fragmento solto) — teria pego o bug original.
+function assertOnclickBemFormado(html, nomeFuncao, msg) {
+  var re = new RegExp('onclick="(' + nomeFuncao + '\\([^"]*\\))"', '');
+  var m = html.match(re);
+  assertTrue(!!m, msg + ' — onclick="' + nomeFuncao + '(...)" bem formado (aspas fechadas corretamente, sem HTML quebrado)');
+  if (m) assertTrue(/\)$/.test(m[1]), msg + ' — a chamada termina com ")" fechado (nunca um fragmento truncado)');
+}
+
+// ── atdRenderPainel: botões chamam as funções corretas E o onclick é HTML válido ──
 (function () {
   reset();
   var atd = { id: 'atd1', nome: 'Cliente Teste', telefoneE164: '+5562999990000' };
@@ -97,6 +115,9 @@ console.log('\n=== RODADA 9, FECHAMENTO — botões de ação do painel de Atend
   var out = _els.atdColPainel.innerHTML;
   assertTrue(/atdCriarOuAbrirCliente/.test(out), '1. botão de cliente aponta para a ação real (atdCriarOuAbrirCliente)');
   assertTrue(/atdCriarOuAbrirOportunidade/.test(out), '2. botão de oportunidade aponta para a ação real (atdCriarOuAbrirOportunidade)');
+  assertOnclickBemFormado(out, 'atdCriarOuAbrirCliente', '2b. Criar/Abrir cliente');
+  assertOnclickBemFormado(out, 'atdCriarOuAbrirOportunidade', '2c. Criar/Abrir oportunidade');
+  assertOnclickBemFormado(out, 'atdRevisarCriarOrcamento', '2d. Revisar e criar orçamento');
 })();
 
 // ── atdCriarOuAbrirCliente: já vinculado → só abre, nunca chama a Function ──

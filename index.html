@@ -32334,8 +32334,18 @@ function atdRenderPainel(atd){
   // o atendente sempre revisa antes de salvar, mesmo padrão já usado pelo
   // resto do CRM). _crmVincularCliente (chamado por crmSalvarNovoLead)
   // já evita duplicar cliente existente pelo telefone.
-  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button id="atdBtnCliente_'+atd.id+'" onclick="atdCriarOuAbrirCliente('+JSON.stringify(atd.id)+')">➕ Criar/Abrir cliente</button>';
-  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button id="atdBtnOportunidade_'+atd.id+'" onclick="atdCriarOuAbrirOportunidade('+JSON.stringify(atd.id)+')">➕ Criar/Abrir oportunidade</button>';
+  // RODADA 9, FECHAMENTO (2026-08-23) — achado real de smoke test em
+  // produção: JSON.stringify(atd.id) dentro de um atributo onclick="..."
+  // (delimitado por aspas DUPLAS) colidia com as aspas duplas que o
+  // próprio JSON.stringify usa para envolver a string — o HTML resultante
+  // ficava truncado (onclick="atdCriarOuAbrirCliente(" + atributo bogus
+  // solto), e o botão NUNCA disparava nada ao clicar (achado idêntico ao
+  // relatado: "nenhum botão executa a ação de verdade"). Corrigido usando
+  // o MESMO padrão de aspas simples escapadas já usado ao lado
+  // (cliOpenDetalhe/crmOpenCard) — atd.id é sempre um ID gerado pelo
+  // Firestore, nunca contém aspas.
+  html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button id="atdBtnCliente_'+atd.id+'" onclick="atdCriarOuAbrirCliente(\''+atd.id+'\')">➕ Criar/Abrir cliente</button>';
+  html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button id="atdBtnOportunidade_'+atd.id+'" onclick="atdCriarOuAbrirOportunidade(\''+atd.id+'\')">➕ Criar/Abrir oportunidade</button>';
   if(atd.orcamentoId){
     // RODADA 9, FECHAMENTO — número/valor podem já estar no cache (recém
     // vinculado nesta sessão) ou precisar de fallback no array global de
@@ -32349,7 +32359,7 @@ function atdRenderPainel(atd){
     var orcVal = (typeof orcTotVal==='number') ? ' — R$ '+orcTotVal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
     html += '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento '+orcNum+orcVal+'</button>';
   } else {
-    html += '<button onclick="atdRevisarCriarOrcamento('+JSON.stringify(atd.id)+')">📝 Revisar e criar orçamento</button>';
+    html += '<button onclick="atdRevisarCriarOrcamento(\''+atd.id+'\')">📝 Revisar e criar orçamento</button>';
   }
   html += '</div></div>';
   wrap.innerHTML = html;
