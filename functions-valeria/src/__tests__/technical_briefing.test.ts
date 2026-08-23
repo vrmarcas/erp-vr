@@ -8,6 +8,7 @@ import {
   computeTechnicalReadiness,
   toQuoteCoreInput,
   emptyTechnicalBriefing,
+  technicalBriefingFingerprint,
 } from "../technical_briefing";
 
 describe("A6 — parseFlexibleLength (conversão de unidade)", () => {
@@ -193,5 +194,59 @@ describe("A4 — toQuoteCoreInput (adaptador mm→cm, único ponto de conversão
     };
     const out = toQuoteCoreInput(b);
     expect(out?.prof).toBeUndefined();
+  });
+});
+
+describe("P0.4 — technicalBriefingFingerprint (base do S4: invalidação automática)", () => {
+  const base = {
+    ...emptyTechnicalBriefing(),
+    productId: "Caixa",
+    dimensions: { larguraMm: 150, alturaMm: 150, profundidadeMm: 150 },
+    thicknessMm: 3, materialId: "cfg_0", quantity: 1,
+  };
+
+  test("mesmos dados (mesma referência ou cópia) geram o MESMO fingerprint — determinístico", () => {
+    const copia = { ...base, dimensions: { ...base.dimensions } };
+    expect(technicalBriefingFingerprint(base)).toBe(technicalBriefingFingerprint(copia));
+  });
+
+  test("mudar quantidade muda o fingerprint", () => {
+    expect(technicalBriefingFingerprint(base)).not.toBe(technicalBriefingFingerprint({ ...base, quantity: 2 }));
+  });
+
+  test("mudar material muda o fingerprint", () => {
+    expect(technicalBriefingFingerprint(base)).not.toBe(technicalBriefingFingerprint({ ...base, materialId: "cfg_1" }));
+  });
+
+  test("mudar espessura muda o fingerprint", () => {
+    expect(technicalBriefingFingerprint(base)).not.toBe(technicalBriefingFingerprint({ ...base, thicknessMm: 5 }));
+  });
+
+  test("mudar largura/altura/profundidade muda o fingerprint", () => {
+    const fp0 = technicalBriefingFingerprint(base);
+    expect(fp0).not.toBe(technicalBriefingFingerprint({ ...base, dimensions: { ...base.dimensions, larguraMm: 200 } }));
+    expect(fp0).not.toBe(technicalBriefingFingerprint({ ...base, dimensions: { ...base.dimensions, alturaMm: 200 } }));
+    expect(fp0).not.toBe(technicalBriefingFingerprint({ ...base, dimensions: { ...base.dimensions, profundidadeMm: 200 } }));
+  });
+
+  test("mudar adesivo/adesivoBranco muda o fingerprint (Bloco C também é campo de preço)", () => {
+    const fp0 = technicalBriefingFingerprint(base);
+    expect(fp0).not.toBe(technicalBriefingFingerprint({ ...base, adesivo: true }));
+    expect(fp0).not.toBe(technicalBriefingFingerprint({ ...base, adesivoBranco: true }));
+    expect(technicalBriefingFingerprint({ ...base, adesivo: true })).not.toBe(technicalBriefingFingerprint({ ...base, adesivoBranco: true }));
+  });
+
+  test("adesivo ausente (undefined) e adesivo:false geram o MESMO fingerprint (equivalentes para preço)", () => {
+    expect(technicalBriefingFingerprint(base)).toBe(technicalBriefingFingerprint({ ...base, adesivo: false }));
+  });
+
+  test("mudar produto muda o fingerprint", () => {
+    expect(technicalBriefingFingerprint(base)).not.toBe(technicalBriefingFingerprint({ ...base, productId: "Bandeja" }));
+  });
+
+  test("mudar confirmedFields/missingRequiredFields (campos DERIVADOS, não de preço) NÃO muda o fingerprint", () => {
+    expect(technicalBriefingFingerprint(base)).toBe(
+      technicalBriefingFingerprint({ ...base, confirmedFields: ["x"], missingRequiredFields: ["y"] })
+    );
   });
 });

@@ -162,6 +162,25 @@ export function nextCommercialAction(params: {
   handoffReasonCode?: HandoffReasonCode | null;
   technicalBriefing?: TechnicalBriefing | null;
 }): NextActionResult {
+  const resultado = nextCommercialActionCore(params);
+  // P0.8 — invariante garantida centralmente, não branch a branch (nunca
+  // esquecida em uma ação nova): não existe estado válido de "pedir
+  // permissão para continuar" em NENHUMA ação. Se o campo já veio
+  // explicitamente definido num branch específico, ele vence; senão o
+  // default é sempre false.
+  return { ...resultado, actionPayload: { askPermission: false, ...resultado.actionPayload } };
+}
+
+function nextCommercialActionCore(params: {
+  briefing: BriefingData | null;
+  cliente: Cliente | null;
+  lead: CrmLead | null;
+  channelPhone: string | null;
+  temHistoricoConversa: boolean;
+  orcamentoJaCriado: boolean;
+  handoffReasonCode?: HandoffReasonCode | null;
+  technicalBriefing?: TechnicalBriefing | null;
+}): NextActionResult {
   if (params.handoffReasonCode) {
     return {
       nextAction: "handoff", missingFields: [], reason: params.handoffReasonCode,
@@ -190,12 +209,17 @@ export function nextCommercialAction(params: {
   }
 
   if (readiness.canGenerateQuote) {
-    // Bloco F — regra explícita: o LLM NÃO deve pedir mais nada aqui, deve
-    // chamar a Tool de cálculo (calcular_produto_personalizado /
-    // calcular_orcamento_vr) diretamente.
+    // Sprint P0.4 (P0.7) — toolToCall tira a escolha do LLM: para produto
+    // VR personalizado (technicalBriefing com productId), a ÚNICA Tool
+    // válida é calcular_produto_personalizado. calcular_orcamento_vr é
+    // legado (auditoria real: zero uso legítimo em produção, só
+    // confusão de nome) — nunca é o toolToCall aqui.
     return {
       nextAction: "calculate_quote", missingFields: [], reason: "Todos os campos obrigatórios e identificação do cliente confirmados.",
-      actionPayload: { instrucao: "Chamar a Tool de cálculo agora — não pedir mais informação ao cliente." },
+      actionPayload: {
+        instrucao: "Chamar a Tool de cálculo agora — não pedir mais informação ao cliente.",
+        toolToCall: "calcular_produto_personalizado",
+      },
     };
   }
 

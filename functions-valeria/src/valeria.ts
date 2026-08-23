@@ -26,8 +26,8 @@ import { evaluateQuoteEligibility } from "./pricing";
 import { calculatePersonalizedProduct, describeProductFields } from "./quote_core";
 import { nextCommercialAction, computeQuoteReadiness } from "./orchestrator";
 import { estimateProductionDeadline, checkUrgentFit } from "./deadline";
-import { parseFlexibleLength, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness } from "./technical_briefing";
-import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing } from "./technical_briefing_store";
+import { parseFlexibleLength, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
+import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing, saveLastEligibleSimulation, loadLastEligibleSimulation, clearLastEligibleSimulation } from "./technical_briefing_store";
 import { ok, err, QUOTE_RESPONSES } from "./response";
 import { paraE164BR, encontrarPorTelefone } from "./telefone";
 
@@ -702,6 +702,8 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
           thicknessMm: esp,
           materialId: matKey,
           quantity: qty,
+          adesivo,
+          adesivoBranco,
         } as never);
         await saveTechnicalBriefing(ctx.conversationId, briefingSincronizado);
 
@@ -745,6 +747,18 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
               technicalBriefingSnapshot: briefingSincronizado as unknown as Record<string, unknown>,
             };
             await saveSimulation(sim);
+
+            // Sprint P0.4 — fonte canônica de qual simulação vale para
+            // criar_orcamento_vr. O LLM recebe simulationId na resposta só
+            // para referência/depuração — valeriaCriarOrcamento NUNCA
+            // confia nesse valor vindo do modelo, sempre lê daqui.
+            await saveLastEligibleSimulation(ctx.conversationId, {
+              simulationId: simId,
+              createdAt: simNow,
+              productId: produto,
+              finalPrice: pricing.finalPrice!,
+              fingerprint: technicalBriefingFingerprint(briefingSincronizado),
+            });
 
             return ok(
               {
@@ -839,7 +853,13 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
       return;
     }
 
-    const simulationId = body["simulationId"] as string | undefined;
+    // Sprint P0.4 — simulationId NUNCA vem do LLM. `body["simulationId"]`
+    // ainda é aceito (compatibilidade com a Tool já configurada no
+    // Chatvolt) só para log de divergência — a fonte real é sempre
+    // lastEligibleSimulation, escrita exclusivamente por
+    // valeriaCalcularProdutoPersonalizado. O modelo não escolhe, não
+    // gera, não transcreve ID nenhum aqui.
+    const simulationIdDoModelo = body["simulationId"] as string | undefined;
     const nomeCliente  = body["nomeCliente"]  as string | undefined;
     // Bloco H — ver parseArrayFlexivel. O CONTEÚDO de `itens` nunca é
     // usado para preço (o orçamento persistido sempre vem de
@@ -850,7 +870,6 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
     const telCliente   = ctx.channelPhone ?? (body["telCliente"] as string | undefined);
 
     const missing: string[] = [];
-    if (!simulationId) missing.push("simulationId");
     if (!nomeCliente)  missing.push("nomeCliente");
     if (!telCliente)   missing.push("channelPhone");
     if (!itens || !Array.isArray(itens) || itens.length === 0) missing.push("itens");
@@ -858,6 +877,28 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
       res.status(400).json(err("VALIDATION_ERROR", "Campos obrigatórios ausentes.", { missingFields: missing }));
       return;
     }
+
+    // P0.4 — resolve o simulationId CANÔNICO server-side, valida que o
+    // briefing atual ainda corresponde ao que foi calculado (nunca cria
+    // orçamento com simulação desatualizada por mudança de qty/material/
+    // medidas/adesivo depois do cálculo).
+    const canonico = await loadLastEligibleSimulation(ctx.conversationId);
+    if (!canonico) {
+      res.status(422).json(QUOTE_RESPONSES.needsInformation(["Nenhum cálculo elegível encontrado para esta conversa — calcule o orçamento (calcular_produto_personalizado) antes de criar."]));
+      return;
+    }
+    const briefingAtualParaValidacao = await loadTechnicalBriefing(ctx.conversationId);
+    const fingerprintAtual = technicalBriefingFingerprint(briefingAtualParaValidacao);
+    if (fingerprintAtual !== canonico.fingerprint) {
+      res.status(422).json(QUOTE_RESPONSES.humanValidationRequired(
+        "Os dados do produto mudaram desde o último cálculo — preciso recalcular o orçamento antes de criar."
+      ));
+      return;
+    }
+    if (simulationIdDoModelo && simulationIdDoModelo !== canonico.simulationId) {
+      console.warn(`[valeriaCriarOrcamento] simulationId divergente do LLM ignorado — recebido=${simulationIdDoModelo} canonico=${canonico.simulationId} conversationId=${ctx.conversationId}`);
+    }
+    const simulationId = canonico.simulationId;
 
     const idempKey = extractIdempotencyKey(req);
     const result = await withIdempotency(
@@ -868,7 +909,7 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
         let sim!: PricingSimulation;
         try {
           await db.runTransaction(async (tx) => {
-            const simRef = db.collection(SIM_COL).doc(simulationId!);
+            const simRef = db.collection(SIM_COL).doc(simulationId);
             const simDoc = await tx.get(simRef);
             if (!simDoc.exists) throw Object.assign(new Error(), { _code: "SIMULATION_NOT_FOUND" });
             const simData = simDoc.data() as PricingSimulation;
@@ -933,7 +974,7 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
           totalCost:             sim.finalPrice,
           pricingVersion:        sim.pricingVersion,
           quoteEngine:           "erp_official",
-          simulationId:          simulationId!,
+          simulationId:          simulationId,
           communicableToCustomer: true,
           status:                "pre_orc_valeria",
           data:                  new Date().toISOString(),
@@ -976,6 +1017,12 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
             console.error("[valeriaCriarOrcamento] orçamento criado, mas falhou ao vincular no atendimento:", (e as Error).message);
           }
         }
+
+        // P0.4 — consome a referência canônica (a simulação em si já foi
+        // marcada usado:true na transação acima; isto evita qualquer
+        // reaproveitamento futuro do MESMO cálculo, mesmo que o
+        // fingerprint ainda batesse por coincidência).
+        await clearLastEligibleSimulation(ctx.conversationId);
 
         return ok(
           { orcamentoId: orc.id, n: orc.n, total: orc.total, pricingVersion: orc.pricingVersion },
