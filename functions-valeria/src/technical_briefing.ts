@@ -86,21 +86,62 @@ export function parseFlexibleLength(input: number | string | null | undefined): 
  * com a lista de materiais REAL do ERP (mesma fonte de
  * valeriaListarMateriais). Retorna null se não conseguir resolver com
  * confiança (nunca aproxima "chute").
+ *
+ * Bloco H (sprint P0.3, achado real de E2E conversacional) — famílias de
+ * material real são nomeadas por linha + espessura ("Acrílico Cristal
+ * 2mm".."20mm", 11 variantes) — "acrílico cristal" sozinho é
+ * genuinamente ambíguo (11 candidatos parciais). Quando o chamador já
+ * informou `espMm` NA MESMA chamada (dado real, não inventado), usa isso
+ * para desempatar ENTRE os candidatos já filtrados pelo nome — nunca
+ * para ampliar a busca, só para escolher entre opções que já bateram no
+ * texto. Se não restar exatamente 1 depois do desempate, continua
+ * retornando null (mesma disciplina de nunca aproximar).
+ *
+ * Bloco H (achado real de E2E conversacional via Chatvolt) — o LLM
+ * reescreve o texto do material de formas imprevisíveis mesmo quando o
+ * cliente disse o nome exato: sem acento ("acrilico cristal"), com
+ * underscore no lugar de espaço ("acrilico_cristal"), etc. Comparação
+ * por substring exato quebrava a cada variação nova. `tokenizar` reduz
+ * tanto o texto recebido quanto o nome real a um conjunto de palavras
+ * (remove acento, minúsculo, quebra em qualquer separador não
+ * alfanumérico) — o match exige que TODAS as palavras do texto recebido
+ * apareçam no nome real, nunca aproxima palavra nenhuma. Ainda é um
+ * match exato de conteúdo, só tolerante a formatação/pontuação.
  */
+function tokenizar(s: string): string[] {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
 export function resolveMaterialId(
   textoOuMatKey: string,
-  materiaisReais: Array<{ matKey: string; nome: string }>
+  materiaisReais: Array<{ matKey: string; nome: string }>,
+  espMm?: number | null
 ): string | null {
   const alvo = textoOuMatKey.trim();
   if (!alvo) return null;
   // Já é um matKey válido (veio de uma Tool anterior, ex.: consultar_materiais_vr)
   if (materiaisReais.some((m) => m.matKey === alvo)) return alvo;
-  // Match exato de nome (case-insensitive)
-  const porNomeExato = materiaisReais.find((m) => m.nome.toLowerCase() === alvo.toLowerCase());
+  const alvoTokens = tokenizar(alvo);
+  if (alvoTokens.length === 0) return null;
+  // Match exato — mesmo conjunto de palavras, em qualquer ordem/separador
+  const porNomeExato = materiaisReais.find((m) => {
+    const nomeTokens = tokenizar(m.nome);
+    return nomeTokens.length === alvoTokens.length && alvoTokens.every((t) => nomeTokens.includes(t));
+  });
   if (porNomeExato) return porNomeExato.matKey;
-  // Match parcial — só aceita se for INEQUÍVOCO (exatamente 1 candidato)
-  const porNomeParcial = materiaisReais.filter((m) => m.nome.toLowerCase().includes(alvo.toLowerCase()));
+  // Match parcial (todas as palavras do texto aparecem no nome real, nome pode ter mais) — só aceita se INEQUÍVOCO
+  const porNomeParcial = materiaisReais.filter((m) => {
+    const nomeTokens = tokenizar(m.nome);
+    return alvoTokens.every((t) => nomeTokens.includes(t));
+  });
   if (porNomeParcial.length === 1) return porNomeParcial[0].matKey;
+  if (porNomeParcial.length > 1 && espMm != null && espMm > 0) {
+    const porEspessura = porNomeParcial.filter((m) => {
+      const mm = m.nome.match(/(\d+(?:\.\d+)?)\s*mm/i);
+      return mm && parseFloat(mm[1]) === espMm;
+    });
+    if (porEspessura.length === 1) return porEspessura[0].matKey;
+  }
   return null;
 }
 

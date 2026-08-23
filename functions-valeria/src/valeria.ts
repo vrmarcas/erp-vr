@@ -516,7 +516,11 @@ export const valeriaAtualizarBriefingTecnico = RUN_OPTS.https.onRequest(async (r
         let cfg: { materiais?: Array<{ nome?: string }> } | null = null;
         try { cfg = raw ? JSON.parse(raw) : null; } catch { cfg = null; }
         const materiaisReais = materiaisParaResolucao((cfg?.materiais ?? []) as never[]);
-        const resolvido = resolveMaterialId(String(body["material"]), materiaisReais);
+        // Bloco H — desempata famílias de material ambíguas ("Acrílico
+        // Cristal" bate em 11 espessuras reais) usando a espessura JÁ
+        // informada nesta mesma chamada, nunca um dado novo/inventado.
+        const espDesambiguacao = body["espessura"] != null ? parseFlexibleLength(String(body["espessura"])) : null;
+        const resolvido = resolveMaterialId(String(body["material"]), materiaisReais, espDesambiguacao);
         if (resolvido) materialId = resolvido;
       }
 
@@ -617,6 +621,26 @@ function parseMmFlexivel(v: unknown): number {
   return parseFloat(String(v));
 }
 
+/**
+ * Bloco H (achado real de E2E via Chatvolt) — parâmetros de Tool do tipo
+ * array chegam serializados como STRING JSON no body do Chatvolt, mesmo
+ * com o schema configurado como array (confirmado com `itens` de
+ * valeriaCriarOrcamento e reaplicado aqui preventivamente). Faz o parse
+ * defensivamente antes de checar Array.isArray — nunca inventa
+ * conteúdo, só desfaz uma serialização que não é opcional do lado do
+ * Chatvolt.
+ */
+function parseArrayFlexivel(v: unknown): unknown[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* não era JSON — trata como ausente */ }
+  }
+  return [];
+}
+
 export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(async (req, res) => {
     const ppl = await pipeline(req, res, "valeriaCalcularProdutoPersonalizado");
     if (!ppl) return;
@@ -637,7 +661,8 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
       let cfg: { materiais?: Array<{ nome?: string }> } | null = null;
       try { cfg = raw ? JSON.parse(raw) : null; } catch { cfg = null; }
       const materiaisReais = materiaisParaResolucao((cfg?.materiais ?? []) as never[]);
-      const resolvido = resolveMaterialId(matKeyBruto, materiaisReais);
+      // Bloco H — mesma desambiguação por espessura já informada nesta chamada.
+      const resolvido = resolveMaterialId(matKeyBruto, materiaisReais, Number.isFinite(esp) ? esp : null);
       if (resolvido) matKey = resolvido;
     }
     const qty = parseFloat(String(body["qty"])) || 1;
@@ -648,10 +673,8 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
     // para o LLM sinalizar explicitamente o que o cliente pediu além do
     // produto em si. Nunca calculado/ignorado silenciosamente — vira
     // HUMAN_VALIDATION_REQUIRED com reasonCode por item.
-    const solicitacoesNaoSuportadasRaw = body["solicitacoesNaoSuportadas"];
-    const solicitacoesNaoSuportadas = Array.isArray(solicitacoesNaoSuportadasRaw)
-      ? solicitacoesNaoSuportadasRaw.map((x) => String(x).trim().toLowerCase())
-      : [];
+    const solicitacoesNaoSuportadas = parseArrayFlexivel(body["solicitacoesNaoSuportadas"])
+      .map((x) => String(x).trim().toLowerCase());
 
     const missing: string[] = [];
     if (!produto) missing.push("produto");
@@ -818,7 +841,12 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
 
     const simulationId = body["simulationId"] as string | undefined;
     const nomeCliente  = body["nomeCliente"]  as string | undefined;
-    const itens        = body["itens"]        as QuoteItem[] | undefined;
+    // Bloco H — ver parseArrayFlexivel. O CONTEÚDO de `itens` nunca é
+    // usado para preço (o orçamento persistido sempre vem de
+    // sim.itensNormalizados, nunca deste campo) — isto só afeta a
+    // checagem de presença, não abre brecha para o cliente influenciar preço.
+    const itensParsed = parseArrayFlexivel(body["itens"]);
+    const itens = (itensParsed.length > 0 ? itensParsed : undefined) as QuoteItem[] | undefined;
     const telCliente   = ctx.channelPhone ?? (body["telCliente"] as string | undefined);
 
     const missing: string[] = [];
