@@ -57,6 +57,61 @@ describe("A3 — resolveMaterialId (material canônico)", () => {
   });
 });
 
+describe("A3 — resolveMaterialId com desambiguação por espessura (Bloco H, achado real de E2E)", () => {
+  const familiaAmbigua = [
+    { matKey: "cfg_0", nome: "Acrílico Cristal 2mm" },
+    { matKey: "cfg_1", nome: "Acrílico Cristal 3mm" },
+    { matKey: "cfg_2", nome: "Acrílico Cristal 5mm" },
+    { matKey: "cfg_3", nome: "Acrílico Cristal 10mm" },
+  ];
+
+  test("nome ambíguo sozinho (sem espessura) continua null — mesma disciplina de nunca aproximar", () => {
+    expect(resolveMaterialId("Acrílico Cristal", familiaAmbigua)).toBeNull();
+  });
+
+  test("nome ambíguo + espessura já informada (dado real) resolve para o matKey exato", () => {
+    expect(resolveMaterialId("Acrílico Cristal", familiaAmbigua, 3)).toBe("cfg_1");
+    expect(resolveMaterialId("Acrílico Cristal", familiaAmbigua, 10)).toBe("cfg_3");
+  });
+
+  test("espessura informada que não existe na família ainda retorna null (nunca aproxima pra vizinho)", () => {
+    expect(resolveMaterialId("Acrílico Cristal", familiaAmbigua, 7)).toBeNull();
+  });
+
+  test("match já inequívoco por nome não é afetado por espessura contraditória (nome vence, espessura só desempata)", () => {
+    const comUmPreto = [...familiaAmbigua, { matKey: "cfg_9", nome: "Acrílico Preto 3mm" }];
+    expect(resolveMaterialId("Preto", comUmPreto, 999)).toBe("cfg_9");
+  });
+});
+
+describe("A3 — resolveMaterialId ignora acento (achado real de E2E via Chatvolt, Bloco H)", () => {
+  const materiaisComAcento = [
+    { matKey: "cfg_0", nome: "Acrílico Cristal 2mm" },
+    { matKey: "cfg_1", nome: "Acrílico Cristal 3mm" },
+  ];
+
+  test("LLM manda o texto sem acento ('acrilico cristal') + espessura — ainda resolve certo", () => {
+    expect(resolveMaterialId("acrilico cristal", materiaisComAcento, 3)).toBe("cfg_1");
+  });
+
+  test("texto sem acento com espessura embutida ('acrilico cristal 3mm') resolve por match exato", () => {
+    expect(resolveMaterialId("acrilico cristal 3mm", materiaisComAcento)).toBe("cfg_1");
+  });
+
+  test("nome cadastrado sem acento comparado com texto do cliente COM acento também resolve", () => {
+    const materiaisSemAcento = [{ matKey: "cfg_5", nome: "Acrilico Preto 5mm" }];
+    expect(resolveMaterialId("Acrílico Preto 5mm", materiaisSemAcento)).toBe("cfg_5");
+  });
+
+  test("LLM manda underscore no lugar de espaço ('acrilico_cristal') — achado real, ainda resolve com espessura", () => {
+    expect(resolveMaterialId("acrilico_cristal", materiaisComAcento, 3)).toBe("cfg_1");
+  });
+
+  test("ordem das palavras trocada ('cristal acrilico') ainda resolve — token set, não substring posicional", () => {
+    expect(resolveMaterialId("cristal acrilico 3mm", materiaisComAcento)).toBe("cfg_1");
+  });
+});
+
 describe("A5 — computeTechnicalReadiness", () => {
   test("briefing vazio → not ready, todos os campos faltando", () => {
     const r = computeTechnicalReadiness(emptyTechnicalBriefing());
