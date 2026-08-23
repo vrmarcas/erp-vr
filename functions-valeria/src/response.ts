@@ -48,10 +48,12 @@ export function err(
     missingFields?: string[];
     warnings?: string[];
     details?: string; // nunca incluir stack trace ou dados sensíveis
+    blockedItems?: ApiError["blockedItems"];
   } = {}
 ): ApiResponse<never> {
   const error: ApiError = { code, message };
   if (opts.details) error.details = opts.details;
+  if (opts.blockedItems && opts.blockedItems.length > 0) error.blockedItems = opts.blockedItems;
 
   return {
     success: false,
@@ -73,10 +75,11 @@ export const QUOTE_RESPONSES = {
       missingFields,
     }),
 
-  humanValidationRequired: (reason: string) =>
+  humanValidationRequired: (reason: string, blockedItems?: ApiError["blockedItems"]) =>
     err("HUMAN_VALIDATION_REQUIRED", reason, {
       communicableToCustomer: true,
       humanValidationRequired: true,
+      blockedItems,
     }),
 
   unsupported: (productType: string) =>

@@ -46,6 +46,14 @@ export interface ApiError {
   code: string;
   message: string;
   details?: string;
+  /**
+   * Itens que a Valéria pediu para incluir no orçamento mas que o ERP não
+   * tem fonte canônica de preço/regra para calcular automaticamente
+   * (sprint P0.3, Bloco C) — nunca um valor inventado, sempre um handoff
+   * explícito e rastreável. Ausência de tabela HOJE, não vedação
+   * permanente: quando uma fonte canônica existir, o campo sai desta lista.
+   */
+  blockedItems?: Array<{ campo: string; reasonCode: string; motivo: string }>;
 }
 
 // ── Enums de resultado de elegibilidade ──────────────────────────────────────
@@ -189,9 +197,28 @@ export interface ErpConfig {
     overhead?: number;
     vrml?: number;
     impostos?: number;
+    /** R$ por cm² de adesivo normal — fallback real do wizard (orcRecalc) é 0.0056 quando ausente/zero. */
+    adesivoPrecoCm2?: number;
+    /** R$ por cm² de adesivo branco — fallback real do wizard (orcRecalc) é 0.0011 quando ausente/zero. */
+    adesivoBrancoPrecoCm2?: number;
   };
   materiais?: MaterialConfig[];
   maquinas?: MaquinaConfig[];
+  /**
+   * Bloco E (sprint P0.3) — capacidade produtiva, configurável só pelo
+   * Master (Config → Produção no ERP). NUNCA lido com fallback fictício:
+   * ausência de qualquer um destes 3 campos (ou valor <= 0) mantém
+   * canEstimate:false no motor de prazo (deadline.ts) — nunca inventa um
+   * número plausível para preencher a lacuna.
+   */
+  producao?: {
+    /** Dias de produção "padrão" para 1 OS típica, sem fila. */
+    leadTimeBaseDias?: number;
+    /** Quantas OS a produção consegue processar por dia útil. */
+    capacidadeOsPorDia?: number;
+    /** Margem de segurança extra somada ao prazo calculado. */
+    bufferDias?: number;
+  };
 }
 
 export interface MaterialConfig {
@@ -225,6 +252,15 @@ export interface PricingSimulation {
   origem: "valeria";
   usado: boolean;                   // true após criarOrcamento consumir
   autorizacaoHumana?: string;       // opcional — id de autorização manual
+  /**
+   * Bloco D (sprint P0.3) — snapshot IMUTÁVEL do briefing técnico usado
+   * para gerar ESTE preço específico, congelado no momento do cálculo.
+   * criarOrcamento propaga isso para o orçamento persistido — nunca lê o
+   * briefing "ao vivo" de novo (que pode já ter mudado até o cliente
+   * confirmar), garantindo que o orçamento sempre reflita o que foi
+   * efetivamente calculado e mostrado ao cliente.
+   */
+  technicalBriefingSnapshot?: Record<string, unknown>;
 }
 
 // ── Resultado do motor de preço ───────────────────────────────────────────────
@@ -238,6 +274,7 @@ export interface PricingResult {
   missingFields?: string[];
   pricingVersion?: string;
   simulationId?: string;
+  blockedItems?: Array<{ campo: string; reasonCode: string; motivo: string }>;
 }
 
 export interface PricingBreakdown {
@@ -248,6 +285,7 @@ export interface PricingBreakdown {
   extrasTotal: number;
   matTotal: number;
   maqTotal?: number;
+  adesivoCusto?: number;
 }
 
 // ── Rate limit ────────────────────────────────────────────────────────────────

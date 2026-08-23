@@ -22,6 +22,7 @@ export {
   valeriaUpsertCliente,
   valeriaCatalogo,
   valeriaListarMateriais,
+  valeriaAtualizarBriefingTecnico,
   valeriaPrepararProdutoPersonalizado,
   valeriaCalcularProdutoPersonalizado,
   valeriaConsultarPrazoProducao,
