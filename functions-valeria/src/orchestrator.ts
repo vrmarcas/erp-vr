@@ -14,7 +14,7 @@
 
 import type { BriefingData, Cliente, CrmLead } from "./types";
 import type { TechnicalBriefing } from "./technical_briefing";
-import { computeTechnicalReadiness } from "./technical_briefing";
+import { computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
 
 export type NextCommercialAction =
   | "greet"
@@ -161,6 +161,7 @@ export function nextCommercialAction(params: {
   orcamentoJaCriado: boolean;
   handoffReasonCode?: HandoffReasonCode | null;
   technicalBriefing?: TechnicalBriefing | null;
+  lastEligibleSimulationFingerprint?: string | null;
 }): NextActionResult {
   const resultado = nextCommercialActionCore(params);
   // P0.8 — invariante garantida centralmente, não branch a branch (nunca
@@ -180,6 +181,7 @@ function nextCommercialActionCore(params: {
   orcamentoJaCriado: boolean;
   handoffReasonCode?: HandoffReasonCode | null;
   technicalBriefing?: TechnicalBriefing | null;
+  lastEligibleSimulationFingerprint?: string | null;
 }): NextActionResult {
   if (params.handoffReasonCode) {
     return {
@@ -205,6 +207,28 @@ function nextCommercialActionCore(params: {
     return {
       nextAction: "identify_customer", missingFields: [], reason: "Dados de especificação completos — falta identificar o cliente antes de orçar.",
       actionPayload: {},
+    };
+  }
+
+  if (
+    readiness.canGenerateQuote &&
+    params.technicalBriefing?.productId &&
+    params.lastEligibleSimulationFingerprint &&
+    technicalBriefingFingerprint(params.technicalBriefing) === params.lastEligibleSimulationFingerprint
+  ) {
+    // Sprint P0.4 (achado real de E2E, Bloco H2) — já existe uma
+    // simulação ELIGIBLE cujo fingerprint bate com o briefing atual (não
+    // mudou nada desde o cálculo). O LLM já apresentou o preço num turno
+    // anterior; se a conversa chegou até aqui de novo, é hora de criar o
+    // orçamento formal — nunca deixar o LLM escolher entre
+    // criar_orcamento_vr e criar_rascunho_vitre (achado real: confundiu
+    // as duas e caiu no 401 da Tool errada).
+    return {
+      nextAction: "create_quote", missingFields: [], reason: "Simulação elegível já calculada e confere com os dados atuais — criar o orçamento formal.",
+      actionPayload: {
+        instrucao: "Chamar a Tool de criação do orçamento agora, com os dados já confirmados — não recalcular, não escolher outra Tool.",
+        toolToCall: "criar_orcamento_vr",
+      },
     };
   }
 

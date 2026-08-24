@@ -4,6 +4,7 @@
  */
 import {
   parseFlexibleLength,
+  parseDimensionLengthMm,
   resolveMaterialId,
   computeTechnicalReadiness,
   toQuoteCoreInput,
@@ -28,6 +29,29 @@ describe("A6 — parseFlexibleLength (conversão de unidade)", () => {
     expect(parseFlexibleLength(null)).toBeNull();
     expect(parseFlexibleLength(undefined)).toBeNull();
     expect(parseFlexibleLength("")).toBeNull();
+  });
+});
+
+describe("P0.4 (achado real de E2E) — parseDimensionLengthMm (largura/altura/profundidade, nunca espessura)", () => {
+  test("número puro é tratado como CM, não mm (mesma convenção de calcular_produto_personalizado)", () => {
+    expect(parseDimensionLengthMm("40")).toBe(400);
+    expect(parseDimensionLengthMm("30")).toBe(300);
+    expect(parseDimensionLengthMm(40)).toBe(40); // number já é assumido mm (mesmo contrato de parseFlexibleLength para tipo number)
+  });
+  test("unidade explícita continua respeitada normalmente", () => {
+    expect(parseDimensionLengthMm("400mm")).toBe(400);
+    expect(parseDimensionLengthMm("40cm")).toBe(400);
+    expect(parseDimensionLengthMm("0.4m")).toBe(400);
+  });
+  test("bug real reproduzido: '40x30x25cm' informado pelo cliente não pode virar uma peça de 40mm x 30mm x 25mm", () => {
+    expect(parseDimensionLengthMm("40")).not.toBe(40);
+    expect(parseDimensionLengthMm("40")).toBe(parseFlexibleLength("40cm"));
+  });
+  test("entrada inválida retorna null", () => {
+    expect(parseDimensionLengthMm("abc")).toBeNull();
+    expect(parseDimensionLengthMm(null)).toBeNull();
+    expect(parseDimensionLengthMm(undefined)).toBeNull();
+    expect(parseDimensionLengthMm("")).toBeNull();
   });
 });
 
