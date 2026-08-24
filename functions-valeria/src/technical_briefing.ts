@@ -89,6 +89,26 @@ export function parseFlexibleLength(input: number | string | null | undefined): 
 }
 
 /**
+ * P0.4 (achado real de E2E) — largura/altura/profundidade: quando o
+ * cliente fala "40x30x25cm" e o LLM manda um número puro sem unidade, é
+ * CENTÍMETRO (convenção do motor de cálculo, calcular_produto_
+ * personalizado's larg/alt/prof) — nunca milímetro. parseFlexibleLength()
+ * sozinho assume mm num número puro, o que é certo para espessura (ex.
+ * "5" = 5mm) mas errado para dimensão (faria "40" virar 40mm em vez de
+ * 400mm, encolhendo a peça 10x). Use esta função só para largura/altura/
+ * profundidade; espessura continua em parseFlexibleLength() direto.
+ */
+export function parseDimensionLengthMm(input: number | string | null | undefined): number | null {
+  if (input === null || input === undefined || input === "") return null;
+  if (typeof input === "number") return Number.isFinite(input) ? input : null;
+
+  const s = String(input).trim();
+  if (/[a-zA-Z]/.test(s)) return parseFlexibleLength(s); // unidade explícita, ex. "40cm"/"400mm"
+  const n = parseFloat(s.replace(",", "."));
+  return Number.isFinite(n) ? n * 10 : null; // número puro = cm
+}
+
+/**
  * Bloco A3 — material canônico. Nunca aceita "acrílico cristal 3mm" como
  * identificador técnico — resolve para o matKey real (cfg_N) comparando
  * com a lista de materiais REAL do ERP (mesma fonte de

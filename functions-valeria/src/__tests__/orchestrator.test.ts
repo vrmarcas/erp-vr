@@ -3,7 +3,7 @@
  * comercial (sprint P0.2 2026-08-23, P0.34).
  */
 import { computeQuoteReadiness, nextCommercialAction } from "../orchestrator";
-import { emptyTechnicalBriefing } from "../technical_briefing";
+import { emptyTechnicalBriefing, technicalBriefingFingerprint } from "../technical_briefing";
 import type { BriefingData, Cliente, CrmLead } from "../types";
 import type { TechnicalBriefing } from "../technical_briefing";
 
@@ -208,6 +208,36 @@ describe("ORCHESTRATOR — Bloco F: technicalBriefing como fonte de verdade (pro
     });
     expect(r.nextAction).toBe("calculate_quote");
     expect(r.actionPayload.toolToCall).toBe("calcular_produto_personalizado");
+  });
+
+  test("19. P0.4 (achado real E2E Bloco H2) — simulação elegível com fingerprint batendo → create_quote com toolToCall='criar_orcamento_vr', nunca deixa o LLM escolher entre criar_orcamento_vr e criar_rascunho_vitre", () => {
+    const fp = technicalBriefingFingerprint(tbCaixaCompleto);
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+      lastEligibleSimulationFingerprint: fp,
+    });
+    expect(r.nextAction).toBe("create_quote");
+    expect(r.actionPayload.toolToCall).toBe("criar_orcamento_vr");
+  });
+
+  test("20. Sem simulação elegível ainda (fingerprint ausente) → continua calculate_quote, nunca create_quote prematuro", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+      lastEligibleSimulationFingerprint: null,
+    });
+    expect(r.nextAction).toBe("calculate_quote");
+  });
+
+  test("21. Simulação elegível existe mas fingerprint NÃO bate (briefing mudou depois do cálculo) → volta a calculate_quote, nunca cria com dado desatualizado", () => {
+    const fpDesatualizado = technicalBriefingFingerprint(tbCaixaIncompleto);
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+      lastEligibleSimulationFingerprint: fpDesatualizado,
+    });
+    expect(r.nextAction).toBe("calculate_quote");
   });
 
   test("19. P0.8 — actionPayload.askPermission é SEMPRE false, em toda ação possível (nunca existe estado de 'pedir permissão')", () => {

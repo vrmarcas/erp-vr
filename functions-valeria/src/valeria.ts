@@ -26,7 +26,7 @@ import { evaluateQuoteEligibility } from "./pricing";
 import { calculatePersonalizedProduct, describeProductFields } from "./quote_core";
 import { nextCommercialAction, computeQuoteReadiness } from "./orchestrator";
 import { estimateProductionDeadline, checkUrgentFit } from "./deadline";
-import { parseFlexibleLength, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
+import { parseFlexibleLength, parseDimensionLengthMm, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
 import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing, saveLastEligibleSimulation, loadLastEligibleSimulation, clearLastEligibleSimulation } from "./technical_briefing_store";
 import { ok, err, QUOTE_RESPONSES } from "./response";
 import { paraE164BR, encontrarPorTelefone } from "./telefone";
@@ -235,6 +235,14 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       // produto VR personalizado em andamento nesta conversa).
       const technicalBriefing = await loadTechnicalBriefing(ctx.conversationId);
       const technicalBriefingParaOrchestrator = technicalBriefing.productId ? technicalBriefing : null;
+      // Sprint P0.4 (achado real de E2E, Bloco H2) — carrega a simulação
+      // canônica para o orchestrator saber se já existe um cálculo
+      // ELIGIBLE pronto para virar orçamento formal (nextAction
+      // create_quote), sem o LLM precisar escolher entre
+      // criar_orcamento_vr e criar_rascunho_vitre sozinho.
+      const lastEligibleSim = technicalBriefingParaOrchestrator
+        ? await loadLastEligibleSimulation(ctx.conversationId)
+        : null;
       const nextAction = nextCommercialAction({
         briefing: briefingTyped,
         cliente,
@@ -243,6 +251,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         temHistoricoConversa: !!briefing || !!cliente || !!lead,
         orcamentoJaCriado,
         technicalBriefing: technicalBriefingParaOrchestrator,
+        lastEligibleSimulationFingerprint: lastEligibleSim?.fingerprint ?? null,
       });
       const quoteReadiness = computeQuoteReadiness(
         briefingTyped, cliente, lead, ctx.channelPhone ?? null, technicalBriefingParaOrchestrator
@@ -530,9 +539,9 @@ export const valeriaAtualizarBriefingTecnico = RUN_OPTS.https.onRequest(async (r
         ...(materialId ? { materialId } : {}),
         ...(body["espessura"] != null ? { thicknessMm: parseFlexibleLength(String(body["espessura"])) ?? undefined } : {}),
         dimensions: {
-          larguraMm: body["largura"] != null ? (parseFlexibleLength(String(body["largura"])) ?? undefined) : undefined,
-          alturaMm: body["altura"] != null ? (parseFlexibleLength(String(body["altura"])) ?? undefined) : undefined,
-          profundidadeMm: body["profundidade"] != null ? (parseFlexibleLength(String(body["profundidade"])) ?? undefined) : undefined,
+          larguraMm: body["largura"] != null ? (parseDimensionLengthMm(String(body["largura"])) ?? undefined) : undefined,
+          alturaMm: body["altura"] != null ? (parseDimensionLengthMm(String(body["altura"])) ?? undefined) : undefined,
+          profundidadeMm: body["profundidade"] != null ? (parseDimensionLengthMm(String(body["profundidade"])) ?? undefined) : undefined,
         },
       };
 
