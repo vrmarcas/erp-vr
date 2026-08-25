@@ -1165,6 +1165,18 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
         let found = findLeadByConv(dict, ctx.conversationId);
         if (!found) found = findLeadByTelefone(dict, tel);
 
+        // Sprint P0.9 — isTest propagado do atendimento (nunca inferido),
+        // mesma disciplina de OrcamentoEnviado/PricingSimulation. O
+        // frontend já filtra CRM_LEADS por isso (_isTestRecord(), hotfix
+        // 2026-08-10) — só faltava o backend popular o campo.
+        let isTestFromAtd = false;
+        try {
+          const atdSnap = await admin.firestore().collection("atendimentos").doc(ctx.conversationId).get();
+          isTestFromAtd = atdSnap.exists && atdSnap.data()?.isTeste === true;
+        } catch (e) {
+          console.error("[valeriaCriarOportunidade] falha ao ler atendimento p/ isTest:", (e as Error).message);
+        }
+
         let lead: CrmLead;
         let acao: string;
 
@@ -1173,6 +1185,7 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
           const existing = found.lead;
           existing.nome  = nome;
           existing.tel   = tel;
+          if (isTestFromAtd) existing.isTest = true;
           if (body["email"]) existing.email = body["email"] as string;
           existing.valeria = {
             ...existing.valeria,
@@ -1213,6 +1226,7 @@ export const valeriaCriarOportunidade = RUN_OPTS.https.onRequest(async (req, res
             dores:    [],
             resumo_ia: (body["observacoes"] as string) ?? "Lead criado pela Valéria.",
             valor:    "A definir",
+            isTest:   isTestFromAtd,
             valeria: {
               status:         "NOVO_LEAD",
               conversationId: ctx.conversationId,
