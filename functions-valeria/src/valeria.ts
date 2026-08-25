@@ -266,8 +266,21 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
           briefing,
           etapaValeria,
           etapaKanban,
-          camposFaltando: (briefing as { camposFaltando?: string[] } | null)?.camposFaltando ?? null,
-          classificacao:  (briefing as { classificacao?: string } | null)?.classificacao ?? null,
+          // P0.5 (achado real de E2E) — camposFaltando/classificacao vêm do
+          // briefing GENÉRICO (catálogo/Vitre) e ficam desatualizados assim
+          // que o technicalBriefing (produto VR personalizado) assume como
+          // fonte de verdade — a Valéria confundiu esse campo legado com
+          // nextActionPayload.fields e voltou a pedir acabamento/prazo/
+          // observação (campos opcionais) mesmo com a especificação técnica
+          // 100% completa. Suprimido aqui pela mesma razão que
+          // computeQuoteReadiness (Bloco F) já ignora BriefingData genérico
+          // nesse caso — nunca duas fontes conflitantes de "o que falta".
+          camposFaltando: technicalBriefingParaOrchestrator
+            ? null
+            : (briefing as { camposFaltando?: string[] } | null)?.camposFaltando ?? null,
+          classificacao:  technicalBriefingParaOrchestrator
+            ? null
+            : (briefing as { classificacao?: string } | null)?.classificacao ?? null,
           // P0.24 — Tool Output orientado à ação: a Valéria segue
           // nextAction.nextAction, não decide sozinha o próximo passo.
           quoteReadiness,
