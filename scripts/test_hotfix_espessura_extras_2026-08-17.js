@@ -333,7 +333,15 @@ function rodarCenario(opts) {
   });
   var unit = parseBRL(r.oi_unit_1.textContent);
   var tot = parseBRL(r.oi_tot_1.textContent);
-  testePerto('I1. UNIT. × QTD = TOTAL (espessura mista + extra do item juntos)', unit * 3, tot, 0.05);
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — "Unit.×Qtd=Total"
+  // deixou de valer por CONSTRUÇÃO quando o item tem um extra "➕ deste
+  // Item" (aqui, instalacao:45): a causa raiz do bloco é justamente que o
+  // preço UNITÁRIO comercial nunca pode incluir um valor que não escala
+  // com a quantidade — Extra "deste Item" é um valor FLAT por linha
+  // (nunca um valor por peça), então continua 100% cobrado, só não é mais
+  // diluído dentro do "Unit.". Total = Unit×Qtd + o extra (R$45, sem
+  // markup extra neste cenário sem overhead/vrml/impostos configurados).
+  testePerto('I1. Total = Unit.×Qtd + o extra "➕ deste Item" (nunca mais diluído no unitário)', tot - (unit * 3), 45, 0.05);
   var itensDistribuidos = mod.orcColetarItensDistribuidos(window._orcCalc.finalPrice);
   testePerto('I2. PDF/WhatsApp (orcColetarItensDistribuidos) batem com a linha', itensDistribuidos[0].total, tot, 0.02);
 }

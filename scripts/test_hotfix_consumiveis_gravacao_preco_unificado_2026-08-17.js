@@ -227,7 +227,16 @@ function rodarCenario(opts) {
   var unit = parseBRL(r.els.oi_unit_1.textContent);
   var tot = parseBRL(r.els.oi_tot_1.textContent);
   var resumo = parseBRL(r.els.orcTotalVal.textContent);
-  test('D1. UNIT. = TOTAL quando qty=1', r.els.oi_unit_1.textContent, r.els.oi_tot_1.textContent);
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — "Unit.=Total quando
+  // qty=1" deixou de valer por CONSTRUÇÃO quando há Gravação/Spray/Extra
+  // no item: a causa raiz do bloco é justamente que o preço UNITÁRIO
+  // comercial nunca pode incluir um custo que não escala com a
+  // quantidade (Gravação é "valor TOTAL da ocorrência", RODADA 6 — nunca
+  // um valor por peça) — mesmo em qty=1. Total continua correto (D3,
+  // abaixo, R$332,00) — só passou a ser Unit (material+adesivo, R$312,00,
+  // a parte que de fato escalaria com qty) + a fatia de Gravação (R$20,00
+  // = 10×2, flat) que este item sozinho absorve por inteiro.
+  testePerto('D1. Total = Unitário + a fatia de Gravação/custo-fixo do pedido (nunca mais confundidos em qty=1)', tot - unit, 20, 0.02);
   testePerto('D2. TOTAL da linha bate com o Resumo lateral (mesma fonte canônica)', tot, resumo);
   ok('D3. o preço da linha agora inclui adesivo+Gravação+markup, não só material (R$332,00, não R$100,00 nem R$156,00)', Math.abs(tot - 332) < 0.02);
 }
@@ -304,7 +313,17 @@ function rodarCenario(opts) {
   // asserção original checava o texto exato da fórmula antiga; o que
   // importa (PASS 3 escreve oi_unit_/oi_tot_ com o preço final
   // redistribuído a partir de finalPriceVR) continua verdadeiro.
-  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final redistribuído (fonte canônica única, agora com extras isolados por item)', /_totalVRParaRepartir\s*=\s*finalPriceVR_semItemExtras\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc) && /eu=document\.getElementById\('oi_unit_'\+item\.idx\)/.test(orcRecalcSrc));
+  //
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — _totalVRParaRepartir
+  // foi substituído por finalPriceVR_soMaterial/_fatorPoolMaterial (isola
+  // o preço UNITÁRIO comercial de custos fixos do pedido — máquinas/
+  // montagem/deslocamento — que antes eram diluídos por item.qty, bug real
+  // de produção). Extras "➕ deste Item" continuam somados no TOTAL da
+  // linha (nunca no unitário) via itemExtrasProprio, exatamente como
+  // antes — a asserção abaixo troca só o nome da variável do achado desta
+  // rodada, a garantia comportamental (oi_unit_/oi_tot_ escritos a partir
+  // de um preço final único, nunca duas fórmulas) continua a mesma.
+  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final redistribuído (fonte canônica única, agora com extras isolados por item)', /finalPriceVR_qtySafe\s*=\s*_calcularFinalPriceVR\(matTotal\s*\+\s*consTotal\)/.test(orcRecalcSrc) && /eu=document\.getElementById\('oi_unit_'\+item\.idx\)/.test(orcRecalcSrc) && /itemExtrasProprio/.test(orcRecalcSrc));
 
   var cfgRenderSrc = extractFn('cfgRenderTables');
   ok('G8. cfgRenderTables() nunca deixa os campos de preço do adesivo em branco/0 (evita reintroduzir o bug ao salvar Config de novo)', /cfgAdesivoPrecoCm2/.test(cfgRenderSrc) && /parseFloat\(elAdhCm2\.value\)>0/.test(cfgRenderSrc));

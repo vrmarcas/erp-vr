@@ -6654,6 +6654,7 @@ function _authFirebaseError(code){
           <option value="">Todos os status</option>
           <option value="ativo">Ativo</option>
           <option value="inativo">Inativo</option>
+          <option value="renomeado">Renomeado (SKU antigo)</option>
         </select>
         <select id="vitreCatFiltroCategoria" onchange="vitreCatalogoRender()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
           <option value="">Todas as categorias</option>
@@ -6766,6 +6767,12 @@ function _authFirebaseError(code){
         <div class="fg">
           <label>SKU *</label>
           <input type="text" id="vitreCatSku" placeholder="Ex: CPC001">
+          <!-- RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — SKU é o ID do
+               documento (ver comentário em vitreCatalogoEditarModal), por
+               isso o campo acima fica travado ao editar; esta ação separada
+               chama vitreRenomearSku() (cria novo doc + tombstone no
+               antigo), nunca uma edição in-place do campo. -->
+          <button type="button" id="vitreCatSkuRenomearBtn" onclick="vitreCatalogoRenomearSku()" style="display:none;margin-top:4px;font-size:11px;padding:3px 8px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">✏️ Renomear SKU</button>
         </div>
         <div class="fg">
           <label>Nome *</label>
@@ -11204,6 +11211,21 @@ function orcRecalc() {
   var finalPriceVR = _calcularFinalPriceVR(totalCostParaMarkup);
   var finalPriceVR_semItemExtras = _calcularFinalPriceVR(totalCostParaMarkup - itemExtrasTotal);
   var somaExtrasTransformada = finalPriceVR - finalPriceVR_semItemExtras;
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — mesma técnica de
+  // "calcular com e sem uma parcela" já usada acima para isolar os extras
+  // por item, agora para isolar do preço UNITÁRIO comercial só o que
+  // GENUINAMENTE escala com a quantidade: material (matTotal) e Adesivo/
+  // Adh. Branco por área (consTotal = adh+adhb, RODADA 5 — `adh` já
+  // multiplica `areaTotal`, que já inclui `*qty` desde o PASS 1, exatamente
+  // como matCost). Máquinas/Montagem/Deslocamento (`maqTotal+mont+desl`)
+  // são valores ÚNICOS por pedido (um input manual, nunca multiplicado por
+  // qty em lugar nenhum) — são esses, e SÓ esses, que causavam o bug real
+  // de produção (unitário caindo conforme a quantidade sobe, porque um
+  // custo fixo estava sendo dividido por ela). `finalPriceVR_qtySafe` usa
+  // a MESMA transformação de desconto/acréscimo, só com base de custo
+  // filtrada (material+consumíveis por área, nunca máquinas/montagem/
+  // deslocamento).
+  var finalPriceVR_qtySafe = _calcularFinalPriceVR(matTotal + consTotal);
   if(_soCorte) {
     var scEl = document.getElementById('soCorteValor');
     if(scEl) scEl.textContent = 'R$ '+finalPriceVR.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -11222,48 +11244,65 @@ function orcRecalc() {
   // descontado (RODADA 6 — Spray/Extra seguem a mesma regra da Gravação).
   finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
 
-  // PASS 3 — preço final unitário efetivo do item (fonte canônica única):
-  // cada item VR recebe (a) sua fatia proporcional (peso = tsRaw do PASS 2,
-  // SEM os extras — material + ajuste do item) do "pool" comum do pedido —
-  // material, máquinas, consumíveis, montagem, deslocamento, desconto/
-  // acréscimo global e Gravação — MAIS (b) o valor dos SEUS PRÓPRIOS
-  // extras "➕ deste Item" (achado da rodada anterior: extras de um item
-  // vazavam parcialmente pro preço de outros, porque entravam só no pool
-  // comum, rateado por um peso que não sabia de quem era o extra).
-  // Itens Vitre (catálogo, preço já final) não são linhas desta tabela e
-  // ficam fora da partilha. MESMA técnica de rateio que
-  // orcColetarItensDistribuidos() já usa para PDF/WhatsApp — ao escrever
-  // aqui o mesmo valor final, PDF/WhatsApp continuam devolvendo o mesmo
-  // número, sem duplicar fórmula.
-  var _totalVRParaRepartir = finalPriceVR_semItemExtras + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
-  // RODADA 5 — Orçamento comparativo / grupos de opções: `_rawTotalVR` (o
-  // denominador do rateio) soma só os itens que CONTAM para o total real
-  // (item.conta!==false) — exatamente simétrico ao que o PASS 1 já fez em
-  // matTotal/areaTotal/qtyTotal. Uma opção não selecionada nunca entra
-  // aqui, então nunca "rouba" fatia do pool comum dos itens cumulativos.
+  // PASS 3 — preço final unitário efetivo do item (fonte canônica única).
+  //
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — achado real de
+  // produção: mesmo item/config, só mudando a quantidade, o "Unit."
+  // exibido variava (qty 1 ≈R$45,46 → qty 2 ≈R$45,24 → qty 6 ≈R$45,16).
+  // Causa raiz: a versão anterior deste PASS 3 dava a cada item uma fatia
+  // proporcional do POOL INTEIRO do pedido — incluindo máquinas/montagem/
+  // deslocamento (custos FIXOS do pedido, um único input manual, nunca
+  // multiplicado por qty em lugar nenhum) — e então dividia essa fatia por
+  // item.qty para achar o "unitário". Custo fixo dividido por quantidade
+  // NUNCA é constante (some conforme qty sobe) — regra comercial violada.
+  //
+  // Corrigido separando dois conceitos que a versão anterior misturava:
+  //   (a) preço UNITÁRIO comercial — só a parte que genuinamente escala
+  //       com a quantidade (material + Adesivo/Adh.Branco por área, ambos
+  //       já lineares em qty desde o PASS 1/2) — nunca mais custo fixo.
+  //   (b) TOTAL da linha — unitário×qty (a), MAIS a fatia proporcional
+  //       (por peso de material, mesmo rateio de sempre) dos custos que
+  //       são do PEDIDO inteiro, não desta peça especificamente: máquinas/
+  //       montagem/deslocamento, e Gravação/Spray/Extra por peça (RODADA
+  //       6 — "valor TOTAL desta ocorrência, nunca multiplicado por qty",
+  //       ou seja, também não é um custo por unidade) — MAIS os extras
+  //       "➕ deste Item" (Acabamento/Instalação/Outros), que já eram, e
+  //       continuam sendo, atribuídos 100% a este item (nunca rateados).
+  // Isso preserva TODAS as regras já estabilizadas (Gravação/Spray/Extra/
+  // Extra por item continuam aparecendo no preço da linha exatamente como
+  // sempre apareceram — nenhuma delas é "removida", só deixaram de ser
+  // DIVIDIDAS por quantidade) e fecha exatamente o bug relatado (o
+  // UNITÁRIO nunca mais cai conforme a quantidade sobe).
   var _rawTotalVR = 0;
   itemRows.forEach(function(item){ if(item.conta!==false) _rawTotalVR += (item.tsRaw||0); });
-  // Fator de escala do pool comum por unidade de peso — mesmo valor que
-  // `_totalVRParaRepartir*share` produziria para um item que conta
-  // (identidade algébrica: total*(tsRaw/_rawTotalVR) === tsRaw*_fatorPool),
-  // então o comportamento de orçamentos sem grupos fica bit-a-bit
-  // idêntico ao de antes desta rodada. Para uma opção NÃO selecionada,
-  // este mesmo fator produz um preço INFORMATIVO na mesma escala de preço
-  // por peso dos itens reais do pedido — nunca somado ao total, só exibido
-  // na linha do item (ver oi_tot_/oi_unit_ abaixo).
-  var _fatorPool = _rawTotalVR>0 ? _totalVRParaRepartir/_rawTotalVR : 0;
+  var _fatorPoolQtySafe = _rawTotalVR>0 ? finalPriceVR_qtySafe/_rawTotalVR : 0;
+  // Custos do PEDIDO (não desta peça) que nunca escalam com qty — mesma
+  // técnica de "calcular com e sem" já usada para isolar item extras:
+  // a diferença entre o pool completo (sem item extras) e o pool
+  // qty-safe é exatamente a contribuição, já transformada por desconto/
+  // acréscimo, de máquinas+montagem+deslocamento.
+  var _custoFixoTransformado = finalPriceVR_semItemExtras - finalPriceVR_qtySafe;
+  var _poolNaoUnitario = _custoFixoTransformado + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
+  var _fatorPoolNaoUnitario = _rawTotalVR>0 ? _poolNaoUnitario/_rawTotalVR : 0;
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
-    var itemPoolComum;
+    var itemUnitFinal, itemShareNaoUnitario;
     if (item.conta===false) {
-      itemPoolComum = _fatorPool>0 ? item.tsRaw*_fatorPool : (itemRows.length ? _totalVRParaRepartir/itemRows.length : 0);
+      // Opção NÃO selecionada (orçamento comparativo) — preço
+      // INFORMATIVO na mesma escala de preço/peso dos itens reais do
+      // pedido, nunca somado ao total — mesma regra de sempre.
+      itemUnitFinal = _fatorPoolQtySafe>0 ? (item.tsRaw*_fatorPoolQtySafe)/(item.qty||1) : (item.qty>0 ? item.tsRaw/item.qty : item.tsRaw);
+      itemShareNaoUnitario = _fatorPoolNaoUnitario>0 ? item.tsRaw*_fatorPoolNaoUnitario : (itemRows.length ? _poolNaoUnitario/itemRows.length : 0);
     } else {
-      var share = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
-      itemPoolComum = _totalVRParaRepartir*share;
+      itemUnitFinal = item.qty>0 ? (item.tsRaw*_fatorPoolQtySafe)/item.qty : item.tsRaw*_fatorPoolQtySafe;
+      var _shareNaoUnit = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
+      itemShareNaoUnitario = _poolNaoUnitario*_shareNaoUnit;
     }
+    // Extras "➕ deste Item" (Acabamento/Instalação/Outros) — valor FLAT
+    // por linha, 100% atribuído a este item (nunca rateado com outros,
+    // nunca dividido por qty).
     var itemExtrasProprio = (itemExtrasTotal>0) ? (item.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
-    var itemTotalFinal = itemPoolComum + itemExtrasProprio;
-    var itemUnitFinal  = item.qty>0 ? itemTotalFinal/item.qty : itemTotalFinal;
+    var itemTotalFinal = itemUnitFinal * item.qty + itemShareNaoUnitario + itemExtrasProprio;
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
     // RODADA 5 — badge/ação de grupo de opções na própria linha do item.
@@ -11302,11 +11341,14 @@ function orcRecalc() {
           if(itemExtrasTotal>0) {
             lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#1EB8D8;font-weight:600">Extras por item</span><span style="color:#1EB8D8;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
             // RODADA CIRÚRGICA (consistência visual) — decompõe a linha
-            // acima por item, usando o MESMO valor já atribuído a cada um
-            // no PASS 3 (itemExtrasSoma/itemExtrasTotal × somaExtrasTransformada,
-            // ver mais abaixo) — não é uma conta nova nem muda o total
-            // desta linha; só deixa explícito a qual item cada extra
-            // pertence, resolvendo a ambiguidade do agregado.
+            // acima por item (itemExtrasSoma/itemExtrasTotal ×
+            // somaExtrasTransformada) — não é uma conta nova nem muda o
+            // total desta linha; só deixa explícito a qual item cada
+            // extra pertence, resolvendo a ambiguidade do agregado.
+            // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — este valor
+            // NÃO é mais somado ao "Unit."/"Total" da linha do item na
+            // tabela (PASS 3, acima) — só aparece aqui, no resumo do
+            // pedido — ver comentário do PASS 3 para a causa raiz.
             var _extrasPorItemTxt = itemRows.filter(function(it){ return (it.itemExtrasSoma||0)>0; }).map(function(it){
               var _prodNomeExtra = (document.getElementById('oi_prod_'+it.idx)||{}).value || ('Item '+it.idx);
               var _valorItemExtra = itemExtrasTotal>0 ? (it.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
@@ -11363,6 +11405,25 @@ function orcRecalc() {
   // manualmente. Repintar aqui, sempre — nunca deixar o resumo divergir
   // do estado real recém-calculado.
   if (typeof orcUpdateSummary === 'function') orcUpdateSummary();
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco B — preço já enviado ao
+  // cliente não pode mudar sozinho ao reabrir para editar. orcEnvEditar()
+  // hidrata o orçamento e, ao final, sobrepõe o valor CONGELADO
+  // (o.valorFinal/o.itens[].unit/.total) por cima deste recálculo ao vivo
+  // — nunca lê overhead/vrml/impostos do snapshot salvo (política de
+  // segurança já existente: esses três nunca são persistidos em texto
+  // puro, ver pricingVersion/cfgHashNaoReversivel logo acima). Este motor
+  // de cálculo continua sendo o único e não é duplicado — só o resultado
+  // exibido é substituído pelo congelado enquanto nada foi alterado.
+  // window._orcHidratando fica true durante TODA a hidratação (mesmo com
+  // várias chamadas internas de orcRecalc() disparadas por orcMatChanged
+  // por item) — só quando o usuário de fato altera algo DEPOIS da
+  // hidratação terminar (_orcHidratando já false) é que este recálculo ao
+  // vivo deve "vencer" o congelado — vira uma revisão explícita.
+  if (!window._orcHidratando && window._orcMostrandoCongelado) {
+    window._orcMostrandoCongelado = false;
+    var _bannerCongRevisao = document.getElementById('orcCongeladoBanner'); if (_bannerCongRevisao) _bannerCongRevisao.remove();
+    showToast('Orçamento alterado — novo cálculo aplicado (revisão da versão enviada).', 'info');
+  }
 }
 
 // ── Motor de Orçamento API (Valéria / Cloud Functions) ──────────────────────
@@ -13261,14 +13322,15 @@ function kbDrop(e) {
   const body = e.currentTarget;
   body.classList.remove('drag-over');
   if (_kbDrag) {
-    body.appendChild(_kbDrag);
     _kbDrag.classList.remove('kb-dragging');
     // Ao arrastar para coluna de dia, salva os.entrega com a data da semana corrente
     var _dragOsId = _kbDrag.dataset.osid;
     var _dragOs = _dragOsId ? KB_OS[_dragOsId] : null;
+    _kbDrag = null;
     if(_dragOs) {
       var _colDayOffset = {kbSeg:0,kbTer:1,kbQua:2,kbQui:3,kbSex:4,kbSab:5}[body.id];
       if(_colDayOffset !== undefined) {
+        var _entregaAntes = _dragOs.entrega, _prazoAntes = _dragOs.prazo, _origemAntes = _dragOs.entregaOrigem;
         // Compute Monday of current week
         var _dn = new Date(); var _dow = _dn.getDay();
         var _mon = new Date(_dn);
@@ -13278,6 +13340,27 @@ function kbDrop(e) {
         var _yy=_tgt.getFullYear(), _mm=String(_tgt.getMonth()+1).padStart(2,'0'), _dd=String(_tgt.getDate()).padStart(2,'0');
         _dragOs.entrega = _yy+'-'+_mm+'-'+_dd;
         _dragOs.prazo   = _dragOs.entrega;
+        // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco G — achado real de
+        // produção: kbRender() força toda OS com status 'iniciada'/
+        // 'aguardando_saldo' de volta para "Novas OS", incondicionalmente
+        // (GO-LIVE 2026-08-11, P0 seção 11 — evita a SUGESTÃO automática
+        // pular a triagem). Isso também suprimia qualquer escolha MANUAL
+        // feita depois (drag/modal/sugestão aceita), porque nenhuma delas
+        // avançava o status — a data era salva certa no Firestore, mas o
+        // card sempre voltava pra "Novas OS" no próximo render (inclusive
+        // o disparado pelo PRÓPRIO save, e sempre no reload). Corrigido
+        // marcando a escolha como 'manual' aqui — kbRender() só força
+        // "Novas OS" quando a data ainda é a sugestão original nunca
+        // confirmada. MANUAL > SUGESTÃO, sempre, por regra explícita.
+        _dragOs.entregaOrigem = 'manual';
+      }
+      // kbRender() reposiciona o card pelo estado real (nunca mais
+      // manipulação de DOM solta como o body.appendChild(_kbDrag) daqui —
+      // achado adicional: aquele reposicionamento visual nunca refletia
+      // a regra real de coluna, e por isso escondia o próprio bug: o card
+      // "parecia" ter ido pro dia certo até o próximo render de verdade.
+      if(typeof kbRender==='function') kbRender();
+      if(_colDayOffset !== undefined && typeof kbSaveKbos==='function') {
         // Rodada 2.1 (2026-08-08) — achado real: este ponto gravava o
         // KB_OS INTEIRO direto em 'kb_os' via _cloudSave(), ignorando o
         // split kb_os/kb_os_fin do P0.6. Para sessões que tinham campos
@@ -13286,10 +13369,24 @@ function kbDrop(e) {
         // restante/etc no documento operacional que a Produção lê —
         // exatamente o vazamento que P0.6 fechou. kbSaveKbos() faz o
         // split correto (nunca escreve financeiro em 'kb_os').
-        if(typeof kbSaveKbos==='function') kbSaveKbos();
+        // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco G — antes disparava
+        // e esquecia (fire-and-forget), sem reverter nem avisar em falha
+        // (achado da auditoria: único write de data do Kanban sem essa
+        // proteção, diferente de kbSalvarPrazo/kbAceitarSugestaoBtn).
+        // Agora aguarda e reverte visualmente se o save não confirmar —
+        // nunca deixa o card num dia diferente do que está no servidor.
+        kbSaveKbos().then(function(res){
+          if(res && res.ok) return;
+          // kbSaveKbos() já mostra sua própria mensagem para conflito
+          // real entre sessões — só avisamos aqui os demais casos (ex.:
+          // permissão negada), que antes falhavam em silêncio completo.
+          if(res && (res.reason==='conflito_os' || res.reason==='conflito-persistente')) return;
+          _dragOs.entrega = _entregaAntes; _dragOs.prazo = _prazoAntes; _dragOs.entregaOrigem = _origemAntes;
+          if(typeof kbRender==='function') kbRender();
+          if(typeof showToast==='function') showToast('Não foi possível salvar a nova data — tente novamente.','err');
+        });
       }
     }
-    _kbDrag = null;
     kbSyncCounts();
   }
 }
@@ -13910,7 +14007,7 @@ function kbMostrarSugestao(os) {
 function kbAceitarSugestaoBtn(btn) {
   var os = KB_OS[_kbOsId]; if(!os) return;
   var _osIdSnap = _kbOsId;
-  var _antesEntrega=os.entrega, _antesPrazo=os.prazo, _antesTempo=os.tempoProd;
+  var _antesEntrega=os.entrega, _antesPrazo=os.prazo, _antesTempo=os.tempoProd, _antesOrigem=os.entregaOrigem;
   var horas   = parseFloat(btn.dataset.h)||0;
   var dateVal = btn.dataset.d||'';
   var tempoStr = horas % 1 === 0 ? String(horas) : horas.toFixed(1);
@@ -13928,7 +14025,11 @@ function kbAceitarSugestaoBtn(btn) {
   // Corrigido: os dois campos são aplicados aqui e persistidos em UMA
   // única gravação — nunca duas gravações competindo pela mesma OS.
   os.tempoProd = tempoStr;
-  if(dateVal){ os.entrega = dateVal; os.prazo = dateVal; }
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco G — clicar "Aceitar
+  // sugestão" é uma confirmação EXPLÍCITA do operador (mesmo nível de
+  // deliberação que digitar a data no modal ou arrastar o card) — nunca a
+  // sugestão passiva em si, que nunca marca isto. Ver kbRender().
+  if(dateVal){ os.entrega = dateVal; os.prazo = dateVal; os.entregaOrigem = 'manual'; }
   if(typeof kbRender==='function') kbRender();
   // Re-aplicar filtro de visão para mover card para coluna correta
   if(typeof _kbView !== 'undefined') {
@@ -13949,7 +14050,7 @@ function kbAceitarSugestaoBtn(btn) {
     }
     if(!res || (res.reason!=='conflito_os' && res.reason!=='conflito-persistente')){
       var osAtual=KB_OS[_osIdSnap];
-      if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; osAtual.tempoProd=_antesTempo; }
+      if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; osAtual.tempoProd=_antesTempo; osAtual.entregaOrigem=_antesOrigem; }
     }
     if(typeof kbRender==='function') kbRender();
     if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
@@ -14070,7 +14171,7 @@ function kbSalvarPrazo() {
   var v=(document.getElementById('kbPrazoEntrega')||{}).value||'';
   var _pSalvar = null;
   if(v){
-    var _osIdSnap=_kbOsId, _antesEntrega=os.entrega, _antesPrazo=os.prazo;
+    var _osIdSnap=_kbOsId, _antesEntrega=os.entrega, _antesPrazo=os.prazo, _antesOrigem=os.entregaOrigem;
     // Corrigido 2026-08-07 (Rodada Mestre, seção 21) — bug real
     // reproduzido: salvar um novo prazo só repintava o badge do card no
     // lugar ("mantém card na coluna atual, sem mover", comentário
@@ -14081,7 +14182,11 @@ function kbSalvarPrazo() {
     // kbRender() roda na hora — reposiciona o card de forma otimista,
     // sem esperar o round-trip do servidor. O listener real, quando
     // chegar, apenas confirma o mesmo estado.
-    os.entrega=v; os.prazo=v;
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco G — definir o prazo
+    // manualmente aqui é uma confirmação explícita (mesmo padrão de
+    // kbDrop/kbAceitarSugestaoBtn) — kbRender() só respeita esta data
+    // enquanto a produção não foi iniciada por causa desta marcação.
+    os.entrega=v; os.prazo=v; os.entregaOrigem='manual';
     if(typeof kbRender==='function') kbRender();
     // RODADA 9, Bloco A — achado real: o toast "Prazo salvo" aparecia
     // aqui, ANTES da gravação no Firestore confirmar — quando a gravação
@@ -14100,7 +14205,7 @@ function kbSalvarPrazo() {
         }
         if(!res || (res.reason!=='conflito_os' && res.reason!=='conflito-persistente')){
           var osAtual=KB_OS[_osIdSnap];
-          if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; }
+          if(osAtual){ osAtual.entrega=_antesEntrega; osAtual.prazo=_antesPrazo; osAtual.entregaOrigem=_antesOrigem; }
         }
         if(typeof kbRender==='function') kbRender();
         if(String(_kbOsId)===String(_osIdSnap) && typeof kbOpen==='function') kbOpen(_osIdSnap);
@@ -14423,8 +14528,23 @@ function kbRender() {
     // 'aguardando_saldo' — ver kbIniciarProd/producaoIniciarOuEditar, que
     // são os únicos pontos que avançam para 'producao'), a OS fica sempre
     // em "Novas OS", nunca num dia da semana nem em "Prontas".
+    //
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco G — achado real: essa
+    // MESMA regra também suprimia qualquer data definida MANUALMENTE
+    // depois (drag/modal "Definir prazo"/sugestão aceita) — nenhum desses
+    // três pontos avança o status, então a OS sempre voltava pra "Novas
+    // OS" no próximo render, mesmo com a data manual corretamente
+    // persistida no Firestore (o bug era 100% de renderização, nunca de
+    // escrita — confirmado por auditoria dedicada). MANUAL > SUGESTÃO,
+    // por regra explícita: uma vez que o operador confirma um dia (ver
+    // os.entregaOrigem==='manual', setado em kbDrop/kbSalvarPrazo/
+    // kbAceitarSugestaoBtn), a OS respeita esse dia mesmo que a produção
+    // ainda não tenha sido formalmente iniciada. OS sem confirmação manual
+    // continua caindo em "Novas OS" exatamente como antes — zero mudança
+    // de comportamento pra sugestão automática nunca tocada.
     var _producaoJaIniciada = (os.status!=='iniciada' && os.status!=='aguardando_saldo');
-    if(!_producaoJaIniciada) {
+    var _dataConfirmadaManualmente = (os.entregaOrigem === 'manual');
+    if(!_producaoJaIniciada && !_dataConfirmadaManualmente) {
       colId='kbNovas';
     } else if(os.status==='pronta'||os.pronto) {
       colId='kbProntas';
@@ -22925,6 +23045,11 @@ function vitreCatalogoRender() {
   }
 
   var lista = VITRE_CATALOGO_CACHE.filter(function (p) {
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — tombstones deixados
+    // por vitreRenomearSku ficam fora da lista por padrão (nunca poluem o
+    // catálogo/busca normais), só aparecem se o operador filtrar
+    // explicitamente por "Renomeado" — nunca apagados, sempre localizáveis.
+    if (!fStatus && p.status === 'renomeado') return false;
     if (fStatus && p.status !== fStatus) return false;
     if (fCategoria && p.categoria !== fCategoria) return false;
     if (fNivel !== '' && String(vitreCatNivel(p)) !== fNivel) return false;
@@ -22941,7 +23066,21 @@ function vitreCatalogoRender() {
   var minhaFuncao = vitreCatMinhaFuncao();
   var podeEditar = souMaster || minhaFuncao === 'producao';
 
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — cor/rótulo do status
+  // numa função única (evita repetir o mesmo ternário em 4 lugares —
+  // grade/lista × cor/texto); "renomeado" ganha um rótulo próprio, nunca
+  // fica parecendo "inativo" (semântica diferente: o produto de verdade
+  // está no SKU novo, não foi desativado).
+  function vitreCatStatusCor(p) { return p.status === 'ativo' ? '#16A34A' : (p.status === 'renomeado' ? '#9333EA' : '#6B7280'); }
+  function vitreCatStatusLabel(p) { return p.status === 'ativo' ? 'ATIVO' : (p.status === 'renomeado' ? 'RENOMEADO' : 'INATIVO'); }
+
   function vitreCatAcoes(p) {
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — tombstone: nunca
+    // editável/ativável/duplicável (o produto de verdade agora vive no SKU
+    // novo) — só um link direto pra ele, preserva a rastreabilidade.
+    if (p.status === 'renomeado') {
+      return p.skuRenomeadoPara ? '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.skuRenomeadoPara) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">→ Ver SKU novo (' + cfgEsc(p.skuRenomeadoPara) + ')</button>' : '';
+    }
     var acoes = '';
     if (podeEditar) acoes += '<button onclick="vitreCatalogoEditarModal(\'' + cfgEsc(p.sku) + '\')" style="font-size:11px;padding:5px 10px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer">✏️ Editar</button>';
     if (souMaster) {
@@ -22962,7 +23101,7 @@ function vitreCatalogoRender() {
       + '</tr></thead><tbody>'
       + lista.map(function (p) {
           var nivel = vitreCatNivel(p);
-          var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+          var statusCor = vitreCatStatusCor(p);
           return '<tr>'
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);font-weight:700">' + cfgEsc(p.nome || '(sem nome)') + '</td>'
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + cfgEsc(p.sku) + '</td>'
@@ -22970,7 +23109,7 @@ function vitreCatalogoRender() {
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)">' + (p.precoVenda != null ? 'R$ ' + Number(p.precoVenda).toFixed(2) : '—') + '</td>'
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:var(--muted)">' + (p.custo != null ? 'R$ ' + Number(p.custo).toFixed(2) : '—') + '</td>'
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;white-space:nowrap">' + VITRE_NIVEL_LABEL[nivel] + '</span></td>'
-            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + (p.status === 'ativo' ? 'ATIVO' : 'INATIVO') + '</span></td>'
+            + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + vitreCatStatusLabel(p) + '</span></td>'
             + '<td style="padding:7px 10px;border-bottom:1px solid var(--border)"><div style="display:flex;flex-wrap:wrap;gap:6px">' + vitreCatAcoes(p) + '</div></td>'
             + '</tr>';
         }).join('')
@@ -22980,12 +23119,12 @@ function vitreCatalogoRender() {
   wrap.style.display = 'grid'; wrap.style.gridTemplateColumns = 'repeat(auto-fill,minmax(280px,1fr))'; wrap.style.gap = '10px';
   wrap.innerHTML = lista.map(function (p) {
     var nivel = vitreCatNivel(p);
-    var statusCor = p.status === 'ativo' ? '#16A34A' : '#6B7280';
+    var statusCor = vitreCatStatusCor(p);
     var acoes = vitreCatAcoes(p);
     return '<div class="card" style="padding:14px">'
       + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
       + '<div><strong>' + cfgEsc(p.nome || '(sem nome)') + '</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">SKU ' + cfgEsc(p.sku) + (p.categoria ? ' · ' + cfgEsc(p.categoria) : '') + '</div></div>'
-      + '<span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + (p.status === 'ativo' ? 'ATIVO' : 'INATIVO') + '</span>'
+      + '<span style="background:' + statusCor + '22;color:' + statusCor + ';padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">' + vitreCatStatusLabel(p) + '</span>'
       + '</div>'
       + '<div style="margin-top:8px;font-size:13px">' + (p.precoVenda != null ? '<strong>R$ ' + Number(p.precoVenda).toFixed(2) + '</strong>' : '<span style="color:var(--muted)">sem preço</span>') + (p.custo != null ? ' <span style="font-size:11px;color:var(--muted)">(custo R$ ' + Number(p.custo).toFixed(2) + ')</span>' : '') + '</div>'
       + '<div style="margin-top:8px"><span style="background:' + VITRE_NIVEL_COLOR[nivel] + '22;color:' + VITRE_NIVEL_COLOR[nivel] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">' + VITRE_NIVEL_LABEL[nivel] + '</span></div>'
@@ -23013,6 +23152,7 @@ function vitreCatalogoNovoModal() {
   document.getElementById('vitreCatSku').disabled = false;
   document.getElementById('vitreCatStatus').value = 'ativo';
   document.getElementById('vitreCatNivelBadge').innerHTML = '';
+  var _skuRenBtnNovo = document.getElementById('vitreCatSkuRenomearBtn'); if (_skuRenBtnNovo) _skuRenBtnNovo.style.display = 'none';
   vitreCatalogoAplicarPermissoesForm();
   document.getElementById('vitreCatOverlay').classList.add('open');
 }
@@ -23024,6 +23164,11 @@ function vitreCatalogoEditarModal(sku) {
   document.getElementById('vitreCatModalTitle').textContent = '🌸 Editar Produto — ' + p.sku;
   document.getElementById('vitreCatSku').value = p.sku;
   document.getElementById('vitreCatSku').disabled = true; // SKU é o ID do documento — não é editável após criado
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — só master (mesma
+  // fronteira de vitreRenomearSku no backend) e só quando o produto não é
+  // já um tombstone de outro rename (ver vitreCatalogoRenomearSku).
+  var _skuRenBtn = document.getElementById('vitreCatSkuRenomearBtn');
+  if (_skuRenBtn) _skuRenBtn.style.display = (vitreCatSouMaster() && p.status !== 'renomeado') ? '' : 'none';
   document.getElementById('vitreCatNome').value = p.nome || '';
   document.getElementById('vitreCatCusto').value = p.custo != null ? p.custo : '';
   document.getElementById('vitreCatPrecoVenda').value = p.precoVenda != null ? p.precoVenda : '';
@@ -23221,7 +23366,12 @@ function vitreCatalogoSalvar() {
   if (!nome) { showToast('Nome é obrigatório.', 'err'); return; }
 
   var souMaster = vitreCatSouMaster();
-  var payload = { sku: sku, nome: nome, requestId: vitreCatReqId() };
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — informa a intenção real
+  // (criar vs. editar) ao backend, que agora valida SKU duplicado quando o
+  // operador está em "Novo Produto" (achado da auditoria: antes um SKU
+  // repetido por engano em "Novo Produto" fazia merge silencioso no
+  // produto ERRADO, sem aviso nenhum).
+  var payload = { sku: sku, nome: nome, requestId: vitreCatReqId(), modo: editando ? 'editar' : 'criar' };
   function num(id) { var v = document.getElementById(id).value; return v === '' ? null : Number(v); }
   function str(id) { var v = document.getElementById(id).value.trim(); return v === '' ? null : v; }
   // Ficha técnica/dimensões — qualquer perfil autorizado (Produção inclusive) pode editar.
@@ -23245,7 +23395,9 @@ function vitreCatalogoSalvar() {
     showToast((editando ? 'Produto atualizado' : 'Produto criado') + (nivel != null ? ' — ' + VITRE_NIVEL_LABEL[nivel] : '') + '.', 'ok');
     vitreCatalogoFecharModal();
   }).catch(function (e) {
-    showToast('Erro ao salvar produto: ' + (e && e.message || e), 'err');
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('SKU_JA_EXISTE') >= 0) showToast('Já existe um produto com o SKU "' + sku + '" — escolha outro.', 'err');
+    else showToast('Erro ao salvar produto: ' + msg, 'err');
   });
 }
 
@@ -23266,6 +23418,27 @@ function vitreCatalogoDuplicar(skuOrigem) {
     var msg = (e && e.message) || '';
     if (msg.indexOf('SKU_JA_EXISTE') >= 0) showToast('Já existe um produto com o SKU "' + skuNovo.trim() + '".', 'err');
     else showToast('Erro ao duplicar: ' + msg, 'err');
+  });
+}
+
+// RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — renomear SKU de um
+// produto já existente (o campo do modal principal fica travado de
+// propósito — SKU é o ID do documento, ver vitreCatalogoEditarModal). Cria
+// um produto novo com o SKU novo (todos os dados preservados) e marca o
+// antigo como tombstone no backend (vitreRenomearSku) — nunca apaga nada,
+// histórico/pedidos que já referenciam o SKU antigo continuam íntegros.
+function vitreCatalogoRenomearSku() {
+  var skuAtual = document.getElementById('vitreCatSku').value.trim();
+  if (!skuAtual) return;
+  var skuNovo = _e2eDlgPrompt('Novo SKU para "' + skuAtual + '":', skuAtual);
+  if (!skuNovo || !skuNovo.trim() || skuNovo.trim() === skuAtual) return;
+  firebase.functions().httpsCallable('vitreRenomearSku')({ skuAtual: skuAtual, skuNovo: skuNovo.trim(), requestId: vitreCatReqId() }).then(function () {
+    showToast('SKU renomeado: ' + skuAtual + ' → ' + skuNovo.trim() + '.', 'ok');
+    vitreCatalogoFecharModal();
+  }).catch(function (e) {
+    var msg = (e && e.message) || '';
+    if (msg.indexOf('SKU_JA_EXISTE') >= 0) showToast('Já existe um produto com o SKU "' + skuNovo.trim() + '".', 'err');
+    else showToast('Erro ao renomear SKU: ' + msg, 'err');
   });
 }
 
@@ -23414,6 +23587,12 @@ function orcResetFormularioVR(){
   setV('orcDataPedido', new Date().toISOString().slice(0,10));
   var validadeEl=document.getElementById('orcValidadeDias'); if(validadeEl) validadeEl.value='10';
   var banner=document.getElementById('orcEditBanner'); if(banner) banner.remove();
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco B — novo orçamento nunca
+  // herda o overlay de valor congelado nem o banner do orçamento anterior
+  // editado nesta sessão (mesmo padrão do banner de edição acima).
+  var bannerCong=document.getElementById('orcCongeladoBanner'); if(bannerCong) bannerCong.remove();
+  window._orcMostrandoCongelado = false;
+  window._orcHidratando = false;
   var pdfBtn=document.getElementById('orcBtnPdf'); if(pdfBtn) pdfBtn.style.display='none';
   orcResetCondicoesPagamentoCompartilhadas();
   window._orcSessaoAtualId = null;
@@ -25508,18 +25687,26 @@ function orcColetarItensDistribuidos(baseEfetiva){
     });
   }
   var _totalParaDistribuir = baseEfetiva || c.finalPrice || 0;
-  // Mesma identidade algébrica do PASS3 de orcRecalc() (ver comentário lá):
-  // total*(totRaw/_matTotalRaw) === totRaw*_fatorPoolColeta para um item
-  // que conta — então nenhum pedido sem grupos muda de valor nesta rodada.
-  var _fatorPoolColeta = _matTotalRaw > 0 ? _totalParaDistribuir/_matTotalRaw : 0;
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — antes desta rodada,
+  // esta função redistribuía `_totalParaDistribuir` (o total EFETIVO —
+  // já com taxa de cartão/desconto PIX embutidos) proporcionalmente por
+  // peso entre os itens e dividia por qty — reproduzindo no PDF/WhatsApp
+  // o MESMO bug corrigido em orcRecalc() PASS 3 (unitário variando com a
+  // quantidade), porque esse total efetivo ainda carrega a fatia de
+  // custo FIXO do pedido (máquinas/consumíveis/montagem/deslocamento).
+  // `item.totRaw` (lido de oi_tot_) já é, desde a correção do PASS 3, o
+  // total CORRETO daquele item (unitário fixo × qty + extras próprios do
+  // item, sem custo fixo do pedido diluído). Escala UNIFORME (nunca mais
+  // um rateio por peso, que reintroduziria o mesmo tipo de distorção) —
+  // denominador é a SOMA dos próprios totRaw (_matTotalRaw, já calculado
+  // acima), nunca um total externo (c.finalPrice) que pode não bater 1:1
+  // com o que está de fato nas linhas (ex.: card fee aplicado só na
+  // camada de pagamento) — mantém a mesma identidade algébrica que a
+  // versão anterior já garantia (soma dos itens sempre fecha com
+  // _totalParaDistribuir), agora sem redividir o pool por peso.
+  var _escalaEfetiva = (_matTotalRaw>0) ? (_totalParaDistribuir/_matTotalRaw) : 1;
   return _itensDados.map(function(item){
-    var itemTotal;
-    if (item.conta === false) {
-      itemTotal = _fatorPoolColeta>0 ? item.totRaw*_fatorPoolColeta : (_itensDados.length ? _totalParaDistribuir/_itensDados.length : 0);
-    } else {
-      var share = _matTotalRaw > 0 ? item.totRaw / _matTotalRaw : (_itensDados.length ? 1/_itensDados.length : 0);
-      itemTotal = _totalParaDistribuir * share;
-    }
+    var itemTotal = item.totRaw * _escalaEfetiva;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
     var desc = orcItemDescricaoComercial(item);
     return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false };
@@ -27205,14 +27392,31 @@ function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
 function orcEnviadosRender() {
   var tbody = document.getElementById('orcEnvBody'); if(!tbody) return;
   orcEnvFiltroMesPopular();
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco C — achado real de
+  // auditoria: _cloudWatch('orcamentos', ...) já sinalizava falha de
+  // permissão/rede em _CLOUD_WATCH_ERROR['orcamentos'] (onSnapshot erro),
+  // mas essa flag nunca era consultada por esta tela — uma falha de
+  // leitura ficava indistinguível de "não há orçamentos", mostrando
+  // sempre "Nenhum orçamento encontrado." mesmo com dados reais existindo
+  // no Firestore. Mesmo padrão já usado em _kbOpenProdOverlay() para
+  // Estoque/Retalhos (Rodada 9, Bloco B) — nunca um silêncio.
+  if (typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['orcamentos']) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:30px;font-weight:700">⚠️ Não foi possível carregar os Orçamentos Enviados — verifique sua conexão/permissão e tente novamente (recarregue a página).</td></tr>';
+    var totErr = document.getElementById('orcEnvTotal'); if(totErr) totErr.textContent = '— erro ao carregar';
+    return;
+  }
   var lista  = orcGetEnviados();
   var q      = (document.getElementById('orcEnvSearch')||{}).value||'';
+  // Busca tolerante a acento/caixa — mesma normalização já usada no
+  // Catálogo Vitre (vitreOrcNormalizarTexto), nunca uma segunda fórmula.
+  var qNorm  = (typeof vitreOrcNormalizarTexto==='function') ? vitreOrcNormalizarTexto(q) : q.toLowerCase();
   var fs     = (document.getElementById('orcEnvFiltroStatus')||{}).value||'';
   var fnf    = (document.getElementById('orcEnvFiltroNF')||{}).value||'';
   var fDe    = (document.getElementById('orcEnvFiltroDataDe')||{}).value||'';
   var fAte   = (document.getElementById('orcEnvFiltroDataAte')||{}).value||'';
   var filtered = lista.filter(function(o){
-    var tOk = !q || (o.cliente+o.num+o.produto).toLowerCase().includes(q.toLowerCase());
+    var alvoNorm = (typeof vitreOrcNormalizarTexto==='function') ? vitreOrcNormalizarTexto((o.cliente||'')+(o.num||'')+(o.produto||'')) : ((o.cliente||'')+(o.num||'')+(o.produto||'')).toLowerCase();
+    var tOk = !qNorm || alvoNorm.includes(qNorm);
     var sOk = !fs || o.status===fs;
     var nfOk = !fnf || (fnf==='sim' ? !!o.nfSolicitada : !o.nfSolicitada);
     var dOk = true;
@@ -27466,6 +27670,50 @@ function orcEnvExcluir(id) {
 // esse estado quebrado, produzindo um total sem relação com o valor
 // salvo. Agora restaura TUDO do snapshotCompleto antes de recalcular —
 // se nada mudar, o recálculo reproduz exatamente o valor salvo.
+// RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco B — aplica por cima da tela
+// de edição os valores CONGELADOS no momento do envio (o.valorFinal e
+// o.itens[].unit/.total, já persistidos por _orcSalvarOrcamentoImpl há
+// várias rodadas — nada novo é gravado aqui). Mesmo princípio que
+// orcEnvAbrir() já usa para a tela de "Ver detalhes" (breakdown salvo,
+// nunca recalculado) — só estende para a tela de EDIÇÃO, que até aqui
+// nunca lia esse valor de volta. Nunca toca overhead/vrml/impostos (esses
+// nunca são persistidos em texto puro — ver pricingVersion acima). Se o
+// registro for legado (sem valorFinal utilizável), não há o que congelar
+// — mostra o recalculado ao vivo mesmo, com aviso explícito (nunca inventa
+// um valor congelado que não existe).
+function orcAplicarSnapshotCongelado(o) {
+  window._orcMostrandoCongelado = false;
+  var bannerCong = document.getElementById('orcCongeladoBanner');
+  if (!o || !(typeof o.valorFinal === 'number' && o.valorFinal > 0)) {
+    if (bannerCong) bannerCong.remove();
+    return;
+  }
+  // Overlay por item — mesma correspondência item-salvo → linha usada na
+  // hidratação logo acima (orcAddItem() só roda para itens VR, na MESMA
+  // ordem; itens do catálogo Vitre são pulados igual lá, nunca contam ri).
+  var ri = 0;
+  (o.itens||[]).forEach(function(it){
+    if (it.tipoItem === 'vitre_catalogo') return;
+    ri++;
+    if (it.unit) { var eu=document.getElementById('oi_unit_'+ri); if(eu) eu.textContent = it.unit; }
+    if (it.total){ var et=document.getElementById('oi_tot_'+ri);  if(et) et.textContent = it.total; }
+  });
+  var bk = o.snapshotCompleto && o.snapshotCompleto.breakdown;
+  if (bk && typeof bk.totalCost === 'number') {
+    var ec = document.getElementById('orcRsmCusto'); if(ec) ec.textContent = orcFmt(bk.totalCost);
+  }
+  var etot = document.getElementById('orcRsmTotal'); if(etot) etot.textContent = orcFmt(o.valorFinal);
+  window._orcMostrandoCongelado = true;
+  if (!bannerCong) {
+    bannerCong = document.createElement('div');
+    bannerCong.id = 'orcCongeladoBanner';
+    bannerCong.style.cssText = 'background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:8px;padding:8px 12px;font-size:11px;color:#1D4ED8;font-weight:700;margin-bottom:10px';
+    var orcHeaderCong = document.querySelector('#pg-orcamento .card');
+    if (orcHeaderCong) orcHeaderCong.insertBefore(bannerCong, orcHeaderCong.firstChild);
+  }
+  bannerCong.innerHTML = '📌 Mostrando o valor ENVIADO originalmente ('+orcFmt(o.valorFinal)+'). Qualquer alteração recalcula (gera revisão).';
+}
+
 function orcEnvEditar(id) {
   var lista = orcGetEnviados();
   var o = lista.find(function(x){ return x.id===id; });
@@ -27480,6 +27728,22 @@ function orcEnvEditar(id) {
   // Navegar para a aba de orçamento
   nav('orcamento');
   setTimeout(function(){
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco A — achado real de
+    // produção: esta função inteira não tinha nenhum try/catch; qualquer
+    // exceção em QUALQUER ponto da hidratação (ex.: opção de material
+    // removida da config, formato inesperado de peça/planificação salva
+    // antigamente) abortava tudo em silêncio, inclusive orcRecalc()/
+    // orcStep(4) no final — que são os ÚNICOS pontos que repintam o card
+    // de resumo (Cliente/Itens/Custo/Total). O <input> de cliente já tinha
+    // sido preenchido (linha abaixo, antes do loop de itens que podia
+    // falhar), mas o resumo nunca repintava — cliente em branco, itens
+    // "0un", custo/total "R$0,00", exatamente o sintoma relatado, mesmo
+    // com o orçamento tendo dados reais salvos. try/catch aqui NUNCA
+    // encobre o erro (console.error + toast) — só garante que o resumo
+    // sempre repinta com o que conseguiu ser restaurado, em vez de travar
+    // a tela inteira num estado quebrado por causa de UM item problemático.
+    window._orcHidratando = true;
+    try {
     // Corrigido 2026-08-07 (Rodada Mestre, seção 7 — bug crítico
     // reproduzido): nav('orcamento') dispara orcEscolhaFluxo() (hook
     // interno, setTimeout 0) que sempre volta para o seletor de marca
@@ -27709,11 +27973,26 @@ function orcEnvEditar(id) {
     window._orcSessaoAtualId = o.id;
     if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
     showToast('Orçamento #'+o.num+' carregado para edição','ok');
-    orcRecalc();
+    } catch(_eHidratacao) {
+      // Bloco A — nunca engolir em silêncio: loga a causa real e avisa o
+      // operador que algo não restaurou, em vez de travar a tela inteira
+      // num estado zerado sem explicação nenhuma.
+      console.error('[orcEnvEditar] falha ao restaurar orçamento #'+(o&&o.num)+':', _eHidratacao);
+      showToast('Este orçamento não pôde ser restaurado completamente — revise os dados antes de salvar/reenviar.', 'warn');
+    }
+    // A partir daqui roda SEMPRE, mesmo que a hidratação acima tenha
+    // falhado parcialmente — nunca deixar o resumo (Cliente/Itens/Custo/
+    // Total) travado no estado zerado do formulário em branco.
+    window._orcHidratando = false;
     // Só agora — com cliente/itens/parâmetros já hidratados — roda o
     // orcStep(4) "de verdade" (pills de etapa, badges, orcSyncStep3Result,
     // parcelamento/PIX etc.); orcUpdateSummary() já vai ler o estado real.
-    orcStep(4);
+    try { orcRecalc(); } catch(_eRecalc) { console.error('[orcEnvEditar] orcRecalc() falhou:', _eRecalc); }
+    try { orcStep(4); } catch(_eStep) { console.error('[orcEnvEditar] orcStep(4) falhou:', _eStep); }
+    // Bloco B — sobrepõe o valor CONGELADO do envio por cima do recálculo
+    // ao vivo acima (ver orcAplicarSnapshotCongelado, definida logo antes
+    // desta função).
+    try { orcAplicarSnapshotCongelado(o); } catch(_eCong) { console.error('[orcEnvEditar] overlay de valor congelado falhou:', _eCong); }
   }, 200);
 }
 
@@ -33470,17 +33749,24 @@ function crmRenderOrcPend() {
 var MAT_PRICE_KEY = 'erp_mat_prices';
 function _matPricesGet() { return Object.assign({},_MAT_PRICES); }
 
-// ── Helper: lista de espessuras configuradas com preço/m² (ORC_MATS + Config Materiais)
+// ── Helper: lista de espessuras configuradas com preço/m² — SÓ Configuração
+// de Orçamento (RODADA DE ESTABILIZAÇÃO, 2026-08-23, Bloco E).
+//
+// Achado real de produção (já relatado antes e nunca corrigido): este
+// seletor mostrava materiais que não existem/não estão mais ativos na
+// Configuração de Orçamento. Causa raiz: esta função combinava dois
+// catálogos sem nenhuma deduplicação nem checagem de existência — ORC_MATS
+// (6 materiais hardcoded no código-fonte, com preço cravado em <input
+// type="hidden"> no HTML) SEMPRE entrava aqui, mesmo que o material
+// equivalente tivesse sido removido/nunca cadastrado na Configuração real.
+// ORC_MATS continua existindo (necessário como fallback de RESOLUÇÃO de
+// chaves legadas antigas — ver orcMatChanged()/_matGetRsm2() — orçamentos
+// salvos há muito tempo usam essas chaves e não podem quebrar), mas nunca
+// mais alimenta a LISTA de opções para peça NOVA — mesma regra já seguida
+// pelo seletor principal do item (orcConstruirMatOpts(), que só lê
+// _cfgData.materiais). Fonte de verdade única: Configuração de Orçamento.
 function _planGetEspOptions() {
   var opts = [];
-  // Materiais padrão ORC_MATS (lê preço do input op_*)
-  ORC_MATS.forEach(function(m) {
-    if(!m.esp) return;
-    var el = document.getElementById(m.field);
-    var p = el ? (parseFloat(el.value)||100) : 100;
-    opts.push({espMm: m.esp, label: m.label, priceM2: p});
-  });
-  // Materiais da Config Orçamento (Firestore/cfgLoad)
   try {
     var cfgMats = (_cfgData&&_cfgData.materiais&&_cfgData.materiais.length)
       ? _cfgData.materiais : (cfgLoad().materiais||[]);
@@ -33490,7 +33776,10 @@ function _planGetEspOptions() {
       if(!espMm) return;
       var areaM2 = (parseFloat(m.comp)||0)*(parseFloat(m.larg)||0)/10000;
       var p = areaM2>0 ? (parseFloat(m.custo)||0)/areaM2 : (parseFloat(m.custo)||100);
-      if(p>0) opts.push({espMm: espMm, label: m.nome, priceM2: p});
+      // Identidade por ID estável (mesmo padrão já usado no merge cloud↔
+      // local da Config Orçamento, _cfgNewMaterialId/_cfgFindMaterialMatchIdx)
+      // — nunca mais espessura+aproximação de preço como chave primária.
+      if(p>0) opts.push({espMm: espMm, label: m.nome, priceM2: p, id: m.id||null});
     });
   } catch(e) {}
   return opts;
@@ -33559,14 +33848,19 @@ function planRenderManual() {
     // 3mm e Acrílico Fumê 3mm), o vendedor não tinha como saber qual
     // estava selecionando — _planGetEspOptions() já devolve o nome
     // (o.label), só não estava sendo usado aqui.
+    // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco E — identidade por ID
+    // estável (p.matId) quando a peça já foi selecionada depois desta
+    // correção; peças manuais salvas ANTES dela nunca tiveram matId — cai
+    // no fallback por espessura+preço aproximado de sempre (preserva
+    // compatibilidade, nunca quebra uma peça já planificada).
     var espHtml = '<option value="">material — esp</option>' + espOpts.map(function(o){
-      var isSel = parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5;
-      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
+      var isSel = p.matId ? (p.matId===o.id) : (parseFloat(p.esp||0)===o.espMm && Math.abs(parseFloat(p.precoM2||0)-o.priceM2)<0.5);
+      return '<option value="'+o.espMm+'" data-rsm2="'+o.priceM2.toFixed(2)+'" data-matid="'+(o.id||'')+'"'+(isSel?' selected':'')+'>'+(o.label||'')+' '+o.espMm+'mm — R$'+Math.round(o.priceM2)+'/m²</option>';
     }).join('');
     return '<div style="display:grid;grid-template-columns:2fr 0.7fr 1fr 1fr 0.5fr auto;gap:5px;align-items:center;margin-bottom:5px">'
       +'<input placeholder="Nome" value="'+p.nome+'" oninput="planManualPieces['+i+'].nome=this.value"'
       +' style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
-      +'<select oninput="planManualPieces['+i+'].esp=this.value;planManualPieces['+i+'].precoM2=parseFloat(this.options[this.selectedIndex].dataset.rsm2||0);_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
+      +'<select oninput="planManualPieces['+i+'].esp=this.value;planManualPieces['+i+'].precoM2=parseFloat(this.options[this.selectedIndex].dataset.rsm2||0);planManualPieces['+i+'].matId=this.options[this.selectedIndex].dataset.matid||null;_planCalcAndMerge()" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg);color:var(--text)">'
       +espHtml+'</select>'
       +'<input type="number" placeholder="Larg cm" value="'+(p.larg||'')+'" min="0" step="0.1"'
       +' oninput="planManualPieces['+i+'].larg=parseFloat(this.value)||0;_planCalcAndMerge()"'
