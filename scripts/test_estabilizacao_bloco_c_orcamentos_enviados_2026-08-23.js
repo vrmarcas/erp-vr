@@ -22,10 +22,26 @@
  * vitreOrcNormalizarTexto() (já existente, reaproveitada — nunca uma
  * segunda normalização) para tolerar acento/caixa.
  *
+ * ACHADO REAL EM PRODUÇÃO (encontrado por reprodução ao vivo, DEPOIS da
+ * auditoria estática acima, exatamente como o processo desta rodada pede
+ * — "reproduza cada bug antes de corrigir"): mesmo com o fix acima
+ * deployado, a tela continuou vazia em produção com 18 orçamentos reais
+ * existentes. Causa raiz de verdade: orçamentos criados pelo motor novo
+ * da ValerIA (functions-valeria/quote_core.ts, P0.2, orçamento VR
+ * personalizado determinístico) gravam na MESMA chave canônica
+ * erp_vr/orcamentos (arquitetura correta) mas com nomes de campo
+ * PRÓPRIOS (n/nomeCliente/total) — orcEnviadosRender() acessava
+ * o.valorFinal.toLocaleString() sem nenhum guard, lançando exceção
+ * dentro do .map() para QUALQUER registro sem valorFinal numérico e
+ * abortando a renderização de TODA a lista (silenciosa, porque quem
+ * chama esta função a partir do listener de nuvem está em try/catch).
+ * Corrigido com orcEnvNormalizar(o) — nunca no motor da ValerIA (fora do
+ * escopo, outros consumidores dela podem depender do schema próprio).
+ *
  * Função sob teste extraída de index.html (nunca reimplementada):
- * orcEnviadosRender, vitreOrcNormalizarTexto, orcEnvParseDataSalvo,
- * orcEnvFiltroMesPopular (stubada — popula um <select>, não relacionada
- * ao bug).
+ * orcEnviadosRender, orcEnvNormalizar, vitreOrcNormalizarTexto,
+ * orcEnvParseDataSalvo, orcEnvFiltroMesPopular (stubada — popula um
+ * <select>, não relacionada ao bug).
  *
  * Uso: node scripts/test_estabilizacao_bloco_c_orcamentos_enviados_2026-08-23.js
  */
@@ -50,7 +66,7 @@ function extractFn(name) {
 
 console.log('\n=== RODADA DE ESTABILIZAÇÃO — Bloco C (Orçamentos Enviados vazio/busca quebrada) ===\n');
 
-var FN_NAMES = ['orcEnviadosRender', 'vitreOrcNormalizarTexto', 'orcEnvParseDataSalvo'];
+var FN_NAMES = ['orcEnviadosRender', 'orcEnvNormalizar', 'vitreOrcNormalizarTexto', 'orcEnvParseDataSalvo'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_estabilizacao_bloco_c.tmp.js');
 fs.writeFileSync(modPath, src);
@@ -60,6 +76,11 @@ function makeEl(props) { return Object.assign({ value: '', textContent: '', inne
 var ORCAMENTOS_REAIS = [
   { id: 'ORC-1', num: '000057', cliente: 'Cliente SEBRAE', produto: 'Troféu', marca: 'vr', valorFinal: 806.84, valorBase: 806.84, status: 'aguardando', dataSalvo: '23/08/2026 10:00', nfSolicitada: false },
   { id: 'ORC-2', num: '000058', cliente: 'João da Conceição', produto: 'Placa', marca: 'vr', valorFinal: 150, valorBase: 150, status: 'aprovado', dataSalvo: '23/08/2026 11:00', nfSolicitada: true },
+  // Achado real de produção — registro no schema do motor novo da ValerIA
+  // (n/nomeCliente/total, SEM num/cliente/valorFinal) — mesmo formato
+  // exato encontrado ao vivo (orc_9ef2f989...) que derrubava a lista
+  // inteira antes deste fix.
+  { id: 'orc_valeria-1', n: 3, nomeCliente: 'Ana Souza', marca: 'vr', total: 524.45, totalCost: 524.45, status: 'pre_orc_valeria', data: '2026-08-25T03:03:04.843Z', itens: [{ descricao: 'Lateral' }] },
 ];
 
 var _els, _cloudWatchError;
@@ -83,10 +104,14 @@ delete require.cache[require.resolve(modPath)];
 var mod = require(modPath);
 
 // 1-2 — caso base: sem filtros, sem erro de nuvem → lista TODOS os orçamentos reais
+// (inclui o registro no schema da ValerIA — achado real que derrubava a
+// lista INTEIRA antes deste fix, não só o próprio registro problemático)
 reset();
 mod.orcEnviadosRender();
 assertTrue(_els.orcEnvBody.innerHTML.indexOf('Nenhum orçamento encontrado') < 0, '1. sem filtros e sem erro de nuvem: NUNCA mostra "Nenhum orçamento encontrado" havendo orçamentos reais — reprodução do bug relatado corrigida');
-assertTrue(_els.orcEnvTotal.textContent === '2 orçamento(s)', '2. contador mostra os 2 orçamentos reais existentes');
+assertTrue(_els.orcEnvTotal.textContent === '3 orçamento(s)', '2. contador mostra os 3 orçamentos reais existentes (2 do ERP + 1 da ValerIA)');
+assertTrue(_els.orcEnvBody.innerHTML.indexOf('Ana Souza') >= 0 && _els.orcEnvBody.innerHTML.indexOf('R$') >= 0, '2b. ACHADO REAL: registro da ValerIA (schema n/nomeCliente/total) renderiza sem lançar exceção — antes derrubava a lista INTEIRA (não só este registro)');
+assertTrue(_els.orcEnvBody.innerHTML.indexOf('524,45') >= 0, '2c. valor do registro da ValerIA vem do campo alternativo "total" (nunca R$0,00 inventado)');
 
 // 3-4 — Bloco C, achado real: _CLOUD_WATCH_ERROR['orcamentos']=true (permissão/rede)
 // precisa avisar claramente, nunca mostrar "Nenhum orçamento encontrado" como se fosse ausência de dados
@@ -100,7 +125,7 @@ assertTrue(/n.o foi poss.vel carregar/i.test(_els.orcEnvBody.innerHTML), '4. mos
 reset();
 _cloudWatchError['orcamentos'] = false;
 mod.orcEnviadosRender();
-assertTrue(_els.orcEnvTotal.textContent === '2 orçamento(s)', '5. flag de erro false (nuvem OK) — lista volta a aparecer normalmente, nenhuma regressão introduzida pelo novo check');
+assertTrue(_els.orcEnvTotal.textContent === '3 orçamento(s)', '5. flag de erro false (nuvem OK) — lista volta a aparecer normalmente, nenhuma regressão introduzida pelo novo check');
 
 // 6-10 — Busca tolerante a acento/caixa
 reset();
@@ -126,7 +151,17 @@ assertTrue(_els.orcEnvBody.innerHTML.indexOf('Nenhum orçamento encontrado') >= 
 reset();
 _els.orcEnvSearch.value = '';
 mod.orcEnviadosRender();
-assertTrue(_els.orcEnvTotal.textContent === '2 orçamento(s)', '10. campo de busca vazio: lista completa volta (nenhum filtro residual)');
+assertTrue(_els.orcEnvTotal.textContent === '3 orçamento(s)', '10. campo de busca vazio: lista completa volta (nenhum filtro residual)');
+
+// 11 — busca encontra o registro da ValerIA pelo nome em nomeCliente (não cliente)
+reset();
+_els.orcEnvSearch.value = 'ana souza';
+mod.orcEnviadosRender();
+assertTrue(_els.orcEnvTotal.textContent === '1 orçamento(s)', '11. busca encontra o registro da ValerIA pelo campo nomeCliente (schema alternativo), não só pelo campo cliente do ERP');
+
+// 12 — orcEnvNormalizar isolada: nunca inventa valor quando nem total nem
+// totalCost existem (regra "não inventar dado ausente")
+assertTrue(mod.orcEnvNormalizar({ id: 'x' }).valorFinal === 0 && mod.orcEnvNormalizar({ id: 'x' }).cliente === '(sem nome)', '12. orcEnvNormalizar() de um registro completamente vazio nunca lança exceção — cai em fallback neutro, nunca inventa nome/valor');
 
 console.log('\n======================================================================');
 console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');

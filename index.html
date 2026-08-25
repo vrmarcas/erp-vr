@@ -27389,17 +27389,60 @@ var ORC_STATUS_COLOR = {
 function orcStatusLabel(status) { return ORC_STATUS_LABEL[status] || status; }
 function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
 
+// RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco C — achado real em PRODUÇÃO
+// (reprodução ao vivo, não só auditoria estática): orçamentos criados
+// pelo motor novo da ValerIA (functions-valeria/quote_core.ts, orçamento
+// VR personalizado determinístico, P0.2) já gravam na MESMA chave
+// canônica erp_vr/orcamentos (arquitetura correta — nunca uma segunda
+// fonte, ver orcGetEnviados()) mas com nomes de campo PRÓPRIOS
+// (n/nomeCliente/total), diferentes do schema que o restante do ERP grava
+// (num/cliente/valorFinal). orcEnviadosRender() acessava
+// o.valorFinal.toLocaleString() sem NENHUM guard — para qualquer registro
+// sem valorFinal numérico, isso lançava exceção dentro do .map(),
+// abortando a renderização INTEIRA da lista (silenciosamente, porque quem
+// chama esta função a partir do listener de nuvem está dentro de um
+// try/catch) — o sintoma relatado ("Nenhum orçamento encontrado" mesmo
+// com 18 orçamentos reais salvos) acontecia sempre que QUALQUER orçamento
+// da ValerIA estivesse na lista, derrubando os outros junto. Normalizado
+// aqui — nunca no motor da ValerIA, que é uma frente de trabalho separada
+// e outros consumidores dela podem depender do schema próprio — mostra os
+// dados reais quando existem, nunca inventa o que falta (fallback
+// "—"/"(sem nome)", nunca R$0,00 fantasioso quando nem total nem
+// totalCost existem).
+function orcEnvNormalizar(o) {
+  return {
+    num: o.num != null ? o.num : (o.n != null ? o.n : '—'),
+    cliente: o.cliente || o.nomeCliente || '(sem nome)',
+    produto: o.produto || (o.itens && o.itens[0] && (o.itens[0].descricao || o.itens[0].prod)) || '—',
+    valorFinal: typeof o.valorFinal === 'number' ? o.valorFinal : (typeof o.total === 'number' ? o.total : 0),
+    valorBase: typeof o.valorBase === 'number' ? o.valorBase : (typeof o.totalCost === 'number' ? o.totalCost : (typeof o.total === 'number' ? o.total : 0)),
+    dataSalvo: o.dataSalvo || (o.data ? String(o.data).slice(0,10).split('-').reverse().join('/') : '—'),
+  };
+}
+
 function orcEnviadosRender() {
   var tbody = document.getElementById('orcEnvBody'); if(!tbody) return;
   orcEnvFiltroMesPopular();
-  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco C — achado real de
-  // auditoria: _cloudWatch('orcamentos', ...) já sinalizava falha de
-  // permissão/rede em _CLOUD_WATCH_ERROR['orcamentos'] (onSnapshot erro),
-  // mas essa flag nunca era consultada por esta tela — uma falha de
-  // leitura ficava indistinguível de "não há orçamentos", mostrando
-  // sempre "Nenhum orçamento encontrado." mesmo com dados reais existindo
-  // no Firestore. Mesmo padrão já usado em _kbOpenProdOverlay() para
-  // Estoque/Retalhos (Rodada 9, Bloco B) — nunca um silêncio.
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco C — achado real em
+  // PRODUÇÃO (reprodução ao vivo, não só auditoria estática): orçamentos
+  // criados pelo motor novo da ValerIA (functions-valeria/quote_core.ts,
+  // orçamento VR personalizado determinístico, P0.2) já gravam na MESMA
+  // chave canônica erp_vr/orcamentos (arquitetura correta — nunca uma
+  // segunda fonte, ver orcGetEnviados()) mas com nomes de campo PRÓPRIOS
+  // (n/nomeCliente/total), diferentes do schema que o restante do ERP
+  // grava (num/cliente/valorFinal). Esta função acessava
+  // o.valorFinal.toLocaleString() sem NENHUM guard — para qualquer
+  // registro sem valorFinal numérico, isso lançava exceção dentro do
+  // .map(), abortando a renderização INTEIRA da lista (silenciosamente,
+  // porque quem chama esta função a partir do listener de nuvem está
+  // dentro de um try/catch) — o sintoma relatado ("Nenhum orçamento
+  // encontrado" mesmo com 18 orçamentos reais salvos) acontecia sempre
+  // que QUALQUER orçamento da ValerIA estivesse na lista, derrubando os
+  // outros 17 junto. Normalizado aqui (orcEnvNormalizar, abaixo) — nunca
+  // no motor da ValerIA, que é uma frente de trabalho separada e outros
+  // consumidores dela podem depender do schema próprio — mostra os dados
+  // reais quando existem, nunca inventa o que falta (fallback "—"/"(sem
+  // nome)", nunca R$0,00 fantasioso quando nem total nem totalCost existem).
   if (typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['orcamentos']) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:30px;font-weight:700">⚠️ Não foi possível carregar os Orçamentos Enviados — verifique sua conexão/permissão e tente novamente (recarregue a página).</td></tr>';
     var totErr = document.getElementById('orcEnvTotal'); if(totErr) totErr.textContent = '— erro ao carregar';
@@ -27415,7 +27458,8 @@ function orcEnviadosRender() {
   var fDe    = (document.getElementById('orcEnvFiltroDataDe')||{}).value||'';
   var fAte   = (document.getElementById('orcEnvFiltroDataAte')||{}).value||'';
   var filtered = lista.filter(function(o){
-    var alvoNorm = (typeof vitreOrcNormalizarTexto==='function') ? vitreOrcNormalizarTexto((o.cliente||'')+(o.num||'')+(o.produto||'')) : ((o.cliente||'')+(o.num||'')+(o.produto||'')).toLowerCase();
+    var _n = orcEnvNormalizar(o);
+    var alvoNorm = (typeof vitreOrcNormalizarTexto==='function') ? vitreOrcNormalizarTexto((_n.cliente||'')+(_n.num||'')+(_n.produto||'')) : ((_n.cliente||'')+(_n.num||'')+(_n.produto||'')).toLowerCase();
     var tOk = !qNorm || alvoNorm.includes(qNorm);
     var sOk = !fs || o.status===fs;
     var nfOk = !fnf || (fnf==='sim' ? !!o.nfSolicitada : !o.nfSolicitada);
@@ -27439,11 +27483,12 @@ function orcEnviadosRender() {
   // aguardando_pagamento/pago são estados aditivos (setados automaticamente ao
   // gerar OS / receber saldo) — nunca substituem os 4 estados manuais originais.
   tbody.innerHTML = filtered.map(function(o,idx){
+    var _n = orcEnvNormalizar(o);
     var isVR = o.marca==='vr';
     var marcaHtml = '<span style="background:'+(isVR?'#E3F7FB':'#E3F0F1')+';color:'+(isVR?'#983C8F':'#134F57')+';padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700">'+(isVR?'VR Marcas':'Vitre')+'</span>';
-    var valHtml = 'R$ '+o.valorFinal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-    if(o.valorFinal < o.valorBase){
-      valHtml = '<span style="text-decoration:line-through;color:#aaa;font-size:10px">R$ '+o.valorBase.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span> '+valHtml;
+    var valHtml = 'R$ '+_n.valorFinal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    if(_n.valorFinal < _n.valorBase){
+      valHtml = '<span style="text-decoration:line-through;color:#aaa;font-size:10px">R$ '+_n.valorBase.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span> '+valHtml;
     }
     var extras = [];
     if(o.descCond>0) extras.push('⚡ Cond. '+o.descCond+'%'+(o.dcData?' até '+o.dcData.split('-').reverse().join('/'):''));
@@ -27459,12 +27504,12 @@ function orcEnviadosRender() {
     // ações do detalhe (orcEnvAbrir → Aprovar/Recusar/Confirmar Pgt).
     var statusSel = '<span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;background:'+orcStatusCor(o.status)+'22;color:'+orcStatusCor(o.status)+'">'+orcStatusLabel(o.status)+'</span>';
     return '<tr>'
-      +'<td><strong>#'+o.num+'</strong></td>'
-      +'<td>'+o.cliente+'</td>'
-      +'<td style="font-size:11px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+o.produto+(o.nfSolicitada?'<span style="margin-left:5px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;border-radius:6px;padding:1px 5px;font-size:9px;font-weight:700">🧾 NF</span>':'')+extraHtml+'</td>'
+      +'<td><strong>#'+_n.num+'</strong></td>'
+      +'<td>'+_n.cliente+'</td>'
+      +'<td style="font-size:11px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_n.produto+(o.nfSolicitada?'<span style="margin-left:5px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;border-radius:6px;padding:1px 5px;font-size:9px;font-weight:700">🧾 NF</span>':'')+extraHtml+'</td>'
       +'<td>'+marcaHtml+'</td>'
       +'<td style="text-align:right;font-weight:600;color:#059669">'+valHtml+'</td>'
-      +'<td style="font-size:10px;color:var(--muted)">'+o.dataSalvo+'</td>'
+      +'<td style="font-size:10px;color:var(--muted)">'+_n.dataSalvo+'</td>'
       +'<td>'+statusSel+'</td>'
       +'<td style="white-space:nowrap"><button onclick="orcEnvAbrir(\''+o.id+'\')" style="padding:3px 8px;border:1px solid #983C8F;background:transparent;color:#983C8F;border-radius:5px;font-size:10px;cursor:pointer;margin-right:4px">📄 Abrir</button><button onclick="orcEnvExcluir(\''+o.id+'\')" style="padding:3px 7px;border:1px solid #DC2626;background:transparent;color:#DC2626;border-radius:5px;font-size:10px;cursor:pointer">Excluir</button></td>'
       +'</tr>';
