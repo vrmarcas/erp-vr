@@ -105,17 +105,24 @@ async function detectarEPersistirConfirmacao(atendimentoId: string, texto: strin
  * com nome/telefone declarados explicitamente pelo cliente no texto, o
  * LLM às vezes nunca chama criar_ou_atualizar_cliente/abrir_oportunidade
  * — travando identify_customer indefinidamente (achado real, conversa
- * "Homologacao P07 Final Diana Reis", sprint P0.7). Extrai nome+telefone
- * do texto (identity_detector.ts, puro e conservador — nunca "chuta") e,
- * se ambos presentes E o atendimento ainda não tem lead/cliente
- * vinculado, chama o MESMO endpoint que a Tool chamaria
- * (valeriaCriarOportunidade), direto do backend — a criação do lead
- * deixa de depender de qualquer decisão do LLM. Best-effort: falha aqui
- * NUNCA bloqueia o envio da mensagem.
+ * "Homologacao P07 Final Diana Reis", sprint P0.7). Extrai nome do texto
+ * (identity_detector.ts, puro e conservador — nunca "chuta") e, se
+ * presente E o atendimento ainda não tem lead/cliente vinculado, chama o
+ * MESMO endpoint que a Tool chamaria (valeriaCriarOportunidade), direto
+ * do backend — a criação do lead deixa de depender de qualquer decisão
+ * do LLM. Best-effort: falha aqui NUNCA bloqueia o envio da mensagem.
+ *
+ * Telefone: prioriza o que o CANAL já sabe (atd.telefoneE164 — em
+ * WhatsApp real isso vem pronto do número do canal; nos testes vem do
+ * campo opcional em "Nova conversa de teste"), só usa o extraído do
+ * texto como fallback quando o canal não tem nada — o cliente NUNCA
+ * precisa digitar o próprio telefone na conversa para ser identificado
+ * (achado real, roteiro de gravação P0.9: mensagem não traz telefone).
  */
 async function detectarEPersistirIdentidade(atendimentoId: string, texto: string, atd: FirebaseFirestore.DocumentData): Promise<void> {
   if (atd.leadId || atd.clienteId) return; // já resolvido — nunca sobrescreve
-  const { nome, telefone } = extrairIdentidade(texto);
+  const { nome, telefone: telefoneDoTexto } = extrairIdentidade(texto);
+  const telefone = (atd.telefoneE164 as string | undefined) || telefoneDoTexto;
   if (!nome || !telefone) return;
   const bearer = process.env.VALERIA_BEARER_SECRET;
   if (!bearer) {
@@ -212,6 +219,13 @@ export const atdCriarConversaTeste = functions.https.onCall(async (data, context
   requireRole(caller, [], "criar conversa de homologação em Atendimentos"); // só master (requireRole deixa master passar sempre)
 
   const nomeClienteSimulado = String(data?.nomeClienteSimulado || "Cliente Teste").trim().slice(0, 80);
+  // Sprint P0.9 (achado real de E2E) — telefone do CANAL, opcional,
+  // simulando o que um canal real (WhatsApp) já traria pronto sem o
+  // cliente precisar digitar o próprio número na conversa. Nunca
+  // inventado: só existe se o Master informar explicitamente ao criar a
+  // conversa de teste.
+  const telefoneDigitos = String(data?.telefoneSimulado || "").replace(/\D/g, "").trim();
+  const telefoneSimulado = telefoneDigitos.length >= 10 && telefoneDigitos.length <= 13 ? telefoneDigitos : null;
 
   const ref = db().collection(COL_ATD).doc();
   const now = Date.now();
@@ -223,7 +237,7 @@ export const atdCriarConversaTeste = functions.https.onCall(async (data, context
     contactId: null,
     leadId: null,
     clienteId: null,
-    telefoneE164: null,
+    telefoneE164: telefoneSimulado,
     nome: nomeClienteSimulado,
     empresa: null,
     modoAtendimento: "valeria",
