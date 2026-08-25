@@ -2,7 +2,7 @@
  * orchestrator.test.ts — testes do motor determinístico de progressão
  * comercial (sprint P0.2 2026-08-23, P0.34).
  */
-import { computeQuoteReadiness, nextCommercialAction } from "../orchestrator";
+import { computeQuoteReadiness, nextCommercialAction, computeCommercialRoute } from "../orchestrator";
 import { emptyTechnicalBriefing, technicalBriefingFingerprint } from "../technical_briefing";
 import type { BriefingData, Cliente, CrmLead } from "../types";
 import type { TechnicalBriefing } from "../technical_briefing";
@@ -136,12 +136,12 @@ describe("ORCHESTRATOR — nextCommercialAction (P0.34)", () => {
     expect(r.actionPayload.reasonCode).toBe("UNSUPPORTED_PRODUCT");
   });
 
-  test("11. calculate_quote traz instrucao explícita de não perguntar mais nada", () => {
+  test("11. calculate_quote traz instrucao explícita de não chamar Tool de cálculo (P0.6 — backend já executou)", () => {
     const r = nextCommercialAction({
       briefing: briefingCompleto, cliente: clienteConfirmado, lead: null, channelPhone: null,
       temHistoricoConversa: true, orcamentoJaCriado: false,
     });
-    expect(String(r.actionPayload.instrucao)).toMatch(/não pedir mais informação/i);
+    expect(String(r.actionPayload.instrucao)).toMatch(/não chame nenhuma Tool/i);
   });
 });
 
@@ -210,34 +210,105 @@ describe("ORCHESTRATOR — Bloco F: technicalBriefing como fonte de verdade (pro
     expect(r.actionPayload.toolToCall).toBe("calcular_produto_personalizado");
   });
 
-  test("19. P0.4 (achado real E2E Bloco H2) — simulação elegível com fingerprint batendo → create_quote com toolToCall='criar_orcamento_vr', nunca deixa o LLM escolher entre criar_orcamento_vr e criar_rascunho_vitre", () => {
+  test("19. P0.4 (achado real E2E Bloco H2) — simulação elegível com fingerprint batendo E cliente já confirmou → create_quote com toolToCall='criar_orcamento_vr', nunca deixa o LLM escolher entre criar_orcamento_vr e criar_rascunho_vitre", () => {
     const fp = technicalBriefingFingerprint(tbCaixaCompleto);
     const r = nextCommercialAction({
       briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
-      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
-      lastEligibleSimulationFingerprint: fp,
+      temHistoricoConversa: true, orcamentoJaCriado: false,
+      technicalBriefing: { ...tbCaixaCompleto, clientConfirmedQuote: true },
+      lastEligibleSimulation: { fingerprint: fp, finalPrice: 123.45, simulationId: "sim_test_1" },
     });
     expect(r.nextAction).toBe("create_quote");
     expect(r.actionPayload.toolToCall).toBe("criar_orcamento_vr");
   });
 
-  test("20. Sem simulação elegível ainda (fingerprint ausente) → continua calculate_quote, nunca create_quote prematuro", () => {
+  test("19b. P0.6 — fingerprint bate mas cliente AINDA NÃO confirmou → confirm_quote (nunca cria o orçamento sem confirmação explícita)", () => {
+    const fp = technicalBriefingFingerprint(tbCaixaCompleto);
     const r = nextCommercialAction({
       briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
       temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
-      lastEligibleSimulationFingerprint: null,
+      lastEligibleSimulation: { fingerprint: fp, finalPrice: 123.45, simulationId: "sim_test_2" },
+    });
+    expect(r.nextAction).toBe("confirm_quote");
+    expect(r.actionPayload.finalPrice).toBe(123.45);
+  });
+
+  test("19c. P0.6 — confirm_quote nunca traz toolToCall (não é uma ação que o LLM ou o executor devem chamar Tool nenhuma, só apresentar)", () => {
+    const fp = technicalBriefingFingerprint(tbCaixaCompleto);
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+      lastEligibleSimulation: { fingerprint: fp, finalPrice: 50, simulationId: "sim_test_3" },
+    });
+    expect(r.actionPayload.toolToCall).toBeUndefined();
+  });
+
+  test("20. Sem simulação elegível ainda (lastEligibleSimulation ausente) → continua calculate_quote, nunca create_quote/confirm_quote prematuro", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+      lastEligibleSimulation: null,
     });
     expect(r.nextAction).toBe("calculate_quote");
   });
 
-  test("21. Simulação elegível existe mas fingerprint NÃO bate (briefing mudou depois do cálculo) → volta a calculate_quote, nunca cria com dado desatualizado", () => {
+  test("21. Simulação elegível existe mas fingerprint NÃO bate (briefing mudou depois do cálculo) → volta a calculate_quote, nunca cria/confirma com dado desatualizado", () => {
     const fpDesatualizado = technicalBriefingFingerprint(tbCaixaIncompleto);
     const r = nextCommercialAction({
       briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
-      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
-      lastEligibleSimulationFingerprint: fpDesatualizado,
+      temHistoricoConversa: true, orcamentoJaCriado: false,
+      technicalBriefing: { ...tbCaixaCompleto, clientConfirmedQuote: true },
+      lastEligibleSimulation: { fingerprint: fpDesatualizado, finalPrice: 99, simulationId: "sim_test_4" },
     });
     expect(r.nextAction).toBe("calculate_quote");
+  });
+
+  test("21b. P0.6 (A4) — qty mudou depois do cálculo (mesmo com clientConfirmedQuote=true de uma rodada anterior) → recalcula antes de criar, nunca usa simulação desatualizada", () => {
+    const fpAntigo = technicalBriefingFingerprint(tbCaixaCompleto);
+    const tbQtyMudou = { ...tbCaixaCompleto, quantity: 99, clientConfirmedQuote: true };
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbQtyMudou,
+      lastEligibleSimulation: { fingerprint: fpAntigo, finalPrice: 100, simulationId: "sim_test_5" },
+    });
+    expect(r.nextAction).toBe("calculate_quote");
+  });
+
+  test("22. P0.6 (A5) — wantsDeadlineCheck=true → check_production_deadline, nunca deixa o LLM decidir se consulta prazo", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false,
+      technicalBriefing: { ...tbCaixaIncompleto, wantsDeadlineCheck: true },
+    });
+    expect(r.nextAction).toBe("check_production_deadline");
+  });
+
+  test("23. P0.6 (A6) — dataNecessidadeCliente informada → check_urgent_fit, nunca deixa o LLM decidir se verifica encaixe", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false,
+      technicalBriefing: { ...tbCaixaIncompleto, dataNecessidadeCliente: "2026-09-01" },
+    });
+    expect(r.nextAction).toBe("check_urgent_fit");
+  });
+
+  test("24. P0.6 — check_production_deadline/check_urgent_fit exigem productId (pergunta de prazo sem produto ainda identificado não é auto-executável)", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false,
+      technicalBriefing: { ...emptyTechnicalBriefing(), wantsDeadlineCheck: true },
+    });
+    expect(r.nextAction).not.toBe("check_production_deadline");
+  });
+
+  test("25. P0.6 — commercialRoute é VR_CUSTOM assim que productId existe, mesmo com briefing incompleto (trava a rota cedo, nunca deixa migrar pro Vitre no mesmo turno)", () => {
+    expect(computeCommercialRoute(tbCaixaIncompleto)).toBe("VR_CUSTOM");
+    expect(computeCommercialRoute(tbCaixaCompleto)).toBe("VR_CUSTOM");
+  });
+
+  test("26. P0.6 — commercialRoute é null sem productId (rota ainda não decidida — não bloqueia Vitre indevidamente)", () => {
+    expect(computeCommercialRoute(emptyTechnicalBriefing())).toBeNull();
+    expect(computeCommercialRoute(null)).toBeNull();
   });
 
   test("19. P0.8 — actionPayload.askPermission é SEMPRE false, em toda ação possível (nunca existe estado de 'pedir permissão')", () => {

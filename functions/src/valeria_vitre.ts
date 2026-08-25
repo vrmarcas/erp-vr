@@ -97,6 +97,30 @@ function requireEnv(body: Record<string, unknown>): { conversationId: string; or
   return { conversationId, organizationId };
 }
 
+/**
+ * Sprint P0.6 — guard de rota (achado real de E2E: com nextAction/
+ * toolToCall já decididos para o fluxo VR personalizado, o LLM ainda foi
+ * parar no catálogo Vitre). Lê diretamente
+ * valeria_technical_briefings/{conversationId} — mesma coleção que
+ * functions-valeria/technical_briefing_store.ts usa, mas lida aqui sem
+ * importar entre codebases (functions/ e functions-valeria/ são pacotes
+ * de deploy independentes). productId presente == conversa já travada em
+ * VR_CUSTOM: criar/editar um rascunho Vitre nesse turno seria a mesma
+ * confusão de Tool que já aconteceu uma vez.
+ *
+ * Limitação conhecida (documentada, não resolvida nesta rodada):
+ * valeriaVitreBuscarCatalogo/valeriaVitreConsultarProduto não recebem
+ * conversationId no contrato atual (são buscas anônimas) — não dá para
+ * aplicar o mesmo guard sem quebrar o schema já configurado no Chatvolt.
+ * O guard aqui cobre as ações que de fato criam/editam um orçamento
+ * Vitre (o equivalente Vitre de create_quote), que é o risco real.
+ */
+async function commercialRouteBloqueiaVitre(conversationId: string): Promise<boolean> {
+  const doc = await admin.firestore().collection("valeria_technical_briefings").doc(conversationId).get();
+  if (!doc.exists) return false;
+  return !!doc.data()?.productId;
+}
+
 function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", "*"); }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -230,6 +254,12 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
   };
   const env = requireEnv(body as unknown as Record<string, unknown>);
   if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
+  // Sprint P0.6 — guard de rota: nunca cria um rascunho Vitre numa
+  // conversa já travada em VR_CUSTOM (achado real de E2E).
+  if (await commercialRouteBloqueiaVitre(env.conversationId)) {
+    res.status(409).json({ ok: false, error: "ROUTE_LOCKED_VR_CUSTOM", motivo: "Esta conversa já está no fluxo VR personalizado — use calcular_produto_personalizado/criar_orcamento_vr, não o catálogo Vitre." });
+    return;
+  }
   const requestId = String(body.requestId || "").trim();
   if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }
   const clienteNome = String(body.clienteNome || "").trim();
@@ -311,6 +341,12 @@ export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (re
   };
   const env = requireEnv(body as unknown as Record<string, unknown>);
   if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
+  // Sprint P0.6 — guard de rota: nunca edita um rascunho Vitre numa
+  // conversa já travada em VR_CUSTOM (achado real de E2E).
+  if (await commercialRouteBloqueiaVitre(env.conversationId)) {
+    res.status(409).json({ ok: false, error: "ROUTE_LOCKED_VR_CUSTOM", motivo: "Esta conversa já está no fluxo VR personalizado — use calcular_produto_personalizado/criar_orcamento_vr, não o catálogo Vitre." });
+    return;
+  }
   const requestId = String(body.requestId || "").trim();
   if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }
   const orcamentoId = String(body.orcamentoId || "").trim();
