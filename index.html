@@ -12523,7 +12523,24 @@ function orcPgtoAtualizarValorReceber() {
   // e só quando PIX é de fato o método selecionado (nunca soma desconto de
   // PIX ao escolher Cartão/Dinheiro/Link).
   var nParcSim = parseInt((document.getElementById('orcSimParcelas')||{}).value,10)||1;
-  var baseAposCond = (cond.dcOn && cond.dcPct>0) ? (v.finalPrice||0)*(1-cond.dcPct/100) : (v.finalPrice||0);
+  // HOTFIX CRÍTICO 2026-08-25 — achado real: reabrir um orçamento JÁ
+  // ENVIADO/APROVADO para pagamento sempre usava window._orcCalc.finalPrice
+  // (recálculo AO VIVO, pós-reabertura) como base do "Valor a Receber" —
+  // nunca o valorBase realmente enviado/aprovado pelo cliente. Divergência
+  // de config/materiais entre o envio e a reabertura podia mostrar um
+  // valor diferente do aprovado (inclusive R$0,00 quando o recálculo ao
+  // vivo falhava para o orçamento reaberto). Enquanto nada foi alterado
+  // desde a reabertura (window._orcMostrandoCongelado — ver
+  // orcAplicarSnapshotCongelado/orcRecalc, nunca quebrado por orcStep(5),
+  // só por uma edição real do operador), a base usada aqui é a MESMA já
+  // enviada/aprovada — nunca recalculada.
+  var _orcFrozenPgto = null;
+  if (window._orcMostrandoCongelado && window._orcSessaoAtualId && typeof orcGetEnviados==='function') {
+    var _listaFzPgto = orcGetEnviados();
+    _orcFrozenPgto = _listaFzPgto.find(function(x){ return x.id===window._orcSessaoAtualId; }) || null;
+  }
+  var finalPriceBasePgto = (_orcFrozenPgto && typeof _orcFrozenPgto.valorBase==='number') ? _orcFrozenPgto.valorBase : (v.finalPrice||0);
+  var baseAposCond = (cond.dcOn && cond.dcPct>0) ? finalPriceBasePgto*(1-cond.dcPct/100) : finalPriceBasePgto;
   var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParcSim });
   // GO-LIVE 2026-08-11, P0 seção 7 (bug real reproduzido em produção):
   // "metodo==='pix'" tratava Dinheiro no mesmo ramo de Cartão/Link (preço
@@ -12706,7 +12723,29 @@ async function orcConfirmarPagamentoWizard(){
   var btn = document.getElementById('orcBtnConfirmarPagamento');
   if(btn && btn.disabled) return; // operação já em andamento ou já concluída
   if(btn){ btn.disabled = true; btn.textContent = 'Salvando…'; }
-  var saved = await orcSalvarOrcamento();
+  // HOTFIX CRÍTICO 2026-08-25 — achado real de produção: confirmar
+  // pagamento de um orçamento JÁ ENVIADO/APROVADO sempre chamava
+  // orcSalvarOrcamento(), que reconstrói valorFinal/valorBase/
+  // snapshotCompleto.breakdown inteiros a partir de window._orcCalc (o
+  // recálculo AO VIVO feito ao reabrir) — nunca do snapshot congelado que
+  // orcAplicarSnapshotCongelado() só sobrepõe no TEXTO da tela (nunca em
+  // window._orcCalc). Abrir para pagar e confirmar sem mudar nada
+  // sobrescrevia silenciosamente o orçamento já aprovado pelo cliente com
+  // os números do recálculo ao vivo — podendo zerar/divergir do valor
+  // realmente enviado. ABRIR ≠ RECALCULAR: enquanto nada foi alterado
+  // desde a reabertura (window._orcMostrandoCongelado ainda true — só
+  // quebrada por uma edição real do operador, ver orcRecalc()), reusa o
+  // registro já persistido tal como está, sem resalvar; orcSalvarOrcamento()
+  // (que já trata revisão financeira explícita, ver
+  // orcAvaliarRevisaoFinanceira) só é chamada quando o operador de fato
+  // alterou algo.
+  var saved;
+  if (window._orcSessaoAtualId && window._orcMostrandoCongelado) {
+    var _listaConfirmarPgto = orcGetEnviados();
+    saved = _listaConfirmarPgto.find(function(x){ return x.id===window._orcSessaoAtualId; }) || null;
+  } else {
+    saved = await orcSalvarOrcamento();
+  }
   if(!saved || !saved.id){
     if(btn){ btn.disabled = false; btn.textContent = '💳 Confirmar Pagamento'; }
     showToast('Não foi possível salvar o orçamento — verifique os dados antes de prosseguir.', 'err');
