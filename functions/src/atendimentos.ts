@@ -27,6 +27,7 @@ import { ChatVoltProvider, VALERIA_AGENT_ID, VALERIA_ORGANIZATION_ID } from "./c
 import { AIProvider } from "./ai_provider";
 import { checkAuth } from "./valeria";
 import { detectCommercialIntent } from "./commercial_intent";
+import { extrairIdentidade } from "./identity_detector";
 
 const COL_ATD = "atendimentos";
 const SUB_MSG = "mensagens";
@@ -36,6 +37,7 @@ const SUB_MSG = "mensagens";
 // chatvolt_provider.ts). Usado por dispararExecucaoComercialServerSide
 // (sprint P0.7).
 const VALERIA_GET_CONTEXTO_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaGetContexto";
+const VALERIA_CRIAR_OPORTUNIDADE_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaCriarOportunidade";
 
 const provider: AIProvider = new ChatVoltProvider();
 
@@ -95,6 +97,52 @@ async function detectarEPersistirConfirmacao(atendimentoId: string, texto: strin
     await tbRef.set({ clientConfirmedQuote: intent.confirmQuote, updatedAt: Date.now() }, { merge: true });
   } catch (e) {
     console.error("[atendimentos.detectarEPersistirConfirmacao] falha ao detectar/persistir confirmação (não bloqueia envio):", (e as Error).message);
+  }
+}
+
+/**
+ * Sprint P0.9 (achado real de E2E, P0.7) — identidade server-side. Mesmo
+ * com nome/telefone declarados explicitamente pelo cliente no texto, o
+ * LLM às vezes nunca chama criar_ou_atualizar_cliente/abrir_oportunidade
+ * — travando identify_customer indefinidamente (achado real, conversa
+ * "Homologacao P07 Final Diana Reis", sprint P0.7). Extrai nome+telefone
+ * do texto (identity_detector.ts, puro e conservador — nunca "chuta") e,
+ * se ambos presentes E o atendimento ainda não tem lead/cliente
+ * vinculado, chama o MESMO endpoint que a Tool chamaria
+ * (valeriaCriarOportunidade), direto do backend — a criação do lead
+ * deixa de depender de qualquer decisão do LLM. Best-effort: falha aqui
+ * NUNCA bloqueia o envio da mensagem.
+ */
+async function detectarEPersistirIdentidade(atendimentoId: string, texto: string, atd: FirebaseFirestore.DocumentData): Promise<void> {
+  if (atd.leadId || atd.clienteId) return; // já resolvido — nunca sobrescreve
+  const { nome, telefone } = extrairIdentidade(texto);
+  if (!nome || !telefone) return;
+  const bearer = process.env.VALERIA_BEARER_SECRET;
+  if (!bearer) {
+    console.error("[atendimentos.detectarEPersistirIdentidade] VALERIA_BEARER_SECRET ausente — pulando.");
+    return;
+  }
+  try {
+    const res = await axios.post(
+      VALERIA_CRIAR_OPORTUNIDADE_URL,
+      {
+        conversationId: atendimentoId,
+        agentId: VALERIA_AGENT_ID,
+        organizationId: VALERIA_ORGANIZATION_ID,
+        nome, tel: telefone,
+        origem: "valeria_identity_detector",
+      },
+      { headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" }, timeout: 15_000 }
+    );
+    const leadId = res.data?.data?.leadId as string | undefined;
+    if (leadId) {
+      await db().collection(COL_ATD).doc(atendimentoId).set(
+        { leadId, telefoneE164: telefone, updatedAt: Date.now() },
+        { merge: true }
+      );
+    }
+  } catch (e) {
+    console.error("[atendimentos.detectarEPersistirIdentidade] falha ao detectar/persistir identidade (não bloqueia envio):", (e as Error).message);
   }
 }
 
@@ -252,12 +300,19 @@ export const atdSimularMensagemCliente = functions
       return { ok: true, jaProcessado: false, resposta: null };
     }
 
+    // Sprint P0.9 — identidade server-side, ANTES de tudo: se o texto
+    // declara nome+telefone e o atendimento ainda não tem lead/cliente,
+    // persiste o lead real (mesmo endpoint que a Tool chamaria) — nunca
+    // depende do LLM lembrar de chamar criar_ou_atualizar_cliente.
+    await detectarEPersistirIdentidade(atendimentoId, texto, atd);
+
     // Sprint P0.7 — confirmação server-side, ANTES de chamar o Chatvolt:
     // se o texto confirma um orçamento já aguardando, o sinal é persistido
     // aqui, e a execução comercial é disparada logo em seguida — nenhuma
     // das duas depende do LLM decidir chamar uma Tool.
     await detectarEPersistirConfirmacao(atendimentoId, texto);
-    await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || null);
+    const { telefone: telefoneExtraidoAgora } = extrairIdentidade(texto);
+    await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || telefoneExtraidoAgora || null);
 
     const result = await provider.sendMessage({
       atendimentoId,

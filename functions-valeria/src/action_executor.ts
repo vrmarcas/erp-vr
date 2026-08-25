@@ -41,6 +41,7 @@ import {
 import { saveSimulation, SIM_COL, SIM_TTL_MS } from "./simulation_store";
 import { fsRead, fsWrite } from "./kv_store";
 import { uid } from "./ids";
+import { TROFEU_GOJOVEM_PRODUCT_ID, calculateTrofeuGoJovem } from "./trofeu_gojovem";
 import { nomeConfirmado, telefoneConfirmado, type NextCommercialAction } from "./orchestrator";
 import type { Cliente, CrmLead, OrcamentoEnviado, PricingSimulation, QuoteItem } from "./types";
 
@@ -80,11 +81,80 @@ export type CalculateQuoteExecutionResult =
  * persistido (nunca por body de Tool call). simulationId continua
  * exclusivamente server-side (nunca fornecido/lido do LLM).
  */
+/** Persiste a simulação + lastEligibleSimulation e monta o envelope de retorno — usado por ambos os ramos (motor genérico e Troféu GoJovem). */
+async function persistirSimulacaoElegivel(params: {
+  conversationId: string;
+  technicalBriefing: TechnicalBriefing;
+  isTest: boolean;
+  finalPrice: number;
+  pricingVersion: string;
+  simulationId: string;
+  itensNormalizados: Array<{ larg: number; alt: number; qty: number; matKey: string; descricao: string }>;
+  pieces: Array<{ nome: string; larg: number; alt: number; qtyTotal: number }>;
+  warnings: string[];
+}): Promise<CalculateQuoteExecutionResult> {
+  const { conversationId, technicalBriefing, isTest, finalPrice, pricingVersion, simulationId, itensNormalizados, pieces, warnings } = params;
+  const simNow = Date.now();
+  const sim: PricingSimulation = {
+    simulationId, conversationId,
+    itensNormalizados: itensNormalizados as unknown as QuoteItem[],
+    finalPrice, pricingVersion,
+    createdAt: simNow, expiresAt: simNow + SIM_TTL_MS,
+    origem: "valeria", usado: false, isTest,
+    technicalBriefingSnapshot: technicalBriefing as unknown as Record<string, unknown>,
+  };
+  await saveSimulation(sim);
+  await saveLastEligibleSimulation(conversationId, {
+    simulationId, createdAt: simNow,
+    productId: technicalBriefing.productId!,
+    finalPrice, fingerprint: technicalBriefingFingerprint(technicalBriefing),
+  });
+  return {
+    action: "calculate_quote", success: true, eligibility: "ELIGIBLE",
+    finalPrice, simulationId, pricingVersion, pieces, warnings,
+  };
+}
+
 export async function executeCalculateQuote(
   conversationId: string,
   technicalBriefing: TechnicalBriefing,
   isTest: boolean = false
 ): Promise<CalculateQuoteExecutionResult> {
+  // Sprint P0.9 — Troféu GoJovem: produto conhecido com preço comercial
+  // fixo cadastrado no ERP (vitre_produtos/TFMOD10.precoVenda) — a receita
+  // real tem 2 materiais/espessuras diferentes (fora do que
+  // calculatePersonalizedProduct suporta hoje, 1 material por produto), e
+  // o preço cobre gravação/montagem que o motor de área não sabe
+  // precificar. Ver trofeu_gojovem.ts para a justificativa completa.
+  if (technicalBriefing.productId === TROFEU_GOJOVEM_PRODUCT_ID) {
+    const qty = technicalBriefing.quantity;
+    if (!(qty && qty > 0)) {
+      return { action: "calculate_quote", success: false, eligibility: "NEEDS_INFORMATION", missingFields: ["quantity"], reason: "Quantidade ainda não informada." };
+    }
+    const calc = await calculateTrofeuGoJovem(qty);
+    if (calc.pricing.eligibility !== "ELIGIBLE") {
+      const reason = calc.pricing.eligibility === "NEEDS_INFORMATION"
+        ? "Quantidade ainda não informada."
+        : "Preço comercial fixo do Troféu GoJovem não encontrado no ERP (vitre_produtos/TFMOD10.precoVenda).";
+      return {
+        action: "calculate_quote", success: false, eligibility: calc.pricing.eligibility,
+        missingFields: calc.pricing.missingFields, reason,
+      };
+    }
+    const itensNormalizados = calc.pieces.map((p) => ({
+      larg: p.larg, alt: p.alt, qty: p.qtyTotal, matKey: p.matKey, descricao: p.nome,
+    }));
+    return persistirSimulacaoElegivel({
+      conversationId, technicalBriefing, isTest,
+      finalPrice: calc.pricing.finalPrice!,
+      pricingVersion: calc.pricing.pricingVersion!,
+      simulationId: calc.pricing.simulationId!,
+      itensNormalizados,
+      pieces: calc.pieces.map((p) => ({ nome: p.nome, larg: p.larg, alt: p.alt, qtyTotal: p.qtyTotal })),
+      warnings: [],
+    });
+  }
+
   const core = toQuoteCoreInput(technicalBriefing);
   if (!core) {
     return { action: "calculate_quote", success: false, eligibility: null, reason: "TECHNICAL_BRIEFING_NOT_READY" };
@@ -111,37 +181,18 @@ export async function executeCalculateQuote(
   }
 
   const simId = pricing.simulationId ?? uid("sim");
-  const simNow = Date.now();
   const itensNormalizados = calc.pieces.map((p) => ({
     larg: p.larg, alt: p.alt, qty: p.qtyTotal, matKey: core.matKey, descricao: p.nome,
   }));
-  const sim: PricingSimulation = {
-    simulationId: simId,
-    conversationId,
-    itensNormalizados: itensNormalizados as unknown as QuoteItem[],
+  return persistirSimulacaoElegivel({
+    conversationId, technicalBriefing, isTest,
     finalPrice: pricing.finalPrice!,
     pricingVersion: pricing.pricingVersion!,
-    createdAt: simNow,
-    expiresAt: simNow + SIM_TTL_MS,
-    origem: "valeria",
-    usado: false,
-    isTest,
-    technicalBriefingSnapshot: technicalBriefing as unknown as Record<string, unknown>,
-  };
-  await saveSimulation(sim);
-  await saveLastEligibleSimulation(conversationId, {
     simulationId: simId,
-    createdAt: simNow,
-    productId: technicalBriefing.productId!,
-    finalPrice: pricing.finalPrice!,
-    fingerprint: technicalBriefingFingerprint(technicalBriefing),
+    itensNormalizados,
+    pieces: calc.pieces,
+    warnings: calc.warnings,
   });
-
-  return {
-    action: "calculate_quote", success: true, eligibility: "ELIGIBLE",
-    finalPrice: pricing.finalPrice!, simulationId: simId, pricingVersion: pricing.pricingVersion!,
-    pieces: calc.pieces, warnings: calc.warnings,
-  };
 }
 
 export type CreateQuoteExecutionResult =

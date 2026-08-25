@@ -177,6 +177,15 @@ export interface CrmLead {
     responsavel?: string;
   };
 
+  /**
+   * Sprint P0.9 — propagado do atendimento (atendimentos/{conversationId}.isTeste),
+   * mesmo nome/convenção de OrcamentoEnviado.isTest e PricingSimulation.isTest
+   * (ver comentário lá). O frontend JÁ filtra CRM_LEADS por isso
+   * (_isTestRecord() em index.html, hotfix 2026-08-10) — só faltava o
+   * backend popular o campo, nunca foi um gap de frontend.
+   */
+  isTest?: boolean;
+
   [key: string]: unknown;
 }
 
