@@ -269,3 +269,75 @@ describe("A7 — nenhuma ação automática depende de LLM tool-call", () => {
     expect(urgent?.action).toBe("check_urgent_fit");
   });
 });
+
+describe("C7/C10 — isTeste propaga do atendimento até simulação/orçamento (P0.7, P0 real: métricas comerciais poluídas)", () => {
+  test("C7: atendimento isTeste=true → simulação e orçamento nascem com isTest=true", async () => {
+    _store["atendimentos/conv_c7"] = { isTeste: true };
+    const calc = await executeCommercialAction({
+      conversationId: "conv_c7", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "calculate_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: null,
+      isTest: true,
+    });
+    expect(calc?.action).toBe("calculate_quote");
+    if (calc?.action === "calculate_quote" && calc.result.success) {
+      const simDoc = _store[`valeria_simulations/${calc.result.simulationId}`];
+      expect(simDoc?.isTest).toBe(true);
+    }
+
+    const canonico = await loadLastEligibleSimulation("conv_c7");
+    const created = await executeCommercialAction({
+      conversationId: "conv_c7", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "create_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: canonico,
+    });
+    expect(created?.action).toBe("create_quote");
+    if (created?.action === "create_quote" && created.result.success) {
+      const orcamentos = JSON.parse(_store["erp_vr/orcamentos"].data as string);
+      const orcReal = orcamentos.find((o: { id: string }) => o.id === created.result.orcamentoId);
+      expect(orcReal?.isTest).toBe(true);
+    }
+  });
+
+  test("C10: atendimento sem isTeste (real) → orçamento nasce com isTest=false, continua entrando nos KPIs normalmente", async () => {
+    _store["atendimentos/conv_c10"] = { isTeste: false };
+    await executeCommercialAction({
+      conversationId: "conv_c10", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "calculate_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: null,
+      isTest: false,
+    });
+    const canonico = await loadLastEligibleSimulation("conv_c10");
+    const created = await executeCommercialAction({
+      conversationId: "conv_c10", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "create_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: canonico,
+    });
+    expect(created?.action).toBe("create_quote");
+    if (created?.action === "create_quote" && created.result.success) {
+      const orcamentos = JSON.parse(_store["erp_vr/orcamentos"].data as string);
+      const orcReal = orcamentos.find((o: { id: string }) => o.id === (created.result as { orcamentoId: string }).orcamentoId);
+      expect(orcReal?.isTest).toBe(false);
+    }
+  });
+
+  test("sem doc de atendimento (canal fora do módulo Atendimentos) → isTest=false por padrão, nunca undefined/quebra", async () => {
+    delete _store["atendimentos/conv_sem_atd"];
+    await executeCommercialAction({
+      conversationId: "conv_sem_atd", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "calculate_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: null,
+    });
+    const canonico = await loadLastEligibleSimulation("conv_sem_atd");
+    const created = await executeCommercialAction({
+      conversationId: "conv_sem_atd", agentId: "a", organizationId: "o",
+      cliente: clienteConfirmado, lead: null, channelPhone: null,
+      nextAction: "create_quote", technicalBriefing: tbCaixaCompleto, lastEligibleSimulation: canonico,
+    });
+    if (created?.action === "create_quote" && created.result.success) {
+      const orcamentos = JSON.parse(_store["erp_vr/orcamentos"].data as string);
+      const orcReal = orcamentos.find((o: { id: string }) => o.id === (created.result as { orcamentoId: string }).orcamentoId);
+      expect(orcReal?.isTest).toBe(false);
+    }
+  });
+});

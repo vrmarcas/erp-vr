@@ -82,7 +82,8 @@ export type CalculateQuoteExecutionResult =
  */
 export async function executeCalculateQuote(
   conversationId: string,
-  technicalBriefing: TechnicalBriefing
+  technicalBriefing: TechnicalBriefing,
+  isTest: boolean = false
 ): Promise<CalculateQuoteExecutionResult> {
   const core = toQuoteCoreInput(technicalBriefing);
   if (!core) {
@@ -124,6 +125,7 @@ export async function executeCalculateQuote(
     expiresAt: simNow + SIM_TTL_MS,
     origem: "valeria",
     usado: false,
+    isTest,
     technicalBriefingSnapshot: technicalBriefing as unknown as Record<string, unknown>,
   };
   await saveSimulation(sim);
@@ -198,9 +200,15 @@ export async function executeCreateQuote(params: {
   const orcamentos = (await fsRead<OrcamentoEnviado[]>("orcamentos")) ?? [];
   const maxN = orcamentos.reduce((m, o) => Math.max(m, parseInt(String(o.n ?? 0), 10) || 0), 0);
 
-  // Herda leadId/clienteId/oportunidadeId do atendimento real (cross-codebase,
-  // read-only), best-effort — mesma disciplina de valeriaCriarOrcamento.
+  // Herda leadId/clienteId/oportunidadeId/isTest do atendimento real
+  // (cross-codebase, read-only), best-effort — mesma disciplina de
+  // valeriaCriarOrcamento. isTest NUNCA é inferido de nome/padrão de
+  // texto — só da flag explícita atendimentos/{id}.isTeste (sprint P0.7,
+  // P0 real: orçamentos de homologação estavam poluindo métricas
+  // comerciais). Nome do campo no orçamento é isTest (sem "e") —
+  // ver comentário em types.ts.
   let leadId: string | null = null, clienteId: string | null = null, oportunidadeId: string | null = null;
+  let isTestFromAtd = false;
   let atdRef: FirebaseFirestore.DocumentReference | null = null;
   try {
     atdRef = db.collection("atendimentos").doc(conversationId);
@@ -210,6 +218,7 @@ export async function executeCreateQuote(params: {
       leadId = (atdData.leadId as string) ?? null;
       clienteId = (atdData.clienteId as string) ?? null;
       oportunidadeId = (atdData.oportunidadeId as string) ?? null;
+      isTestFromAtd = atdData.isTeste === true;
     } else {
       atdRef = null;
     }
@@ -230,6 +239,7 @@ export async function executeCreateQuote(params: {
     data: new Date().toISOString(), marca: "vr", origem: "valeria",
     conversationId, agentId, organizationId,
     atendimentoId: conversationId, leadId, clienteId, oportunidadeId,
+    isTest: isTestFromAtd || sim.isTest === true,
     recipeSnapshot: briefingSnap ? { productId: briefingSnap.productId ?? null, recipeVersion: briefingSnap.recipeVersion ?? null } : null,
     technicalBriefingSnapshot: sim.technicalBriefingSnapshot ?? null,
   };
@@ -318,13 +328,15 @@ export async function executeCommercialAction(params: {
   nextAction: NextCommercialAction;
   technicalBriefing: TechnicalBriefing | null;
   lastEligibleSimulation: LastEligibleSimulation | null;
+  /** Sprint P0.7 — propagado do atendimento até simulação/orçamento (nunca inferido). */
+  isTest?: boolean;
 }): Promise<ExecutedActionEnvelope | null> {
   const { conversationId, nextAction, technicalBriefing, lastEligibleSimulation } = params;
   if (!EXECUTABLE_ACTIONS.has(nextAction)) return null;
 
   if (nextAction === "calculate_quote") {
     if (!technicalBriefing) return null;
-    return { action: "calculate_quote", result: await executeCalculateQuote(conversationId, technicalBriefing) };
+    return { action: "calculate_quote", result: await executeCalculateQuote(conversationId, technicalBriefing, !!params.isTest) };
   }
 
   if (nextAction === "create_quote") {

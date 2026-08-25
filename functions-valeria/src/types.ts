@@ -105,6 +105,15 @@ export interface OrcamentoEnviado {
   conversationId: string;
   agentId: string;
   organizationId: string;
+  /**
+   * Sprint P0.7 — propagado do atendimento (atendimentos/{conversationId}.isTeste)
+   * no momento da criação, nunca inferido depois. Nome do campo (isTest,
+   * sem o "e") é DELIBERADO — casa exatamente com a convenção já existente
+   * no frontend (_isTestRecord() em index.html, usada por KB_OS/CRM_LEADS/
+   * FIN_TX) para que orcGetEnviados() já exclua isso de todo KPI comercial
+   * sem precisar tocar em index.html.
+   */
+  isTest: boolean;
   [key: string]: unknown;
 }
 
@@ -252,6 +261,8 @@ export interface PricingSimulation {
   origem: "valeria";
   usado: boolean;                   // true após criarOrcamento consumir
   autorizacaoHumana?: string;       // opcional — id de autorização manual
+  /** Sprint P0.7 — propagado do atendimento, ver OrcamentoEnviado.isTest. */
+  isTest: boolean;
   /**
    * Bloco D (sprint P0.3) — snapshot IMUTÁVEL do briefing técnico usado
    * para gerar ESTE preço específico, congelado no momento do cálculo.

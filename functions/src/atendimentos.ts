@@ -21,13 +21,21 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import axios from "axios";
 import { getCallerVerificado, requireRole, acquireIdem, writeAudit, parseDoc } from "./auth_helper";
-import { ChatVoltProvider } from "./chatvolt_provider";
+import { ChatVoltProvider, VALERIA_AGENT_ID, VALERIA_ORGANIZATION_ID } from "./chatvolt_provider";
 import { AIProvider } from "./ai_provider";
 import { checkAuth } from "./valeria";
+import { detectCommercialIntent } from "./commercial_intent";
 
 const COL_ATD = "atendimentos";
 const SUB_MSG = "mensagens";
+
+// Endpoint HTTP do codebase functions-valeria (deploy independente — sem
+// import cross-package, só chamada de rede, mesmo padrão de
+// chatvolt_provider.ts). Usado por dispararExecucaoComercialServerSide
+// (sprint P0.7).
+const VALERIA_GET_CONTEXTO_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaGetContexto";
 
 const provider: AIProvider = new ChatVoltProvider();
 
@@ -50,6 +58,94 @@ async function carregarAtendimento(atendimentoId: string): Promise<FirebaseFires
     throw new functions.https.HttpsError("not-found", "Atendimento não encontrado.");
   }
   return snap;
+}
+
+/**
+ * Sprint P0.7 — confirmação server-side. Chamada ANTES de enviar a
+ * mensagem ao Chatvolt (mesmo Firestore, sem cruzar codebase de código —
+ * só dado). Lê valeria_technical_briefings/{atendimentoId} (escrito pelo
+ * codebase functions-valeria) para saber se existe uma simulação
+ * elegível aguardando confirmação; classifica o texto do cliente com
+ * detectCommercialIntent(); se confirmar, grava clienteConfirmouOrcamento
+ * diretamente — quando buscar_contexto_da_conversa rodar (primeira Tool
+ * call do turno), o sinal já está lá e o action_executor cria o
+ * orçamento sozinho, sem o LLM precisar chamar Tool nenhuma para isso.
+ * Best-effort: qualquer falha aqui NUNCA bloqueia o envio da mensagem —
+ * na pior hipótese, a confirmação cai de volta no fallback (LLM chamando
+ * atualizar_briefing_tecnico com clienteConfirmouOrcamento, que ainda
+ * existe no schema da Tool por compatibilidade).
+ */
+async function detectarEPersistirConfirmacao(atendimentoId: string, texto: string): Promise<void> {
+  try {
+    const tbRef = db().collection("valeria_technical_briefings").doc(atendimentoId);
+    const tbSnap = await tbRef.get();
+    if (!tbSnap.exists) return; // nenhum produto VR personalizado em andamento — nada a detectar
+    const tbData = tbSnap.data() ?? {};
+    const awaitingConfirmation = !!tbData.lastEligibleSimulation;
+
+    const intent = detectCommercialIntent({ texto, awaitingConfirmation });
+    if (!awaitingConfirmation) return; // sem simulação elegível, não grava nada (evita write desnecessário)
+
+    // Sempre grava o resultado desta rodada (true OU false) — nunca deixa
+    // um clientConfirmedQuote=true de um turno anterior "vazar" para este
+    // turno se a mensagem atual não confirmar nada. Nome do campo
+    // (clientConfirmedQuote) precisa casar EXATAMENTE com
+    // functions-valeria/src/technical_briefing.ts — é o mesmo doc, escrito
+    // por dois codebases diferentes.
+    await tbRef.set({ clientConfirmedQuote: intent.confirmQuote, updatedAt: Date.now() }, { merge: true });
+  } catch (e) {
+    console.error("[atendimentos.detectarEPersistirConfirmacao] falha ao detectar/persistir confirmação (não bloqueia envio):", (e as Error).message);
+  }
+}
+
+/**
+ * Sprint P0.7 (achado real de E2E) — dispara a execução comercial
+ * server-side (calculate_quote/create_quote/etc., ver action_executor.ts
+ * em functions-valeria) ANTES de chamar o Chatvolt, em vez de confiar que
+ * a Valéria vá chamar buscar_contexto_da_conversa neste turno.
+ *
+ * Achado: numa conversa real, o cliente confirmou ("Sim, confirmo."),
+ * clientConfirmedQuote foi persistido corretamente por
+ * detectarEPersistirConfirmacao, mas a Valéria respondeu "orçamento
+ * registrado" SEM nunca chamar a Tool que executaria create_quote — o LLM
+ * simplesmente não chamou a Tool naquele turno. O comentário original
+ * desta sprint assumia que "quando buscar_contexto_da_conversa rodar,
+ * action_executor cria o orçamento sozinho" — mas nada garantia que essa
+ * chamada aconteceria. Esta função fecha esse gap chamando o mesmo
+ * endpoint que a Tool chamaria, direto do backend, sempre — a criação do
+ * orçamento deixa de depender de qualquer decisão do LLM, não só a
+ * confirmação.
+ *
+ * Idempotente: nextCommercialAction() nunca reexecuta create_quote depois
+ * que orcamentoJaCriado=true (orchestrator.ts, bloco F) — chamar isto
+ * antes E a Valéria chamar a mesma Tool depois no mesmo turno não duplica
+ * orçamento. Best-effort: falha aqui NUNCA bloqueia o envio da mensagem
+ * ao Chatvolt — na pior hipótese, cai de volta no comportamento anterior
+ * (depende da Tool call do LLM).
+ */
+async function dispararExecucaoComercialServerSide(atendimentoId: string, channelPhone: string | null): Promise<void> {
+  const bearer = process.env.VALERIA_BEARER_SECRET;
+  if (!bearer) {
+    console.error("[atendimentos.dispararExecucaoComercialServerSide] VALERIA_BEARER_SECRET ausente — pulando execução proativa.");
+    return;
+  }
+  try {
+    await axios.post(
+      VALERIA_GET_CONTEXTO_URL,
+      {
+        conversationId: atendimentoId,
+        agentId: VALERIA_AGENT_ID,
+        organizationId: VALERIA_ORGANIZATION_ID,
+        channelPhone: channelPhone || undefined,
+      },
+      {
+        headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+        timeout: 15_000,
+      }
+    );
+  } catch (e) {
+    console.error("[atendimentos.dispararExecucaoComercialServerSide] falha ao disparar execução comercial (não bloqueia envio):", (e as Error).message);
+  }
 }
 
 async function nomeStaff(uid: string): Promise<string> {
@@ -108,8 +204,9 @@ export const atdCriarConversaTeste = functions.https.onCall(async (data, context
 // ── 2. Simular mensagem do cliente (Master only, dispara a Valéria) ────────
 export const atdSimularMensagemCliente = functions
   // timeoutSeconds acima do CHATVOLT_QUERY_TIMEOUT_MS (50s, ver
-  // chatvolt_provider.ts) + folga para leitura/escrita Firestore.
-  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 90 })
+  // chatvolt_provider.ts) + folga para leitura/escrita Firestore + a
+  // chamada proativa a valeriaGetContexto (P0.7).
+  .runWith({ secrets: ["CHATVOLT_API_KEY", "VALERIA_BEARER_SECRET"], timeoutSeconds: 90 })
   .https.onCall(async (data, context) => {
     const caller = await getCallerVerificado(context);
     requireRole(caller, [], "simular mensagem de cliente em Atendimentos");
@@ -154,6 +251,13 @@ export const atdSimularMensagemCliente = functions
     if (atd.modoAtendimento === "humano") {
       return { ok: true, jaProcessado: false, resposta: null };
     }
+
+    // Sprint P0.7 — confirmação server-side, ANTES de chamar o Chatvolt:
+    // se o texto confirma um orçamento já aguardando, o sinal é persistido
+    // aqui, e a execução comercial é disparada logo em seguida — nenhuma
+    // das duas depende do LLM decidir chamar uma Tool.
+    await detectarEPersistirConfirmacao(atendimentoId, texto);
+    await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || null);
 
     const result = await provider.sendMessage({
       atendimentoId,
@@ -433,25 +537,118 @@ export const atdResolverAtendimento = functions.https.onCall(async (data, contex
 });
 
 // ── 7. Limpar conversa de teste (Master only, hard guard isTeste) ──────────
+// Sprint P0.7 (item 10) — reescrito para: (a) ser IDEMPOTENTE (clicar duas
+// vezes não dá erro nem afeta dado real — se o atendimento já não existe,
+// trata como "já limpo", não lança not-found); (b) limpar TUDO que a
+// homologação pode ter criado, não só o atendimento — technical briefing,
+// briefing legado, conversation, simulações e o orçamento em si (só se
+// isTest=true, nunca um orçamento real que por acaso reusa o mesmo
+// conversationId); (c) remover o CRM lead SÓ quando ele foi criado
+// exclusivamente por este teste (vínculo atual ainda aponta pra este
+// atendimentoId) — nunca um lead real reaproveitado depois.
 export const atdLimparConversaTeste = functions.https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, [], "limpar conversa de teste em Atendimentos");
 
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
-  const snap = await carregarAtendimento(atendimentoId);
+
+  const ref = db().collection(COL_ATD).doc(atendimentoId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    // Idempotência: segundo clique (ou clique após já ter sido limpo por
+    // outra aba) não é erro — não há mais nada de teste para remover.
+    return { ok: true, jaLimpo: true };
+  }
   const atd = snap.data()!;
   if (!atd.isTeste) {
     throw new functions.https.HttpsError("failed-precondition", "Só é possível limpar conversas marcadas como teste (isTeste=true).");
   }
 
-  const msgs = await snap.ref.collection(SUB_MSG).get();
+  const removidos: string[] = [];
   const batch = db().batch();
+
+  const msgs = await ref.collection(SUB_MSG).get();
   msgs.docs.forEach((d) => batch.delete(d.ref));
-  batch.delete(snap.ref);
+  batch.delete(ref);
+  removidos.push("atendimento", "mensagens");
+
+  // Coleções do codebase functions-valeria — mesmo Firestore, só dado
+  // (nenhum import de código entre codebases). Best-effort cada uma:
+  // uma falha isolada não deve impedir a limpeza do resto.
+  for (const col of ["valeria_technical_briefings", "valeria_briefings", "valeria_conversations"]) {
+    try {
+      const docRef = db().collection(col).doc(atendimentoId);
+      const docSnap = await docRef.get();
+      if (docSnap.exists) { batch.delete(docRef); removidos.push(col); }
+    } catch (e) {
+      console.error(`[atdLimparConversaTeste] falha ao verificar ${col}:`, (e as Error).message);
+    }
+  }
+
   await batch.commit();
-  await writeAudit("atendimentos_audit_log", "limpar_teste", caller.uid, caller.role, { atendimentoId });
-  return { ok: true };
+
+  // Simulações — keyed por simulationId, não por conversationId — precisa
+  // de query. Só remove as que pertencem exatamente a este atendimentoId.
+  try {
+    const simSnap = await db().collection("valeria_simulations")
+      .where("conversationId", "==", atendimentoId).get();
+    if (!simSnap.empty) {
+      const simBatch = db().batch();
+      simSnap.docs.forEach((d) => simBatch.delete(d.ref));
+      await simBatch.commit();
+      removidos.push(`valeria_simulations(${simSnap.size})`);
+    }
+  } catch (e) {
+    console.error("[atdLimparConversaTeste] falha ao limpar valeria_simulations:", (e as Error).message);
+  }
+
+  // Orçamento — array agregado em erp_vr/orcamentos. Remove SOMENTE
+  // entradas com isTest===true vinculadas a este atendimentoId — nunca um
+  // orçamento real (defesa em profundidade, mesmo que isso nunca devesse
+  // acontecer por construção).
+  try {
+    const orcDocRef = db().collection("erp_vr").doc("orcamentos");
+    const orcDoc = await orcDocRef.get();
+    if (orcDoc.exists) {
+      const raw = orcDoc.data()?.data;
+      const lista: Array<Record<string, unknown>> = raw ? JSON.parse(raw) : [];
+      const antes = lista.length;
+      const filtrada = lista.filter((o) => !(o.conversationId === atendimentoId && o.isTest === true));
+      if (filtrada.length !== antes) {
+        await orcDocRef.set({ data: JSON.stringify(filtrada), ts: Date.now() });
+        removidos.push(`orcamentos(${antes - filtrada.length})`);
+      }
+    }
+  } catch (e) {
+    console.error("[atdLimparConversaTeste] falha ao limpar orcamentos de teste:", (e as Error).message);
+  }
+
+  // CRM lead — array agregado em erp_vr/crm_leads. Remove SOMENTE quando
+  // o vínculo ATUAL do lead ainda aponta para este atendimentoId — se um
+  // cliente real reaproveitou o lead depois (conversationId mudou), nunca
+  // é tocado.
+  try {
+    const leadsDocRef = db().collection("erp_vr").doc("crm_leads");
+    const leadsDoc = await leadsDocRef.get();
+    if (leadsDoc.exists) {
+      const raw = leadsDoc.data()?.data;
+      const leads: Record<string, { valeria?: { conversationId?: string } }> = raw ? JSON.parse(raw) : {};
+      const idsParaRemover = Object.entries(leads)
+        .filter(([, l]) => l?.valeria?.conversationId === atendimentoId)
+        .map(([id]) => id);
+      if (idsParaRemover.length > 0) {
+        for (const id of idsParaRemover) delete leads[id];
+        await leadsDocRef.set({ data: JSON.stringify(leads), ts: Date.now() });
+        removidos.push(`crm_leads(${idsParaRemover.length})`);
+      }
+    }
+  } catch (e) {
+    console.error("[atdLimparConversaTeste] falha ao limpar crm_leads de teste:", (e as Error).message);
+  }
+
+  await writeAudit("atendimentos_audit_log", "limpar_teste", caller.uid, caller.role, { atendimentoId, removidos });
+  return { ok: true, jaLimpo: false, removidos };
 });
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -192,9 +192,18 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       // retroceder para discovery depois disso. ctx.conversationId ==
       // atendimentoId desde o hotfix do marcador [ID_ATENDIMENTO: X].
       let orcamentoJaCriado = false;
+      // Sprint P0.7 — mesma leitura já usada para orcamentoJaCriado, também
+      // captura isTeste para propagar até a simulação/orçamento (P0 real:
+      // testes de homologação estavam poluindo métricas comerciais reais
+      // porque nada gravava essa flag além do atendimento).
+      let isTesteConversa = false;
       try {
         const atdDoc = await db.collection("atendimentos").doc(ctx.conversationId).get();
-        orcamentoJaCriado = atdDoc.exists && !!atdDoc.data()?.orcamentoId;
+        if (atdDoc.exists) {
+          const atdData = atdDoc.data();
+          orcamentoJaCriado = !!atdData?.orcamentoId;
+          isTesteConversa = atdData?.isTeste === true;
+        }
       } catch { /* atendimento pode não existir (canal fora do módulo Atendimentos) — não bloqueia */ }
 
       const briefingTyped = briefing as import("./types").BriefingData | null;
@@ -236,6 +245,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         nextAction: nextAction.nextAction,
         technicalBriefing: technicalBriefingParaOrchestrator,
         lastEligibleSimulation: lastEligibleSim,
+        isTest: isTesteConversa,
       });
 
       // A execução acima muda o estado persistido (nova simulação, novo
@@ -510,6 +520,11 @@ export const valeriaCalcularOrcamento = RUN_OPTS.https.onRequest(async (req, res
               expiresAt:         simNow + SIM_TTL_MS,
               origem:            "valeria",
               usado:             false,
+              // Tool legada sem uso legítimo confirmado em produção (já
+              // removida do agente Chatvolt) — sem leitura de isTeste aqui
+              // por não valer o custo, mas nunca teste real passa por este
+              // caminho hoje.
+              isTest:            false,
             };
             await saveSimulation(sim);
 
@@ -585,7 +600,18 @@ export const valeriaAtualizarBriefingTecnico = RUN_OPTS.https.onRequest(async (r
         ...(body["solicitacoesNaoSuportadas"] != null
           ? { solicitacoesNaoSuportadas: parseArrayFlexivel(body["solicitacoesNaoSuportadas"]).map((x) => String(x).trim().toLowerCase()) }
           : {}),
-        ...(body["clienteConfirmouOrcamento"] != null ? { clientConfirmedQuote: parseBooleanFlexivel(body["clienteConfirmouOrcamento"]) } : {}),
+        // Sprint P0.7 (achado real de E2E) — clienteConfirmouOrcamento NÃO é
+        // mais a fonte autoritativa: o backend já detecta a confirmação
+        // deterministicamente a partir do texto real do cliente, ANTES do
+        // Chatvolt ser chamado (ver functions/atendimentos.ts,
+        // detectarEPersistirConfirmacao). O valor do LLM só é aceito para
+        // REVOGAR (false) — nunca para CONCEDER (true) — assim um "sim"
+        // mal-interpretado pelo modelo nunca cria um orçamento sozinho, mas
+        // o modelo ainda pode sinalizar "na verdade não, deixa pra lá" se
+        // perceber isso na conversa.
+        ...(body["clienteConfirmouOrcamento"] === false || String(body["clienteConfirmouOrcamento"]).toLowerCase() === "nao" || String(body["clienteConfirmouOrcamento"]).toLowerCase() === "não"
+          ? { clientConfirmedQuote: false }
+          : {}),
         ...(body["perguntouPrazo"] != null ? { wantsDeadlineCheck: parseBooleanFlexivel(body["perguntouPrazo"]) } : {}),
         ...(body["dataNecessidadeCliente"] != null ? { dataNecessidadeCliente: String(body["dataNecessidadeCliente"]).trim() || null } : {}),
         dimensions: {
@@ -746,6 +772,15 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
       return;
     }
 
+    // Sprint P0.7 — mesma leitura que action_executor.ts faz para o caminho
+    // automático: fallback manual desta Tool precisa propagar isTeste do
+    // mesmo jeito, nunca inferido de nome/padrão de texto.
+    let isTesteFallback = false;
+    try {
+      const atdSnap = await admin.firestore().collection("atendimentos").doc(ctx.conversationId).get();
+      isTesteFallback = atdSnap.exists && atdSnap.data()?.isTeste === true;
+    } catch { /* atendimento pode não existir — não bloqueia */ }
+
     const idempKey = extractIdempotencyKey(req);
     const result = await withIdempotency(
       { idempotencyKey: idempKey, conversationId: ctx.conversationId, functionName: "valeriaCalcularProdutoPersonalizado" },
@@ -801,6 +836,7 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
               expiresAt: simNow + SIM_TTL_MS,
               origem: "valeria",
               usado: false,
+              isTest: isTesteFallback,
               // Bloco D — congela o briefing técnico usado NESTE cálculo
               // específico (nunca o "ao vivo", que pode mudar depois).
               technicalBriefingSnapshot: briefingSincronizado as unknown as Record<string, unknown>,
@@ -1003,6 +1039,9 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
         // (ex.: chamada de teste direta fora do fluxo real), o orçamento
         // ainda é criado normalmente, só sem esses vínculos.
         let leadId: string | null = null, clienteId: string | null = null, oportunidadeId: string | null = null;
+        // Sprint P0.7 — propaga isTeste do atendimento (nunca inferido de
+        // nome/padrão de texto) até o orçamento, mesmo neste fallback manual.
+        let isTesteFallback = false;
         let atdRef: FirebaseFirestore.DocumentReference | null = null;
         try {
           atdRef = admin.firestore().collection("atendimentos").doc(ctx.conversationId);
@@ -1012,6 +1051,7 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
             leadId = (atdData.leadId as string) ?? null;
             clienteId = (atdData.clienteId as string) ?? null;
             oportunidadeId = (atdData.oportunidadeId as string) ?? null;
+            isTesteFallback = atdData.isTeste === true;
           } else {
             atdRef = null; // não cria atendimento novo por engano — link só se já existir
           }
@@ -1047,6 +1087,7 @@ export const valeriaCriarOrcamento = RUN_OPTS.https.onRequest(async (req, res) =
           leadId,
           clienteId,
           oportunidadeId,
+          isTest:                isTesteFallback || sim.isTest === true,
           recipeSnapshot:        briefingSnap ? { productId: briefingSnap.productId ?? null, recipeVersion: briefingSnap.recipeVersion ?? null } : null,
           technicalBriefingSnapshot: sim.technicalBriefingSnapshot ?? null,
         };
