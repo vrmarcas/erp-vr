@@ -47,6 +47,27 @@ export interface TechnicalBriefing {
    */
   adesivo?: boolean | null;
   adesivoBranco?: boolean | null;
+  /**
+   * Sprint P0.6 (Bloco C) — chaves de itens que o cliente pediu além do
+   * produto em si (gravacao/spray/extra/montagem/deslocamento/desconto/
+   * acrescimo). Afeta a elegibilidade do cálculo (vira
+   * HUMAN_VALIDATION_REQUIRED) — por isso participa do fingerprint, igual
+   * a adesivo/adesivoBranco. Extraído pelo LLM (linguagem natural), nunca
+   * decidido por ele quando agir.
+   */
+  solicitacoesNaoSuportadas?: string[] | null;
+  /**
+   * Sprint P0.6 — sinais de controle, nunca de preço (por isso NUNCA
+   * entram em technicalBriefingFingerprint). O LLM só EXTRAI esses sinais
+   * da linguagem do cliente (confirmação explícita do preço mostrado,
+   * pergunta sobre prazo, data-limite informada) — quem DECIDE agir sobre
+   * eles é sempre o orchestrator/action_executor, nunca o LLM escolhendo
+   * chamar uma Tool. Cada um é consumido (limpo) pelo action_executor
+   * depois de executado, para nunca reexecutar em loop.
+   */
+  clientConfirmedQuote?: boolean | null;
+  wantsDeadlineCheck?: boolean | null;
+  dataNecessidadeCliente?: string | null;
   confirmedFields: string[];
   missingRequiredFields: string[];
 }
@@ -61,6 +82,10 @@ export function emptyTechnicalBriefing(): TechnicalBriefing {
     quantity: null,
     materialId: null,
     thicknessMm: null,
+    solicitacoesNaoSuportadas: null,
+    clientConfirmedQuote: null,
+    wantsDeadlineCheck: null,
+    dataNecessidadeCliente: null,
     confirmedFields: [],
     missingRequiredFields: [...CAMPO_ORDEM],
   };
@@ -246,5 +271,9 @@ export function technicalBriefingFingerprint(b: TechnicalBriefing): string {
     thicknessMm: b.thicknessMm,
     adesivo: !!b.adesivo,
     adesivoBranco: !!b.adesivoBranco,
+    // P0.6 — afeta elegibilidade (HUMAN_VALIDATION_REQUIRED), por isso
+    // participa do fingerprint igual a adesivo/adesivoBranco. Ordenado
+    // para que a mesma lista em ordem diferente gere o mesmo fingerprint.
+    solicitacoesNaoSuportadas: [...(b.solicitacoesNaoSuportadas ?? [])].sort(),
   });
 }

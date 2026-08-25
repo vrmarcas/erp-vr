@@ -83,6 +83,12 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
     ...(patch.thicknessMm !== undefined ? { thicknessMm: patch.thicknessMm } : {}),
     ...(patch.adesivo !== undefined ? { adesivo: patch.adesivo } : {}),
     ...(patch.adesivoBranco !== undefined ? { adesivoBranco: patch.adesivoBranco } : {}),
+    // Sprint P0.6 — sinais de controle/Bloco C, mesma disciplina de merge
+    // progressivo (só sobrescreve o que veio explicitamente no patch).
+    ...(patch.solicitacoesNaoSuportadas !== undefined ? { solicitacoesNaoSuportadas: patch.solicitacoesNaoSuportadas } : {}),
+    ...(patch.clientConfirmedQuote !== undefined ? { clientConfirmedQuote: patch.clientConfirmedQuote } : {}),
+    ...(patch.wantsDeadlineCheck !== undefined ? { wantsDeadlineCheck: patch.wantsDeadlineCheck } : {}),
+    ...(patch.dataNecessidadeCliente !== undefined ? { dataNecessidadeCliente: patch.dataNecessidadeCliente } : {}),
     dimensions: {
       larguraMm: patch.dimensions?.larguraMm !== undefined ? patch.dimensions.larguraMm : atual.dimensions.larguraMm,
       alturaMm: patch.dimensions?.alturaMm !== undefined ? patch.dimensions.alturaMm : atual.dimensions.alturaMm,

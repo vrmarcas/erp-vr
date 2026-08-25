@@ -27,11 +27,40 @@ export type NextCommercialAction =
   | "lookup_repurchase"
   | "configure_custom"
   | "calculate_quote"
+  | "confirm_quote"
   | "create_quote"
   | "present_quote"
   | "check_production_deadline"
   | "check_urgent_fit"
   | "handoff";
+
+/**
+ * Sprint P0.6 — rota comercial canônica da conversa. Uma vez que o
+ * technicalBriefing tem productId (fluxo VR personalizado), a conversa
+ * está travada em VR_CUSTOM — nunca deve migrar espontaneamente para
+ * Vitre no mesmo turno sem uma nova decisão do orchestrator (achado real
+ * de E2E: o LLM confundiu Tools e foi parar no catálogo Vitre mesmo com
+ * toolToCall="calcular_produto_personalizado" explícito). Exportado para
+ * os endpoints de Vitre (outro codebase) lerem antes de executar.
+ */
+export type CommercialRoute = "VR_CUSTOM" | null;
+
+export function computeCommercialRoute(technicalBriefing?: TechnicalBriefing | null): CommercialRoute {
+  return technicalBriefing?.productId ? "VR_CUSTOM" : null;
+}
+
+/**
+ * Sprint P0.6 — as mesmas resoluções de nome/telefone usadas internamente
+ * por computeQuoteReadiness, exportadas para action_executor.ts derivar a
+ * identidade do cliente sem duplicar a lógica nem depender do LLM
+ * fornecer nomeCliente/telCliente por Tool call.
+ */
+export function nomeConfirmado(cliente: Cliente | null, lead: CrmLead | null): string | null {
+  return cliente?.nome || lead?.nome || null;
+}
+export function telefoneConfirmado(cliente: Cliente | null, lead: CrmLead | null, channelPhone: string | null): string | null {
+  return channelPhone || cliente?.tel || lead?.tel || null;
+}
 
 export type HandoffReasonCode =
   | "UNSUPPORTED_PRODUCT"
@@ -69,13 +98,6 @@ export interface NextActionResult {
 // calcular_orcamento_vr/calcular_produto_personalizado).
 const CAMPOS_BLOQUEANTES: (keyof BriefingData)[] = ["produto", "larguraMm", "alturaMm", "quantidade", "material"];
 const CAMPOS_OPCIONAIS: (keyof BriefingData)[] = ["acabamento", "referencia", "observacoes"];
-
-function nomeConfirmado(cliente: Cliente | null, lead: CrmLead | null): string | null {
-  return cliente?.nome || lead?.nome || null;
-}
-function telefoneConfirmado(cliente: Cliente | null, lead: CrmLead | null, channelPhone: string | null): string | null {
-  return channelPhone || cliente?.tel || lead?.tel || null;
-}
 
 /**
  * quoteReadiness() — avaliador canônico (P0.8). Determina objetivamente
@@ -161,7 +183,7 @@ export function nextCommercialAction(params: {
   orcamentoJaCriado: boolean;
   handoffReasonCode?: HandoffReasonCode | null;
   technicalBriefing?: TechnicalBriefing | null;
-  lastEligibleSimulationFingerprint?: string | null;
+  lastEligibleSimulation?: { fingerprint: string; finalPrice: number; simulationId: string } | null;
 }): NextActionResult {
   const resultado = nextCommercialActionCore(params);
   // P0.8 — invariante garantida centralmente, não branch a branch (nunca
@@ -181,7 +203,7 @@ function nextCommercialActionCore(params: {
   orcamentoJaCriado: boolean;
   handoffReasonCode?: HandoffReasonCode | null;
   technicalBriefing?: TechnicalBriefing | null;
-  lastEligibleSimulationFingerprint?: string | null;
+  lastEligibleSimulation?: { fingerprint: string; finalPrice: number; simulationId: string } | null;
 }): NextActionResult {
   if (params.handoffReasonCode) {
     return {
@@ -199,6 +221,27 @@ function nextCommercialActionCore(params: {
     };
   }
 
+  // Sprint P0.6 — sinais de pergunta lateral (prazo/urgência) extraídos
+  // pelo LLM (nunca decididos por ele: só relata o que o cliente disse) e
+  // persistidos no technicalBriefing. Sempre que presentes, o
+  // action_executor consulta automaticamente e o backend consome o sinal
+  // (limpa a flag) — o LLM nunca chama consultar_prazo_producao/
+  // verificar_encaixe_producao por conta própria. Verificados antes da
+  // readiness de preço porque são perguntas ortogonais ao cálculo
+  // (o cliente pode perguntar prazo antes de terminar de especificar).
+  if (params.technicalBriefing?.productId && params.technicalBriefing?.wantsDeadlineCheck === true) {
+    return {
+      nextAction: "check_production_deadline", missingFields: [], reason: "Cliente perguntou sobre prazo — consultado automaticamente pelo backend.",
+      actionPayload: { instrucao: "Prazo já consultado pelo backend — apresente o resultado ao cliente, nunca chame uma Tool de prazo." },
+    };
+  }
+  if (params.technicalBriefing?.productId && params.technicalBriefing?.dataNecessidadeCliente) {
+    return {
+      nextAction: "check_urgent_fit", missingFields: [], reason: "Cliente informou uma data-limite — encaixe verificado automaticamente pelo backend.",
+      actionPayload: { instrucao: "Encaixe já verificado pelo backend — apresente o resultado ao cliente, nunca chame uma Tool de encaixe." },
+    };
+  }
+
   const readiness = computeQuoteReadiness(
     params.briefing, params.cliente, params.lead, params.channelPhone, params.technicalBriefing
   );
@@ -210,24 +253,42 @@ function nextCommercialActionCore(params: {
     };
   }
 
-  if (
+  const simulacaoAindaValida =
     readiness.canGenerateQuote &&
-    params.technicalBriefing?.productId &&
-    params.lastEligibleSimulationFingerprint &&
-    technicalBriefingFingerprint(params.technicalBriefing) === params.lastEligibleSimulationFingerprint
-  ) {
+    !!params.technicalBriefing?.productId &&
+    !!params.lastEligibleSimulation &&
+    technicalBriefingFingerprint(params.technicalBriefing!) === params.lastEligibleSimulation.fingerprint;
+
+  if (simulacaoAindaValida && params.technicalBriefing?.clientConfirmedQuote === true) {
     // Sprint P0.4 (achado real de E2E, Bloco H2) — já existe uma
     // simulação ELIGIBLE cujo fingerprint bate com o briefing atual (não
-    // mudou nada desde o cálculo). O LLM já apresentou o preço num turno
-    // anterior; se a conversa chegou até aqui de novo, é hora de criar o
-    // orçamento formal — nunca deixar o LLM escolher entre
-    // criar_orcamento_vr e criar_rascunho_vitre (achado real: confundiu
-    // as duas e caiu no 401 da Tool errada).
+    // mudou nada desde o cálculo) E o cliente já confirmou explicitamente
+    // o preço apresentado (sprint P0.6 — nunca criar orçamento sem essa
+    // confirmação, mesmo que o fingerprint já batesse). O
+    // action_executor cria o orçamento diretamente — o LLM nunca escolhe
+    // entre criar_orcamento_vr e criar_rascunho_vitre (achado real:
+    // confundiu as duas e caiu no 401 da Tool errada).
     return {
-      nextAction: "create_quote", missingFields: [], reason: "Simulação elegível já calculada e confere com os dados atuais — criar o orçamento formal.",
+      nextAction: "create_quote", missingFields: [], reason: "Simulação elegível confere com os dados atuais e o cliente já confirmou — criar o orçamento formal.",
       actionPayload: {
-        instrucao: "Chamar a Tool de criação do orçamento agora, com os dados já confirmados — não recalcular, não escolher outra Tool.",
+        instrucao: "Orçamento já criado pelo backend — apresente o resultado ao cliente, não chame nenhuma Tool.",
         toolToCall: "criar_orcamento_vr",
+      },
+    };
+  }
+
+  if (simulacaoAindaValida) {
+    // Sprint P0.6 — preço já calculado e ainda válido, mas o cliente
+    // ainda não confirmou explicitamente: nunca criar o orçamento sem
+    // essa confirmação. O LLM só apresenta o preço já conhecido (sem
+    // recalcular) e aguarda a resposta do cliente — a confirmação em si
+    // é extraída pelo LLM (linguagem natural) e persistida via
+    // atualizar_briefing_tecnico, nunca decidida por ele quando agir.
+    return {
+      nextAction: "confirm_quote", missingFields: [], reason: "Preço já calculado — aguardando confirmação explícita do cliente antes de criar o orçamento.",
+      actionPayload: {
+        finalPrice: params.lastEligibleSimulation!.finalPrice,
+        instrucao: `Preço já calculado: R$ ${params.lastEligibleSimulation!.finalPrice.toFixed(2)}. Apresente esse valor e pergunte se o cliente confirma — não recalcule, não crie o orçamento ainda.`,
       },
     };
   }
@@ -237,11 +298,13 @@ function nextCommercialActionCore(params: {
     // VR personalizado (technicalBriefing com productId), a ÚNICA Tool
     // válida é calcular_produto_personalizado. calcular_orcamento_vr é
     // legado (auditoria real: zero uso legítimo em produção, só
-    // confusão de nome) — nunca é o toolToCall aqui.
+    // confusão de nome) — nunca é o toolToCall aqui. Sprint P0.6 — o
+    // action_executor já executa esse cálculo automaticamente
+    // (calcular_produto_personalizado vira redundante/fallback).
     return {
       nextAction: "calculate_quote", missingFields: [], reason: "Todos os campos obrigatórios e identificação do cliente confirmados.",
       actionPayload: {
-        instrucao: "Chamar a Tool de cálculo agora — não pedir mais informação ao cliente.",
+        instrucao: "Preço já calculado pelo backend — apresente ao cliente, não chame nenhuma Tool de cálculo.",
         toolToCall: "calcular_produto_personalizado",
       },
     };

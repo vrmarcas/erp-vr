@@ -18,7 +18,6 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import { randomUUID } from "crypto";
 
 import { pipeline } from "./pipeline";
 import { withIdempotency, extractIdempotencyKey } from "./idempotency";
@@ -28,8 +27,12 @@ import { nextCommercialAction, computeQuoteReadiness } from "./orchestrator";
 import { estimateProductionDeadline, checkUrgentFit } from "./deadline";
 import { parseFlexibleLength, parseDimensionLengthMm, resolveMaterialId, materiaisParaResolucao, computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
 import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing, saveLastEligibleSimulation, loadLastEligibleSimulation, clearLastEligibleSimulation } from "./technical_briefing_store";
+import { executeCommercialAction, EXECUTABLE_ACTIONS } from "./action_executor";
 import { ok, err, QUOTE_RESPONSES } from "./response";
 import { paraE164BR, encontrarPorTelefone } from "./telefone";
+import { fsRead, fsWrite } from "./kv_store";
+import { saveSimulation, SIM_COL, SIM_TTL_MS } from "./simulation_store";
+import { uid } from "./ids";
 
 import type {
   Cliente,
@@ -56,29 +59,11 @@ const RUN_OPTS = functions.runWith({
   memory:         "256MB",
 });
 
-// ── Helpers Firestore ─────────────────────────────────────────────────────────
-
-async function fsRead<T>(key: string): Promise<T | null> {
-  const db  = admin.firestore();
-  const doc = await db.collection(COL).doc(key).get();
-  if (!doc.exists) return null;
-  const raw = doc.data()?.data;
-  if (!raw) return null;
-  try { return JSON.parse(raw) as T; } catch { return null; }
-}
-
-async function fsWrite(key: string, data: unknown): Promise<void> {
-  const db = admin.firestore();
-  await db.collection(COL).doc(key).set({
-    data: JSON.stringify(data),
-    ts: Date.now(),
-  });
-}
+// fsRead/fsWrite (padrão KV erp_vr) e saveSimulation/SIM_COL/SIM_TTL_MS
+// (valeria_simulations) agora vêm de kv_store.ts/simulation_store.ts —
+// sprint P0.6, compartilhados com action_executor.ts.
 
 // ── Helpers CRM (dict unificado ERP + Valéria) ───────────────────────────────
-
-const SIM_COL     = "valeria_simulations";
-const SIM_TTL_MS  = 60 * 60 * 1000; // 1 hora
 
 /**
  * Mapeamento: etapa interna Valéria → coluna Kanban ERP.
@@ -123,20 +108,6 @@ function erpFieldsFromEtapa(valeriaStatus: string): Partial<CrmLead> {
   return { etapa, temp, cor: TEMP_TO_COR[temp] };
 }
 
-// ── Helpers simulação de preço ───────────────────────────────────────────────
-
-async function saveSimulation(sim: PricingSimulation): Promise<void> {
-  const db = admin.firestore();
-  await db.collection(SIM_COL).doc(sim.simulationId).set(sim);
-}
-
-async function getSimulation(simulationId: string): Promise<PricingSimulation | null> {
-  const db  = admin.firestore();
-  const doc = await db.collection(SIM_COL).doc(simulationId).get();
-  if (!doc.exists) return null;
-  return doc.data() as PricingSimulation;
-}
-
 function normTel(tel: string): string {
   return (tel ?? "").replace(/\D/g, "");
 }
@@ -152,11 +123,8 @@ function findLeadByTelefone(dict: CrmLeadDict, tel: string): { id: string; lead:
   return found ? { id: found[0], lead: found[1] } : null;
 }
 
-function uid(prefix = "v"): string {
-  return `${prefix}_${randomUUID()}`;
-}
-
-// pipeline() importado de ./pipeline (shared middleware)
+// uid() importado de ./ids (sprint P0.6). pipeline() importado de
+// ./pipeline (shared middleware).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. GET CONTEXTO DA CONVERSA
@@ -240,10 +208,10 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       // ELIGIBLE pronto para virar orçamento formal (nextAction
       // create_quote), sem o LLM precisar escolher entre
       // criar_orcamento_vr e criar_rascunho_vitre sozinho.
-      const lastEligibleSim = technicalBriefingParaOrchestrator
+      let lastEligibleSim = technicalBriefingParaOrchestrator
         ? await loadLastEligibleSimulation(ctx.conversationId)
         : null;
-      const nextAction = nextCommercialAction({
+      let nextAction = nextCommercialAction({
         briefing: briefingTyped,
         cliente,
         lead,
@@ -251,8 +219,50 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
         temHistoricoConversa: !!briefing || !!cliente || !!lead,
         orcamentoJaCriado,
         technicalBriefing: technicalBriefingParaOrchestrator,
-        lastEligibleSimulationFingerprint: lastEligibleSim?.fingerprint ?? null,
+        lastEligibleSimulation: lastEligibleSim,
       });
+
+      // Sprint P0.6 — achado real de E2E: toolToCall sozinho não impede o
+      // LLM de ignorar a decisão do orchestrator (chegou a chamar Tools
+      // do Vitre com calculate_quote já decidido). Ações determinísticas
+      // e seguras (calculate_quote/create_quote/check_production_deadline/
+      // check_urgent_fit) são executadas AQUI, sem depender de nenhuma
+      // Tool call — o LLM só recebe o resultado já pronto para verbalizar.
+      const executedAction = await executeCommercialAction({
+        conversationId: ctx.conversationId,
+        agentId: ctx.agentId,
+        organizationId: ctx.organizationId,
+        cliente, lead, channelPhone: ctx.channelPhone ?? null,
+        nextAction: nextAction.nextAction,
+        technicalBriefing: technicalBriefingParaOrchestrator,
+        lastEligibleSimulation: lastEligibleSim,
+      });
+
+      // A execução acima muda o estado persistido (nova simulação, novo
+      // orçamento, sinal de prazo/urgência consumido) — recarrega e
+      // recalcula nextAction para nunca devolver ao LLM uma decisão
+      // desatualizada (ex.: ainda mandando calcular algo que o backend
+      // já calculou neste mesmo turno).
+      if (executedAction) {
+        const technicalBriefingAtualizado = await loadTechnicalBriefing(ctx.conversationId);
+        const technicalBriefingAtualizadoParaOrchestrator = technicalBriefingAtualizado.productId ? technicalBriefingAtualizado : null;
+        lastEligibleSim = technicalBriefingAtualizadoParaOrchestrator
+          ? await loadLastEligibleSimulation(ctx.conversationId)
+          : null;
+        let orcamentoJaCriadoAtualizado = orcamentoJaCriado;
+        if (executedAction.action === "create_quote" && executedAction.result.success) {
+          orcamentoJaCriadoAtualizado = true;
+        }
+        nextAction = nextCommercialAction({
+          briefing: briefingTyped,
+          cliente, lead, channelPhone: ctx.channelPhone ?? null,
+          temHistoricoConversa: !!briefing || !!cliente || !!lead,
+          orcamentoJaCriado: orcamentoJaCriadoAtualizado,
+          technicalBriefing: technicalBriefingAtualizadoParaOrchestrator,
+          lastEligibleSimulation: lastEligibleSim,
+        });
+      }
+
       const quoteReadiness = computeQuoteReadiness(
         briefingTyped, cliente, lead, ctx.channelPhone ?? null, technicalBriefingParaOrchestrator
       );
@@ -281,6 +291,15 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
           classificacao:  technicalBriefingParaOrchestrator
             ? null
             : (briefing as { classificacao?: string } | null)?.classificacao ?? null,
+          // Sprint P0.6 — rota comercial travada (VR_CUSTOM) impede migração
+          // espontânea para Vitre no mesmo turno — ver guard em
+          // functions/src/valeria_vitre.ts.
+          commercialRoute: technicalBriefingParaOrchestrator ? "VR_CUSTOM" : null,
+          // Sprint P0.6 — quando presente, a ação já foi executada
+          // server-side neste turno: o LLM só apresenta este resultado ao
+          // cliente, nunca chama uma Tool para "fazer" de novo o que já
+          // está feito.
+          executedAction,
           // P0.24 — Tool Output orientado à ação: a Valéria segue
           // nextAction.nextAction, não decide sozinha o próximo passo.
           quoteReadiness,
@@ -546,11 +565,29 @@ export const valeriaAtualizarBriefingTecnico = RUN_OPTS.https.onRequest(async (r
         if (resolvido) materialId = resolvido;
       }
 
+      // Sprint P0.6 — sinais de controle que o LLM só EXTRAI (linguagem
+      // natural do cliente), nunca decide agir sobre: confirmação
+      // explícita do preço já apresentado, pergunta sobre prazo, data-
+      // limite informada, e itens sem fonte canônica de preço (Bloco C).
+      // Quem decide o que fazer com esses sinais é sempre o orchestrator/
+      // action_executor (nextCommercialAction + executeCommercialAction),
+      // nunca o LLM escolhendo chamar uma Tool de prazo/cálculo.
+      const parseBooleanFlexivel = (v: unknown): boolean | undefined =>
+        v == null ? undefined : (v === true || String(v).toLowerCase() === "sim");
+
       const patch = {
         ...(body["produto"] != null ? { productId: String(body["produto"]).trim() } : {}),
         ...(body["quantidade"] != null ? { quantity: parseInt(String(body["quantidade"]), 10) || undefined } : {}),
         ...(materialId ? { materialId } : {}),
         ...(body["espessura"] != null ? { thicknessMm: parseFlexibleLength(String(body["espessura"])) ?? undefined } : {}),
+        ...(body["adesivo"] != null ? { adesivo: parseBooleanFlexivel(body["adesivo"]) } : {}),
+        ...(body["adesivoBranco"] != null ? { adesivoBranco: parseBooleanFlexivel(body["adesivoBranco"]) } : {}),
+        ...(body["solicitacoesNaoSuportadas"] != null
+          ? { solicitacoesNaoSuportadas: parseArrayFlexivel(body["solicitacoesNaoSuportadas"]).map((x) => String(x).trim().toLowerCase()) }
+          : {}),
+        ...(body["clienteConfirmouOrcamento"] != null ? { clientConfirmedQuote: parseBooleanFlexivel(body["clienteConfirmouOrcamento"]) } : {}),
+        ...(body["perguntouPrazo"] != null ? { wantsDeadlineCheck: parseBooleanFlexivel(body["perguntouPrazo"]) } : {}),
+        ...(body["dataNecessidadeCliente"] != null ? { dataNecessidadeCliente: String(body["dataNecessidadeCliente"]).trim() || null } : {}),
         dimensions: {
           larguraMm: body["largura"] != null ? (parseDimensionLengthMm(String(body["largura"])) ?? undefined) : undefined,
           alturaMm: body["altura"] != null ? (parseDimensionLengthMm(String(body["altura"])) ?? undefined) : undefined,
