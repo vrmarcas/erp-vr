@@ -27873,8 +27873,19 @@ function orcEnvEditar(id) {
     setV('orcPrazoDias', o.prazoDias);
     setV('orcPrazoDiasMax', o.prazoDiasMax);
     // Marca
-    if(o.marca==='vr') { if(document.body.classList.contains('vitre')) orcToggleMarca(); }
-    else               { if(!document.body.classList.contains('vitre')) orcToggleMarca(); }
+    // HOTFIX CRÍTICO 2026-08-25 — achado real em PRODUÇÃO (reprodução ao
+    // vivo, ORC-000061): orcToggleMarca() era chamada aqui mas NUNCA foi
+    // definida em lugar nenhum do arquivo — ReferenceError garantido toda
+    // vez que a marca do body (VR/Vitre) na tela não batia com a marca do
+    // orçamento sendo reaberto. Essa exceção lançava direto no catch de
+    // orcEnvEditar (Bloco A) ANTES do loop de itens rodar — exatamente o
+    // sintoma relatado ("itens somem" + "Este orçamento não pôde ser
+    // restaurado completamente"), para QUALQUER orçamento de marca
+    // diferente da marca ativa na tela no momento da reabertura. Trocado
+    // pela função real e já existente setBrand() (ver definição acima) —
+    // determinística e idempotente, nunca um "toggle" que dependia de
+    // adivinhar o estado atual.
+    if(typeof setBrand==='function') setBrand(o.marca==='vr' ? 'vr' : 'vitre');
     var snap = o.snapshotCompleto || null;
     var materiaisNaoEncontrados = [];
     // Preencher itens se existem no snapshot
