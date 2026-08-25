@@ -5085,6 +5085,10 @@ function _authFirebaseError(code){
             <label>Nome do cliente simulado</label>
             <input type="text" id="atdNovoTesteNome" placeholder="Ex.: Cliente Teste" value="Cliente Teste">
           </div>
+          <div class="fg">
+            <label>Telefone do canal (opcional)</label>
+            <input type="text" id="atdNovoTesteTelefone" placeholder="Ex.: 11999998888 — simula o número do canal (WhatsApp), não precisa ser digitado na conversa">
+          </div>
           <button class="gen-submit" onclick="atdCriarConversaTesteSubmit()">Criar conversa de teste</button>
         </div>
       </div>
@@ -34143,7 +34147,9 @@ function atdFecharModalNovoTeste(){
 function atdCriarConversaTesteSubmit(){
   if(ATD_BUSY) return; ATD_BUSY = true;
   var nome = (document.getElementById('atdNovoTesteNome').value||'Cliente Teste').trim();
-  firebase.functions().httpsCallable('atdCriarConversaTeste')({ nomeClienteSimulado: nome })
+  var telEl = document.getElementById('atdNovoTesteTelefone');
+  var telefoneSimulado = telEl ? telEl.value.replace(/\D/g,'').trim() : '';
+  firebase.functions().httpsCallable('atdCriarConversaTeste')({ nomeClienteSimulado: nome, telefoneSimulado: telefoneSimulado || undefined })
     .then(function(res){
       atdFecharModalNovoTeste();
       showToast('Conversa de teste criada.','ok');
