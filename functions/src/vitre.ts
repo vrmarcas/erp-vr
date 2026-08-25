@@ -48,7 +48,11 @@ export interface VitreProduto {
   familia?: string | null;
   produtoPaiId?: string | null;
   variante?: string | null;
-  status: "ativo" | "inativo";
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — "renomeado" marca um
+  // documento tombstone deixado por vitreRenomearSku (ver skuRenomeadoPara);
+  // nunca aparece como opção ativa em nenhuma tela, só existe para
+  // preservar histórico/vínculos do SKU antigo.
+  status: "ativo" | "inativo" | "renomeado";
   // comercial
   custo?: number | null;
   precoVenda?: number | null;
@@ -93,6 +97,13 @@ export interface VitreProduto {
   criadoEm?: number;
   atualizadoEm?: number;
   camposEditadosManualmente?: string[]; // campos que reimportação NUNCA sobrescreve
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — renomear SKU (ver
+  // vitreRenomearSku). skuRenomeadoPara marca este documento como um
+  // tombstone (nunca apagado — preserva histórico/vínculos/pedidos que já
+  // referenciam este SKU); skuAnterior, no documento NOVO, aponta de volta
+  // para o SKU original, para auditoria/rastreabilidade.
+  skuRenomeadoPara?: string | null;
+  skuAnterior?: string | null;
 }
 
 export function calcularNivelCompletude(p: Partial<VitreProduto>): number {
@@ -230,8 +241,17 @@ export const vitreCriarOuEditarProduto = functions.https.onCall(async (data, con
 
   const sku = String(data?.sku || "").trim();
   const requestId = String(data?.requestId || "");
+  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — achado real de
+  // auditoria: esta função nunca soube distinguir "Novo Produto" de
+  // "Editar Produto" — as duas telas mandam o mesmo payload, e se o
+  // operador em "Novo Produto" digitasse por engano um SKU que já existe,
+  // a função fazia merge silencioso nos dados de um produto DIFERENTE, sem
+  // aviso nenhum (diferente de vitreDuplicarProduto, que já bloqueia SKU
+  // duplicado). `modo` é opcional (nunca quebra chamadores antigos/scripts
+  // que não o enviam) — só passa a validar quando o frontend o informa.
+  const modo = data?.modo === "criar" || data?.modo === "editar" ? data.modo : null;
   const camposComerciais = ["custo", "precoVenda", "descricaoCurta", "descricaoCompleta", "status", "categoria", "familia"];
-  const payloadKeys = Object.keys(data || {}).filter((k) => !["sku", "requestId"].includes(k));
+  const payloadKeys = Object.keys(data || {}).filter((k) => !["sku", "requestId", "modo"].includes(k));
   if (!sku) throw new functions.https.HttpsError("invalid-argument", "sku obrigatório.");
   if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
 
@@ -249,11 +269,24 @@ export const vitreCriarOuEditarProduto = functions.https.onCall(async (data, con
   const resultado = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const existia = snap.exists;
+    if (modo === "criar" && existia) throw new functions.https.HttpsError("already-exists", "SKU_JA_EXISTE:" + sku);
+    if (modo === "editar" && !existia) throw new functions.https.HttpsError("not-found", "Produto não encontrado — pode ter sido removido/renomeado por outra sessão.");
     const atual = existia ? (snap.data() as VitreProduto) : null;
     const camposManuaisNovos = new Set(atual?.camposEditadosManualmente || []);
     payloadKeys.forEach((k) => camposManuaisNovos.add(k));
     const novo: Record<string, unknown> = { ...(atual || {}), ...(data || {}), sku, marca: "vitre", origem: "manual", camposEditadosManualmente: Array.from(camposManuaisNovos), atualizadoEm: Date.now() };
     delete (novo as any).requestId;
+    delete (novo as any).modo;
+    // Recomputa lucroBruto/margemBruta sempre que custo/precoVenda entram
+    // no payload — mesma fórmula já usada em vitreImportarProdutos, nunca
+    // uma segunda. Achado da auditoria: antes só a importação recalculava
+    // esses dois campos; editar custo/preço manualmente deixava
+    // lucroBruto/margemBruta desatualizados, inconsistentes com o valor novo.
+    if (payloadKeys.includes("custo") || payloadKeys.includes("precoVenda")) {
+      const _custo = (novo as any).custo, _preco = (novo as any).precoVenda;
+      (novo as any).lucroBruto = (_preco != null && _custo != null) ? +(_preco - _custo).toFixed(2) : null;
+      (novo as any).margemBruta = (_preco != null && _custo != null && _preco > 0) ? +((_preco - _custo) / _preco).toFixed(4) : null;
+    }
     if (!existia) { (novo as any).criadoPorUid = caller.uid; (novo as any).criadoEm = Date.now(); (novo as any).status = novo.status || "ativo"; (novo as any).ativoErp = true; (novo as any).ativoValeria = false; }
     tx.set(ref, novo, { merge: false });
     return { existia, nivel: calcularNivelCompletude(novo as unknown as VitreProduto) };
@@ -305,6 +338,65 @@ export const vitreDuplicarProduto = functions.https.onCall(async (data, context)
   });
   await writeAudit("produto_duplicado", caller.uid, caller.role, { skuOrigem, skuNovo });
   return { ok: true, jaProcessado: false, ...resultado };
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco F — renomear SKU.
+//
+// Auditoria: `vitre_produtos/{sku}` usa o próprio SKU como ID do documento
+// — não existe (e nunca existiu) um ID interno estável separado. Trocar
+// literalmente a chave de um documento no Firestore não é uma operação
+// atômica (é sempre create+delete), e SKU é referenciado como chave em
+// pelo menos 15 pontos diferentes (orçamentos Vitre já salvos, conversão
+// de orçamento em OS, fluxo de pedido único VR+Vitre, integração da
+// Valéria). Migrar TODOS esses pontos para um ID interno novo é uma
+// mudança de arquitetura de escopo muito maior que este bloco — e o
+// próprio pedido veda migração destrutiva.
+//
+// Solução segura e aditiva: cria um documento NOVO (SKU novo, todos os
+// dados do produto copiados) e marca o documento ANTIGO como tombstone
+// (`status:'renomeado'`, `skuRenomeadoPara`) — NUNCA apagado. Isso
+// preserva histórico/vínculos/pedidos que já referenciam o SKU antigo
+// (Blocos de orçamento salvos continuam resolvendo o produto pelo SKU
+// antigo, só que agora encontram um tombstone identificável em vez de
+// "não encontrado"), enquanto o catálogo/busca/orçamento NOVOS passam a
+// usar o SKU novo — exatamente o comportamento pedido ("Novo SKU deve
+// aparecer... Registros históricos devem continuar íntegros").
+// ══════════════════════════════════════════════════════════════════════════
+export const vitreRenomearSku = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, [], "renomear SKU de produto do catálogo"); // master-only — SKU é atributo estrutural, não só comercial
+  const skuAtual = String(data?.skuAtual || "").trim();
+  const skuNovo = String(data?.skuNovo || "").trim();
+  const requestId = String(data?.requestId || "");
+  if (!skuAtual || !skuNovo) throw new functions.https.HttpsError("invalid-argument", "skuAtual e skuNovo obrigatórios.");
+  if (skuAtual === skuNovo) throw new functions.https.HttpsError("invalid-argument", "O novo SKU precisa ser diferente do atual.");
+  if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+  const idemKey = `renomear:${requestId}`;
+  if (!(await acquireIdem(idemKey))) return { ok: true, jaProcessado: true };
+
+  const db = admin.firestore();
+  const atualRef = db.collection(COL_PRODUTOS).doc(skuAtual);
+  const novoRef = db.collection(COL_PRODUTOS).doc(skuNovo);
+  await db.runTransaction(async (tx) => {
+    const [atualSnap, novoSnap] = await Promise.all([tx.get(atualRef), tx.get(novoRef)]);
+    if (!atualSnap.exists) throw new functions.https.HttpsError("not-found", "Produto não encontrado.");
+    const atual = atualSnap.data() as VitreProduto;
+    if (atual.status === "renomeado") throw new functions.https.HttpsError("failed-precondition", "Este produto já foi renomeado para \"" + atual.skuRenomeadoPara + "\" — edite/renomeie a partir do SKU atual.");
+    if (novoSnap.exists) throw new functions.https.HttpsError("already-exists", "SKU_JA_EXISTE:" + skuNovo);
+    const agora = Date.now();
+    // Documento novo — cópia integral (imagens, ficha técnica, vínculos
+    // ERP/Valéria) + sku atualizado + rastro de onde veio.
+    tx.set(novoRef, { ...atual, sku: skuNovo, skuAnterior: skuAtual, atualizadoEm: agora });
+    // Documento antigo — tombstone, nunca apagado. status:'renomeado' já
+    // exclui automaticamente de qualquer tela/Tool que filtre status==='ativo'
+    // (catálogo, busca, elegibilidade Valéria) sem precisar tocar nenhuma
+    // dessas telas — preserva histórico/pedidos que ainda apontam pra cá.
+    tx.set(atualRef, { status: "renomeado", skuRenomeadoPara: skuNovo, atualizadoEm: agora }, { merge: true });
+  });
+
+  await writeAudit("produto_sku_renomeado", caller.uid, caller.role, { skuAtual, skuNovo });
+  return { ok: true, jaProcessado: false, skuNovo };
 });
 
 // ══════════════════════════════════════════════════════════════════════════

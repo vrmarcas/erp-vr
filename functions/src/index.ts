@@ -68,6 +68,9 @@ export {
   vitreCriarOuEditarProduto,
   vitreAtivarDesativarProduto,
   vitreDuplicarProduto,
+  // Rodada de estabilização (2026-08-23), Bloco F — renomear SKU
+  // preservando histórico (tombstone), nunca migração destrutiva de ID.
+  vitreRenomearSku,
   vitreCriarOrcamento,
   vitreAtualizarOrcamento,
   vitreConverterOrcamentoParaOS,
