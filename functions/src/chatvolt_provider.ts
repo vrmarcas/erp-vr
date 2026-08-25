@@ -25,6 +25,10 @@ import axios from "axios";
 import { AIProvider, AIProviderContext, AIProviderResult } from "./ai_provider";
 
 export const VALERIA_AGENT_ID = "cmmmkciwb02j8lcxudbnwv31y";
+// Par autorizado em erp_vr/valeria_authorized_agents (auth.ts do codebase
+// functions-valeria) — usado por atendimentos.ts para chamar de volta
+// valeriaGetContexto server-side (sprint P0.7, ver dispararExecucaoComercial).
+export const VALERIA_ORGANIZATION_ID = "cmmmk6oqi02hmlcxugbddv62q";
 // Medido em produção no hotfix 2026-08-22 (logs reais de atdSimularMensagemCliente):
 // Agent Query sozinho (sem nenhuma Tool nossa lenta — só 1 chamada de 3.9s a
 // valeriaGetContexto no meio) levou 27.9s e 31.7s em duas mensagens
