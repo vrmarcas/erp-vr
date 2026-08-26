@@ -84,11 +84,15 @@ function extractAsyncFn(name) {
 
 console.log('\n=== HOTFIX CRÍTICO — Orçamento zera ao passar de Aprovação para Pagamento ===\n');
 
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcPgtoAtualizarValorReceber()
+// passou a normalizar o orçamento congelado via orcEnvNormalizar() (schema
+// legado × ValerIA), nunca reimplementada.
 var FN_SRC = [
   extractFn('orcDistribuirParcelas'),
   extractFn('orcMotorComercial'),
   extractFn('orcFmt'),
   extractFn('orcPgtoAtualizarValorReceber'),
+  extractFn('orcEnvNormalizar'),
 ].join('\n\n') + '\n\nmodule.exports = {orcDistribuirParcelas,orcMotorComercial,orcFmt,orcPgtoAtualizarValorReceber};';
 var modPath1 = path.join(__dirname, '_hotfix_pgto_congelado_valorreceber.tmp.js');
 fs.writeFileSync(modPath1, FN_SRC);

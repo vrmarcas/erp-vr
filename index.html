@@ -9075,6 +9075,27 @@ function orcEmpresaChange() {
 }
 function orcTipoChange(sel) { orcEmpresaChange(); }
 
+// HOTFIX BLOCO F (Rodada de Hardening, Fase 2, 2026-08-26) — fonte única
+// para "os materiais reais da Configuração já chegaram do servidor?".
+// Antes, 4 pontos do arquivo reimplementavam a mesma pergunta com a
+// heurística `materiais.length>5` (5 = o tamanho do catálogo de bootstrap
+// CFG_DEFAULT, usado como proxy de "isso ainda é o default, não a config
+// real") — para qualquer empresa com catálogo real de 5 materiais ou
+// menos, essa heurística NUNCA passava, travando o wizard/seletor em
+// "Carregando..." para sempre, mesmo com o catálogo real já confirmado
+// pelo servidor. `_cfgDataLoaded` (já existente, setado só quando o dado
+// vem do servidor — nunca do cache/bootstrap local, ver _cloudWatch
+// ("erp_config",...)) é o sinal real e correto. Devolve `null` enquanto
+// ainda não confirmado (nunca confundir com "confirmado e vazio") — quem
+// chama decide como tratar loading vs. vazio de verdade.
+function _cfgMateriaisReais() {
+  if(typeof _cfgDataLoaded==='undefined' || !_cfgDataLoaded) return null;
+  try {
+    var d = cfgLoad();
+    return (d && d.materiais) ? d.materiais.filter(function(m){ return m.nome && m.nome!=='Novo material'; }) : [];
+  } catch(e) { return []; }
+}
+
 // RODADA 6, seção 4 — extrai a construção das opções de material (antes
 // inline dentro de orcAddItem) para reuso por orcAplicarMaterialReceita()
 // ao trocar de produto. `materiaisPermitidos` (array de matKeys "cfg_N")
@@ -9082,9 +9103,11 @@ function orcTipoChange(sel) { orcEmpresaChange(); }
 // materiais cadastrados no Estoque (comportamento original, sem receita).
 function orcConstruirMatOpts(materiaisPermitidos) {
   // Gerar opções de material APENAS da configuração do Firebase (nunca usar fallback padrão)
-  var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
+  var _cfgMatsReais = _cfgMateriaisReais();
+  if(_cfgMatsReais === null) return '<option value="pending">⏳ Carregando materiais...</option>';
+  var _cfgMats = _cfgMatsReais;
   var permitidos = (materiaisPermitidos && materiaisPermitidos.length) ? materiaisPermitidos : null;
-  if(!_cfgMats.length) return '<option value="pending">⏳ Carregando materiais...</option>';
+  if(!_cfgMats.length) return '<option value="">Nenhum material cadastrado na Configuração</option>';
   var opts = [];
   _cfgMats.forEach(function(m,i){
     var matKey = 'cfg_'+i;
@@ -9101,18 +9124,20 @@ function orcConstruirMatOpts(materiaisPermitidos) {
     // voltados ao cliente — o preço/m² é custo interno, não deve vazar ali.
     opts.push('<option value="'+matKey+'" data-rsm2="'+(_rsm2).toFixed(2)+'" data-esp="'+_esp+'" data-nome="'+cfgEsc(m.nome)+'">'+_label+'</option>');
   });
-  return opts.length ? opts.join('') : '<option value="pending">⏳ Carregando materiais...</option>';
+  // Chegou aqui só quando `permitidos` (restrição da receita) excluiu
+  // TODOS os materiais reais já carregados — nunca mais "Carregando..."
+  // (mensagem enganosa; os dados já chegaram, só nenhum bate a receita).
+  return opts.length ? opts.join('') : '<option value="">Nenhum material permitido por esta receita está cadastrado</option>';
 }
 // Lê os matKeys ("cfg_N") atualmente disponíveis no cadastro de materiais,
 // na mesma ordem/índice usada por orcConstruirMatOpts — necessário para
 // orcMaterialSelecaoResolver() decidir se um materialPadrao/permitido da
 // receita ainda existe no Estoque atual.
 function orcMatKeysDisponiveis() {
-  try {
-    var d = cfgLoad();
-    var mats = (d && d.materiais && d.materiais.length>5) ? d.materiais.filter(function(m){ return m.nome && m.nome!=='Novo material'; }) : [];
-    return mats.map(function(m,i){ return 'cfg_'+i; });
-  } catch(e) { return []; }
+  // HOTFIX BLOCO F — mesma correção de _cfgMateriaisReais() acima; nunca
+  // mais decide "config carregada" pela quantidade de materiais.
+  var mats = _cfgMateriaisReais() || [];
+  return mats.map(function(m,i){ return 'cfg_'+i; });
 }
 // Ao trocar o produto de uma linha do orçamento, aplica o material
 // padrão/permitido declarado na receita daquele produto — mas só quando a
@@ -9262,8 +9287,12 @@ function orcOpcaoSelecionar(idx) {
 // Atualiza os selects de material em linhas já existentes do orçamento (corrige race condition com Firebase)
 function orcRefreshMatSelects() {
   if(!orcItemCount) return;
-  var _cfgMats = (function(){ try{ var d=cfgLoad(); return (d&&d.materiais&&d.materiais.length>5)?d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }):[];  }catch(e){ return []; } })();
-  if(!_cfgMats.length) return; // Firebase ainda não respondeu, aguardar
+  // HOTFIX BLOCO F — mesma correção de _cfgMateriaisReais() acima; um
+  // catálogo real com 5 materiais ou menos nunca mais trava esta função
+  // em "aguardar" para sempre.
+  var _cfgMatsReais = _cfgMateriaisReais();
+  if(_cfgMatsReais === null) return; // servidor ainda não confirmou — aguardar
+  var _cfgMats = _cfgMatsReais;
   // RODADA 9 (2026-08-22, Bloco D) — achado real: esta função reimplementava
   // sua própria versão simplificada das <option> (só m.nome, sem espessura/
   // preço/data-nome) — diferente da usada por orcConstruirMatOpts() em todo
@@ -12272,10 +12301,15 @@ function orcGerarReciboEntrada(orcIdParam) {
   var gate = orcObterConfirmacaoEntrada(orcIdParam||window._orcSessaoAtualId);
   if(!gate.pode){ showToast(gate.motivo,'warn'); return; }
   var orc = gate.orc, os = gate.os;
-  var total   = os.totalGeral||os.valor||orc.valorFinal||0;
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orc pode ser
+  // um orçamento ValerIA (campos num/cliente/valorFinal inexistentes,
+  // n/nomeCliente/total no lugar) — recibo impresso saía com "Cliente"
+  // genérico, "REC-SN" e total R$0,00. orcEnvNormalizar() reutilizado.
+  var _n      = orcEnvNormalizar(orc);
+  var total   = os.totalGeral||os.valor||_n.valorFinal||0;
   var entrada = os.valorEntrada||0;
   var resto   = Math.max(0, os.restante!=null ? os.restante : (total-entrada));
-  var cliente = orc.cliente||'Cliente';
+  var cliente = _n.cliente!=='(sem nome)' ? _n.cliente : 'Cliente';
   var isVt    = orc.marca==='vitre';
   var empresa = isVt ? 'Vitre' : 'VR Marcas';
   var cor     = isVt ? '#1E7A86' : '#1EB8D8';
@@ -12290,7 +12324,7 @@ function orcGerarReciboEntrada(orcIdParam) {
   // recibo novo, mesmo sem nenhuma nova transação/gravação). Corrigido
   // para derivar do número oficial do orçamento (já estável e único),
   // com a OS como fallback — a mesma entrada sempre imprime o mesmo Nº.
-  var numRec  = 'REC-'+String(orc.num || os.num || orc.id || 'SN').replace(/[^0-9A-Za-z]/g,'');
+  var numRec  = 'REC-'+String((_n.num!=='—'?_n.num:null) || os.num || orc.id || 'SN').replace(/[^0-9A-Za-z]/g,'');
   var itensStr = (os.itens||orc.itens||[]).map(function(it){ return (it.qty||1)+'x '+(it.prod||'Produto'); }).join(', ')||'Serviço conforme orçamento';
   var _brandBaseRec = location.origin + '/assets/brand/';
   var logoSrcRec = isVt ? (_brandBaseRec+'vitre-logo.png') : (_brandBaseRec+'vr-marcas-logo.png');
@@ -12321,7 +12355,7 @@ function orcGerarReciboEntrada(orcIdParam) {
     +'<div class="row"><span class="lbl">Cliente</span><span class="val">'+cliente+'</span></div>'
     +'<div class="row"><span class="lbl">Produto / Serviço</span><span class="val" style="max-width:320px;font-size:12px">'+itensStr+'</span></div>'
     +'<div class="row"><span class="lbl">Vendedor</span><span class="val">'+vend+'</span></div>'
-    +'<div class="row"><span class="lbl">Orçamento</span><span class="val">#'+(orc.num||'—')+'</span></div>'
+    +'<div class="row"><span class="lbl">Orçamento</span><span class="val">#'+_n.num+'</span></div>'
     +(os.num?'<div class="row"><span class="lbl">Ordem de Serviço</span><span class="val">#'+os.num+'</span></div>':'')
     +'<div class="row"><span class="lbl">Forma de Pagamento</span><span class="val">'+(os.formaPgto||'—')+'</span></div>'
     +'<div class="row"><span class="lbl">Valor total do orçamento</span><span class="val">'+fmtBR(total)+'</span></div>'
@@ -12580,7 +12614,12 @@ function orcPgtoAtualizarValorReceber() {
     var _listaFzPgto = orcGetEnviados();
     _orcFrozenPgto = _listaFzPgto.find(function(x){ return x.id===window._orcSessaoAtualId; }) || null;
   }
-  var finalPriceBasePgto = (_orcFrozenPgto && typeof _orcFrozenPgto.valorBase==='number') ? _orcFrozenPgto.valorBase : (v.finalPrice||0);
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orçamento
+  // ValerIA nunca tem .valorBase (campo legado); caía sempre no recálculo
+  // ao vivo, reabrindo exatamente o bug que o HOTFIX CRÍTICO 2026-08-25
+  // (comentário acima) documenta ter corrigido — só que para o legado.
+  var _nFzPgto = _orcFrozenPgto ? orcEnvNormalizar(_orcFrozenPgto) : null;
+  var finalPriceBasePgto = _nFzPgto ? _nFzPgto.valorBase : (v.finalPrice||0);
   var baseAposCond = (cond.dcOn && cond.dcPct>0) ? finalPriceBasePgto*(1-cond.dcPct/100) : finalPriceBasePgto;
   var motorCom = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParcSim });
   // GO-LIVE 2026-08-11, P0 seção 7 (bug real reproduzido em produção):
@@ -12839,25 +12878,35 @@ function orcRegistrarSituacaoFinanceira(orcId, dados){
     return { tipo:tipo, forma:forma, valorEfetivo:valorTotal, valorEntrada:valorEntrada, restante:restante, obs:obs, nf:nf, confirmadoEm:dia, confirmadoPor:(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.email)||'—' };
   }
   function aplicarCRTx(o, arrCR, arrTx, isFallback){
-    var prodNome = o.produto||'Produto';
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — `o` pode
+    // ser um orçamento ValerIA (cliente/tel/num/produto vêm em
+    // nomeCliente/telCliente/n/itens[0]); sem normalizar, o CR gerado saía
+    // com cliente genérico "Cliente", telefone vazio (finResolveClienteId
+    // falhava) e "#undefined" na descrição — dado financeiro real gravado
+    // errado. orcEnvNormalizar() reutilizado, nunca uma segunda fórmula.
+    var _n = orcEnvNormalizar(o);
+    var oCliente = _n.cliente!=='(sem nome)' ? _n.cliente : 'Cliente';
+    var oTel = _n.tel;
+    var oNum = _n.num;
+    var prodNome = _n.produto!=='—' ? _n.produto : 'Produto';
     var txMutado = false;
     if(valorEntrada>0){
-      var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
+      var _crClienteId=(typeof finResolveClienteId==='function' ? finResolveClienteId(oCliente, oTel) : '');
       if(o.crId) { var _idx=arrCR.findIndex(function(c){return c.id===o.crId;}); if(_idx>=0) arrCR.splice(_idx,1); }
-      arrCR.unshift({id:'cr'+Date.now(),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:orcId,osId:'',descricao:'Entrada ORC #'+o.num+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:dia});
-      if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1),cliente:o.cliente||'Cliente',clienteId:_crClienteId,orcamentoId:orcId,osId:'',descricao:'Restante ORC #'+o.num+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:null});
-      arrTx.unshift({data:dia.slice(0,5),cliente:o.cliente||'Cliente',os:'',orcamentoId:orcId,marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
+      arrCR.unshift({id:'cr'+Date.now(),cliente:oCliente,clienteId:_crClienteId,orcamentoId:orcId,osId:'',descricao:'Entrada ORC #'+oNum+' — '+prodNome,valor:valorEntrada,vencimento:dia,status:'recebido',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:dia});
+      if(restante>0) arrCR.unshift({id:'cr'+(Date.now()+1),cliente:oCliente,clienteId:_crClienteId,orcamentoId:orcId,osId:'',descricao:'Restante ORC #'+oNum+' — '+prodNome,valor:restante,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:null});
+      arrTx.unshift({data:dia.slice(0,5),cliente:oCliente,os:'',orcamentoId:orcId,marca:o.marca||'vr',valor:valorEntrada,metodo:forma,status:'recebido',dia:1,sem:1,mes:hoje.getMonth()+1});
       txMutado = true;
     } else if(tipo==='futuro'){
       // A Receber — zero FIN_TX (seção 22), zero recibo, mas o CR precisa
       // existir/ser corrigido para o valor EFETIVO da forma escolhida
       // (nunca ficar preso no valor Cartão estimado na aprovação).
-      var _crClienteIdF=(typeof finResolveClienteId==='function' ? finResolveClienteId(o.cliente, o.tel) : '');
+      var _crClienteIdF=(typeof finResolveClienteId==='function' ? finResolveClienteId(oCliente, oTel) : '');
       var crIdx = o.crId ? arrCR.findIndex(function(c){ return c.id===o.crId; }) : -1;
       if(crIdx>=0){ arrCR[crIdx].valor = valorTotal; arrCR[crIdx].metodo = forma; }
       else {
         var novoCrId = 'cr'+Date.now();
-        arrCR.unshift({id:novoCrId,cliente:o.cliente||'Cliente',clienteId:_crClienteIdF,orcamentoId:orcId,osId:'',descricao:'ORC #'+o.num+' — '+prodNome,valor:valorTotal,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:null});
+        arrCR.unshift({id:novoCrId,cliente:oCliente,clienteId:_crClienteIdF,orcamentoId:orcId,osId:'',descricao:'ORC #'+oNum+' — '+prodNome,valor:valorTotal,vencimento:dia,status:'pendente',marca:o.marca||'vr',metodo:forma,osRef:'',dataCriacao:dia,dataRecebimento:null});
         o.crId = novoCrId;
       }
     }
@@ -16368,7 +16417,12 @@ function dashAbrirKanbanFiltrado(lbl) {
 //     'cancelado' é aceito como alias por compatibilidade de nomenclatura)
 function dashOrcMesDoFiltro(o, mesFiltro) {
   if (!mesFiltro) return true;
-  var d = o.dataSalvo || '';
+  // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — o.dataSalvo
+  // cru é sempre undefined para ValerIA — o filtro de mês excluía todo
+  // orçamento ValerIA do Dashboard, mesmo dentro do mês selecionado.
+  // orcEnvNormalizar() reutilizado.
+  var d = orcEnvNormalizar(o).dataSalvo;
+  if (d === '—') return false;
   var p = d.split(' ')[0].split('/');
   var m = p.length >= 2 ? parseInt(p[1], 10) : 0;
   return m === mesFiltro;
@@ -16378,7 +16432,10 @@ function dashCalcularKPIsComerciais(orcamentos, mesFiltro, marcaFiltro) {
     var bOk = !marcaFiltro || marcaFiltro === 'all' || (o.marca || 'vr') === marcaFiltro;
     return bOk && dashOrcMesDoFiltro(o, mesFiltro);
   });
-  var val = function (o) { return o.valorFinal || o.valorBase || 0; };
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — KPIs
+  // "Orçamentos do mês"/"Valor Orçado"/"Valor Aprovado" somavam 0 para
+  // ValerIA. orcEnvNormalizar() reutilizado.
+  var val = function (o) { return orcEnvNormalizar(o).valorFinal || 0; };
   var aprovados = list.filter(function (o) { return o.status === 'aprovado'; });
   var cancelados = list.filter(function (o) { return o.status === 'recusado' || o.status === 'cancelado'; });
   var aguardando = list.filter(function (o) { return o.status === 'aguardando' || !o.status; });
@@ -17112,10 +17169,14 @@ function comercialRender() {
   setEl('comEnvAprov', String(envAprov));
   setEl('comEnvRecus', String(envRecus));
   var _fmtEnvR=function(v){return v>0?'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';};
-  var _envValTotal=envList.reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
-  var _envValAgu=envList.filter(function(o){return o.status==='aguardando';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
-  var _envValAprov=envList.filter(function(o){return o.status==='aprovado';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
-  var _envValRecus=envList.filter(function(o){return o.status==='recusado';}).reduce(function(s,o){return s+(o.valorFinal||o.valorBase||0);},0);
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — cards de R$
+  // da seção "Orçamentos enviados" subestimavam o total ao ignorar
+  // ValerIA (.valorFinal inexistente). orcEnvNormalizar() reutilizado.
+  var _envVal = function(o){ return orcEnvNormalizar(o).valorFinal||0; };
+  var _envValTotal=envList.reduce(function(s,o){return s+_envVal(o);},0);
+  var _envValAgu=envList.filter(function(o){return o.status==='aguardando';}).reduce(function(s,o){return s+_envVal(o);},0);
+  var _envValAprov=envList.filter(function(o){return o.status==='aprovado';}).reduce(function(s,o){return s+_envVal(o);},0);
+  var _envValRecus=envList.filter(function(o){return o.status==='recusado';}).reduce(function(s,o){return s+_envVal(o);},0);
   var _ecr=document.getElementById('comEnvCountR'); if(_ecr)_ecr.textContent=_fmtEnvR(_envValTotal);
   var _ear=document.getElementById('comEnvAguardR'); if(_ear)_ear.textContent=_fmtEnvR(_envValAgu);
   var _epr=document.getElementById('comEnvAprovR'); if(_epr)_epr.textContent=_fmtEnvR(_envValAprov);
@@ -20935,7 +20996,11 @@ function relFiscalGetFiltrados() {
   return orcGetEnviados().filter(function(o) {
     if(!o.nfSolicitada) return false;
     if(mrcFiltro && (o.marca||'vr') !== mrcFiltro) return false;
-    if(mesFiltro && o.dataSalvo && o.dataSalvo.indexOf(mesFiltro) < 0) return false;
+    // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — o.dataSalvo
+    // cru é sempre undefined para ValerIA (campo real é .data, ISO) — o
+    // filtro de mês nunca excluía esses registros (over-inclusão silenciosa).
+    // orcEnvNormalizar() reutilizado.
+    if(mesFiltro){ var _dSalvo = orcEnvNormalizar(o).dataSalvo; if(_dSalvo!=='—' && _dSalvo.indexOf(mesFiltro) < 0) return false; }
     return true;
   });
 }
@@ -20955,7 +21020,10 @@ function relFiscalRegistrarEmissao(orc, input) {
   input = input || {};
   var numero = String(input.numero || '').trim();
   if (!numero) return { ok: false, erro: 'NUMERO_OBRIGATORIO' };
-  var vendaValor = orc.valorFinal || orc.valorBase || 0;
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — emitir NF de
+  // um orçamento ValerIA registrava venda R$0,00 (campo real é .total).
+  // orcEnvNormalizar() reutilizado.
+  var vendaValor = orcEnvNormalizar(orc).valorFinal || 0;
   var valorEmitido = (input.valorEmitido === '' || input.valorEmitido === undefined || input.valorEmitido === null)
     ? vendaValor : parseFloat(input.valorEmitido);
   if (isNaN(valorEmitido)) return { ok: false, erro: 'VALOR_INVALIDO' };
@@ -20984,10 +21052,14 @@ function relFiscalRegistrarEmissao(orc, input) {
 function relFiscalRecebidoDoOrc(o) {
   if (!o) return 0;
   var osNum = (o.osRef && typeof KB_OS !== 'undefined' && KB_OS[o.osRef]) ? KB_OS[o.osRef].num : null;
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — o.num cru é
+  // undefined para ValerIA (campo real é .n), quebrando o fallback textual
+  // "ORC-"+num usado para casar CR×orçamento. orcEnvNormalizar() reutilizado.
+  var _numOrc = orcEnvNormalizar(o).num;
   return (typeof FIN_CR !== 'undefined' ? FIN_CR : []).filter(function (r) {
     if (r.status !== 'recebido') return false;
     if (r.orcamentoId === o.id) return true;
-    if (r.osRef === 'ORC-' + o.num) return true;
+    if (r.osRef === 'ORC-' + _numOrc) return true;
     if (osNum && r.osRef === 'OS #' + osNum) return true;
     return false;
   }).reduce(function (s, r) { return s + r.valor; }, 0);
@@ -21000,7 +21072,10 @@ function relFiscalSetStatus(id, status){
   if(status==='emitida'){
     var numero = prompt('Numero da nota fiscal emitida:', orc.numeroNF||'');
     if(!numero || !numero.trim()){ showToast('Numero da NF e obrigatorio para marcar como emitida.','warn'); return; }
-    var vendaValor = orc.valorFinal||orc.valorBase||0;
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — mesmo
+    // achado de relFiscalRegistrarEmissao(): sem isto, o prompt "Valor
+    // emitido" já vinha pré-preenchido com R$0,00 para ValerIA.
+    var vendaValor = orcEnvNormalizar(orc).valorFinal||0;
     var valorEmitidoStr = prompt('Valor emitido na NF (R$) — deixe igual ao valor da venda se não houver divergência:', vendaValor.toFixed(2));
     if(valorEmitidoStr===null) return;
     var valorEmitidoNum = parseFloat(String(valorEmitidoStr).replace(',','.'));
@@ -21030,13 +21105,16 @@ function relFiscalSetStatus(id, status){
 function relFiscalRender() {
   var el = document.getElementById('relNFBody'); if(!el) return;
   var orcs = relFiscalGetFiltrados();
-  var totalNF = orcs.reduce(function(s,o){ return s+(o.valorFinal||o.valorBase||0); }, 0);
+  // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) \u2014 tabela do
+  // Relat\u00f3rio Fiscal mostrava R$0,00/data em branco/cliente em branco para
+  // ValerIA. orcEnvNormalizar() reutilizado em todo o render.
+  var totalNF = orcs.reduce(function(s,o){ return s+(orcEnvNormalizar(o).valorFinal||0); }, 0);
   if(!orcs.length){
     el.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhum or\u00e7amento com nota fiscal solicitada no per\u00edodo.</div>';
     return;
   }
   var porSituacao = {pendente:0, emitida:0, dispensada:0, cancelada:0};
-  orcs.forEach(function(o){ var s=o.statusFiscal||'pendente'; porSituacao[s]=(porSituacao[s]||0)+(o.valorFinal||o.valorBase||0); });
+  orcs.forEach(function(o){ var s=o.statusFiscal||'pendente'; porSituacao[s]=(porSituacao[s]||0)+(orcEnvNormalizar(o).valorFinal||0); });
   var resumoHtml = Object.keys(FISCAL_STATUS_LABEL).map(function(s){
     return '<span style="margin-right:14px">'+FISCAL_STATUS_LABEL[s]+': <strong>'+finFmt(porSituacao[s]||0)+'</strong></span>';
   }).join('');
@@ -21048,7 +21126,8 @@ function relFiscalRender() {
       + '</select>';
     // RODADA 4, seção 6 — venda × recebido × NF são TRÊS valores
     // distintos, exibidos lado a lado; a NF nunca altera o valor da venda.
-    var vendaValor = o.valorFinal||o.valorBase||0;
+    var _nRow = orcEnvNormalizar(o);
+    var vendaValor = _nRow.valorFinal||0;
     var recebidoValor = relFiscalRecebidoDoOrc(o);
     var nfValor = (typeof o.valorEmitidoNF==='number') ? o.valorEmitidoNF : null;
     var nfCell = nfValor===null
@@ -21057,8 +21136,8 @@ function relFiscalRender() {
         + (o.divergenciaNF ? '<div title="'+cfgEsc(o.divergenciaNFJustificativa||'')+'" style="font-size:9px;font-weight:700;color:#DC2626;margin-top:1px">⚠ diverge da venda</div>' : '');
     return '<tr style="border-bottom:1px solid var(--border)">'
       +'<td style="padding:6px 8px">'+cfgEsc(o.id)+(o.numeroNF?'<div style="font-size:10px;color:var(--muted)">NF no '+cfgEsc(o.numeroNF)+(o.chaveNF?' · '+cfgEsc(o.chaveNF):'')+'</div>':'')+(o.observacaoNF?'<div style="font-size:9px;color:var(--muted)">'+cfgEsc(o.observacaoNF)+'</div>':'')+'</td>'
-      +'<td style="padding:6px 8px">'+cfgEsc(o.dataSalvo)+'</td>'
-      +'<td style="padding:6px 8px"><strong>'+cfgEsc(o.cliente)+'</strong>'
+      +'<td style="padding:6px 8px">'+cfgEsc(_nRow.dataSalvo)+'</td>'
+      +'<td style="padding:6px 8px"><strong>'+cfgEsc(_nRow.cliente!=='(sem nome)'?_nRow.cliente:'—')+'</strong>'
         +(o.nf&&o.nf.doc?'<div style="font-size:10px;color:var(--muted)">CNPJ/CPF: '+cfgEsc(o.nf.doc)+'</div>':'')+'</td>'
       +'<td style="padding:6px 8px">'+marca+'</td>'
       +'<td style="padding:6px 8px;font-weight:700;color:#1D4ED8">'+finFmt(vendaValor)+'</td>'
@@ -21091,11 +21170,15 @@ function relFiscalExportar() {
   if(!orcs.length){ showToast('Nenhum item com NF solicitada no período/filtro atual','warn'); return; }
   var linhas = ['Or\u00e7amento\tData\tCliente\tCNPJ/CPF\tEmpresa\tValor\tSitua\u00e7\u00e3o\tN\u00famero NF'];
   orcs.forEach(function(o){
+    // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — export
+    // .txt saía com colunas de data/cliente/valor vazias/zeradas p/
+    // ValerIA. orcEnvNormalizar() reutilizado.
+    var _nExp = orcEnvNormalizar(o);
     linhas.push([
-      o.id, o.dataSalvo, o.cliente,
+      o.id, _nExp.dataSalvo, (_nExp.cliente!=='(sem nome)'?_nExp.cliente:'—'),
       (o.nf&&o.nf.doc)||'—',
       o.marca==='vitre'?'Vitre':'VR Marcas',
-      (o.valorFinal||o.valorBase||0).toFixed(2).replace('.',','),
+      (_nExp.valorFinal||0).toFixed(2).replace('.',','),
       FISCAL_STATUS_LABEL[o.statusFiscal||'pendente']||'—',
       o.numeroNF||'—'
     ].join('\t'));
@@ -21602,9 +21685,20 @@ function relAnual() {
 
   envList.forEach(function(o){
     if(o.status!=='aprovado') return;
-    var d = (typeof orcEnvParseDataSalvo==='function') ? orcEnvParseDataSalvo(o.dataSalvo) : null;
+    // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+    // real: lia o.dataSalvo/o.valorFinal/o.valorBase BRUTOS — um orçamento
+    // aprovado da ValerIA (campos data/total/totalCost, nunca dataSalvo/
+    // valorFinal) sempre caía em d=null e era excluído do Relatório Anual
+    // por completo, mesmo aprovado e dentro do ano — filtro excluindo
+    // silenciosamente um registro de venda real. orcEnvNormalizar() já
+    // resolve os dois campos (reutilizado, nunca uma segunda fórmula).
+    var _n = orcEnvNormalizar(o);
+    var d = (typeof orcEnvParseDataSalvo==='function') ? orcEnvParseDataSalvo(_n.dataSalvo) : null;
     if(!d || d.getFullYear()!==ano) return;
-    porMes[d.getMonth()].vendas += (o.valorFinal||o.valorBase||0);
+    // preserva o fallback original (valorFinal ausente → usa valorBase) —
+    // orcEnvNormalizar() só cobre o fallback ValerIA (→ total), nunca o
+    // legado (valorFinal → valorBase), que este relatório sempre suportou.
+    porMes[d.getMonth()].vendas += (_n.valorFinal || _n.valorBase);
   });
   allCR.forEach(function(r){
     if(r.status!=='recebido'||!r.dataRecebimento) return;
@@ -25755,6 +25849,10 @@ function orcCondicaoPagamentoAtual(o){
 // já usam, nunca um terceiro lugar novo para "recebimentos".
 function orcFinanceiroReal(o){
   var osFin = (o && o.osRef && typeof KB_OS!=='undefined' && KB_OS) ? KB_OS[o.osRef] : null;
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — sem OS
+  // ainda, o painel financeiro do detalhe zerava "Valor contratado" para
+  // orçamentos ValerIA (o.valorFinal inexistente). orcEnvNormalizar() reutilizado.
+  var _nFin = o ? orcEnvNormalizar(o) : { valorFinal: 0 };
   var totalCents, recebidoCents, saldoCents;
   if(osFin && typeof osFin.restante!=='undefined'){
     // OS já existe — total E saldo vêm do valor REAL vivo em kb_os_fin
@@ -25767,12 +25865,12 @@ function orcFinanceiroReal(o){
     // cartão. Total agora usa a MESMA base de osFin que o saldo, mantendo
     // a identidade recebido+saldo=total sempre consistente com o que foi
     // de fato cobrado.
-    totalCents = moneyToCents(osFin.valor || osFin.totalGeral || o.valorFinal || 0);
+    totalCents = moneyToCents(osFin.valor || osFin.totalGeral || _nFin.valorFinal || 0);
     saldoCents = moneyToCents(osFin.restante||0);
     recebidoCents = Math.max(0, totalCents - saldoCents);
   } else {
     // Orçamento ainda não confirmado/sem OS — nada foi recebido ainda.
-    totalCents = moneyToCents(o.valorFinal||0);
+    totalCents = moneyToCents(_nFin.valorFinal||0);
     recebidoCents = 0;
     saldoCents = totalCents;
   }
@@ -26981,7 +27079,10 @@ function orcAvaliarRevisaoFinanceira(orcExistente, valorFinalNovoCents, recebido
   var temExposicaoFinanceira = orcExistente.status === 'aprovado' || !!orcExistente.crId;
   if (!temExposicaoFinanceira) return { precisaRevisao: false };
   var _fmtCents = function(cents){ return (cents/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var valorFinalAnteriorCents = Math.round((orcExistente.valorFinal || 0) * 100);
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — reabrir um
+  // ValerIA aprovado (sem .valorFinal) tratava "valor anterior" como
+  // R$0,00. orcEnvNormalizar() reutilizado, mantendo a função pura.
+  var valorFinalAnteriorCents = Math.round((orcEnvNormalizar(orcExistente).valorFinal || 0) * 100);
   if (valorFinalNovoCents === valorFinalAnteriorCents) return { precisaRevisao: false };
   var saldoAnteriorCents = valorFinalAnteriorCents - recebidoCents;
   var saldoNovoCents = valorFinalNovoCents - recebidoCents;
@@ -27033,7 +27134,10 @@ async function _orcSalvarOrcamentoImpl() {
 
   var num;
   if(orcExistente){
-    num = orcExistente.num; // idempotência: nunca reserva outro número para o mesmo orçamento
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — reeditar
+    // um orçamento ValerIA (campo `n`, nunca `num`) pelo wizard legado
+    // perdia/zerava o número comercial original. orcEnvNormalizar() reutilizado.
+    num = orcEnvNormalizar(orcExistente).num; // idempotência: nunca reserva outro número para o mesmo orçamento
   } else {
     try { num = await orcObterNumeroOficial(); }
     catch(e){ showToast('Não foi possível reservar o número do orçamento — tente novamente.','err'); return null; }
@@ -27522,7 +27626,11 @@ function orcEnvFiltroMesPopular() {
   var lista = orcGetEnviados();
   var meses = {};
   lista.forEach(function(o){
-    var d = orcEnvParseDataSalvo(o.dataSalvo);
+    // HOTFIX BLOCO H (Rodada de Hardening, Fase 2) — mesmo achado do
+    // filtro de data abaixo: um orçamento ValerIA nunca aparecia nem como
+    // opção de mês no filtro, porque o.dataSalvo é sempre undefined para
+    // esse schema. orcEnvNormalizar() já resolve isso (inclui data ISO).
+    var d = orcEnvParseDataSalvo(orcEnvNormalizar(o).dataSalvo);
     if(!d) return;
     meses[d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')] = true;
   });
@@ -27628,6 +27736,13 @@ function orcEnvNormalizar(o) {
   return {
     num: o.num != null ? o.num : (o.n != null ? o.n : '—'),
     cliente: o.cliente || o.nomeCliente || '(sem nome)',
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — campo
+    // canônico telefone (exigido pelo enunciado da rodada), ausente até
+    // aqui: legado grava `tel`, ValerIA grava `telCliente`
+    // (functions-valeria/src/valeria.ts) — sem isto, todo consumidor que lia
+    // o.tel cru (recibo, CR, WhatsApp pós-pagamento, OS gerada) ficava sem
+    // telefone para orçamentos ValerIA.
+    tel: o.tel || o.telCliente || '',
     produto: o.produto || (o.itens && o.itens[0] && (o.itens[0].descricao || o.itens[0].prod)) || '—',
     valorFinal: typeof o.valorFinal === 'number' ? o.valorFinal : (typeof o.total === 'number' ? o.total : 0),
     valorBase: typeof o.valorBase === 'number' ? o.valorBase : (typeof o.totalCost === 'number' ? o.totalCost : (typeof o.total === 'number' ? o.total : 0)),
@@ -27680,7 +27795,13 @@ function orcEnviadosRender() {
     var nfOk = !fnf || (fnf==='sim' ? !!o.nfSolicitada : !o.nfSolicitada);
     var dOk = true;
     if(fDe || fAte){
-      var od = orcEnvParseDataSalvo(o.dataSalvo);
+      // HOTFIX BLOCO H (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+      // real: usava o.dataSalvo BRUTO — um orçamento ValerIA (campo `data`
+      // ISO, nunca `dataSalvo`) sempre caía em od=null e era EXCLUÍDO de
+      // qualquer filtro de data, mesmo dentro do intervalo — filtro
+      // excluindo silenciosamente registro válido. _n (linha acima) já
+      // normaliza dataSalvo (inclusive do ISO), nunca uma segunda fórmula.
+      var od = orcEnvParseDataSalvo(_n.dataSalvo);
       if(!od) dOk = false;
       else {
         if(fDe  && od < new Date(fDe+'T00:00:00'))  dOk = false;
@@ -27754,18 +27875,23 @@ function orcEnvSetStatus(id, status) {
       var vdd = vencDate.getDate().toString().padStart(2,'0');
       var vmm = (vencDate.getMonth()+1).toString().padStart(2,'0');
       var venc = vdd+'/'+vmm+'/'+vencDate.getFullYear();
+      // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — aprovar
+      // um orçamento ValerIA aqui criava CR com cliente "(não informado)",
+      // valor R$0,00 e "#undefined" — orcEnvNormalizar() reutilizado.
+      var _nSet = orcEnvNormalizar(orc);
+      var _clienteSet = _nSet.cliente!=='(sem nome)' ? _nSet.cliente : '(não informado)';
       FIN_CR.unshift({
         id: crId,
-        cliente: orc.cliente||'(não informado)',
-        clienteId: (typeof finResolveClienteId==='function' ? finResolveClienteId(orc.cliente, orc.tel) : ''),
+        cliente: _clienteSet,
+        clienteId: (typeof finResolveClienteId==='function' ? finResolveClienteId(_clienteSet, _nSet.tel) : ''),
         orcamentoId: orc.id,
-        descricao: 'ORC #'+orc.num+' — '+(orc.produto||'Produto'),
-        valor: orc.valorFinal||0,
+        descricao: 'ORC #'+_nSet.num+' — '+(_nSet.produto!=='—'?_nSet.produto:'Produto'),
+        valor: _nSet.valorFinal||0,
         vencimento: venc,
         status: 'pendente',
         marca: orc.marca||'vr',
         metodo: orc.pgto||'PIX',
-        osRef: 'ORC-'+orc.num,
+        osRef: 'ORC-'+_nSet.num,
         dataCriacao: dd+'/'+mm+'/'+yyyy,
         dataRecebimento: null
       });
@@ -27784,6 +27910,11 @@ function orcEnvAbrir(id) {
   var o = lista.find(function(x){ return x.id===id; });
   if(!o) { showToast('Orçamento não encontrado','warn'); return; }
   var isVR = o.marca !== 'vitre';
+  // HOTFIX BLOCO G/I (Rodada de Hardening, Fase 2, 2026-08-26) — modal de
+  // detalhe (chamado de várias telas: lista, CRM, Atendimentos) mostrava
+  // "#undefined", "Salvo em undefined", telefone em branco e "VALOR FINAL:
+  // R$0,00" para orçamentos ValerIA. orcEnvNormalizar() reutilizado.
+  var _n = orcEnvNormalizar(o);
   var fmtVal = function(v){ return 'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var itensHtml = '';
   if(o.itens && o.itens.length) {
@@ -27868,13 +27999,13 @@ function orcEnvAbrir(id) {
     modal.onclick=function(e){if(e.target===modal)modal.style.display='none';}; document.body.appendChild(modal);}
   modal.innerHTML='<div style="background:var(--bg);border-radius:14px;padding:24px;width:min(680px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'
-    +'<div><div style="font-size:16px;font-weight:800;color:'+accent+'">📄 Orçamento #'+o.num+'</div>'
-    +'<div style="font-size:11px;color:var(--muted)">Salvo em '+o.dataSalvo+'</div></div>'
+    +'<div><div style="font-size:16px;font-weight:800;color:'+accent+'">📄 Orçamento #'+_n.num+'</div>'
+    +'<div style="font-size:11px;color:var(--muted)">Salvo em '+_n.dataSalvo+'</div></div>'
     +'<button onclick="document.getElementById(\'orcEnvModal\').style.display=\'none\'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted)">×</button>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px">'
-    +'<div><span style="color:var(--muted)">Cliente:</span> <strong>'+(o.cliente||'—')+'</strong></div>'
-    +'<div><span style="color:var(--muted)">Telefone:</span> '+(o.tel||'—')+'</div>'
+    +'<div><span style="color:var(--muted)">Cliente:</span> <strong>'+(_n.cliente!=='(sem nome)'?_n.cliente:'—')+'</strong></div>'
+    +'<div><span style="color:var(--muted)">Telefone:</span> '+(_n.tel||'—')+'</div>'
     +'<div><span style="color:var(--muted)">E-mail:</span> '+(o.email||'—')+'</div>'
     +'<div><span style="color:var(--muted)">Condição:</span> '+finReal.condicaoLabel+'</div>'
     +'<div><span style="color:var(--muted)">Marca:</span> '+(isVR?'VR Marcas':'Vitre')+'</div>'
@@ -27885,8 +28016,8 @@ function orcEnvAbrir(id) {
     +itensHtml
     +'<div style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">'
     +descHtml
-    +'<div style="font-size:15px;font-weight:800;color:'+accent+';margin-top:6px">VALOR FINAL: '+fmtVal(o.valorFinal)+'</div>'
-    +(o.valorFinal<o.valorBase?'<div style="font-size:10px;color:var(--muted)">Valor base: '+fmtVal(o.valorBase)+'</div>':'')
+    +'<div style="font-size:15px;font-weight:800;color:'+accent+';margin-top:6px">VALOR FINAL: '+fmtVal(_n.valorFinal)+'</div>'
+    +(_n.valorFinal<_n.valorBase?'<div style="font-size:10px;color:var(--muted)">Valor base: '+fmtVal(_n.valorBase)+'</div>':'')
     +breakHtml
     +'</div>'
     +orcRenderHistoricoRevisoesHtml(o.versoes)
@@ -27944,7 +28075,12 @@ function orcEnvExcluir(id) {
 function orcAplicarSnapshotCongelado(o) {
   window._orcMostrandoCongelado = false;
   var bannerCong = document.getElementById('orcCongeladoBanner');
-  if (!o || !(typeof o.valorFinal === 'number' && o.valorFinal > 0)) {
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — checava
+  // typeof o.valorFinal==='number', campo que orçamentos ValerIA nunca têm
+  // (usam .total) — nunca "congelava" o valor aprovado de um ValerIA
+  // reaberto. orcEnvNormalizar() reutilizado.
+  var _nCong = o ? orcEnvNormalizar(o) : null;
+  if (!o || !(_nCong && _nCong.valorFinal > 0)) {
     if (bannerCong) bannerCong.remove();
     return;
   }
@@ -27962,7 +28098,7 @@ function orcAplicarSnapshotCongelado(o) {
   if (bk && typeof bk.totalCost === 'number') {
     var ec = document.getElementById('orcRsmCusto'); if(ec) ec.textContent = orcFmt(bk.totalCost);
   }
-  var etot = document.getElementById('orcRsmTotal'); if(etot) etot.textContent = orcFmt(o.valorFinal);
+  var etot = document.getElementById('orcRsmTotal'); if(etot) etot.textContent = orcFmt(_nCong.valorFinal);
   window._orcMostrandoCongelado = true;
   if (!bannerCong) {
     bannerCong = document.createElement('div');
@@ -27971,7 +28107,7 @@ function orcAplicarSnapshotCongelado(o) {
     var orcHeaderCong = document.querySelector('#pg-orcamento .card');
     if (orcHeaderCong) orcHeaderCong.insertBefore(bannerCong, orcHeaderCong.firstChild);
   }
-  bannerCong.innerHTML = '📌 Mostrando o valor ENVIADO originalmente ('+orcFmt(o.valorFinal)+'). Qualquer alteração recalcula (gera revisão).';
+  bannerCong.innerHTML = '📌 Mostrando o valor ENVIADO originalmente ('+orcFmt(_nCong.valorFinal)+'). Qualquer alteração recalcula (gera revisão).';
 }
 
 function orcEnvEditar(id) {
@@ -28034,9 +28170,13 @@ function orcEnvEditar(id) {
     document.querySelectorAll('.orc-pg').forEach(function(p){ p.style.display='none'; });
     var _opg4 = document.getElementById('opg4'); if(_opg4) _opg4.style.display='block';
     // Preencher dados do cliente
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — editar um
+    // orçamento ValerIA pelo wizard legado abria Cliente/Telefone em
+    // branco (campos .cliente/.tel inexistentes). orcEnvNormalizar() reutilizado.
+    var _nEdit = orcEnvNormalizar(o);
     var setV = function(id,v){ var el=document.getElementById(id); if(el) el.value=v||''; };
-    setV('orcClientNome', o.cliente);
-    setV('orcClientTel',  o.tel);
+    setV('orcClientNome', _nEdit.cliente!=='(sem nome)' ? _nEdit.cliente : '');
+    setV('orcClientTel',  _nEdit.tel);
     setV('orcClientEmail',o.email);
     setV('orcClientVendedor', o.vendedor);
     // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: orcEnvEditar()
@@ -28335,13 +28475,17 @@ function orcPagtoSucessoFechar(){
 }
 function orcPagtoSucessoModal(o, osId, osNum){
   orcPagtoSucessoFechar();
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — modal de
+  // sucesso pós-pagamento mostrava "Orçamento #undefined · Cliente" para
+  // ValerIA. orcEnvNormalizar() reutilizado.
+  var _nSucesso = orcEnvNormalizar(o);
   var html = ''
     +'<div id="orcPagtoSucessoModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10001;display:flex;align-items:center;justify-content:center">'
     +'<div style="background:var(--surface);border-radius:16px;padding:26px;max-width:380px;width:92%;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center">'
     +'<div style="font-size:36px;margin-bottom:8px">🎉</div>'
     +'<div style="font-size:13px;color:#059669;font-weight:800;margin-bottom:2px">✅ Pagamento registrado</div>'
     +'<div style="font-size:13px;color:#059669;font-weight:800;margin-bottom:14px">✅ OS #'+cfgEsc(String(osNum))+' criada</div>'
-    +'<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Orçamento <strong>#'+cfgEsc(String(o.num))+'</strong> · '+cfgEsc(o.cliente||'Cliente')+'</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:16px">Orçamento <strong>#'+cfgEsc(String(_nSucesso.num))+'</strong> · '+cfgEsc(_nSucesso.cliente!=='(sem nome)'?_nSucesso.cliente:'Cliente')+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:8px;text-align:left">'
     +'<button onclick="orcGerarReciboEntrada(\''+o.id+'\')" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">🖨️ Gerar Recibo de Entrada</button>'
     +'<button onclick="orcPagtoSucessoFechar(); nav(\'kanban\'); setTimeout(function(){ if(typeof kbOpen===\'function\') kbOpen(\''+osId+'\'); },300);" style="padding:10px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);font-weight:700;font-size:12px;cursor:pointer">📋 Ver OS</button>'
@@ -28360,8 +28504,12 @@ function orcPagtoSucessoWhatsApp(orcId){
   var o = lista.find(function(x){ return x.id===orcId; });
   if(!o){ showToast('Orçamento não encontrado','warn'); return; }
   var marca = o.marca==='vitre' ? 'Vitre' : 'VR Marcas';
-  var msg = 'Olá, *'+(o.cliente||'cliente')+'*! 👋\n\nSeu pagamento foi confirmado e a produção do seu pedido na *'+marca+'* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
-  var telNum = (o.tel||'').replace(/\D/g,'');
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — para
+  // ValerIA, o.tel é sempre undefined (campo real é telCliente) — o link
+  // de WhatsApp abria sem destinatário. orcEnvNormalizar() reutilizado.
+  var _nWa = orcEnvNormalizar(o);
+  var msg = 'Olá, *'+(_nWa.cliente!=='(sem nome)'?_nWa.cliente:'cliente')+'*! 👋\n\nSeu pagamento foi confirmado e a produção do seu pedido na *'+marca+'* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
+  var telNum = (_nWa.tel||'').replace(/\D/g,'');
   window.open('https://wa.me/'+(telNum?'55'+telNum:'')+'?text='+encodeURIComponent(msg), '_blank');
 }
 
@@ -28445,7 +28593,14 @@ function orcEnvGerarOS(){
   }
   var prazoPrometidoTextoOS = o.prazoTextoPromessa || '';
   var prodNome=o.produto||'Produto';
-  var tituloOS=(o.cliente||'Cliente')+' — '+prodNome;
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — a função
+  // mais crítica do handoff Comercial→Produção: para um orçamento ValerIA
+  // (sem .cliente/.tel/.num), a OS gerada no Kanban saía com "Cliente"
+  // genérico e telefone vazio — Produção perdia a identificação real do
+  // pedido. orcEnvNormalizar() reutilizado.
+  var _nOS = orcEnvNormalizar(o);
+  var _clienteOS = _nOS.cliente!=='(sem nome)' ? _nOS.cliente : 'Cliente';
+  var tituloOS=_clienteOS+' — '+prodNome;
   // RODADA 5 — Orçamento comparativo / grupos de opções: item cumulativo
   // (sem `grupoOpcao`) sempre entra na OS; dentro de um grupo, só a opção
   // que o cliente escolheu (`grupoOpcao.selecionada:true`) entra — as
@@ -28518,7 +28673,7 @@ function orcEnvGerarOS(){
     try{kbRender();}catch(e){}
     // GO-LIVE 2026-08-11, seção 25-26 — pagamento confirmado + OS gerada
     // avança a oportunidade do Funil Comercial para "Fechado".
-    if (typeof crmMarcarOrcamentoFechado === 'function') { try { crmMarcarOrcamentoFechado(o, o.num); } catch(eCrm) {} }
+    if (typeof crmMarcarOrcamentoFechado === 'function') { try { crmMarcarOrcamentoFechado(o, _nOS.num); } catch(eCrm) {} }
     orcEnviadosRender();
     // GO-LIVE 2026-08-11, seção 10 — antes só mostrava um toast e navegava
     // sozinho pro Kanban depois de 800ms; agora abre o modal de sucesso
@@ -28537,7 +28692,7 @@ function orcEnvGerarOS(){
     var nLocal=(_OS_COUNTER+1); _OS_COUNTER=nLocal;
     var newIdLocal='os'+Date.now();
     KB_OS[newIdLocal]={
-      id:newIdLocal,num:String(nLocal),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
+      id:newIdLocal,num:String(nLocal),titulo:tituloOS,cliente:_clienteOS,prod:prodNome,
       cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
       material:matLabel,medidas:medidasStr,qty:qtyTotal,
       // HOTFIX 2026-08-16 (P0.8/P0.9) — entrega nasce como a data SUGERIDA
@@ -28548,12 +28703,12 @@ function orcEnvGerarOS(){
       prazoPrometidoTexto:prazoPrometidoTextoOS,
       valor:valorTotal,prog:0,pronto:false,
       checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
-      parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+      parcelas:o.parcelas||1,clientDoc:'',clientEmail:o.email||'',clientTel:_nOS.tel,
       clientCidade:'—',vendedor:'',formaPgto:forma,dataOS:dia,
       // RODADA 6, seção 13 — Produção nunca recebe custo/preço/margem: cada
       // item vira uma projeção operacional segura (ver osProjecaoOperacionalItem).
       itens:itens.map(function(it){ return (typeof osProjecaoOperacionalItem==='function') ? osProjecaoOperacionalItem(it) : it; }),totalGeral:valorTotal,obs:obs,
-      orcRef:o.id, orcNum:o.num,
+      orcRef:o.id, orcNum:_nOS.num,
       pagtoTipo:tipo,valorEntrada:valorEntrada,restante:restante
     };
     // Rodada 2, P0.6 — mesmo no fallback local (sem Firestore), separa os
@@ -28623,7 +28778,7 @@ function orcEnvGerarOS(){
         _newIdCaptured = newId; // só o vínculo final da tentativa que realmente confirmar importa
 
         objOS[newId] = {
-          id:newId,num:String(n),titulo:tituloOS,cliente:o.cliente||'Cliente',prod:prodNome,
+          id:newId,num:String(n),titulo:tituloOS,cliente:_clienteOS,prod:prodNome,
           cidade:'—',marca:o.marca==='vr'?'VR Marcas':'Vitre',mk:o.marca||'vr',
           material:matLabel,medidas:medidasStr,qty:qtyTotal,
           // RODADA 9, Bloco B — herdados da planificação efetiva para o
@@ -28645,7 +28800,7 @@ function orcEnvGerarOS(){
           prazoPrometidoTexto:prazoPrometidoTextoOS,
           prog:0,pronto:false,
           checks:checksProducao,_ck:_ckProducao,maquinas:_maquinasOS,
-          clientDoc:'',clientEmail:o.email||'',clientTel:o.tel||'',
+          clientDoc:'',clientEmail:o.email||'',clientTel:_nOS.tel,
           clientCidade:'—',vendedor:'',dataOS:dia,
           // RODADA 6, seção 13 — troca a lista negra (delete unit/total) por
           // uma lista branca explícita (osProjecaoOperacionalItem): garante
@@ -28653,7 +28808,7 @@ function orcEnvGerarOS(){
           // recipeSnapshot financeiro) vaze para kb_os por engano no futuro.
           itens:itens.map(function(it){ return (typeof osProjecaoOperacionalItem==='function') ? osProjecaoOperacionalItem(it) : it; }),
           obs:obs,
-          orcRef:o.id, orcNum:o.num
+          orcRef:o.id, orcNum:_nOS.num
         };
         objOSFin[newId] = {
           valor:valorTotal, totalGeral:valorTotal, parcelas:o.parcelas||1,
@@ -28719,7 +28874,7 @@ function orcEnvGerarOS(){
       var _vitreReqId = 'vitreunif:'+_newIdCaptured+':'+Date.now()+':'+Math.random().toString(36).slice(2);
       return firebase.functions().httpsCallable('vitreClassificarItensPedidoUnificado')({
         grupoPedidoId: _newIdCaptured, kbOsRef: _newIdCaptured, requestId: _vitreReqId,
-        clienteNome: o.cliente||'Cliente', clienteTel: o.tel||'', itens: _vitreItensPayload
+        clienteNome: _clienteOS, clienteTel: _nOS.tel, itens: _vitreItensPayload
       }).then(function(res){
         var _vitreOsIdResolvido = (res && res.data && res.data.id) || null;
         if(res && res.data && res.data.bloqueado) showToast('OS criada, mas alguns itens Vitre não puderam ser classificados (produto removido do catálogo) — revise pelo Kanban.','warn');
@@ -31530,8 +31685,13 @@ function comissaoRender() {
   // Filter approved in this month
   var aprov = envList.filter(function(o){
     if(o.status !== 'aprovado') return false;
-    // Use dataSalvo or dataPedido
-    var ds = o.dataSalvo||o.dataPedido||'';
+    // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — nenhuma
+    // venda ValerIA aprovada entrava no cálculo de comissão de vendedor em
+    // nenhum mês (nem .dataSalvo nem .dataPedido existem nela).
+    // orcEnvNormalizar() reutilizado.
+    var _dsNorm = orcEnvNormalizar(o).dataSalvo;
+    // Use dataSalvo ou dataPedido
+    var ds = (_dsNorm!=='—' ? _dsNorm : (o.dataPedido||''));
     // dataSalvo format: "DD/MM/YYYY HH:MM" or dataPedido: "YYYY-MM-DD"
     var m, y;
     if(ds.indexOf('/')>0){
@@ -31548,7 +31708,7 @@ function comissaoRender() {
   var vMap = {};
   aprov.forEach(function(o){
     var v = o.vendedor||'Sem vendedor';
-    var val = parseFloat(o.valorFinal||o.valorBase)||0;
+    var val = parseFloat(orcEnvNormalizar(o).valorFinal)||0;
     var pct = parseFloat(o.comissaoPct||o.comissao)||0;
     var comVal = val * pct / 100;
     if(!vMap[v]) vMap[v] = {nome:v, faturado:0, comissao:0, qtd:0, orcamentos:[]};
@@ -33125,8 +33285,14 @@ function atdRenderPainel(atd){
     // independente disso, ver atdVincularOrcamentoAposSalvar).
     var orcRef = (typeof atd.orcamentoNum!=='undefined') ? atd
       : (typeof _ORC_ENVIADOS_DATA!=='undefined' ? _ORC_ENVIADOS_DATA.find(function(o){ return o.id===atd.orcamentoId; }) : null) || {};
-    var orcNumVal = orcRef.orcamentoNum!=null ? orcRef.orcamentoNum : orcRef.num;
-    var orcTotVal = typeof orcRef.orcamentoTotal==='number' ? orcRef.orcamentoTotal : orcRef.valorFinal;
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — o fallback
+    // (após reload, sem cache de sessão) lê orcRef.num/.valorFinal crus —
+    // para ValerIA, o botão "Abrir orçamento" perdia número e valor.
+    // orcEnvNormalizar() reutilizado só no caminho de fallback (o cache
+    // orcamentoNum/orcamentoTotal já são valores prontos, não um orçamento cru).
+    var _orcRefNorm = (typeof atd.orcamentoNum==='undefined') ? orcEnvNormalizar(orcRef) : null;
+    var orcNumVal = orcRef.orcamentoNum!=null ? orcRef.orcamentoNum : (_orcRefNorm ? (_orcRefNorm.num!=='—'?_orcRefNorm.num:null) : orcRef.num);
+    var orcTotVal = typeof orcRef.orcamentoTotal==='number' ? orcRef.orcamentoTotal : (_orcRefNorm ? _orcRefNorm.valorFinal : orcRef.valorFinal);
     var orcNum = orcNumVal ? '#'+orcNumVal : '';
     var orcVal = (typeof orcTotVal==='number') ? ' — R$ '+orcTotVal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
     html += '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento '+orcNum+orcVal+'</button>';
@@ -34217,15 +34383,21 @@ function crmRenderOrcPend() {
     // Divider
     var html = '<div style="border-top:1px dashed var(--border);margin:6px 4px 4px;padding-top:4px;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📬 Aguard. resposta</div>';
     html += list.map(function(o){
-      var valorFmt = o.valorFinal ? 'R$ '+parseFloat(String(o.valorFinal).replace(/[^\d.]/g,'')).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '';
+      // HOTFIX BLOCO I (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+      // real: lia o.valorFinal/o.dataSalvo/o.cliente/o.produto BRUTOS — um
+      // orçamento ValerIA (campos total/data/nomeCliente) sempre mostrava
+      // "Cliente"/"Produto" genéricos e nenhum valor, mesmo sendo um lead
+      // real aguardando resposta no funil comercial. orcEnvNormalizar()
+      // reutilizado (nunca uma segunda fórmula) — mesma função já usada
+      // por Orçamentos Enviados para o mesmo problema.
+      var _n = orcEnvNormalizar(o);
+      var valorFmt = _n.valorFinal ? 'R$ '+_n.valorFinal.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '';
       var dias = '?';
-      if(o.dataSalvo) {
-        var dp = o.dataSalvo.split('/');
-        if(dp.length===3) { var d=new Date(dp[2]+'-'+dp[1]+'-'+dp[0]); if(!isNaN(d)) dias=Math.ceil((Date.now()-d.getTime())/864e5); }
-      }
+      var _dData = (typeof orcEnvParseDataSalvo==='function') ? orcEnvParseDataSalvo(_n.dataSalvo) : null;
+      if(_dData) dias = Math.ceil((Date.now()-_dData.getTime())/864e5);
       return '<div class="crm-card" style="border-color:#0369A1;cursor:default">'
-        +'<div class="crm-card-name">'+(o.cliente||'Cliente')+'</div>'
-        +'<div class="crm-card-sub">'+(o.produto||o.titulo||'Produto')+(valorFmt?' · '+valorFmt:'')+'</div>'
+        +'<div class="crm-card-name">'+(_n.cliente!=='(sem nome)'?_n.cliente:(o.titulo||'Cliente'))+'</div>'
+        +'<div class="crm-card-sub">'+(_n.produto!=='—'?_n.produto:(o.titulo||'Produto'))+(valorFmt?' · '+valorFmt:'')+'</div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:4px">📋 há '+dias+'d</div>'
         +'</div>';
     }).join('');
@@ -35187,7 +35359,11 @@ function _comRenderTopClientes(cmap) {
   var orcMap={};
   var envList=(typeof orcGetEnviados==='function')?orcGetEnviados():[];
   envList.forEach(function(o){
-    var n=o.cliente||'';
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — contagem
+    // de "nº de orçamentos" no Top Clientes ignorava todo orçamento
+    // ValerIA (o.cliente inexistente). orcEnvNormalizar() reutilizado.
+    var _nCli = orcEnvNormalizar(o).cliente;
+    var n=_nCli!=='(sem nome)'?_nCli:'';
     if(!n||n.toLowerCase()==='consumidor final'||n==='—') return;
     if(!orcMap[n]) orcMap[n]=0;
     orcMap[n]++;
@@ -35304,7 +35480,11 @@ function _comIntelligence() {
   var envList=(typeof orcGetEnviados==='function')?orcGetEnviados():[];
   envList.forEach(function(o){
     if(!matchBrand(o)) return;
-    var n=(o.cliente||'').trim();
+    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — mesma
+    // raiz de _comRenderTopClientes: o.cliente inexistente em ValerIA.
+    // orcEnvNormalizar() reutilizado.
+    var _nCliInt = orcEnvNormalizar(o).cliente;
+    var n=(_nCliInt!=='(sem nome)'?_nCliInt:'').trim();
     if(!n||n==='—'||n.toLowerCase()==='consumidor final') return;
     // Soma valor dos orçamentos aprovados no faturamento se não tiver OS correspondente
     if(o.status==='aprovado') {
@@ -36107,8 +36287,8 @@ function planProdRenderMaterial(materialPadraoSalvo, materiaisPermitidosSalvos) 
   var selPadrao = document.getElementById('planProdMatPadrao');
   var wrapPermitidos = document.getElementById('planProdMatPermitidos');
   if(!selPadrao || !wrapPermitidos) return;
-  var _cfgMats = [];
-  try { var d = cfgLoad(); _cfgMats = (d&&d.materiais&&d.materiais.length>5) ? d.materiais.filter(function(m){ return m.nome&&m.nome!=='Novo material'; }) : []; } catch(e){}
+  // HOTFIX BLOCO F — mesma correção de _cfgMateriaisReais() acima.
+  var _cfgMats = _cfgMateriaisReais() || [];
   var permitidosSalvos = materiaisPermitidosSalvos || [];
   selPadrao.innerHTML = '<option value="">— nenhum —</option>' + _cfgMats.map(function(m,i){
     var matKey = 'cfg_'+i;
@@ -36506,7 +36686,10 @@ function intelRender() {
   if(convBar){ convBar.style.width=conv+'%'; convBar.style.background=conv>=40?'#059669':conv>=20?'#D97706':'#DC2626'; }
 
   // ── Ticket médio ──
-  var vals = envList.map(function(o){return parseFloat(o.valorFinal||o.valorBase)||0;}).filter(Boolean);
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — ValerIA
+  // nunca entrava no ticket médio (valorFinal/valorBase inexistentes,
+  // .filter(Boolean) descartava os zeros). orcEnvNormalizar() reutilizado.
+  var vals = envList.map(function(o){return parseFloat(orcEnvNormalizar(o).valorFinal)||0;}).filter(Boolean);
   var ticket = vals.length ? vals.reduce(function(s,v){return s+v;},0)/vals.length : 0;
   setEl('intelTicket', ticket>0?fmtBRL(ticket):'—');
   var tkBar = document.getElementById('intelTicketBar');
@@ -36534,9 +36717,13 @@ function intelRender() {
   } else { if(prazoEl) prazoEl.textContent='—'; if(prazoSEl) prazoSEl.textContent='preencha "solicitou em" nos orçamentos'; }
 
   // ── Sem resposta 3+ dias ──
+  // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — um
+  // orçamento ValerIA parado nunca aparecia no alerta de follow-up
+  // (o.dataSalvo cru sempre undefined). orcEnvNormalizar() reutilizado.
   var semResp = envList.filter(function(o){
     if(o.status&&o.status!=='aguardando') return false;
-    var parts=(o.dataSalvo||'').split(' '); var dmy=(parts[0]||'').split('/');
+    var _dsResp = orcEnvNormalizar(o).dataSalvo;
+    var parts=(_dsResp!=='—'?_dsResp:'').split(' '); var dmy=(parts[0]||'').split('/');
     if(dmy.length<3) return false;
     var ds=new Date(dmy[2]+'-'+dmy[1]+'-'+dmy[0]+'T00:00:00');
     if(isNaN(ds)) return false;
@@ -36575,12 +36762,13 @@ function intelRender() {
       pendEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px">✅ Nenhum orçamento parado há 3+ dias.</div>';
     } else {
       pendEl.innerHTML=semResp.slice(0,8).map(function(o){
-        var parts=(o.dataSalvo||'').split(' '); var dmy=(parts[0]||'').split('/');
+        var _nPend = orcEnvNormalizar(o);
+        var parts=(_nPend.dataSalvo!=='—'?_nPend.dataSalvo:'').split(' '); var dmy=(parts[0]||'').split('/');
         var ds=new Date(dmy[2]+'-'+dmy[1]+'-'+dmy[0]+'T00:00:00');
         var dias=Math.round((today-ds)/86400000);
         return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">'
-          +'<div><div style="font-size:12px;font-weight:700">'+o.cliente+'</div>'
-          +'<div style="font-size:10px;color:var(--muted)">'+fmtBRL(o.valorFinal||o.valorBase||0)+' · '+o.produto+'</div></div>'
+          +'<div><div style="font-size:12px;font-weight:700">'+(_nPend.cliente!=='(sem nome)'?_nPend.cliente:'—')+'</div>'
+          +'<div style="font-size:10px;color:var(--muted)">'+fmtBRL(_nPend.valorFinal||0)+' · '+_nPend.produto+'</div></div>'
           +'<span style="font-size:11px;font-weight:800;padding:3px 8px;border-radius:20px;background:#FEF3C7;color:#92400E">'+dias+'d sem retorno</span>'
           +'</div>';
       }).join('');
@@ -36588,11 +36776,15 @@ function intelRender() {
   }
 
   // ── Performance por vendedor ──
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — faturamento
+  // por vendedor subestimava quem trabalhou com orçamentos ValerIA.
+  // orcEnvNormalizar() reutilizado.
   var vMap={};
   envList.forEach(function(o){
     var v=o.vendedor||'—'; if(!vMap[v]) vMap[v]={nome:v,total:0,aprov:0,valor:0,count:0};
-    vMap[v].count++; vMap[v].valor+=(parseFloat(o.valorFinal||o.valorBase)||0);
-    if(o.status==='aprovado'){vMap[v].aprov++;vMap[v].total+=(parseFloat(o.valorFinal||o.valorBase)||0);}
+    var _valVend = parseFloat(orcEnvNormalizar(o).valorFinal)||0;
+    vMap[v].count++; vMap[v].valor+=_valVend;
+    if(o.status==='aprovado'){vMap[v].aprov++;vMap[v].total+=_valVend;}
   });
   var vList=Object.values(vMap).sort(function(a,b){return b.total-a.total;});
   var paleta=['#1EB8D8','#1E7A86','#059669','#D97706','#2563EB'];

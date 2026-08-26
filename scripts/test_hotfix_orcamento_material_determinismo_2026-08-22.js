@@ -61,10 +61,17 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_matGetRsm2', 'orcConstruirMatOpts', 'orcRefreshMatSelects'];
+var FN_NAMES = ['_matGetRsm2', 'orcConstruirMatOpts', 'orcRefreshMatSelects', '_cfgMateriaisReais'];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 global.ORC_MATS = [];
+// HOTFIX BLOCO F (Rodada de Hardening, Fase 2, 2026-08-26): _cfgMateriaisReais()
+// só retorna dados reais quando o servidor já confirmou erp_config pelo menos
+// uma vez (_cfgDataLoaded) — este teste sempre exercita cenários de catálogo já
+// confirmado (o próprio bug sob teste é sobre reindexação/preservação de seleção
+// depois que o catálogo já está carregado), então fixamos o sinal como já
+// confirmado, igual ao runtime real depois do primeiro _cloudWatch("erp_config").
+global._cfgDataLoaded = true;
 // Stub mínimo de orcMatChanged: o real recalcula preço/UI inteiros; para
 // este teste só precisa fazer o que _matGetRsm2/orcRefreshMatSelects
 // observam dele — nada, já que a correção do Bloco D é justamente NÃO

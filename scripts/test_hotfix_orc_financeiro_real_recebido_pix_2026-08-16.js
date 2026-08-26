@@ -48,7 +48,10 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcFinanceiroReal', 'orcCondicaoPagamentoAtual', 'orcCondicaoLabelPorTipo', 'moneyToCents', 'orcEnvParseDataSalvo'];
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcFinanceiroReal()
+// passou a normalizar valorFinal via orcEnvNormalizar() (schema legado ×
+// ValerIA), nunca reimplementada.
+var FN_NAMES = ['orcFinanceiroReal', 'orcCondicaoPagamentoAtual', 'orcCondicaoLabelPorTipo', 'moneyToCents', 'orcEnvParseDataSalvo', 'orcEnvNormalizar'];
 var src = [
   "var KB_OS = null; var FIN_CR = [];",
   "function fmtV(){ return ''; }",

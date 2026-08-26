@@ -47,7 +47,11 @@ var fnGate = extractFn('orcObterConfirmacaoEntrada');
 
 // ── 1. Número do recibo é determinístico (nunca Date.now()/Math.random()) ──
 ok('1a. numRec NÃO usa mais Date.now() (bug real: reimpressão mudava o número)', !/numRec\s*=\s*['"]REC-['"]\s*\+\s*Date\.now/.test(fnRecibo));
-ok('1b. numRec deriva do número oficial e estável do orçamento (orc.num)', /numRec\s*=\s*['"]REC-['"]\s*\+\s*String\(orc\.num/.test(fnRecibo));
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcGerarReciboEntrada()
+// passou a ler orc.num através de orcEnvNormalizar() (schema canônico —
+// legado usa .num, ValerIA usa .n), nunca mais orc.num cru; a garantia
+// de origem no número oficial e estável do orçamento continua idêntica.
+ok('1b. numRec deriva do número oficial e estável do orçamento (via orcEnvNormalizar)', /numRec\s*=\s*['"]REC-['"]\s*\+\s*String\(\(_n\.num/.test(fnRecibo));
 
 // ── 2. Logo oficial real (nunca texto inventado no lugar do logo) ──
 ok('2a. Usa o logo real da VR Marcas (assets/brand/vr-marcas-logo.png)', /vr-marcas-logo\.png/.test(fnRecibo));
@@ -66,9 +70,14 @@ ok('3d. Destaque secundário "Saldo Restante" só aparece quando há saldo pende
 ok('3e. Rodapé com assinatura da empresa E do cliente', /Assinatura \/ Carimbo/.test(fnRecibo) && /Assinatura do Cliente/.test(fnRecibo));
 
 // ── 4. Dado canônico — nunca substitui dado real por "(não informado)" ──
-ok('4a. Cliente vem direto de orc.cliente (nunca um placeholder fixo sobrescrevendo dado real)', /cliente\s*=\s*orc\.cliente\|\|'Cliente'/.test(fnRecibo));
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — cliente/total
+// agora lidos via orcEnvNormalizar(orc) (_n), nunca mais orc.cliente/
+// orc.valorFinal crus — cobre também orçamento ValerIA (schema .nomeCliente/
+// .total), mantendo o mesmo princípio: nunca um placeholder fixo
+// sobrescrevendo dado real.
+ok('4a. Cliente vem direto do orçamento normalizado (nunca um placeholder fixo sobrescrevendo dado real)', /cliente\s*=\s*_n\.cliente\s*!==\s*'\(sem nome\)'\s*\?\s*_n\.cliente\s*:\s*'Cliente'/.test(fnRecibo));
 ok('4b. Vendedor vem direto de orc.vendedor (fallback só quando genuinely vazio)', /vend\s*=\s*orc\.vendedor\|\|/.test(fnRecibo));
-ok('4c. Valores (total/entrada/resto) vêm de os.* / orc.valorFinal — nunca hardcoded/zerados por engano', /total\s*=\s*os\.totalGeral\|\|os\.valor\|\|orc\.valorFinal/.test(fnRecibo));
+ok('4c. Valores (total/entrada/resto) vêm de os.* / orçamento normalizado — nunca hardcoded/zerados por engano', /total\s*=\s*os\.totalGeral\|\|os\.valor\|\|_n\.valorFinal/.test(fnRecibo));
 
 // ── 5. Reimpressão sem efeito colateral — a função NUNCA grava no Firestore ──
 (function () {

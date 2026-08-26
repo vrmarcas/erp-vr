@@ -57,7 +57,10 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'kbReceberSaldo'];
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcRegistrarSituacaoFinanceira()/
+// orcEnvGerarOS() passaram a normalizar o orçamento via orcEnvNormalizar()
+// (schema legado × ValerIA), nunca reimplementada.
+var FN_NAMES = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'kbReceberSaldo', 'orcEnvNormalizar'];
 var COL = 'erp_vr';
 var src = [
   'var _ORC_ENVIADOS_DATA = [];',

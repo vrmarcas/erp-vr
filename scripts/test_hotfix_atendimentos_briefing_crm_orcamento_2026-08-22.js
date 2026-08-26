@@ -60,7 +60,10 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdRevisarCriarOrcamento'];
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — atdRenderPainel()
+// passou a normalizar o fallback de orçamento via orcEnvNormalizar() (schema
+// legado × ValerIA), nunca reimplementada.
+var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdRevisarCriarOrcamento', 'orcEnvNormalizar'];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 

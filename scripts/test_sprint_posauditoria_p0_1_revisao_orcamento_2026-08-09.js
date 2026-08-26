@@ -48,7 +48,10 @@ console.log('\n=== SPRINT DE CORREÇÃO PÓS-AUDITORIA, P0.1 — Revisão de or�
 // ─────────────────────────────────────────────────────────────────────────
 // 1-15. orcAvaliarRevisaoFinanceira() — função pura, cenários do T1
 // ─────────────────────────────────────────────────────────────────────────
-var src = [extractFn('orcAvaliarRevisaoFinanceira'), 'module.exports = { orcAvaliarRevisaoFinanceira: orcAvaliarRevisaoFinanceira };'].join('\n\n');
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcAvaliarRevisaoFinanceira()
+// passou a normalizar valorFinal via orcEnvNormalizar() (schema legado ×
+// ValerIA), mantendo-se pura. Nunca reimplementada.
+var src = [extractFn('orcAvaliarRevisaoFinanceira'), extractFn('orcEnvNormalizar'), 'module.exports = { orcAvaliarRevisaoFinanceira: orcAvaliarRevisaoFinanceira };'].join('\n\n');
 var modPath = path.join(__dirname, '_p0_1_revisao_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 delete require.cache[require.resolve(modPath)];

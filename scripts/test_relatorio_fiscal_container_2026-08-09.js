@@ -114,8 +114,12 @@ function extractFn(name) {
   var srcFiltrados = extractFn('relFiscalGetFiltrados');
   var srcRecebido = extractFn('relFiscalRecebidoDoOrc');
   var srcRender = extractFn('relFiscalRender');
+  // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — todas as
+  // três passaram a normalizar o orçamento via orcEnvNormalizar() (schema
+  // legado × ValerIA), nunca reimplementada.
+  var srcNormalizar = extractFn('orcEnvNormalizar');
 
-  var src = [srcCfgEsc, srcFinFmt, srcFiscalLabel, srcFiltrados, srcRecebido, srcRender].join('\n\n')
+  var src = [srcCfgEsc, srcFinFmt, srcFiscalLabel, srcFiltrados, srcRecebido, srcRender, srcNormalizar].join('\n\n')
     + '\n\nmodule.exports = { relFiscalGetFiltrados, relFiscalRecebidoDoOrc, relFiscalRender };';
   var modPath = path.join(__dirname, '_relatorio_fiscal_extracted.tmp.js');
   fs.writeFileSync(modPath, src);
@@ -149,7 +153,10 @@ function extractFn(name) {
 // ── 10-11. Filtros não duplicam linhas e respeitam mês/marca ────────────
 {
   var srcFiltrados2 = extractFn('relFiscalGetFiltrados');
-  var src2 = srcFiltrados2 + '\n\nmodule.exports = { relFiscalGetFiltrados };';
+  // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — relFiscalGetFiltrados()
+  // passou a normalizar dataSalvo via orcEnvNormalizar(), nunca reimplementada.
+  var srcNormalizar2 = extractFn('orcEnvNormalizar');
+  var src2 = srcFiltrados2 + '\n\n' + srcNormalizar2 + '\n\nmodule.exports = { relFiscalGetFiltrados };';
   var modPath2 = path.join(__dirname, '_relatorio_fiscal_filtros_extracted.tmp.js');
   fs.writeFileSync(modPath2, src2);
   delete require.cache[require.resolve(modPath2)];

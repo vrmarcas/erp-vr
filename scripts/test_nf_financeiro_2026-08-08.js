@@ -31,7 +31,9 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['relFiscalDivergeValor', 'relFiscalRegistrarEmissao', 'relFiscalRecebidoDoOrc'];
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — ambas passaram
+// a normalizar o orçamento via orcEnvNormalizar() (schema legado × ValerIA), nunca reimplementada.
+var FN_NAMES = ['relFiscalDivergeValor', 'relFiscalRegistrarEmissao', 'relFiscalRecebidoDoOrc', 'orcEnvNormalizar'];
 var src = [
   'var FIN_CR = []; var KB_OS = {};',
   FN_NAMES.map(extractFn).join('\n\n'),

@@ -67,7 +67,9 @@ console.log('\n=== RODADA DE ESTABILIZAÇÃO — Bloco A (orçamento zerado) + B
 // PARTE 1 — orcAplicarSnapshotCongelado() isolada (comportamento real)
 // ══════════════════════════════════════════════════════════════════════════
 (function () {
-  var FN_NAMES = ['orcFmt', 'orcAplicarSnapshotCongelado'];
+  // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcAplicarSnapshotCongelado()
+  // passou a checar valorFinal via orcEnvNormalizar() (schema legado × ValerIA), nunca reimplementada.
+  var FN_NAMES = ['orcFmt', 'orcAplicarSnapshotCongelado', 'orcEnvNormalizar'];
   var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
   var modPath = path.join(__dirname, '_estabilizacao_bloco_ab_congelado.tmp.js');
   fs.writeFileSync(modPath, src);

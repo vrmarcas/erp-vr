@@ -50,7 +50,11 @@ test('5. HTML contém o painel relPgAnual com o select relAnualAno e o container
   /id="relPgAnual"/.test(html) && /id="relAnualAno"/.test(html) && /id="relAnualConteudo"/.test(html), true);
 
 // ── 6+. Execução real: DOM fake completo ──
-var FN_NAMES = ['finFmt', 'finCPValorNum', 'orcEnvParseDataSalvo', 'relAnual'];
+// HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26): relAnual()
+// passou a normalizar cada orçamento via orcEnvNormalizar() antes de somar
+// valorFinal/valorBase e extrair dataSalvo (schema legado × ValerIA) —
+// extraída aqui pelo mesmo mecanismo, nunca reimplementada.
+var FN_NAMES = ['finFmt', 'finCPValorNum', 'orcEnvParseDataSalvo', 'orcEnvNormalizar', 'relAnual'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   "module.exports = { relAnual: relAnual };"

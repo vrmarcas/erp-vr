@@ -64,7 +64,10 @@ function extractFn(name) {
 // toast quando já existe OS — nunca mais constrói um modal com HTML
 // próprio, então os testes 5/6 (que checavam innerHTML do modal) passam a
 // checar o toast.
-var FN_NAMES = ['orcEnvConfirmarPgto', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
+// HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcRegistrarSituacaoFinanceira()/
+// orcEnvGerarOS() passaram a normalizar o orçamento via orcEnvNormalizar()
+// (schema legado × ValerIA), nunca reimplementada.
+var FN_NAMES = ['orcEnvConfirmarPgto', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'orcEnvNormalizar'];
 var COL = 'erp_vr';
 var src = [
   'var _ORC_ENVIADOS_DATA = [];',
