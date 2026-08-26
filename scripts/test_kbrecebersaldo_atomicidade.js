@@ -64,6 +64,9 @@ var src = [
   "var _COL = 'erp_vr';",
   "var _cloudLastPayload = {};",
   "var KB_OS = {};",
+  "var _KB_OS_FIN_CACHE = {};",
+  "var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];",
+  "function _kbMergeFinCache(){ Object.keys(_KB_OS_FIN_CACHE).forEach(function(id){ var os=KB_OS[id]; if(!os) return; var fin=_KB_OS_FIN_CACHE[id]; if(!fin) return; _KB_OS_FIN_FIELDS.forEach(function(f){ if(fin[f]!==undefined) os[f]=fin[f]; }); }); }",
   "var FIN_CR = []; var FIN_TX = [];",
   "var _ORC_ENVIADOS_DATA = [];",
   "var _kbOsId = null;",
@@ -73,6 +76,7 @@ var src = [
   "  kbReceberSaldo: kbReceberSaldo,",
   "  getLastPayload: function(k){ return _cloudLastPayload[k]; }, setLastPayload: function(k,v){ _cloudLastPayload[k]=v; },",
   "  getKbOs: function(){ return KB_OS; }, setKbOs: function(v){ KB_OS = v; },",
+  "  getKbOsFinCache: function(){ return _KB_OS_FIN_CACHE; }, setKbOsFinCache: function(v){ _KB_OS_FIN_CACHE = v; },",
   "  setKbOsId: function(v){ _kbOsId = v; },",
   "  getFinCR: function(){ return FIN_CR; }, setFinCR: function(v){ FIN_CR = v; },",
   "  getFinTX: function(){ return FIN_TX; }, setFinTX: function(v){ FIN_TX = v; },",
@@ -115,7 +119,60 @@ global._db = {
     return p;
   }
 };
-global.firebase = { auth: function () { return { currentUser: { getIdToken: function () { _getIdTokenCalls++; return Promise.resolve('fake-token'); } } }; } };
+// HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — kbReceberSaldo()
+// não faz mais a transação de 4 documentos no client (migrada para a Cloud
+// Function finCrReceberSaldo(), Admin SDK — ver functions/src/finCr.ts, já
+// coberta contra o Firestore Emulator real por
+// test_hardening_fin_cr_functions_server_2026-08-26.js). O mock abaixo
+// porta a MESMA lógica (kb_os + kb_os_fin + fin_cr + fin_tx + orcamentos,
+// idêntica à Function real) para dentro do mock _db.runTransaction já
+// existente aqui — preserva os 5 cenários originais (sucesso, orçamento
+// vinculado, falha não deixa nada alterado, retry sem duplicar, duas
+// abas), incluindo _forceErrorOnce, só através do novo formato de chamada.
+global.firebase = {
+  auth: function () { return { currentUser: { getIdToken: function () { _getIdTokenCalls++; return Promise.resolve('fake-token'); } } }; },
+  functions: function () {
+    return {
+      httpsCallable: function (nome) {
+        return function (payload) {
+          if (nome !== 'finCrReceberSaldo') return Promise.resolve({ data: { ok: true } });
+          var osId = payload.osId;
+          return global._db.runTransaction(function (txn) {
+            return Promise.all([txn.get({ _key: 'kb_os' }), txn.get({ _key: 'kb_os_fin' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' }), txn.get({ _key: 'orcamentos' })]).then(function (snaps) {
+              var kbData = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || {};
+              var kbFinData = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || {};
+              var crArr = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+              var txArr = (snaps[3].exists && JSON.parse(snaps[3].data().data)) || [];
+              var orcArr = snaps[4].exists ? JSON.parse(snaps[4].data().data) : null;
+              var osServidor = kbData[osId];
+              var finServidor = kbFinData[osId] || {};
+              if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'not-found'; throw eNF; }
+              if ((finServidor.restante || 0) <= 0) { var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'failed-precondition'; throw eJa; }
+              var valorRecebido = finServidor.restante || 0;
+              osServidor.status = 'iniciada'; finServidor.restante = 0;
+              kbData[osId] = osServidor; kbFinData[osId] = finServidor;
+              var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+              if (crEntry) { crEntry.status = 'recebido'; }
+              txArr = [{ os: String(osServidor.num), valor: valorRecebido }].concat(txArr);
+              var orcMutado = false;
+              if (osServidor.orcRef && Array.isArray(orcArr)) {
+                var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+                if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+              }
+              txn.set({ _key: 'kb_os' }, { data: JSON.stringify(kbData) });
+              txn.set({ _key: 'kb_os_fin' }, { data: JSON.stringify(kbFinData) });
+              txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(txArr) });
+              if (crEntry) txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(crArr) });
+              if (orcMutado) txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(orcArr) });
+              return { osNum: osServidor.num, valorRecebido: valorRecebido, orcRef: orcMutado ? osServidor.orcRef : null };
+            });
+          }).then(function (r) { return { data: Object.assign({ ok: true, jaProcessado: false }, r) }; })
+            .catch(function (e) { var err = new Error(e.message); err.code = e.code || 'internal'; throw err; });
+        };
+      }
+    };
+  }
+};
 global.document = { getElementById: function () { return null; } };
 global._lastToast = null; global._lastToastKind = null;
 global.showToast = function (msg, kind) { global._lastToast = msg; global._lastToastKind = kind; };
@@ -153,6 +210,7 @@ await test('1. sucesso normal — kb_os, fin_cr e fin_tx confirmados juntos (sem
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
+  mod.setKbOsFinCache({ os1: { restante: os.restante, formaPgto: os.formaPgto } });
   seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
@@ -169,10 +227,12 @@ await test('2. sucesso normal — com orçamento vinculado em aguardando_pagamen
   resetAll();
   var os = baseOs({ orcRef: 'ORC-1' });
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
+  mod.setKbOsFinCache({ os1: { restante: os.restante, formaPgto: os.formaPgto } });
   seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
   seedDoc('orcamentos', [{ id: 'ORC-1', status: 'aguardando_pagamento' }]);
+  mod.setOrc([{ id: 'ORC-1', status: 'aguardando_pagamento' }]);
   await mod.kbReceberSaldo();
   assertEq(readDoc('orcamentos')[0].status, 'pago', 'orçamento avança para pago no servidor');
   assertEq(readDoc('kb_os').os1.status, 'iniciada', 'OS avança junto, na mesma transação');
@@ -184,6 +244,7 @@ await test('A/B/C. falha em QUALQUER ponto da transação (ex: fin_cr) não deix
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
+  mod.setKbOsFinCache({ os1: { restante: os.restante, formaPgto: os.formaPgto } });
   seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
@@ -201,6 +262,7 @@ await test('D. resposta perdida (transação falha) — retry subsequente comple
   resetAll();
   var os = baseOs();
   mod.getKbOs().os1 = os; mod.setKbOsId('os1');
+  mod.setKbOsFinCache({ os1: { restante: os.restante, formaPgto: os.formaPgto } });
   seedDoc('kb_os', { os1: os }); seedKbOsFin('os1', os);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
@@ -225,6 +287,7 @@ await test('E. duas abas tentando quitar o mesmo saldo — só a primeira lança
   resetAll();
   var osA = baseOs(); // "aba A"
   mod.getKbOs().os1 = osA; mod.setKbOsId('os1');
+  mod.setKbOsFinCache({ os1: { restante: osA.restante, formaPgto: osA.formaPgto } });
   seedDoc('kb_os', { os1: osA }); seedKbOsFin('os1', osA);
   seedDoc('fin_cr', [{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
   seedDoc('fin_tx', []);
@@ -236,6 +299,7 @@ await test('E. duas abas tentando quitar o mesmo saldo — só a primeira lança
   // criado ANTES de A commitar, então ainda mostra restante=500 localmente.
   var osB = baseOs();
   mod.setKbOs({ os1: osB });
+  mod.setKbOsFinCache({ os1: { restante: osB.restante, formaPgto: osB.formaPgto } });
   mod.setKbOsId('os1');
   await mod.kbReceberSaldo(); // "aba B" tenta quitar o mesmo saldo, sem saber que A já confirmou
   assertEq(global._lastToastKind, 'info', 'aba B recebe aviso de que já foi recebido — não um erro nem um falso sucesso');

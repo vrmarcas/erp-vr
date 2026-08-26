@@ -70,6 +70,8 @@ var src = [
   'var _COL = ' + JSON.stringify(COL) + ';',
   'var KB_OS = {};',
   'var _KB_OS_FIN_CACHE = {};',
+  'var _KB_OS_FIN_FIELDS = ["valor","totalGeral","parcelas","formaPgto","pagtoTipo","valorEntrada","restante"];',
+  'function _kbMergeFinCache(){ Object.keys(_KB_OS_FIN_CACHE).forEach(function(id){ var os=KB_OS[id]; if(!os) return; var fin=_KB_OS_FIN_CACHE[id]; if(!fin) return; _KB_OS_FIN_FIELDS.forEach(function(f){ if(fin[f]!==undefined) os[f]=fin[f]; }); }); }',
   'var _kbOsId = null;',
   'var _kbStatusMap = { iniciada:{cls:"si",txt:"Iniciada"}, aguardando_saldo:{cls:"sas",txt:"Aguard. Saldo"} };',
   'var FIN_CR = [];',
@@ -126,8 +128,6 @@ global._cloudReady = false;
 global.finFmt = function (v) { return 'R$ ' + v; };
 global.kbSyncCounts = function () {}; global.renderOsTable = function () {}; global.syncSidebarBadges = function () {};
 global.kbOpen = function () {}; global.secAuditLog = function () {}; global.finRender = function () {};
-global.firebase = { auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake'); } } }; } };
-
 // ── Mock de Firestore com transação real (mesma garantia observável de uma
 // transação real: get-antes-de-set, commit único, serializada por doc) ────
 var _fakeStore = {};
@@ -153,6 +153,110 @@ global._db = {
     var p = _txnLock.then(runIt, runIt);
     _txnLock = p.catch(function () {});
     return p;
+  }
+};
+
+// HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — orcRegistrarSituacaoFinanceira()/
+// orcEnvGerarOS()/kbReceberSaldo() não fazem mais suas transações de
+// fin_cr/fin_tx no client (migradas para Cloud Functions reais — ver
+// functions/src/finCr.ts, já cobertas contra o Firestore Emulator real por
+// test_hardening_fin_cr_functions_server_2026-08-26.js). O mock abaixo
+// porta a MESMA lógica das 3 Functions usadas por este smoke E2E
+// (finCrConfirmarPagamento, finCrVincularOS, finCrReceberSaldo) para
+// dentro do mock _db.runTransaction já existente aqui.
+function _dataHojeBR() { var h = new Date(); return String(h.getDate()).padStart(2, '0') + '/' + String(h.getMonth() + 1).padStart(2, '0') + '/' + h.getFullYear(); }
+global.firebase = {
+  auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake'); } } }; },
+  functions: function () {
+    return {
+      httpsCallable: function (nome) {
+        return function (payload) {
+          if (nome === 'finCrConfirmarPagamento') {
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'orcamentos' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' })]).then(function (snaps) {
+                var arrOrc = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || [];
+                var arrCR = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || [];
+                var arrTx = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+                var idx = arrOrc.findIndex(function (o) { return o.id === payload.orcId; });
+                if (idx < 0) { var eNF = new Error('ORC_NAO_ENCONTRADO'); eNF.code = 'not-found'; throw eNF; }
+                var orc = arrOrc[idx];
+                if (orc.pgtoConfirmado) return { ok: true, jaConfirmado: true, dados: orc.pgtoConfirmado, semGravar: true };
+                var dia = _dataHojeBR();
+                var txMutado = false;
+                if (payload.valorEntrada > 0) {
+                  if (orc.crId) { var iOld = arrCR.findIndex(function (c) { return c.id === orc.crId; }); if (iOld >= 0) arrCR.splice(iOld, 1); }
+                  var nowMs = Date.now();
+                  arrCR.unshift({ id: 'cr' + nowMs, cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'Entrada ORC #' + payload.numOrc, valor: payload.valorEntrada, vencimento: dia, status: 'recebido', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: dia });
+                  if (payload.restante > 0) arrCR.unshift({ id: 'cr' + (nowMs + 1), cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'Restante ORC #' + payload.numOrc, valor: payload.restante, vencimento: dia, status: 'pendente', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: null });
+                  arrTx.unshift({ data: dia.slice(0, 5), cliente: payload.cliente, os: '', orcamentoId: payload.orcId, marca: payload.marca || 'vr', valor: payload.valorEntrada, metodo: payload.forma, status: 'recebido', dia: 1, sem: 1, mes: 1 });
+                  txMutado = true;
+                } else if (payload.tipo === 'futuro') {
+                  var iCr = orc.crId ? arrCR.findIndex(function (c) { return c.id === orc.crId; }) : -1;
+                  if (iCr >= 0) { arrCR[iCr].valor = payload.valorEfetivo; arrCR[iCr].metodo = payload.forma; }
+                  else { var novoCrId = 'cr' + Date.now(); arrCR.unshift({ id: novoCrId, cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'ORC #' + payload.numOrc, valor: payload.valorEfetivo, vencimento: dia, status: 'pendente', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: null }); orc.crId = novoCrId; }
+                }
+                var pgtoConfirmado = { tipo: payload.tipo, forma: payload.forma, valorEfetivo: payload.valorEfetivo, valorEntrada: payload.valorEntrada, restante: payload.restante, obs: payload.obs, nf: payload.nf, confirmadoEm: dia, confirmadoPor: 'mock' };
+                orc.pgtoConfirmado = pgtoConfirmado;
+                arrOrc[idx] = orc;
+                txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(arrOrc) });
+                txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(arrCR) });
+                if (txMutado) txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(arrTx) });
+                return { ok: true, jaConfirmado: false, dados: pgtoConfirmado, semGravar: false };
+              });
+            }).then(function (r) { return { data: r }; });
+          }
+          if (nome === 'finCrVincularOS') {
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' })]).then(function (snaps) {
+                var arrCR = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || [];
+                var arrTx = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || [];
+                var nCR = 0, nTx = 0;
+                arrCR.forEach(function (c) { if (c.orcamentoId === payload.orcamentoId && !c.osId) { c.osId = payload.osId; c.osRef = 'OS #' + payload.osNum; nCR++; } });
+                arrTx.forEach(function (t) { if (t.orcamentoId === payload.orcamentoId && !t.os) { t.os = String(payload.osNum); nTx++; } });
+                if (nCR > 0) txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(arrCR) });
+                if (nTx > 0) txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(arrTx) });
+                return { ok: true, vinculados: nCR };
+              });
+            }).then(function (r) { return { data: r }; });
+          }
+          if (nome === 'finCrReceberSaldo') {
+            var osId = payload.osId;
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'kb_os' }), txn.get({ _key: 'kb_os_fin' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' }), txn.get({ _key: 'orcamentos' })]).then(function (snaps) {
+                var kbData = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || {};
+                var kbFinData = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || {};
+                var crArr = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+                var txArr = (snaps[3].exists && JSON.parse(snaps[3].data().data)) || [];
+                var orcArr = snaps[4].exists ? JSON.parse(snaps[4].data().data) : null;
+                var osServidor = kbData[osId];
+                var finServidor = kbFinData[osId] || {};
+                if (!osServidor) { var eNF2 = new Error('OS_NAO_ENCONTRADA'); eNF2.code = 'not-found'; throw eNF2; }
+                if ((finServidor.restante || 0) <= 0) { var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'failed-precondition'; throw eJa; }
+                var valorRecebido = finServidor.restante || 0;
+                osServidor.status = 'iniciada'; finServidor.restante = 0;
+                kbData[osId] = osServidor; kbFinData[osId] = finServidor;
+                var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+                if (crEntry) { crEntry.status = 'recebido'; }
+                txArr = [{ os: String(osServidor.num), valor: valorRecebido }].concat(txArr);
+                var orcMutado = false;
+                if (osServidor.orcRef && Array.isArray(orcArr)) {
+                  var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+                  if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+                }
+                txn.set({ _key: 'kb_os' }, { data: JSON.stringify(kbData) });
+                txn.set({ _key: 'kb_os_fin' }, { data: JSON.stringify(kbFinData) });
+                txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(txArr) });
+                if (crEntry) txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(crArr) });
+                if (orcMutado) txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(orcArr) });
+                return { osNum: osServidor.num, valorRecebido: valorRecebido, orcRef: orcMutado ? osServidor.orcRef : null };
+              });
+            }).then(function (r) { return { data: Object.assign({ ok: true, jaProcessado: false }, r) }; })
+              .catch(function (e) { var err = new Error(e.message); err.code = e.code || 'internal'; throw err; });
+          }
+          return Promise.resolve({ data: { ok: true } });
+        };
+      }
+    };
   }
 };
 

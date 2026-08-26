@@ -179,6 +179,44 @@ global._db = {
   }
 };
 
+// HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — orcRegistrarSituacaoFinanceira()/
+// orcEnvGerarOS() não fazem mais a transação de fin_cr no client (migrada
+// para Cloud Functions reais, já cobertas por
+// test_hardening_fin_cr_functions_server_2026-08-26.js contra o Firestore
+// Emulator de verdade). Mock mínimo aqui: cria/vincula uma entrada
+// simplificada na MESMA _fakeStore['fin_cr'], reaproveitando os campos que
+// os testes de idempotência/centavos abaixo realmente checam.
+global.firebase = {
+  functions: function () {
+    return {
+      httpsCallable: function (nome) {
+        return function (payload) {
+          if (nome === 'finCrConfirmarPagamento') {
+            var arr = [{
+              id: 'cr_mock_' + Date.now(), orcamentoId: payload.orcId, osId: '', status: (payload.valorEntrada > 0 ? 'recebido' : 'pendente'),
+              valor: payload.valorEntrada > 0 ? payload.valorEntrada : payload.valorEfetivo, restanteValor: payload.restante || 0
+            }];
+            if (payload.restante > 0 && payload.valorEntrada > 0) {
+              arr.push({ id: 'cr_mock_restante_' + Date.now(), orcamentoId: payload.orcId, osId: '', status: 'pendente', valor: payload.restante });
+            }
+            _fakeStore['fin_cr'] = { data: JSON.stringify(arr) };
+            // dados: mesmo shape que finCrConfirmarPagamento() real devolve
+            // (pgtoConfirmado) — orcEnvGerarOS() lê valorEntrada/restante
+            // daqui (via o.pgtoConfirmado) para montar kb_os_fin.
+            return Promise.resolve({ data: { ok: true, jaConfirmado: false, dados: { tipo: payload.tipo, forma: payload.forma, valorEfetivo: payload.valorEfetivo, valorEntrada: payload.valorEntrada, restante: payload.restante, obs: payload.obs, nf: payload.nf } } });
+          }
+          if (nome === 'finCrVincularOS') {
+            var arr2 = fakeStoreCR().map(function (c) { return c.orcamentoId === payload.orcamentoId ? Object.assign({}, c, { osId: payload.osId }) : c; });
+            _fakeStore['fin_cr'] = { data: JSON.stringify(arr2) };
+            return Promise.resolve({ data: { ok: true, vinculados: 1 } });
+          }
+          return Promise.resolve({ data: { ok: true } });
+        };
+      }
+    };
+  }
+};
+
 function resetModalDom() {
   _tipoButtons = {};
   ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);

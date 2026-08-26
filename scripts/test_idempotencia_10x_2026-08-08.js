@@ -182,6 +182,41 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     }
   };
 
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — orcRegistrarSituacaoFinanceira()/
+  // orcEnvGerarOS() não fazem mais a transação de fin_cr no client (migrada
+  // para Cloud Functions reais, já cobertas por
+  // test_hardening_fin_cr_functions_server_2026-08-26.js contra o Firestore
+  // Emulator de verdade — inclusive concorrência real). Mock mínimo aqui só
+  // para satisfazer as 2 chamadas que este cenário ainda faz: cria/vincula
+  // uma entrada simplificada na MESMA _fakeStoreOS['fin_cr'], o suficiente
+  // para a asserção de setup (Confirmar Pagamento roda 1x, sem corrida)
+  // continuar significativa — a corrida de 10 vias sob teste aqui é a de
+  // orcEnvGerarOS() sobre orcamentos/kb_os (nunca mudou).
+  var _finCrVincularOSChamadas = 0;
+  global.firebase = {
+    functions: function () {
+      return {
+        httpsCallable: function (nome) {
+          return function (payload) {
+            if (nome === 'finCrConfirmarPagamento') {
+              var arr = fakeStoreCROS();
+              arr = [{ id: 'cr_mock_' + Date.now(), orcamentoId: payload.orcId, osId: '', status: 'recebido', valor: payload.valorEntrada || payload.valorEfetivo || 0 }];
+              _fakeStoreOS['fin_cr'] = { data: JSON.stringify(arr) };
+              return Promise.resolve({ data: { ok: true, jaConfirmado: false, dados: {} } });
+            }
+            if (nome === 'finCrVincularOS') {
+              _finCrVincularOSChamadas++;
+              var arr2 = fakeStoreCROS().map(function (c) { return c.orcamentoId === payload.orcamentoId ? Object.assign({}, c, { osId: payload.osId }) : c; });
+              _fakeStoreOS['fin_cr'] = { data: JSON.stringify(arr2) };
+              return Promise.resolve({ data: { ok: true, vinculados: 1 } });
+            }
+            return Promise.resolve({ data: { ok: true } });
+          };
+        }
+      };
+    }
+  };
+
   function resetModalDomOS() {
     _tipoButtons = {};
     ['integral', '50-50', 'parcial', 'futuro'].forEach(makeTipoBtn);
@@ -230,6 +265,8 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     "var _COL = 'erp_vr';",
     "var _cloudLastPayload = {};",
     "var KB_OS = {};",
+    "var _KB_OS_FIN_CACHE = {};",
+    "function _kbMergeFinCache(){}",
     "var FIN_CR = []; var FIN_TX = [];",
     "var _ORC_ENVIADOS_DATA = [];",
     "var _kbOsId = null;",
@@ -238,6 +275,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     "module.exports = {",
     "  kbReceberSaldo: kbReceberSaldo,",
     "  setKbOs: function(v){ KB_OS = v; }, getKbOs: function(){ return KB_OS; },",
+    "  setKbOsFinCache: function(v){ _KB_OS_FIN_CACHE = v; },",
     "  setKbOsId: function(v){ _kbOsId = v; },",
     "  setFinCR: function(v){ FIN_CR = v; }, setFinTX: function(v){ FIN_TX = v; },",
     "  setOrc: function(v){ _ORC_ENVIADOS_DATA = v; }",
@@ -276,7 +314,53 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
       return p;
     }
   };
-  global.firebase = { auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; } };
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — kbReceberSaldo()
+  // não faz mais a transação de kb_os/kb_os_fin/fin_cr/fin_tx no client
+  // (migrada para a Cloud Function finCrReceberSaldo(), Admin SDK — ver
+  // functions/src/finCr.ts, já coberta por
+  // test_hardening_fin_cr_functions_server_2026-08-26.js contra o Firestore
+  // Emulator real). O mock abaixo porta a MESMA lógica para dentro do
+  // mock _db.runTransaction já existente aqui (_fakeStoreSaldo, mesmo lock
+  // + latência injetada) — preserva o valor real deste teste (10 chamadas
+  // verdadeiramente concorrentes disputando o mesmo saldo, resolvidas por
+  // uma transação real), só através do novo formato de chamada.
+  global.firebase = {
+    auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; },
+    functions: function () {
+      return {
+        httpsCallable: function (nome) {
+          return function (payload) {
+            if (nome !== 'finCrReceberSaldo') return Promise.resolve({ data: { ok: true } });
+            var osId = payload.osId;
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'kb_os' }), txn.get({ _key: 'kb_os_fin' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' })]).then(function (snaps) {
+                var kbData = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || {};
+                var kbFinData = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || {};
+                var crArr = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+                var txArr = (snaps[3].exists && JSON.parse(snaps[3].data().data)) || [];
+                var osServidor = kbData[osId];
+                var finServidor = kbFinData[osId] || {};
+                if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'not-found'; throw eNF; }
+                if ((finServidor.restante || 0) <= 0) { var eJa = new Error('failed-precondition:SALDO_JA_QUITADO'); eJa.code = 'failed-precondition'; eJa.message = 'SALDO_JA_QUITADO'; throw eJa; }
+                var valorRecebido = finServidor.restante || 0;
+                osServidor.status = 'iniciada'; finServidor.restante = 0;
+                kbData[osId] = osServidor; kbFinData[osId] = finServidor;
+                var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+                if (crEntry) { crEntry.status = 'recebido'; }
+                txArr = [{ os: String(osServidor.num), valor: valorRecebido }].concat(txArr);
+                txn.set({ _key: 'kb_os' }, { data: JSON.stringify(kbData) });
+                txn.set({ _key: 'kb_os_fin' }, { data: JSON.stringify(kbFinData) });
+                txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(txArr) });
+                if (crEntry) txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(crArr) });
+                return { osNum: osServidor.num, valorRecebido: valorRecebido };
+              });
+            }).then(function (r) { return { data: Object.assign({ ok: true, jaProcessado: false }, r) }; })
+              .catch(function (e) { var err = new Error(e.message); err.code = e.code || 'internal'; throw err; });
+          };
+        }
+      };
+    }
+  };
   global.document = { getElementById: function () { return null; } };
   global._lastToast = null; global._lastToastKind = null;
   global.showToast = function (msg, kind) { global._lastToast = msg; global._lastToastKind = kind; };
@@ -305,6 +389,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
       for (var i = 0; i < 10; i++) {
         // cada "aba" tem sua PRÓPRIA cópia local do objeto OS (mesmo padrão do cenário E existente)
         modSaldo.setKbOs({ os1: baseOsSaldo() });
+        modSaldo.setKbOsFinCache({ os1: { restante: osBase.restante, formaPgto: osBase.formaPgto } });
         modSaldo.setKbOsId('os1');
         modSaldo.setFinCR([{ id: 'cr1', osRef: '42', status: 'pendente', valor: 500 }]);
         modSaldo.setFinTX([]);

@@ -151,7 +151,120 @@ global._db = {
     return p;
   }
 };
-global.firebase = { auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; } };
+// HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — orcRegistrarSituacaoFinanceira()/
+// orcEnvGerarOS()/finRegistrarRecebimento() não fazem mais suas transações
+// de fin_cr/fin_tx no client (migradas para Cloud Functions reais — ver
+// functions/src/finCr.ts, já cobertas contra o Firestore Emulator real por
+// test_hardening_fin_cr_functions_server_2026-08-26.js). O mock abaixo
+// porta a MESMA lógica das 3 Functions usadas por este arquivo
+// (finCrConfirmarPagamento, finCrVincularOS, finCrRegistrarRecebimento)
+// para dentro do mock _db.runTransaction já existente aqui — preserva
+// todos os cenários originais (T1-T12, invariantes) só através do novo
+// formato de chamada.
+function _dataHojeBR() { var h = new Date(); return String(h.getDate()).padStart(2, '0') + '/' + String(h.getMonth() + 1).padStart(2, '0') + '/' + h.getFullYear(); }
+global.firebase = {
+  auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; },
+  functions: function () {
+    return {
+      httpsCallable: function (nome) {
+        return function (payload) {
+          if (nome === 'finCrConfirmarPagamento') {
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'orcamentos' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' })]).then(function (snaps) {
+                var arrOrc = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || [];
+                var arrCR = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || [];
+                var arrTx = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+                var idx = arrOrc.findIndex(function (o) { return o.id === payload.orcId; });
+                if (idx < 0) { var eNF = new Error('ORC_NAO_ENCONTRADO'); eNF.code = 'not-found'; throw eNF; }
+                var orc = arrOrc[idx];
+                if (orc.pgtoConfirmado) return { data: { ok: true, jaConfirmado: true, dados: orc.pgtoConfirmado, semGravar: true } };
+                var dia = _dataHojeBR();
+                var txMutado = false;
+                if (payload.valorEntrada > 0) {
+                  if (orc.crId) { var iOld = arrCR.findIndex(function (c) { return c.id === orc.crId; }); if (iOld >= 0) arrCR.splice(iOld, 1); }
+                  var nowMs = Date.now();
+                  arrCR.unshift({ id: 'cr' + nowMs, cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'Entrada ORC #' + payload.numOrc, valor: payload.valorEntrada, vencimento: dia, status: 'recebido', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: dia });
+                  if (payload.restante > 0) arrCR.unshift({ id: 'cr' + (nowMs + 1), cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'Restante ORC #' + payload.numOrc, valor: payload.restante, vencimento: dia, status: 'pendente', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: null });
+                  arrTx.unshift({ data: dia.slice(0, 5), cliente: payload.cliente, os: '', orcamentoId: payload.orcId, marca: payload.marca || 'vr', valor: payload.valorEntrada, metodo: payload.forma, status: 'recebido', dia: 1, sem: 1, mes: 1 });
+                  txMutado = true;
+                } else if (payload.tipo === 'futuro') {
+                  var iCr = orc.crId ? arrCR.findIndex(function (c) { return c.id === orc.crId; }) : -1;
+                  if (iCr >= 0) { arrCR[iCr].valor = payload.valorEfetivo; arrCR[iCr].metodo = payload.forma; }
+                  else { var novoCrId = 'cr' + Date.now(); arrCR.unshift({ id: novoCrId, cliente: payload.cliente, clienteId: '', orcamentoId: payload.orcId, osId: '', descricao: 'ORC #' + payload.numOrc, valor: payload.valorEfetivo, vencimento: dia, status: 'pendente', marca: payload.marca || 'vr', metodo: payload.forma, osRef: '', dataCriacao: dia, dataRecebimento: null }); orc.crId = novoCrId; }
+                }
+                var pgtoConfirmado = { tipo: payload.tipo, forma: payload.forma, valorEfetivo: payload.valorEfetivo, valorEntrada: payload.valorEntrada, restante: payload.restante, obs: payload.obs, nf: payload.nf, confirmadoEm: dia, confirmadoPor: 'mock' };
+                orc.pgtoConfirmado = pgtoConfirmado;
+                arrOrc[idx] = orc;
+                txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(arrOrc) });
+                txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(arrCR) });
+                if (txMutado) txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(arrTx) });
+                return { ok: true, jaConfirmado: false, dados: pgtoConfirmado, semGravar: false };
+              });
+            }).then(function (r) { return r.data ? r : { data: r }; });
+          }
+          if (nome === 'finCrVincularOS') {
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' })]).then(function (snaps) {
+                var arrCR = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || [];
+                var arrTx = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || [];
+                var nCR = 0, nTx = 0;
+                arrCR.forEach(function (c) { if (c.orcamentoId === payload.orcamentoId && !c.osId) { c.osId = payload.osId; c.osRef = 'OS #' + payload.osNum; nCR++; } });
+                arrTx.forEach(function (t) { if (t.orcamentoId === payload.orcamentoId && !t.os) { t.os = String(payload.osNum); nTx++; } });
+                if (nCR > 0) txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(arrCR) });
+                if (nTx > 0) txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(arrTx) });
+                return { ok: true, vinculados: nCR };
+              });
+            }).then(function (r) { return { data: r }; });
+          }
+          if (nome === 'finCrRegistrarRecebimento') {
+            var osId = payload.osId;
+            var valorPagoCents = Math.round((Number(payload.valorPago) || 0) * 100);
+            var forma = payload.forma || 'PIX';
+            var dia = payload.diaBR || _dataHojeBR();
+            return global._db.runTransaction(function (txn) {
+              return Promise.all([txn.get({ _key: 'kb_os' }), txn.get({ _key: 'kb_os_fin' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' }), txn.get({ _key: 'orcamentos' })]).then(function (snaps) {
+                var kbData = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || {};
+                var kbFinData = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || {};
+                var crArr = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+                var txArr = (snaps[3].exists && JSON.parse(snaps[3].data().data)) || [];
+                var orcArr = snaps[4].exists ? JSON.parse(snaps[4].data().data) : null;
+                var osServidor = kbData[osId];
+                var finServidor = kbFinData[osId] || {};
+                if (!osServidor) { var eNF2 = new Error('OS_NAO_ENCONTRADA'); eNF2.code = 'not-found'; throw eNF2; }
+                var restanteServidorCents = Math.round((finServidor.restante || 0) * 100);
+                if (restanteServidorCents <= 0) { var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'failed-precondition'; throw eJa; }
+                if (valorPagoCents > restanteServidorCents) { var eExc = new Error('VALOR_MAIOR_QUE_SALDO:' + (restanteServidorCents / 100)); eExc.code = 'failed-precondition'; throw eExc; }
+                var novoRestanteCents = restanteServidorCents - valorPagoCents;
+                var quitado = novoRestanteCents <= 0;
+                if (quitado && osServidor.status === 'aguardando_saldo') osServidor.status = 'iniciada';
+                finServidor.restante = novoRestanteCents / 100;
+                kbData[osId] = osServidor; kbFinData[osId] = finServidor;
+                var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+                if (crEntry) { if (quitado) { crArr = crArr.filter(function (c) { return c !== crEntry; }); } else { crEntry.valor = novoRestanteCents / 100; } }
+                var descBase = (quitado ? 'Pagamento do saldo' : 'Pagamento parcial do saldo') + ' — OS #' + osServidor.num;
+                crArr = [{ id: 'cr' + Date.now() + '_pgtosaldo', cliente: osServidor.cliente, clienteId: '', orcamentoId: osServidor.orcRef || null, osId: osId, descricao: descBase, valor: valorPagoCents / 100, vencimento: dia, status: 'recebido', marca: osServidor.mk || 'vr', metodo: forma, osRef: 'OS #' + osServidor.num, dataCriacao: dia, dataRecebimento: dia }].concat(crArr);
+                txArr = [{ data: dia.slice(0, 5), cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorPagoCents / 100, metodo: forma, status: 'recebido', dia: 1, sem: 1, mes: 1 }].concat(txArr);
+                var orcMutado = false;
+                if (quitado && osServidor.orcRef && Array.isArray(orcArr)) {
+                  var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+                  if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+                }
+                txn.set({ _key: 'kb_os' }, { data: JSON.stringify(kbData) });
+                txn.set({ _key: 'kb_os_fin' }, { data: JSON.stringify(kbFinData) });
+                txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(txArr) });
+                txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(crArr) });
+                if (orcMutado) txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(orcArr) });
+                return { osNum: osServidor.num, valorPago: valorPagoCents / 100, quitado: quitado, restanteAtual: finServidor.restante, orcRef: orcMutado ? osServidor.orcRef : null };
+              });
+            }).then(function (r) { return { data: Object.assign({ ok: true }, r) }; })
+              .catch(function (e) { var err = new Error(e.message); err.code = e.code || 'internal'; throw err; });
+          }
+          return Promise.resolve({ data: { ok: true } });
+        };
+      }
+    };
+  }
+};
 
 // ── DOM mock mínimo para orcEnvConfirmarPgto/orcPagtoTipoSel/orcEnvGerarOS
 //    (mesmo padrão de test_idempotencia_10x_2026-08-08.js) ──

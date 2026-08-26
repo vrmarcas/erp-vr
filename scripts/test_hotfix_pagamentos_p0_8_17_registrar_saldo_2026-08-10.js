@@ -61,6 +61,9 @@ var src = [
   "var _COL = 'erp_vr';",
   "var _cloudLastPayload = {};",
   "var KB_OS = {};",
+  "var _KB_OS_FIN_CACHE = {};",
+  "var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];",
+  "function _kbMergeFinCache(){ Object.keys(_KB_OS_FIN_CACHE).forEach(function(id){ var os=KB_OS[id]; if(!os) return; var fin=_KB_OS_FIN_CACHE[id]; if(!fin) return; _KB_OS_FIN_FIELDS.forEach(function(f){ if(fin[f]!==undefined) os[f]=fin[f]; }); }); }",
   "var FIN_CR = []; var FIN_TX = [];",
   "var _ORC_ENVIADOS_DATA = [];",
   "var _kbOsId = null;",
@@ -74,6 +77,7 @@ var src = [
   "  finRegistrarRecebimento: finRegistrarRecebimento,",
   "  getLastPayload: function(k){ return _cloudLastPayload[k]; }, setLastPayload: function(k,v){ _cloudLastPayload[k]=v; },",
   "  getKbOs: function(){ return KB_OS; }, setKbOs: function(v){ KB_OS = v; },",
+  "  getKbOsFinCache: function(){ return _KB_OS_FIN_CACHE; }, setKbOsFinCache: function(v){ _KB_OS_FIN_CACHE = v; },",
   "  setKbOsId: function(v){ _kbOsId = v; },",
   "  getFinCR: function(){ return FIN_CR; }, setFinCR: function(v){ FIN_CR = v; },",
   "  getFinTX: function(){ return FIN_TX; }, setFinTX: function(v){ FIN_TX = v; },",
@@ -116,7 +120,70 @@ global._db = {
     return p;
   }
 };
-global.firebase = { auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; } };
+// HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — finRegistrarRecebimento()
+// não faz mais a transação de kb_os/kb_os_fin/fin_cr/fin_tx/orcamentos no
+// client (migrada para a Cloud Function finCrRegistrarRecebimento(), Admin
+// SDK — ver functions/src/finCr.ts, já coberta contra o Firestore Emulator
+// real por test_hardening_fin_cr_functions_server_2026-08-26.js). O mock
+// abaixo porta a MESMA lógica para dentro do mock _db.runTransaction já
+// existente aqui (_fakeStore, mesmo lock + _forceErrorOnce) — preserva
+// todos os cenários originais só através do novo formato de chamada.
+global.firebase = {
+  auth: function () { return { currentUser: { getIdToken: function () { return Promise.resolve('fake-token'); } } }; },
+  functions: function () {
+    return {
+      httpsCallable: function (nome) {
+        return function (payload) {
+          if (nome !== 'finCrRegistrarRecebimento') return Promise.resolve({ data: { ok: true } });
+          var osId = payload.osId;
+          var valorPagoCents = Math.round((Number(payload.valorPago) || 0) * 100);
+          var forma = payload.forma || 'PIX';
+          var dia = payload.diaBR;
+          return global._db.runTransaction(function (txn) {
+            return Promise.all([txn.get({ _key: 'kb_os' }), txn.get({ _key: 'kb_os_fin' }), txn.get({ _key: 'fin_cr' }), txn.get({ _key: 'fin_tx' }), txn.get({ _key: 'orcamentos' })]).then(function (snaps) {
+              var kbData = (snaps[0].exists && JSON.parse(snaps[0].data().data)) || {};
+              var kbFinData = (snaps[1].exists && JSON.parse(snaps[1].data().data)) || {};
+              var crArr = (snaps[2].exists && JSON.parse(snaps[2].data().data)) || [];
+              var txArr = (snaps[3].exists && JSON.parse(snaps[3].data().data)) || [];
+              var orcArr = snaps[4].exists ? JSON.parse(snaps[4].data().data) : null;
+              var osServidor = kbData[osId];
+              var finServidor = kbFinData[osId] || {};
+              if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'not-found'; throw eNF; }
+              var restanteServidorCents = Math.round((finServidor.restante || 0) * 100);
+              if (restanteServidorCents <= 0) { var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'failed-precondition'; throw eJa; }
+              if (valorPagoCents > restanteServidorCents) { var eExc = new Error('VALOR_MAIOR_QUE_SALDO:' + (restanteServidorCents / 100)); eExc.code = 'failed-precondition'; throw eExc; }
+              var novoRestanteCents = restanteServidorCents - valorPagoCents;
+              var quitado = novoRestanteCents <= 0;
+              if (quitado && osServidor.status === 'aguardando_saldo') osServidor.status = 'iniciada';
+              finServidor.restante = novoRestanteCents / 100;
+              kbData[osId] = osServidor; kbFinData[osId] = finServidor;
+              var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
+              if (crEntry) {
+                if (quitado) { crArr = crArr.filter(function (c) { return c !== crEntry; }); }
+                else { crEntry.valor = novoRestanteCents / 100; }
+              }
+              var descBase = (quitado ? 'Pagamento do saldo' : 'Pagamento parcial do saldo') + ' — OS #' + osServidor.num;
+              crArr = [{ id: 'cr' + Date.now() + '_pgtosaldo', cliente: osServidor.cliente, clienteId: '', orcamentoId: osServidor.orcRef || null, osId: osId, descricao: descBase, valor: valorPagoCents / 100, vencimento: dia, status: 'recebido', marca: osServidor.mk || 'vr', metodo: forma, osRef: 'OS #' + osServidor.num, dataCriacao: dia, dataRecebimento: dia }].concat(crArr);
+              txArr = [{ data: (dia || '').slice(0, 5), cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorPagoCents / 100, metodo: forma, status: 'recebido', dia: 1, sem: 1, mes: 1 }].concat(txArr);
+              var orcMutado = false;
+              if (quitado && osServidor.orcRef && Array.isArray(orcArr)) {
+                var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
+                if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
+              }
+              txn.set({ _key: 'kb_os' }, { data: JSON.stringify(kbData) });
+              txn.set({ _key: 'kb_os_fin' }, { data: JSON.stringify(kbFinData) });
+              txn.set({ _key: 'fin_tx' }, { data: JSON.stringify(txArr) });
+              txn.set({ _key: 'fin_cr' }, { data: JSON.stringify(crArr) });
+              if (orcMutado) txn.set({ _key: 'orcamentos' }, { data: JSON.stringify(orcArr) });
+              return { osNum: osServidor.num, valorPago: valorPagoCents / 100, quitado: quitado, restanteAtual: finServidor.restante, orcRef: orcMutado ? osServidor.orcRef : null };
+            });
+          }).then(function (r) { return { data: Object.assign({ ok: true }, r) }; })
+            .catch(function (e) { var err = new Error(e.message); err.code = e.code || 'internal'; throw err; });
+        };
+      }
+    };
+  }
+};
 global.document = { getElementById: function () { return null; } };
 global._lastToast = null; global._lastToastKind = null;
 global.showToast = function (msg, kind) { global._lastToast = msg; global._lastToastKind = kind; };

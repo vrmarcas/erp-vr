@@ -138,10 +138,16 @@ test('12. docSalvo.vendedor === "—" (placeholder) — tratado como ausente, ca
   var r = mod.financeiroReal(orcComOS);
   test('14. entrada R$100 + saldo R$31,82 — total/recebido/saldo batem exatamente com o cenário real do bug',
     [r.totalCents, r.recebidoCents, r.saldoCents], [13182, 10000, 3182]);
-  test('15. histórico mostra a entrada já recebida (nunca some ao reabrir)',
-    r.historico.length, 1);
-  test('15b. histórico traz Data/Valor/Forma corretos da entrada',
-    [r.historico[0].data, r.historico[0].valorCents, r.historico[0].forma], ['10/08/2026', 10000, 'PIX']);
+  // 15/15b — HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26):
+  // financeiroReal() (orcFinanceiroReal no fonte) não lê mais FIN_CR
+  // diretamente — Comercial não tem mais acesso ao array inteiro. O
+  // histórico (entrada já recebida, nunca some ao reabrir) agora vem de
+  // forma assíncrona via a Cloud Function finCrHistoricoRecebimento()
+  // (Admin SDK, MESMO filtro portado 1:1 — status='recebido' +
+  // orcamentoId/osId), chamada por orcEnvAbrir() depois da renderização
+  // síncrona. Cobertura desses cenários (entrada preservada, Data/Valor/
+  // Forma corretos) está em test_hardening_fin_cr_functions_server_2026-08-26.js.
+  test('15. financeiroReal() não computa mais historico sincronamente — array vazio por design', r.historico, []);
 
   // Depois de quitar o saldo (kbReceberSaldo/registrar pagamento) — a
   // entrada original PERMANECE no histórico, um SEGUNDO recebimento
@@ -154,10 +160,11 @@ test('12. docSalvo.vendedor === "—" (placeholder) — tratado como ausente, ca
   var r2 = mod.financeiroReal(orcComOS);
   test('16. após quitação — saldo zerado, recebido = total exato',
     [r2.recebidoCents, r2.saldoCents], [13182, 0]);
-  test('17. após quitação — histórico tem OS DOIS recebimentos (entrada preservada + saldo novo, nunca 1 só)',
-    r2.historico.length, 2);
-  test('17b. histórico ordenado por data (entrada antes do saldo)',
-    r2.historico.map(function(h){return h.valorCents;}), [10000, 3182]);
+  // 17/17b — mesma migração que 15/15b acima: historico não é mais
+  // computado sincronamente por financeiroReal(). O cenário "dois
+  // recebimentos preservados, ordenados por data" usa o MESMO filtro/sort
+  // agora portado para finCrHistoricoRecebimento() — sem duplicação aqui.
+  test('17. após quitação — historico continua vazio sincronamente (migrado para Cloud Function)', r2.historico, []);
 })();
 
 (function () {
@@ -169,8 +176,9 @@ test('12. docSalvo.vendedor === "—" (placeholder) — tratado como ausente, ca
     { id: 'cr2', orcamentoId: 'orcC', osId: 'osC', status: 'recebido', valor: 500, metodo: 'Cartão de Débito', dataRecebimento: '05/08/2026' },
   ]);
   var r = mod.financeiroReal({ id: 'orcC', osRef: 'osC', valorFinal: 1000 });
-  test('18. formas diferentes por recebimento (PIX + Cartão de Débito) preservadas separadamente no histórico',
-    r.historico.map(function(h){return h.forma;}), ['PIX', 'Cartão de Débito']);
+  // 18 — mesma migração: "formas diferentes preservadas separadamente" é
+  // uma propriedade do filtro/sort agora em finCrHistoricoRecebimento().
+  test('18. historico continua vazio sincronamente (migrado para Cloud Function)', r.historico, []);
 })();
 
 try { fs.unlinkSync(modPath); } catch (e) {}

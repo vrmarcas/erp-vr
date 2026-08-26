@@ -90,7 +90,15 @@ ok('1b. id="orcEntradaResto" (restante simulado) não existe mais no HTML', !/id
 
   var gerarOSSrc = extractFn('orcEnvGerarOS');
   ok('4c. orcEnvGerarOS() generaliza o vínculo: todo CR deste orçamento sem osId (independente do tipo) é vinculado à OS recém-criada, nunca recriado', /FIN_CR\.forEach\(function\(c\)\{ if\(c\.orcamentoId===o\.id && !c\.osId\)/.test(gerarOSSrc));
-  ok('4d. mesmo tratamento no caminho transacional real (dentro da MESMA transação que cria a OS)', /arrCR\.forEach\(function\(c\)\{ if\(c\.orcamentoId===o\.id && !c\.osId\)/.test(gerarOSSrc));
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — o vínculo do
+  // CR à OS recém-criada não roda mais DENTRO da mesma transação client-side
+  // (Comercial não lê/escreve fin_cr diretamente — ver firestore.rules).
+  // Migrado para a Cloud Function finCrVincularOS() (functions/src/finCr.ts,
+  // mesma condição c.orcamentoId===orcamentoId && !c.osId, generalizada
+  // igual antes), chamada como passo best-effort logo após a transação
+  // real (orcamentos/kb_os/kb_os_fin/erp_os_counter) confirmar — nunca
+  // desfaz a OS/orçamento já gravados se este passo falhar.
+  ok('4d. mesmo tratamento no caminho transacional real, agora via Cloud Function best-effort logo após a transação confirmar', /httpsCallable\('finCrVincularOS'\)/.test(gerarOSSrc));
 }
 
 console.log('\n' + '='.repeat(70));

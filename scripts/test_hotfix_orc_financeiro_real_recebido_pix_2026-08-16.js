@@ -86,8 +86,18 @@ console.log('\n=== HOTFIX — orcFinanceiroReal(): Recebido não infla com desco
   test('2. Valor contratado agora usa a mesma base do saldo (osFin.valor=116,72), não o preço-cartão do orçamento (123,04)', fin.totalCents, 11672);
   test('3. Saldo continua vindo de osFin.restante, inalterado', fin.saldoCents, 5836);
   test('4. Identidade financeira sempre válida: recebido + saldo === total', fin.recebidoCents + fin.saldoCents, fin.totalCents);
-  test('5. Recebido bate exatamente com a soma do histórico real (FIN_CR recebido) — nunca um cálculo paralelo', fin.recebidoCents, fin.historico.reduce(function (s, h) { return s + h.valorCents; }, 0));
-  test('6. Histórico mostra exatamente 1 recebimento de R$58,36 (nunca duplicado)', fin.historico.map(function (h) { return h.valorCents; }), [5836]);
+  // 5-6 — HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26): orcFinanceiroReal()
+  // não lê mais FIN_CR (Comercial não tem mais acesso direto ao array
+  // inteiro) — historico agora vem de forma assíncrona, via a Cloud
+  // Function finCrHistoricoRecebimento() (Admin SDK, MESMO filtro portado
+  // 1:1 — orçamentoId/osId + status='recebido'), chamada por orcEnvAbrir()
+  // depois da renderização síncrona. A consistência "recebido bate com a
+  // soma do histórico" para este cenário PIX está coberta do lado servidor
+  // por test_hardening_fin_cr_functions_server_2026-08-26.js (casos 22-24)
+  // — aqui só confirmamos que orcFinanceiroReal() devolve historico:[]
+  // sincronamente por design, nunca um array parcial/desatualizado.
+  test('5. orcFinanceiroReal() não computa mais historico sincronamente (migrado para Cloud Function) — array vazio por design', fin.historico, []);
+  test('6. recebidoCents/saldoCents continuam corretos mesmo com historico vazio — não dependem mais um do outro', fin.recebidoCents + fin.saldoCents, fin.totalCents);
 }
 
 // ── Cenário de controle: pagamento via cartão (sem desconto) — total bate igual antes/depois ──
