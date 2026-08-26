@@ -206,6 +206,22 @@ service cloud.firestore {
       // bloco (compras/erp_plan_*).
       allow read, write: if isComercial() && docId in ['kb_os', 'erp_os_counter'];
 
+      // HOTFIX P0-E (Rodada de Hardening, 2026-08-26) — achado real: UI e
+      // Rule discordavam. PERM_DEFAULT (index.html) já dá acesso padrão à
+      // tela "Todas as OS" para o perfil Financeiro, e o próprio
+      // 'kb_os_fin' logo abaixo já concede leitura financeira da OS a
+      // Financeiro — mas 'kb_os' (o documento BASE — cliente, status,
+      // datas, itens operacionais) nunca teve Rule para esse papel. Sem
+      // ele, 'kb_os_fin' não tem nada para "colar" (ver _kbMergeFinCache,
+      // index.html) e "Todas as OS" ficava estruturalmente inutilizável
+      // para Financeiro ("Nenhuma OS encontrada" sempre, mesmo com
+      // centenas de OS reais) — exatamente o cenário que o desenho
+      // original de kb_os_fin (comentário abaixo) presumia estar
+      // disponível. Só leitura — Financeiro não opera o Kanban
+      // (arrastar/mudar status/gerar produção), nunca precisa escrever
+      // aqui.
+      allow read: if isFinanceiro() && docId == 'kb_os';
+
       // Rodada 2 (2026-08-07), item P0.6 — privacidade financeira real da
       // Produção. Achado: 'kb_os' guardava valor/totalGeral/parcelas/
       // formaPgto/pagtoTipo/valorEntrada/restante (e itens[].unit/total)

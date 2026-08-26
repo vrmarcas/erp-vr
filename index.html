@@ -1779,7 +1779,7 @@ function _cloudLoadAll() {
   // realmente chegado. Recontado programaticamente contra o corpo real
   // desta função — ver scripts/test_cloud_load_all_counter_2026-08-08.js,
   // que falha se este número voltar a divergir da contagem real.
-  var loaded = 0, total = 41;
+  var loaded = 0, total = 42;
   function done() {
     loaded++;
     if(loaded < total) return;
@@ -1932,6 +1932,15 @@ function _cloudLoadAll() {
   }
   _cloudLoad("fin_cr", function(d){ if(d&&d.length){ FIN_CR=d; } done(); });
   _cloudLoad("fin_cp", function(d){ if(d&&d.length){ FIN_CP=d; } done(); });
+  // HOTFIX P0-C (Rodada de Hardening, 2026-08-26) — achado real: fin_tx
+  // (transações financeiras) só tinha _cloudWatch (tempo real, registrado
+  // só depois de _cloudReady=true) — nunca um _cloudLoad de boot como
+  // fin_cr/fin_cp acima. FIN_TX nascia com 8 transações FICTÍCIAS
+  // hardcoded (ver declaração abaixo, agora vazia) e ficava assim durante
+  // toda a janela entre o boot e a 1ª resposta do listener — Dashboard/
+  // Financeiro podiam renderizar dado de demonstração como se fosse real
+  // nesse intervalo. Mesmo padrão de fin_cr/fin_cp agora aplicado aqui.
+  _cloudLoad("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; } done(); });
   _cloudLoad("fin_cp_recorrencias", function(d){ if(d&&d.length){ FIN_CP_RECORRENCIAS=d; } done(); });
   _cloudLoad("fin_cartoes", function(d){ if(d&&d.length){ FIN_CARTOES=d; } done(); });
   _cloudLoad("fin_cartao_compras", function(d){ if(d&&d.length){ FIN_CARTAO_COMPRAS=d; } done(); });
@@ -16618,13 +16627,43 @@ function dashRender() {
   if(dkGargBar) { dkGargBar.style.width = Math.min(gargalos.length*25,100)+'%'; dkGargBar.style.background = gargalos.length>0?'#D97706':'#059669'; }
 
   // ── KPI 4: Estoque crítico ───────────────────────────────────────────────
-  var criticos = dashCalcularEstoqueCritico(STOCK).itens;
+  // HOTFIX P0-D (Rodada de Hardening, 2026-08-26) — achado real: STOCK só é
+  // populado para quem tem permissão de leitura na Rule (isProducao() —
+  // master/produção; Comercial/Financeiro sempre recebem permission-denied
+  // em silêncio, ver firestore.rules). Este KPI lia STOCK direto e
+  // calculava "0 materiais críticos" tanto para "estoque real sem nenhum
+  // item crítico" quanto para "sem permissão nenhuma de ler estoque" —
+  // ERRO DE PERMISSÃO ≠ ESTOQUE ZERO. Financeiro via sempre "✅ Todos os
+  // materiais OK", uma informação falsa. Nunca resolvido abrindo a Rule
+  // (isso vazaria dado de estoque para quem não deve ver) — resolvido
+  // diferenciando os estados: sem permissão / carregando / falha / dado
+  // real, usando os mesmos sinais já corrigidos no P0 de leitura da
+  // rodada anterior (_stockServerConfirmed/_STOCK_LOAD_ERROR).
+  var _dashFuncao = (typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao) || '';
+  var _dashSemAcessoEstoque = ['comercial','financeiro'].indexOf(_dashFuncao) >= 0;
+  var _dashEstoqueCarregando = !_dashSemAcessoEstoque && !(typeof _stockServerConfirmed!=='undefined' && _stockServerConfirmed) && !(typeof _STOCK_LOAD_ERROR!=='undefined' && _STOCK_LOAD_ERROR);
+  var _dashEstoqueFalhou = !_dashSemAcessoEstoque && (typeof _STOCK_LOAD_ERROR!=='undefined' && _STOCK_LOAD_ERROR);
+  var criticos = (_dashSemAcessoEstoque || _dashEstoqueCarregando || _dashEstoqueFalhou) ? [] : dashCalcularEstoqueCritico(STOCK).itens;
   var dkEstq = document.getElementById('dkEstq');
   var dkEstqSub = document.getElementById('dkEstqSub');
   var dkEstqBar = document.getElementById('dkEstqBar');
-  if(dkEstq) { dkEstq.textContent = criticos.length; dkEstq.style.color = criticos.length>0?'#DC2626':'#059669'; }
-  if(dkEstqSub) dkEstqSub.textContent = criticos.length ? criticos.map(function(s){return s.label.split(' ').slice(0,3).join(' ');}).join(', ') : 'Todos os materiais OK';
-  if(dkEstqBar) { dkEstqBar.style.width = Math.min(criticos.length*25,100)+'%'; dkEstqBar.style.background = criticos.length?'#DC2626':'#059669'; }
+  if(_dashSemAcessoEstoque){
+    if(dkEstq) { dkEstq.textContent = '—'; dkEstq.style.color = 'var(--muted)'; }
+    if(dkEstqSub) dkEstqSub.textContent = 'Sem acesso a este dado para seu perfil';
+    if(dkEstqBar) { dkEstqBar.style.width = '0%'; }
+  } else if(_dashEstoqueCarregando){
+    if(dkEstq) { dkEstq.textContent = '…'; dkEstq.style.color = 'var(--muted)'; }
+    if(dkEstqSub) dkEstqSub.textContent = 'Carregando estoque…';
+    if(dkEstqBar) { dkEstqBar.style.width = '0%'; }
+  } else if(_dashEstoqueFalhou){
+    if(dkEstq) { dkEstq.textContent = '⚠️'; dkEstq.style.color = '#DC2626'; }
+    if(dkEstqSub) dkEstqSub.textContent = 'Falha ao carregar estoque';
+    if(dkEstqBar) { dkEstqBar.style.width = '0%'; dkEstqBar.style.background = '#DC2626'; }
+  } else {
+    if(dkEstq) { dkEstq.textContent = criticos.length; dkEstq.style.color = criticos.length>0?'#DC2626':'#059669'; }
+    if(dkEstqSub) dkEstqSub.textContent = criticos.length ? criticos.map(function(s){return s.label.split(' ').slice(0,3).join(' ');}).join(', ') : 'Todos os materiais OK';
+    if(dkEstqBar) { dkEstqBar.style.width = Math.min(criticos.length*25,100)+'%'; dkEstqBar.style.background = criticos.length?'#DC2626':'#059669'; }
+  }
 
   // ── KPI 5: Despesas do mês (FIN_CP) ────────────────────────────────────
   var mesAtual = new Date().getMonth()+1;
@@ -16662,12 +16701,19 @@ function dashRender() {
       {lbl:'💸 CR vencidas', v:central.hoje.crVencidas, warn:true, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cr');},50);}},
       {lbl:'📅 CR vencendo hoje', v:central.hoje.crHoje, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cr');},50);}},
       {lbl:'📤 CP vencendo hoje', v:central.hoje.cpHoje, act:function(){nav('financeiro',null);setTimeout(function(){finTab('cp');},50);}},
-      {lbl:'🧱 Materiais críticos', v:central.hoje.materiaisCriticos, warn:true, act:function(){nav('estoque',null);}},
+      // HOTFIX P0-D (Rodada de Hardening, 2026-08-26) — mesmo achado do KPI
+      // "Estoque crítico" acima: para quem não tem permissão de ler
+      // estoque (Comercial/Financeiro), central.hoje.materiaisCriticos
+      // sempre calcula 0 sobre um STOCK vazio por permission-denied — nunca
+      // um "0 crítico" real. vTxt sobrepõe o valor numérico só nesse caso,
+      // nunca mostrando um "0" que na verdade significa "sem acesso".
+      {lbl:'🧱 Materiais críticos', v:central.hoje.materiaisCriticos, vTxt: _dashSemAcessoEstoque?'—':null, warn:true, act:function(){nav('estoque',null);}},
     ];
     window._dashCentralHojeActs = _rowsH.map(function(r){return r.act;});
     dCH.innerHTML = _rowsH.map(function(r,i){
+      var _valorExibido = (r.vTxt!=null) ? r.vTxt : r.v;
       return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg2);border-radius:6px;cursor:pointer" onclick="window._dashCentralHojeActs['+i+']()">'
-        +'<span>'+r.lbl+'</span><span style="font-weight:800;color:'+(r.warn&&r.v>0?'#DC2626':'var(--text)')+'">'+r.v+'</span></div>';
+        +'<span>'+r.lbl+'</span><span style="font-weight:800;color:'+(r.warn&&r.v>0&&r.vTxt==null?'#DC2626':'var(--text)')+'">'+_valorExibido+'</span></div>';
     }).join('');
   }
   var dCP = document.getElementById('dCentralProximos');
@@ -17148,27 +17194,23 @@ function stockSaveData() {
   return _cloudSave('stock', STOCK);
 }
 
-var FIN_TX = [
-  {data:'01/07',cliente:'OI Telecom',    os:'0847',marca:'vr', valor:2400,metodo:'PIX',    status:'recebido',dia:1,sem:1,mes:7},
-  {data:'01/07',cliente:'CLARO Display', os:'0848',marca:'vr', valor:1800,metodo:'Cartão', status:'recebido',dia:1,sem:1,mes:7},
-  {data:'01/07',cliente:'Maria S.',      os:'0851',marca:'vit',valor:480, metodo:'PIX',    status:'recebido',dia:1,sem:1,mes:7},
-  {data:'30/06',cliente:'VR Construtora',os:'0845',marca:'vr', valor:3200,metodo:'PIX',    status:'recebido',dia:0,sem:1,mes:6},
-  {data:'30/06',cliente:'Lucas M.',      os:'0855',marca:'vit',valor:320, metodo:'Dinheiro',status:'recebido',dia:0,sem:1,mes:6},
-  {data:'29/06',cliente:'BAUHAUS SP',    os:'0843',marca:'vr', valor:5600,metodo:'Cartão', status:'recebido',dia:0,sem:1,mes:6},
-  {data:'28/06',cliente:'Ana F.',        os:'0840',marca:'vit',valor:210, metodo:'PIX',    status:'recebido',dia:0,sem:1,mes:6},
-  {data:'25/06',cliente:'TechVision',    os:'0835',marca:'vr', valor:4100,metodo:'PIX',    status:'recebido',dia:0,sem:0,mes:6}
-];
+// HOTFIX P0-C (Rodada de Hardening, 2026-08-26) — achado real: nascia com
+// 8 transações FICTÍCIAS hardcoded (OI Telecom, CLARO Display etc., datas
+// de 2026-06/07) — dado financeiro nunca pode nascer de demonstração.
+// Mesmo padrão vazio já usado por FIN_CR/FIN_CP; populado só pela leitura
+// real (_cloudLoad de boot + _cloudWatch em tempo real, ver _cloudLoadAll).
+var FIN_TX = [];
 
-var CLIENTES_DATA = [
-  {id:'c1',nome:'CLARO Telecom',    tipo:'PJ',cidade:'São Carlos',     marca:'vr', ultimoPedido:'01/07/2026',tel:'(16) 99800-0001',email:'compras@claro.com.br',     os:['0847','0848']},
-  {id:'c2',nome:'OI Telecom',       tipo:'PJ',cidade:'Ribeirão Preto', marca:'vr', ultimoPedido:'01/07/2026',tel:'(16) 99800-0002',email:'compras@oi.com.br',        os:['0847']},
-  {id:'c3',nome:'VR Construtora',   tipo:'PJ',cidade:'Araraquara',     marca:'vr', ultimoPedido:'30/06/2026',tel:'(16) 99700-0003',email:'projetos@vrconstrutora.com.br',os:['0845','0846']},
-  {id:'c4',nome:'BAUHAUS SP',       tipo:'PJ',cidade:'São Paulo',      marca:'vr', ultimoPedido:'29/06/2026',tel:'(11) 99600-0004',email:'compras@bauhaus.com.br',   os:['0843']},
-  {id:'c5',nome:'TechVision',       tipo:'PJ',cidade:'Campinas',       marca:'vr', ultimoPedido:'25/06/2026',tel:'(19) 99500-0005',email:'ti@techvision.com.br',     os:['0835']},
-  {id:'c6',nome:'Maria Santos',     tipo:'PF',cidade:'Araraquara',     marca:'vit',ultimoPedido:'01/07/2026',tel:'(16) 99400-0006',email:'maria.santos@gmail.com',   os:['0851']},
-  {id:'c7',nome:'Lucas Mendes',     tipo:'PF',cidade:'Araraquara',     marca:'vit',ultimoPedido:'01/07/2026',tel:'(16) 99300-0007',email:'lucas.mendes@gmail.com',   os:['0855']},
-  {id:'c8',nome:'Ana Ferreira',     tipo:'PF',cidade:'São Carlos',     marca:'vit',ultimoPedido:'28/06/2026',tel:'(16) 99200-0008',email:'ana.ferreira@gmail.com',   os:['0840']}
-];
+// HOTFIX P0-C (Rodada de Hardening, 2026-08-26) — achado real: nascia com
+// 8 clientes FICTÍCIOS hardcoded (nomes/e-mails/telefones inventados de
+// empresas/pessoas reais-soantes). O guard já existente em _cloudLoad/
+// _cloudWatch("clientes", function(d){ if(d&&d.length){...} }) nunca
+// sobrescreve este seed quando a coleção real está genuinamente vazia
+// (d.length===0) — uma conta nova, ou qualquer tenant sem clientes
+// cadastrados ainda, veria essas 8 pessoas/empresas fictícias como se
+// fossem reais (inclusive em seletores de cliente do orçamento). Mesmo
+// padrão vazio já usado por FIN_CR/FIN_CP/FIN_TX.
+var CLIENTES_DATA = [];
 var CLIENTES_LIXEIRA = [];
 
 
