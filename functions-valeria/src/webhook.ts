@@ -416,12 +416,27 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       // (sem channelPhone) nem para eventos de saída/log da própria agente.
       if (eventType === "USER_MESSAGE_RECEIVED" && ctx.channelPhone && mensagemCliente) {
         try {
+          // upsertAtendimentoWhatsApp roda SEMPRE — preserva a mensagem e
+          // mantém o atendimento visível no ERP para qualquer número, com
+          // ou sem allowlist (nunca perde dado de cliente real).
           const { atd } = await upsertAtendimentoWhatsApp({
             conversationId: ctx.conversationId,
             channelPhone: ctx.channelPhone,
             texto: mensagemCliente,
           });
-          if (atd.modoAtendimento !== "humano") {
+          // Sprint P1.2, item 10 — allowlist de números de teste
+          // (test_phone_allowlist.ts, config Firestore, nunca hardcoded).
+          // Allowlist vazia = sem restrição (produção normal). Allowlist
+          // não-vazia = só os números listados disparam o pipeline de AÇÃO
+          // comercial (identidade/confirmação/complexidade/handoff/
+          // execução) — qualquer outro número só tem a mensagem
+          // preservada acima, nunca cria orçamento nem altera estado
+          // comercial. NUNCA impede o próprio Chatvolt de responder
+          // automaticamente (isso não passa pelo nosso backend) — ver
+          // aviso completo no cabeçalho de test_phone_allowlist.ts.
+          const { permitidoParaPipeline } = await import("./test_phone_allowlist");
+          const podeExecutarPipeline = await permitidoParaPipeline(ctx.channelPhone);
+          if (podeExecutarPipeline && atd.modoAtendimento !== "humano") {
             await detectarEPersistirIdentidadeWhatsApp(ctx.conversationId, mensagemCliente, atd, ctx.agentId, ctx.organizationId);
             await detectarEPersistirConfirmacaoWhatsApp(ctx.conversationId, mensagemCliente);
             const complexidadeDetectada = await avaliarEPersistirComplexidadeWhatsApp(ctx.conversationId, mensagemCliente);
