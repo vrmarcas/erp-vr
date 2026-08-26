@@ -149,11 +149,24 @@ async function sincronizarConversaCompleta(conversationId: string): Promise<Sinc
         // "human" no vocabulário do ChatVolt = o CLIENTE do outro lado da
         // conversa (não confundir com humano do ERP assumindo o
         // atendimento — esse é sempre escrito por atdEnviarMensagemHumano,
-        // outro codebase, actorType:"human").
-        const actorType = m.from === "agent" ? "valeria" : m.from === "human" ? "customer" : "system";
+        // outro codebase, actorType:"human", e nunca chega aqui porque o
+        // dedup por id real já pula essas mensagens).
+        //
+        // P1.2d (achado real, falso-positivo investigado e corrigido) —
+        // from:"agent" NÃO significa Valéria: o WhatsApp da VR está em
+        // coexistência com o app oficial, e uma resposta humana enviada
+        // por lá também chega como from:"agent" no ChatVolt, sem nenhum
+        // campo que distinga as duas (testado contra uma mensagem
+        // confirmadamente da Valéria — agentModel/usage/usageCredits/
+        // userId vêm todos null nos dois casos, sources sempre []).
+        // Nunca atribui à Valéria sem certeza — marca como
+        // "agent_unknown" (equipe ou IA, indistinguível pelos dados
+        // disponíveis) em vez de arriscar um autor errado no ERP.
+        const actorType = m.from === "agent" ? "agent_unknown" : m.from === "human" ? "customer" : "system";
+        const actorName = actorType === "agent_unknown" ? "Equipe/Valéria (autor não identificável)" : null;
         return msgsCol.doc(m.id).set({
           id: m.id, atendimentoId: conversationId, providerMessageId: m.id,
-          idempotencyKey: null, actorType, actorId: null, actorName: actorType === "valeria" ? "Valéria" : null,
+          idempotencyKey: null, actorType, actorId: null, actorName,
           text: m.text, attachments: [], deliveryStatus: "sent",
           provider: "whatsapp", createdAt: createdAtMs,
         });
