@@ -30095,19 +30095,33 @@ function usrRecriarAcesso(idx) {
     var _secApp = firebase.initializeApp(_fbCfg, 'usrRecriar_' + Date.now());
     _secApp.auth().createUserWithEmailAndPassword(u.email, novaSenha)
       .then(function(cred) {
-        return cred.user.updateProfile({ displayName: u.nome });
+        var novoUid = cred.user.uid;
+        return cred.user.updateProfile({ displayName: u.nome })
+          .then(function() { return _secApp.auth().signOut(); })
+          .then(function() { return novoUid; });
       })
-      .then(function() {
-        return _secApp.auth().signOut();
-      })
-      .then(function() {
+      .then(function(novoUid) {
         _secApp.delete().catch(function(){});
-        // Atualizar hash no Firestore
+        // HOTFIX P0-B (Rodada de Hardening, 2026-08-26) — achado real: esta
+        // função criava a conta Firebase Auth mas nunca definia a custom
+        // claim nem o documento canônico erp_vr_usuarios/{uid} (mesma
+        // lacuna do fluxo de criação, corrigida ali chamando
+        // adminUpdateUserRole logo após o Auth) — o usuário "com acesso
+        // recriado" continuava sem conseguir logar de verdade. Mesma
+        // correção aqui, mesma Cloud Function já usada e testada.
+        users[idx].uid = novoUid;
         users[idx].senha = secHash(novaSenha);
         _USR_DATA = users;
         if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_usuarios', users);
-        showToast('✅ Acesso criado para "'+u.nome+'"! Informe a senha temporária ao usuário.','ok');
-        if(typeof secAuditLog==='function') secAuditLog('user_access_created','Acesso Firebase criado para: '+u.nome+' ('+u.email+')');
+        return firebase.functions().httpsCallable('adminUpdateUserRole')({ targetUid: novoUid, newRole: u.funcao })
+          .then(function(){
+            showToast('✅ Acesso criado para "'+u.nome+'"! Informe a senha temporária ao usuário.','ok');
+            if(typeof secAuditLog==='function') secAuditLog('user_access_created','Acesso Firebase criado para: '+u.nome+' ('+u.email+')');
+          })
+          .catch(function(claimErr){
+            console.error('[usrRecriarAcesso] falha ao definir permissão real', claimErr);
+            showToast('⚠️ Conta criada para "'+u.nome+'", mas a permissão não foi aplicada — ele não conseguirá acessar as telas da função. Tente novamente ou contate o suporte.','err');
+          });
       })
       .catch(function(err) {
         _secApp.delete().catch(function(){});
@@ -30215,22 +30229,53 @@ function crmBaseDoc(id) {
   return _db.collection(_CRM_BASE_COL).doc(id);
 }
 
+// HOTFIX P0-A (Rodada de Hardening, 2026-08-26) — achado real: esta função
+// nunca devolvia o resultado real da escrita — mutava o índice local e
+// disparava o .set() em "fire and forget" (.catch só console.warn), então
+// TODO chamador mostrava toast de sucesso sem nunca saber se persistiu de
+// verdade (e, com a Rule de crm_base ausente até este hotfix, NUNCA
+// persistia). Agora devolve a Promise real do .set(); em falha, desfaz a
+// mutação otimista do índice local (nunca deixa o estado em memória
+// divergir do que realmente está salvo) e propaga o erro para o chamador
+// decidir o toast — nunca mais um "salvo" falso.
 function crmBaseSave(contato) {
-  if(!contato || !contato.id) return;
-  _CRM_BASE_CACHE[contato.id] = contato;
-  // Atualiza índice leve
-  var idx = _CRM_BASE_IDX.findIndex(function(x){ return x.id===contato.id; });
+  if(!contato || !contato.id) return Promise.reject(new Error('Contato inválido'));
+  var idAlvo = contato.id;
+  var idxAnterior = _CRM_BASE_IDX.findIndex(function(x){ return x.id===idAlvo; });
+  var entryAnterior = idxAnterior>=0 ? _CRM_BASE_IDX[idxAnterior] : null;
+  var cacheAnterior = _CRM_BASE_CACHE[idAlvo];
+
+  _CRM_BASE_CACHE[idAlvo] = contato;
   var entry = { id:contato.id, nome:contato.nome||'', tel:contato.tel||'', cidade:contato.cidade||'',
     tipo:contato.tipo||'prospect', produtos:contato.produtos||[], coluna:contato.coluna||'novo',
     valor:contato.valor||0, ultCompra:contato.ultCompra||'', qtdCompras:contato.qtdCompras||0,
     ultimoContato:contato.ultimoContato||'', ts:contato.ts||Date.now() };
-  if(idx>=0) _CRM_BASE_IDX[idx]=entry; else _CRM_BASE_IDX.push(entry);
-  // Salva doc individual no Firestore
-  if(typeof _db!=='undefined' && _cloudReady) {
-    crmBaseDoc(contato.id).set(Object.assign({}, contato, { _ts: Date.now() })).catch(function(e){ console.warn('[CRM_BASE] save error', e); });
+  if(idxAnterior>=0) _CRM_BASE_IDX[idxAnterior]=entry; else _CRM_BASE_IDX.push(entry);
+
+  if(!(typeof _db!=='undefined' && _cloudReady)) {
+    // Sem conexão com o servidor — nunca finge que salvou; desfaz a
+    // mutação otimista imediatamente.
+    _crmBaseReverterMutacao(idAlvo, idxAnterior, entryAnterior, cacheAnterior);
+    return Promise.reject(new Error('Sem conexão com o servidor'));
   }
-  // Salva índice leve no erp_vr
-  _crmBaseSaveIdx();
+  return crmBaseDoc(idAlvo).set(Object.assign({}, contato, { _ts: Date.now() })).then(function(){
+    _crmBaseSaveIdx();
+    return contato;
+  }).catch(function(e){
+    console.error('[CRM_BASE] falha ao salvar contato', idAlvo, e);
+    _crmBaseReverterMutacao(idAlvo, idxAnterior, entryAnterior, cacheAnterior);
+    throw e;
+  });
+}
+
+// Desfaz a mutação otimista de _CRM_BASE_IDX/_CRM_BASE_CACHE quando a
+// escrita real falha — nunca deixa o estado em memória "adiantado" em
+// relação ao que está de fato persistido no servidor.
+function _crmBaseReverterMutacao(id, idxAnterior, entryAnterior, cacheAnterior) {
+  var idxAtual = _CRM_BASE_IDX.findIndex(function(x){ return x.id===id; });
+  if(idxAnterior>=0 && entryAnterior){ if(idxAtual>=0) _CRM_BASE_IDX[idxAtual]=entryAnterior; }
+  else if(idxAtual>=0){ _CRM_BASE_IDX.splice(idxAtual,1); }
+  if(cacheAnterior!==undefined) _CRM_BASE_CACHE[id]=cacheAnterior; else delete _CRM_BASE_CACHE[id];
 }
 
 // Índice fragmentado em blocos de 3000 — um doc único estouraria o limite
@@ -30435,25 +30480,37 @@ function crmBaseRecalcularStatus() {
   var clientes = _CRM_BASE_IDX.filter(function(c){ return c.tipo==='cliente'; });
   if(!clientes.length){ showToast('Nenhum cliente encontrado','warn'); return; }
   var db = (typeof firebase!=='undefined') ? firebase.firestore() : null;
-  var atualiz = 0, fsBatch = db ? db.batch() : null;
+  var fsBatch = db ? db.batch() : null;
+  // HOTFIX P0-A — captura o valor anterior de cada item mutado para poder
+  // desfazer se o batch falhar; o toast de sucesso só dispara depois do
+  // commit real confirmar (nunca antes).
+  var mudancas = [];
   clientes.forEach(function(c){
     var novaColuna = _crmBaseCalcColuna('cliente', c.ultCompra);
-    // Só atualiza se mudou — evita writes desnecessários
     if(novaColuna !== c.coluna){
+      mudancas.push({ c:c, colunaAnterior:c.coluna, cacheAnterior: _CRM_BASE_CACHE[c.id] ? _CRM_BASE_CACHE[c.id].coluna : undefined });
       c.coluna = novaColuna;
       if(_CRM_BASE_CACHE[c.id]) _CRM_BASE_CACHE[c.id].coluna = novaColuna;
-      if(db && fsBatch) fsBatch.update(db.collection(_CRM_BASE_COL).doc(c.id), { coluna: novaColuna, _ts: Date.now() });
-      atualiz++;
+      if(fsBatch) fsBatch.update(db.collection(_CRM_BASE_COL).doc(c.id), { coluna: novaColuna, _ts: Date.now() });
     }
   });
-  if(db && fsBatch && atualiz > 0) fsBatch.commit().catch(function(){});
-  _crmBaseSaveIdx();
   crmBaseRender('reativ');
   crmBaseKpisRender('reativ');
-  var msg = atualiz > 0
-    ? '✅ '+atualiz+' cliente'+(atualiz>1?'s atualizados':' atualizado')+' com status correto!'
-    : '✅ Todos os status já estavam corretos';
-  showToast(msg,'ok');
+  if(!mudancas.length){ showToast('✅ Todos os status já estavam corretos','ok'); return; }
+  if(!db || !fsBatch){ showToast('⚠️ Sem conexão com o servidor — nada foi salvo.','err'); return; }
+  fsBatch.commit().then(function(){
+    _crmBaseSaveIdx();
+    showToast('✅ '+mudancas.length+' cliente'+(mudancas.length>1?'s atualizados':' atualizado')+' com status correto!','ok');
+  }).catch(function(e){
+    console.error('[CRM_BASE] recalcularStatus falhou, desfazendo', e);
+    mudancas.forEach(function(m){
+      m.c.coluna = m.colunaAnterior;
+      if(_CRM_BASE_CACHE[m.c.id]) _CRM_BASE_CACHE[m.c.id].coluna = m.cacheAnterior;
+    });
+    crmBaseRender('reativ');
+    crmBaseKpisRender('reativ');
+    showToast('⚠️ Não foi possível salvar os status recalculados — tente novamente.','err');
+  });
 }
 
 // ── Sincronizar clientes "ativo" (< 90 dias) para aba Clientes ──────────────
@@ -30541,19 +30598,46 @@ function crmBaseExcluirSelecionados(tipo) {
   if(!ids.length){ showToast('Nenhum contato selecionado','warn'); return; }
   if(!confirm('Excluir '+ids.length+' contato'+(ids.length>1?'s':'')+' permanentemente?')) return;
   var db = (typeof firebase!=='undefined') ? firebase.firestore() : null;
+  if(!db){ showToast('⚠️ Sem conexão com o servidor — nada foi excluído.','err'); return; }
+  // HOTFIX P0-A — guarda o registro completo (índice + posição) de cada
+  // contato antes de remover localmente, para poder devolver à lista
+  // exatamente quem falhou ao excluir de verdade no servidor; o toast
+  // final reflete o resultado real, nunca "tudo excluído" por padrão.
+  var falhas = [];
+  var pendentes = ids.length;
   ids.forEach(function(id){
-    // Remove do índice local
     var idx = _CRM_BASE_IDX.findIndex(function(c){ return c.id===id; });
+    var entryRemovida = idx>=0 ? _CRM_BASE_IDX[idx] : null;
+    var cacheRemovido = _CRM_BASE_CACHE[id];
     if(idx>=0) _CRM_BASE_IDX.splice(idx,1);
     delete _CRM_BASE_CACHE[id];
-    // Remove do Firestore
-    if(db) db.collection('crm_base').doc(id).delete().catch(function(){});
+    db.collection('crm_base').doc(id).delete().then(function(){
+      finalizar();
+    }).catch(function(e){
+      console.error('[CRM_BASE] falha ao excluir contato', id, e);
+      if(entryRemovida) _CRM_BASE_IDX.push(entryRemovida);
+      if(cacheRemovido!==undefined) _CRM_BASE_CACHE[id]=cacheRemovido;
+      falhas.push(id);
+      finalizar();
+    });
   });
-  _CRM_BASE_SEL = {};
-  _crmBaseSaveIdx();
-  crmBaseToggleSelMode(tipo, false);
-  crmBaseKpisRender(tipo);
-  showToast('✅ '+ids.length+' contato'+(ids.length>1?'s':'')+' excluído'+(ids.length>1?'s':''),'ok');
+  function finalizar(){
+    pendentes--;
+    if(pendentes > 0) return;
+    _CRM_BASE_SEL = {};
+    _crmBaseSaveIdx();
+    crmBaseToggleSelMode(tipo, false);
+    crmBaseRender(tipo);
+    crmBaseKpisRender(tipo);
+    var sucesso = ids.length - falhas.length;
+    if(falhas.length===0){
+      showToast('✅ '+sucesso+' contato'+(sucesso>1?'s':'')+' excluído'+(sucesso>1?'s':''),'ok');
+    } else if(sucesso===0){
+      showToast('⚠️ Não foi possível excluir nenhum contato — tente novamente.','err');
+    } else {
+      showToast('⚠️ '+sucesso+' excluído(s), '+falhas.length+' falharam e continuam na lista.','warn');
+    }
+  }
 }
 
 // ── KPIs ─────────────────────────────────────────────────────────────────
@@ -30664,10 +30748,25 @@ function crmBaseAbrirPerfil(id) {
 
 function crmBaseAlterarColuna(id, coluna) {
   var idx = _CRM_BASE_IDX.find(function(c){ return c.id===id; });
+  var colunaAnterior = idx ? idx.coluna : null;
+  var cacheColunaAnterior = _CRM_BASE_CACHE[id] ? _CRM_BASE_CACHE[id].coluna : undefined;
   if(idx) idx.coluna = coluna;
   if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].coluna = coluna;
-  crmBaseDoc(id).update({ coluna: coluna, _ts: Date.now() }).catch(function(){});
-  _crmBaseSaveIdx();
+  // HOTFIX P0-A — em falha, desfaz o status localmente e no <select> visível
+  // (nunca deixa a tela mostrar uma coluna que não foi salva) e avisa o
+  // operador; nenhum toast de sucesso aqui — este fluxo nunca teve um, e
+  // a mudança de coluna é visualmente confirmada pelo próprio card mudar
+  // de posição no board.
+  crmBaseDoc(id).update({ coluna: coluna, _ts: Date.now() }).then(function(){
+    _crmBaseSaveIdx();
+  }).catch(function(e){
+    console.error('[CRM_BASE] falha ao alterar status', id, e);
+    if(idx) idx.coluna = colunaAnterior;
+    if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].coluna = cacheColunaAnterior;
+    var selAberto = document.querySelector('#crmBasePerfilContent select');
+    if(selAberto && colunaAnterior) selAberto.value = colunaAnterior;
+    showToast('⚠️ Não foi possível salvar o novo status — tente novamente.','err');
+  });
   // ── Alerta automático ao entrar em Inativo 90d ───────────────────────────
   if(coluna === 'inativo90') {
     var nome = (idx && idx.nome) ? idx.nome.split(' ')[0] : 'Cliente';
@@ -30749,9 +30848,18 @@ function crmBaseReativEnviar(id, msgIdx) {
   var tel = (c.tel||'').replace(/\D/g,'');
   var msg = store[msgIdx].texto;
   window.open('https://wa.me/55'+tel+'?text='+encodeURIComponent(msg), '_blank');
+  // O toast abaixo confirma o ENVIO do WhatsApp (já aconteceu, de verdade,
+  // na linha acima) — nunca a persistência da data de último contato, que
+  // é só um registro auxiliar; se ela falhar, avisamos à parte, sem
+  // desfazer nem atrasar a confirmação do envio real.
   var hoje = new Date().toLocaleDateString('pt-BR');
-  crmBaseDoc(id).update({ ultimoContato: hoje, _ts: Date.now() }).catch(function(){});
+  var ultimoContatoAnterior = c.ultimoContato;
   c.ultimoContato = hoje;
+  crmBaseDoc(id).update({ ultimoContato: hoje, _ts: Date.now() }).catch(function(e){
+    console.error('[CRM_BASE] falha ao registrar data do último contato', id, e);
+    c.ultimoContato = ultimoContatoAnterior;
+    showToast('⚠️ Mensagem enviada, mas a data de último contato não pôde ser salva.','warn');
+  });
   showToast('Mensagem enviada para '+(c.nome||'').split(' ')[0]+'!','ok');
   var m = document.getElementById('crmReativIAModal'); if(m) m.remove();
 }
@@ -30768,18 +30876,36 @@ function crmBaseAgendarContato(id) {
   var nome = idx.nome || 'Cliente';
   var dataStr = prompt('📅 Agendar contato com '+nome+'\nData (AAAA-MM-DD):', new Date(Date.now()+7*864e5).toISOString().slice(0,10));
   if(!dataStr) return;
-  crmBaseDoc(id).update({ dataAgendamento: dataStr, ultimoContato: new Date().toLocaleDateString('pt-BR'), _ts: Date.now() }).catch(function(){});
-  if(idx) { idx.dataAgendamento = dataStr; idx.ultimoContato = new Date().toLocaleDateString('pt-BR'); }
-  _crmBaseSaveIdx();
-  showToast('Contato agendado para '+nome.split(' ')[0]+' em '+new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR'),'ok');
-  crmBaseRender('reativ');
+  // HOTFIX P0-A — toast e re-render só depois da Promise confirmar; em
+  // falha, desfaz a mutação local e avisa (nunca "agendado" falso).
+  var dataAgendamentoAnterior = idx.dataAgendamento, ultimoContatoAnterior = idx.ultimoContato;
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  crmBaseDoc(id).update({ dataAgendamento: dataStr, ultimoContato: hoje, _ts: Date.now() }).then(function(){
+    idx.dataAgendamento = dataStr; idx.ultimoContato = hoje;
+    _crmBaseSaveIdx();
+    crmBaseRender('reativ');
+    showToast('Contato agendado para '+nome.split(' ')[0]+' em '+new Date(dataStr+'T12:00:00').toLocaleDateString('pt-BR'),'ok');
+  }).catch(function(e){
+    console.error('[CRM_BASE] falha ao agendar contato', id, e);
+    idx.dataAgendamento = dataAgendamentoAnterior; idx.ultimoContato = ultimoContatoAnterior;
+    showToast('⚠️ Não foi possível salvar o agendamento — tente novamente.','err');
+  });
 }
 
 function crmBaseSalvarNotas(id) {
   var notas = (document.getElementById('crmBasePerfilNotas')||{}).value||'';
-  if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].notas = notas;
-  crmBaseDoc(id).update({ notas: notas, _ts: Date.now() }).catch(function(){});
-  showToast('Nota salva','ok');
+  var notasAnteriores = _CRM_BASE_CACHE[id] ? _CRM_BASE_CACHE[id].notas : undefined;
+  // HOTFIX P0-A — toast só depois da Promise confirmar; em falha, avisa e
+  // preserva o texto digitado no campo (nunca some o que o operador
+  // escreveu, só reverte o CACHE que alimentaria uma futura reabertura).
+  crmBaseDoc(id).update({ notas: notas, _ts: Date.now() }).then(function(){
+    if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].notas = notas;
+    showToast('Nota salva','ok');
+  }).catch(function(e){
+    console.error('[CRM_BASE] falha ao salvar nota', id, e);
+    if(_CRM_BASE_CACHE[id]) _CRM_BASE_CACHE[id].notas = notasAnteriores;
+    showToast('⚠️ Não foi possível salvar a nota — tente novamente.','err');
+  });
 }
 
 // ── Editar dados do contato ────────────────────────────────────────────────
@@ -30822,19 +30948,29 @@ function crmBaseSalvarEdicao(id) {
   var cidade = (document.getElementById('crmEditCidade')||{}).value||'';
   var marca  = (document.getElementById('crmEditMarca')||{}).value||'vr';
   if(!nome.trim()){ showToast('Nome obrigatório','err'); return; }
-  // Atualizar índice local
   var entry = _CRM_BASE_IDX.find(function(x){ return x.id===id; });
-  if(entry){ entry.nome=nome.trim(); entry.tel=tel.trim(); entry.cidade=cidade.trim(); entry.marca=marca; }
-  // Atualizar cache
-  if(_CRM_BASE_CACHE[id]){ _CRM_BASE_CACHE[id].nome=nome.trim(); _CRM_BASE_CACHE[id].tel=tel.trim(); _CRM_BASE_CACHE[id].cidade=cidade.trim(); _CRM_BASE_CACHE[id].marca=marca; }
-  if(_CRM_BASE_PERFIL_ATUAL){ _CRM_BASE_PERFIL_ATUAL.nome=nome.trim(); _CRM_BASE_PERFIL_ATUAL.tel=tel.trim(); _CRM_BASE_PERFIL_ATUAL.cidade=cidade.trim(); _CRM_BASE_PERFIL_ATUAL.marca=marca; }
-  // Salvar no Firestore
-  crmBaseDoc(id).update({ nome:nome.trim(), tel:tel.trim(), cidade:cidade.trim(), marca:marca, _ts:Date.now() }).catch(function(){});
-  _crmBaseSaveIdx();
-  document.getElementById('crmBasePerfilNome').textContent = nome.trim();
-  showToast('✅ Contato atualizado','ok');
-  crmBaseAbrirPerfil(id); // volta para a view normal
-  crmBaseRender(_CRM_BASE_PERFIL_ATUAL&&_CRM_BASE_PERFIL_ATUAL.tipo==='cliente'?'reativ':'prosp');
+  // HOTFIX P0-A — captura o estado anterior dos 3 lugares que guardam
+  // cópia local antes de mutar, para poder desfazer se a gravação falhar;
+  // toast/volta-para-view só depois da Promise confirmar de verdade.
+  var anteriorEntry = entry ? { nome:entry.nome, tel:entry.tel, cidade:entry.cidade, marca:entry.marca } : null;
+  var anteriorCache = _CRM_BASE_CACHE[id] ? { nome:_CRM_BASE_CACHE[id].nome, tel:_CRM_BASE_CACHE[id].tel, cidade:_CRM_BASE_CACHE[id].cidade, marca:_CRM_BASE_CACHE[id].marca } : null;
+  var anteriorPerfil = _CRM_BASE_PERFIL_ATUAL ? { nome:_CRM_BASE_PERFIL_ATUAL.nome, tel:_CRM_BASE_PERFIL_ATUAL.tel, cidade:_CRM_BASE_PERFIL_ATUAL.cidade, marca:_CRM_BASE_PERFIL_ATUAL.marca } : null;
+  crmBaseDoc(id).update({ nome:nome.trim(), tel:tel.trim(), cidade:cidade.trim(), marca:marca, _ts:Date.now() }).then(function(){
+    if(entry){ entry.nome=nome.trim(); entry.tel=tel.trim(); entry.cidade=cidade.trim(); entry.marca=marca; }
+    if(_CRM_BASE_CACHE[id]){ _CRM_BASE_CACHE[id].nome=nome.trim(); _CRM_BASE_CACHE[id].tel=tel.trim(); _CRM_BASE_CACHE[id].cidade=cidade.trim(); _CRM_BASE_CACHE[id].marca=marca; }
+    if(_CRM_BASE_PERFIL_ATUAL){ _CRM_BASE_PERFIL_ATUAL.nome=nome.trim(); _CRM_BASE_PERFIL_ATUAL.tel=tel.trim(); _CRM_BASE_PERFIL_ATUAL.cidade=cidade.trim(); _CRM_BASE_PERFIL_ATUAL.marca=marca; }
+    _crmBaseSaveIdx();
+    document.getElementById('crmBasePerfilNome').textContent = nome.trim();
+    showToast('✅ Contato atualizado','ok');
+    crmBaseAbrirPerfil(id); // volta para a view normal
+    crmBaseRender(_CRM_BASE_PERFIL_ATUAL&&_CRM_BASE_PERFIL_ATUAL.tipo==='cliente'?'reativ':'prosp');
+  }).catch(function(e){
+    console.error('[CRM_BASE] falha ao salvar edição', id, e);
+    if(entry && anteriorEntry) Object.assign(entry, anteriorEntry);
+    if(_CRM_BASE_CACHE[id] && anteriorCache) Object.assign(_CRM_BASE_CACHE[id], anteriorCache);
+    if(_CRM_BASE_PERFIL_ATUAL && anteriorPerfil) Object.assign(_CRM_BASE_PERFIL_ATUAL, anteriorPerfil);
+    showToast('⚠️ Não foi possível salvar as alterações — tente novamente.','err');
+  });
 }
 
 // ── Enviar contato ao Kanban CRM ─────────────────────────────────────────
@@ -31005,10 +31141,22 @@ function crmBaseNovoContato(tipo) {
     coluna: tipo==='cliente' ? 'ativo' : 'novo',
     ultimoContato: new Date().toLocaleDateString('pt-BR'),
     ts: Date.now() };
-  crmBaseSave(contato);
-  crmBaseRender(tipo==='cliente'?'reativ':'prosp');
-  crmBaseKpisRender(tipo==='cliente'?'reativ':'prosp');
-  showToast('Contato adicionado','ok');
+  var abaAlvo = tipo==='cliente'?'reativ':'prosp';
+  // HOTFIX P0-A — o toast de sucesso e o re-render final só acontecem
+  // DEPOIS da Promise de gravação real confirmar; em falha, crmBaseSave já
+  // desfez a mutação otimista e este catch reflete isso na tela + avisa o
+  // operador explicitamente, nunca um "adicionado" silenciosamente falso.
+  crmBaseRender(abaAlvo);
+  crmBaseKpisRender(abaAlvo);
+  crmBaseSave(contato).then(function(){
+    crmBaseRender(abaAlvo);
+    crmBaseKpisRender(abaAlvo);
+    showToast('Contato adicionado','ok');
+  }).catch(function(e){
+    crmBaseRender(abaAlvo);
+    crmBaseKpisRender(abaAlvo);
+    showToast('⚠️ Não foi possível salvar o contato — tente novamente.','err');
+  });
 }
 
 // ── Importação Excel ──────────────────────────────────────────────────────
@@ -31175,6 +31323,14 @@ function crmBaseExecuteImport() {
   var total = rows.length;
   var done = 0;
   var clientes = 0, prospects = 0;
+  // HOTFIX P0-A — antes, todo lote que falhasse era simplesmente pulado
+  // ("continua mesmo com erro") e a tela final SEMPRE dizia "N contatos
+  // importados!", mesmo que nenhum lote tivesse persistido de verdade. Só
+  // conta como importado o que o commit() do lote realmente confirmou;
+  // lotes que falham têm seus itens removidos do índice local (nunca
+  // ficam "visíveis" sem estar salvos) e o resumo final relata falhas
+  // explicitamente.
+  var importados = 0, falharam = 0;
   var batchSize = 50;
   var batches = [];
   for(var i=0;i<rows.length;i+=batchSize) batches.push(rows.slice(i,i+batchSize));
@@ -31184,12 +31340,21 @@ function crmBaseExecuteImport() {
       _crmBaseSaveIdx();
       document.getElementById('crmImportProgress').style.display='none';
       document.getElementById('crmImportDone').style.display='';
-      document.getElementById('crmImportDoneText').textContent = total+' contatos importados!';
-      document.getElementById('crmImportDoneSub').textContent = clientes+' clientes · '+prospects+' prospects';
+      if(falharam === 0){
+        document.getElementById('crmImportDoneText').textContent = importados+' contatos importados!';
+        document.getElementById('crmImportDoneSub').textContent = clientes+' clientes · '+prospects+' prospects';
+      } else if(importados === 0){
+        document.getElementById('crmImportDoneText').textContent = '⚠️ Nenhum contato foi importado';
+        document.getElementById('crmImportDoneSub').textContent = falharam+' registro(s) falharam — verifique sua conexão/permissão e tente novamente.';
+      } else {
+        document.getElementById('crmImportDoneText').textContent = importados+' de '+total+' contatos importados';
+        document.getElementById('crmImportDoneSub').textContent = '⚠️ '+falharam+' falharam e precisam ser reimportados.';
+      }
       return;
     }
     var batch = batches[bIdx];
     var fsBatch = _db.batch();
+    var idsDoLote = [];
     batch.forEach(function(r){
       var nome = (r[colNome]||'').toString().trim();
       var tel  = colTel  ? (r[colTel]||'').toString().trim() : '';
@@ -31223,10 +31388,12 @@ function crmBaseExecuteImport() {
         produtos:prod?[prod]:[], coluna:colunaCalc, valor:valor, ultCompra:dataC, qtdCompras:qtdC,
         ultimoContato:'', ts:contato.ts });
       fsBatch.set(_db.collection(_CRM_BASE_COL).doc(id), contato);
+      idsDoLote.push(id);
       if(tipo==='cliente') clientes++; else prospects++;
       done++;
     });
     fsBatch.commit().then(function(){
+      importados += idsDoLote.length;
       var pct = Math.round(done/total*100);
       var bar=document.getElementById('crmImportProgressBar');
       var txt=document.getElementById('crmImportProgressText');
@@ -31236,8 +31403,15 @@ function crmBaseExecuteImport() {
       if(sub) sub.textContent=done+' de '+total+' contatos';
       processBatch(bIdx+1);
     }).catch(function(e){
-      console.warn('[CRM_BASE] batch error', e);
-      processBatch(bIdx+1); // continua mesmo com erro
+      console.error('[CRM_BASE] falha ao importar lote', bIdx, e);
+      // Lote não persistiu — remove do índice local os itens deste lote
+      // (nunca deixa a lista mostrar contato "importado" que não foi salvo).
+      idsDoLote.forEach(function(id){
+        var idx = _CRM_BASE_IDX.findIndex(function(c){ return c.id===id; });
+        if(idx>=0) _CRM_BASE_IDX.splice(idx,1);
+      });
+      falharam += idsDoLote.length;
+      processBatch(bIdx+1);
     });
   }
   processBatch(0);
@@ -31574,10 +31748,57 @@ function usrSalvar() {
     // verificar e-mail duplicado em outro usuário
     var dupEmail = users.findIndex(function(x){ return x.email&&x.email===email; });
     if(dupEmail >= 0 && dupEmail !== editIdx){ showToast('E-mail já cadastrado em outro usuário','err'); return; }
-    u.nome = nome.trim(); u.email = email; u.funcao = funcao; u.ativo = ativoVal; u.updatedAt = new Date().toLocaleDateString('pt-BR');
-    _USR_DATA = users;
-    showToast('Usuário "'+nome+'" atualizado!','ok');
-    if(typeof secAuditLog==='function') secAuditLog('user_updated','Usuário editado: '+nome+' ('+funcao+')');
+    // HOTFIX P0-B (Rodada de Hardening, 2026-08-26) — achado real: editar
+    // um usuário aqui só mudava o array legado erp_usuarios (histórico/
+    // tela administrativa) — nunca chamava adminUpdateUserRole/
+    // adminToggleStatus, então a claim do Firebase Auth e o documento
+    // canônico erp_vr_usuarios/{uid} (que authLogin()/getCallerVerificado()
+    // realmente consultam) NUNCA mudavam. Um master "promovendo" ou
+    // "desativando" alguém aqui via a UI via de fato não alterava
+    // permissão nenhuma — só um registro histórico que ninguém consulta
+    // para autorizar nada. Corrigido chamando as mesmas Cloud Functions já
+    // corretas (e já usadas pelo fluxo de criação) sempre que função ou
+    // status realmente mudam; toast de sucesso só depois delas confirmarem.
+    var funcaoMudou = funcao !== u.funcao;
+    var ativoMudou = ativoVal !== u.ativo;
+    var precisaCloudFn = (funcaoMudou || ativoMudou);
+    var nomeAnterior=u.nome, emailAnterior=u.email, funcaoAnterior=u.funcao, ativoAnterior=u.ativo;
+    function aplicarEdicaoLocal(){
+      u.nome = nome.trim(); u.email = email; u.funcao = funcao; u.ativo = ativoVal; u.updatedAt = new Date().toLocaleDateString('pt-BR');
+      _USR_DATA = users;
+      if(typeof _cloudSave==='function' && _cloudReady){
+        _cloudSave('erp_usuarios', users.map(function(x){ return Object.assign({},x); }));
+      }
+      usrNovoClose();
+      usrRender();
+      try{orcPopulateVendedores();}catch(e){}
+      try{vendedoresRender();}catch(e){}
+    }
+    if(!precisaCloudFn){
+      // Só nome/e-mail — nada de permissão real muda, mantém o fluxo
+      // síncrono/imediato de sempre.
+      aplicarEdicaoLocal();
+      showToast('Usuário "'+nome+'" atualizado!','ok');
+      if(typeof secAuditLog==='function') secAuditLog('user_updated','Usuário editado: '+nome+' ('+funcao+')');
+      return;
+    }
+    if(!u.uid){
+      showToast('⚠️ Este usuário não tem acesso vinculado (uid ausente) — use "Recriar Acesso" antes de mudar função/status; nada foi alterado.','err');
+      return;
+    }
+    var chamadas = [];
+    if(funcaoMudou) chamadas.push(firebase.functions().httpsCallable('adminUpdateUserRole')({ targetUid: u.uid, newRole: funcao }));
+    if(ativoMudou) chamadas.push(firebase.functions().httpsCallable('adminToggleStatus')({ targetUid: u.uid, disabled: ativoVal===0 }));
+    showToast('Salvando alterações de permissão…','ok');
+    Promise.all(chamadas).then(function(){
+      aplicarEdicaoLocal();
+      showToast('✅ Usuário "'+nome+'" atualizado — permissão real aplicada.'+(funcaoMudou?' O usuário precisará logar novamente.':''),'ok');
+      if(typeof secAuditLog==='function') secAuditLog('user_updated','Usuário editado: '+nome+' ('+funcao+')');
+    }).catch(function(err){
+      console.error('[usrSalvar] falha ao aplicar mudança de permissão real', err);
+      showToast('⚠️ Não foi possível aplicar a mudança de função/status — nada foi alterado. '+((err&&err.message)||''),'err');
+    });
+    return;
   } else {
     // MODO CRIAÇÃO
     var senha = (document.getElementById('usrSenha')||{}).value||'';

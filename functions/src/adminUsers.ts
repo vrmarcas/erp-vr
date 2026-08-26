@@ -174,6 +174,39 @@ async function writeUsersDoc(users: UserProfile[]): Promise<void> {
   });
 }
 
+// ── erp_vr_usuarios/{uid}: fonte CANÔNICA de login/autorização ─────────────────
+// HOTFIX P0-B (Rodada de Hardening, 2026-08-26) — achado real: as 3 funções
+// desta API (adminCreateUser/adminUpdateUserRole/adminToggleStatus) sempre
+// escreveram só o array legado (erp_usuarios, DOC_USERS acima) — nenhuma
+// delas jamais escreveu erp_vr_usuarios/{uid}, apesar do comentário em
+// firestore.rules (match /erp_vr_usuarios/{uid}) já documentar como
+// intenção "toda alteração passa por adminCreateUser/adminUpdateUserRole/
+// adminToggleStatus". Resultado real: authLogin() (client) e
+// getCallerVerificado() (auth_helper.ts, toda outra Cloud Function
+// protegida) leem EXCLUSIVAMENTE erp_vr_usuarios/{uid} — um usuário criado
+// pela UI ficava com conta Auth + claim, mas sem conseguir logar nem
+// executar nenhuma ação protegida, porque o documento que os dois
+// realmente consultam nunca era criado. A única forma de popular esse
+// documento até este hotfix era rodar manualmente um dos scripts avulsos
+// em scripts/ (migrate_erp_usuarios_normalizado.js, sync_role_claims.js,
+// create_missing_erp_users.js) — um passo manual, fora do fluxo da UI,
+// fácil de esquecer. write: if false nas Rules para esta coleção (só
+// Admin SDK grava) torna esta Cloud Function o ÚNICO lugar correto para
+// esta escrita — nunca um write client-side.
+async function writeErpVrUsuariosDoc(
+  uid: string,
+  profile: { nome: string; email: string; funcao: Role; ativo: 1 | 0 }
+): Promise<void> {
+  const db = admin.firestore();
+  await db.collection("erp_vr_usuarios").doc(uid).set({
+    nome: profile.nome,
+    email: profile.email,
+    funcao: profile.funcao,
+    ativo: profile.ativo,
+    _ts: Date.now(),
+  }, { merge: true });
+}
+
 // ── Idempotência ──────────────────────────────────────────────────────────────
 
 /**
@@ -295,34 +328,29 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("internal", "Erro ao atribuir role. Conta não criada.");
   }
 
-  // Criar/atualizar perfil em erp_usuarios
+  const profile: UserProfile = {
+    uid: newUser.uid,
+    nome,
+    email,
+    funcao: role,
+    ativo,
+    criadoPor: maskUid(caller.callerUid),
+    criadoEm: Date.now(),
+    convidadoEm: Date.now(),
+  };
+
+  // Criar o perfil CANÔNICO (erp_vr_usuarios/{uid}) — HOTFIX P0-B: sem este
+  // documento, authLogin() e getCallerVerificado() (auth_helper.ts, toda
+  // outra Cloud Function protegida) negam a conta por completo; nunca é
+  // aceitável terminar com Auth+claim criados mas este documento ausente
+  // ("estado órfão silencioso"). Falha aqui é compensada de verdade —
+  // remove a conta Auth recém-criada — e propagada como erro real, nunca
+  // um "sucesso parcial" silencioso.
   try {
-    const users = await readUsersDoc();
-    const profileExists = users.findIndex((u) => u.email === email);
-
-    const profile: UserProfile = {
-      uid: newUser.uid,
-      nome,
-      email,
-      funcao: role,
-      ativo,
-      criadoPor: maskUid(caller.callerUid),
-      criadoEm: Date.now(),
-      convidadoEm: Date.now(),
-    };
-
-    if (profileExists >= 0) {
-      users[profileExists] = profile;
-    } else {
-      users.push(profile);
-    }
-
-    await writeUsersDoc(users);
+    await writeErpVrUsuariosDoc(newUser.uid, { nome, email, funcao: role, ativo });
   } catch (e: any) {
-    // Auth criado mas perfil falhou — situação de inconsistência
-    // Não desfazemos o Auth para não perder o UID; registramos o erro
-    functions.logger.error("[adminCreateUser] Falha ao salvar perfil Firestore:", e.message);
-    // Ainda retornamos sucesso parcial com aviso
+    try { await admin.auth().deleteUser(newUser.uid); } catch { /* ignore */ }
+    functions.logger.error("[adminCreateUser] Falha ao criar erp_vr_usuarios/{uid} — conta revertida:", e.message);
     await writeAudit({
       action: "createUser:profileFailed",
       performedByMasked: maskUid(caller.callerUid),
@@ -333,9 +361,26 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
       roleTo: role,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
       success: false,
-      errorCode: "profile-write-failed",
+      errorCode: "canonical-profile-write-failed",
     });
-    // Retorna aviso mas não lança erro — conta Auth está criada
+    throw new functions.https.HttpsError("internal", "Erro ao criar o perfil de acesso. Nenhuma conta foi deixada pela metade — tente novamente.");
+  }
+
+  // Perfil legado em erp_usuarios — só histórico/tela administrativa
+  // (nunca mais usado para login/autorização, ver comentário em
+  // firestore.rules). Falha aqui não invalida a conta já criada e
+  // corretamente utilizável via erp_vr_usuarios acima.
+  try {
+    const users = await readUsersDoc();
+    const profileExists = users.findIndex((u) => u.email === email);
+    if (profileExists >= 0) {
+      users[profileExists] = profile;
+    } else {
+      users.push(profile);
+    }
+    await writeUsersDoc(users);
+  } catch (e: any) {
+    functions.logger.warn("[adminCreateUser] Falha ao salvar perfil legado erp_usuarios (não bloqueante):", e.message);
   }
 
   // Gerar link de convite (reset/definição de senha)
@@ -442,10 +487,47 @@ export const adminUpdateUserRole = functions.https.onCall(async (data, context) 
   const existingClaims = target.customClaims || {};
   await admin.auth().setCustomUserClaims(targetUid, { ...existingClaims, role: newRole });
 
-  // Revogar sessões ativas — token antigo com role antiga deve ser invalidado
+  // Atualizar o perfil CANÔNICO (erp_vr_usuarios/{uid}.funcao) — HOTFIX
+  // P0-B: getCallerVerificado() (auth_helper.ts) exige que este campo
+  // bata EXATAMENTE com a custom claim recém-aplicada acima; se essa
+  // gravação falhar depois da claim já ter mudado, a conta fica travada
+  // (claim nova × doc antigo = negado sempre) até alguém corrigir
+  // manualmente — pior que o estado anterior à mudança. Por isso, falha
+  // aqui reverte a claim de volta ao valor anterior (nunca deixa os dois
+  // divergirem) e propaga erro real — a alteração de role não é
+  // considerada bem-sucedida.
+  try {
+    await writeErpVrUsuariosDoc(targetUid, {
+      nome: target.displayName || "",
+      email: target.email || "",
+      funcao: newRole,
+      ativo: target.disabled ? 0 : 1,
+    });
+  } catch (e: any) {
+    try { await admin.auth().setCustomUserClaims(targetUid, existingClaims); } catch { /* ignore */ }
+    functions.logger.error("[adminUpdateUserRole] Falha ao atualizar erp_vr_usuarios/{uid} — claim revertida:", e.message);
+    await writeAudit({
+      action: "updateRole:profileFailed",
+      performedByMasked: maskUid(caller.callerUid),
+      performedByRole: caller.callerRole,
+      targetEmailMasked: maskEmail(target.email ?? ""),
+      targetUidMasked: maskUid(targetUid),
+      roleFrom: currentRole,
+      roleTo: newRole,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      success: false,
+      errorCode: "canonical-profile-write-failed",
+    });
+    throw new functions.https.HttpsError("internal", "Erro ao salvar a nova permissão — nada foi alterado, tente novamente.");
+  }
+
+  // Revogar sessões ativas — token antigo com role antiga deve ser
+  // invalidado; feito só depois do perfil canônico confirmar, para nunca
+  // forçar um usuário a logar de novo com uma mudança que na verdade falhou.
   await admin.auth().revokeRefreshTokens(targetUid);
 
-  // Atualizar perfil Firestore
+  // Perfil legado em erp_usuarios — só histórico/tela administrativa, não
+  // bloqueante (mesmo padrão de adminCreateUser).
   try {
     const users = await readUsersDoc();
     const idx   = users.findIndex((u) => u.uid === targetUid);
@@ -454,7 +536,7 @@ export const adminUpdateUserRole = functions.https.onCall(async (data, context) 
       await writeUsersDoc(users);
     }
   } catch (e: any) {
-    functions.logger.warn("[adminUpdateUserRole] Falha ao atualizar Firestore:", e.message);
+    functions.logger.warn("[adminUpdateUserRole] Falha ao atualizar erp_usuarios legado (não bloqueante):", e.message);
   }
 
   await writeAudit({
@@ -522,14 +604,51 @@ export const adminToggleStatus = functions.https.onCall(async (data, context) =>
     throw new functions.https.HttpsError("permission-denied", "Admin não pode desativar conta master.");
   }
 
+  const disabledAntes = !!target.disabled;
   await admin.auth().updateUser(targetUid, { disabled });
 
-  // Se desativando — revogar sessões
+  // Atualizar o perfil CANÔNICO (erp_vr_usuarios/{uid}.ativo) — HOTFIX
+  // P0-B: authLogin() (client) e getCallerVerificado() (auth_helper.ts)
+  // checam este campo, não só o `disabled` do Firebase Auth. Se esta
+  // gravação falhar depois do Auth já ter mudado, reverte o Auth de volta
+  // ao estado anterior (nunca deixa os dois sistemas divergindo — ex.:
+  // reativar uma conta no Auth mas o Firestore continuar com ativo:0
+  // faria o usuário achar que foi reativado, mas continuar bloqueado).
+  try {
+    await writeErpVrUsuariosDoc(targetUid, {
+      nome: target.displayName || "",
+      email: target.email || "",
+      funcao: (targetRole as Role) || "comercial",
+      ativo: disabled ? 0 : 1,
+    });
+  } catch (e: any) {
+    try { await admin.auth().updateUser(targetUid, { disabled: disabledAntes }); } catch { /* ignore */ }
+    functions.logger.error("[adminToggleStatus] Falha ao atualizar erp_vr_usuarios/{uid} — Auth revertido:", e.message);
+    await writeAudit({
+      action: (disabled ? "deactivateUser" : "activateUser") + ":profileFailed",
+      performedByMasked: maskUid(caller.callerUid),
+      performedByRole: caller.callerRole,
+      targetEmailMasked: maskEmail(target.email ?? ""),
+      targetUidMasked: maskUid(targetUid),
+      roleFrom: null,
+      roleTo: null,
+      statusBefore: !disabledAntes,
+      statusAfter: !disabledAntes,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      success: false,
+      errorCode: "canonical-profile-write-failed",
+    });
+    throw new functions.https.HttpsError("internal", "Erro ao salvar a mudança de status — nada foi alterado, tente novamente.");
+  }
+
+  // Se desativando — revogar sessões (só depois do perfil canônico
+  // confirmar, mesmo raciocínio de adminUpdateUserRole acima).
   if (disabled) {
     await admin.auth().revokeRefreshTokens(targetUid);
   }
 
-  // Atualizar Firestore
+  // Perfil legado em erp_usuarios — só histórico/tela administrativa, não
+  // bloqueante.
   try {
     const users = await readUsersDoc();
     const idx   = users.findIndex((u) => u.uid === targetUid);
@@ -538,7 +657,7 @@ export const adminToggleStatus = functions.https.onCall(async (data, context) =>
       await writeUsersDoc(users);
     }
   } catch (e: any) {
-    functions.logger.warn("[adminToggleStatus] Falha ao atualizar Firestore:", e.message);
+    functions.logger.warn("[adminToggleStatus] Falha ao atualizar erp_usuarios legado (não bloqueante):", e.message);
   }
 
   await writeAudit({

@@ -384,6 +384,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── crm_base: perfil completo de contato (CRM/Reativação, doc-por-
+    // registro) ──────────────────────────────────────────────────────────
+    // HOTFIX P0-A (Rodada de Hardening, 2026-08-26) — achado real: esta
+    // coleção nunca teve match próprio, caindo no catch-all
+    // "allow read, write: if false" do fim deste arquivo. O módulo inteiro
+    // de CRM/Reativação (notas, agendamento, edição de contato, importação
+    // em massa) aparentava funcionar (a UI sempre otimista) mas toda
+    // leitura/escrita real era negada em silêncio — inclusive para Master.
+    // Confirmado em produção: 1.976 documentos REAIS já existiam aqui
+    // (histórico de compras importado por script Admin SDK), totalmente
+    // inacessíveis a qualquer usuário pelo app — só esta Rule faltava para
+    // reabrir o que já existe, nenhuma migração de dado foi necessária.
+    // Mesmo modelo de permissão já usado para o dado irmão do mesmo módulo
+    // (crm_leads/crm_site_leads, ambos isComercial() acima, e clientes/
+    // clientes_lixeira) — nunca um papel novo inventado: Comercial é quem
+    // já opera CRM/Reativação em toda a aplicação (MODULOS/PERM_DEFAULT no
+    // frontend só libera a página 'crm' para master/comercial). Escrita
+    // direta do client (não Cloud Function) pelo mesmo motivo de
+    // clientes/crm_leads — não é dado financeiro nem exige validação de
+    // regra de negócio complexa no servidor.
+    match /crm_base/{contatoId} {
+      allow read, write: if isComercial();
+    }
+
     // ── Catálogo Vitre + Orçamento de Catálogo (Fase G, 2026-08-06) ─────────
     // Mesma arquitetura documento-por-registro + Cloud Function do bloco
     // Compras acima — nenhuma escrita client-side em nenhuma destas
