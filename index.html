@@ -32035,12 +32035,16 @@ function atdInit(){
   atdListenerInit();
 }
 
+var ATD_HANDOFF_NOTIFIED = {}; // Sprint P1.0 — evita repetir toast pro mesmo atendimento
+
 function atdListenerInit(){
   if(ATD_UNSUB || typeof _db==='undefined' || !_db) return;
   ATD_UNSUB = _db.collection('atendimentos').orderBy('updatedAt','desc').limit(200).onSnapshot(function(snap){
+    var anterior = ATD_CACHE;
     ATD_CACHE = snap.docs.map(function(d){ return d.data(); });
     atdRenderLista();
     atdSyncBadge();
+    atdNotificarNovosHandoffs(anterior, ATD_CACHE);
     if(ATD_SELECTED_ID){
       var atual = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
       if(atual){ atdRenderThreadHeader(atual); atdRenderPainel(atual); } else { atdFecharThread(); }
@@ -32050,8 +32054,33 @@ function atdListenerInit(){
 
 function atdSyncBadge(){
   var el = document.getElementById('sbBadgeAtend'); if(!el) return;
-  var n = ATD_CACHE.filter(function(a){ return a.status==='aguardando_humano'; }).length;
+  var n = atdContarPendencias();
   if(n>0){ el.textContent=n; el.style.display=''; } else { el.style.display='none'; }
+}
+
+/**
+ * Sprint P1.0, Parte R — toast quando surge um NOVO requiresHuman=true.
+ * Compara o snapshot anterior com o atual: só notifica quando o
+ * atendimento passou de false/ausente para true nesta rodada (nunca
+ * repete infinitamente, ver ATD_HANDOFF_NOTIFIED).
+ */
+function atdNotificarNovosHandoffs(anteriorLista, atualLista){
+  var anteriorMap = {};
+  (anteriorLista||[]).forEach(function(a){ anteriorMap[a.id] = a; });
+  atualLista.forEach(function(a){
+    if(a.requiresHuman!==true || a.status==='resolvido') return;
+    var antes = anteriorMap[a.id];
+    var eraPendente = antes && antes.requiresHuman===true;
+    if(eraPendente || ATD_HANDOFF_NOTIFIED[a.id]) return;
+    ATD_HANDOFF_NOTIFIED[a.id] = true;
+    if(typeof showToast==='function'){
+      showToast('⚠️ Valéria solicitou atendimento humano — '+(a.nome||'Cliente')+' · '+atdHumanReasonLabel(a.humanReason), 'err');
+    }
+  });
+  // Limpa flags de conversas que já não estão mais pendentes (permite notificar de novo se reabrir).
+  atualLista.forEach(function(a){
+    if(a.requiresHuman!==true || a.status==='resolvido') delete ATD_HANDOFF_NOTIFIED[a.id];
+  });
 }
 
 function atdIniciais(nome){
@@ -32102,16 +32131,43 @@ function atdRenderLista(){
   wrap.innerHTML = lista.map(function(a){
     var modo = atdModoLabel(a);
     var testeTag = a.isTeste ? '<span class="badge" style="background:#FEF3C7;color:#92400E">🧪 teste</span>' : '';
-    return '<div class="atd-card'+(a.id===ATD_SELECTED_ID?' on':'')+'" onclick="atdSelecionar(\''+a.id+'\')">'
+    var precisaHumano = a.requiresHuman===true && a.status!=='resolvido';
+    var handoffTag = precisaHumano
+      ? '<span class="badge" style="background:#FEE2E2;color:#991B1B;font-weight:800">⚠️ Precisa de humano · '+cfgEsc(atdHumanReasonLabel(a.humanReason))+'</span>'
+      : '';
+    var prioTag = (precisaHumano && a.priority==='URGENT')
+      ? '<span class="badge" style="background:#7F1D1D;color:#fff;font-weight:800">🔴 URGENTE</span>' : '';
+    return '<div class="atd-card'+(a.id===ATD_SELECTED_ID?' on':'')+(precisaHumano?' atd-card-handoff':'')+'" onclick="atdSelecionar(\''+a.id+'\')">'
       + '<div class="atd-card-av">'+atdIniciais(a.nome)+'</div>'
       + '<div class="atd-card-body">'
       + '<div class="atd-card-top"><span class="atd-card-nome">'+cfgEsc(a.nome||'Sem nome')+'</span><span class="atd-card-hora">'+atdFmtHora(a.ultimaInteracaoEm)+'</span></div>'
       + '<div class="atd-card-prev">'+cfgEsc(a.ultimaMensagem||'Sem mensagens ainda')+'</div>'
-      + '<div class="atd-card-tags"><span class="badge '+modo.cls+'">'+modo.txt+'</span>'+testeTag+'</div>'
+      + '<div class="atd-card-tags"><span class="badge '+modo.cls+'">'+modo.txt+'</span>'+testeTag+handoffTag+prioTag+'</div>'
       + '</div>'
       + (a.naoLidas>0 ? '<span class="atd-unread">'+a.naoLidas+'</span>' : '')
       + '</div>';
   }).join('');
+}
+
+/** Sprint P1.0 — nunca mostra o código interno (humanReason) ao usuário do ERP, só o rótulo comercial. */
+function atdHumanReasonLabel(reason){
+  var map = {
+    CUSTOMER_REQUEST: 'cliente pediu humano',
+    CUSTOM_COMPLEX: 'projeto complexo',
+    PRICING_UNSUPPORTED: 'item sem preço automático',
+    NEGOTIATION: 'negociação',
+    DISCOUNT_REQUEST: 'pedido de desconto',
+    COMPLAINT: 'reclamação',
+    PAYMENT_ISSUE: 'pagamento',
+    SYSTEM_ERROR: 'falha técnica',
+    OTHER: 'outro motivo',
+  };
+  return map[reason] || 'motivo não especificado';
+}
+
+/** Sprint P1.0 — contador para o badge do menu lateral "Atendimentos". */
+function atdContarPendencias(){
+  return ATD_CACHE.filter(function(a){ return a.requiresHuman===true && a.status!=='resolvido'; }).length;
 }
 
 function atdSelecionar(id){

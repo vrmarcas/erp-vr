@@ -28,6 +28,7 @@ import { AIProvider } from "./ai_provider";
 import { checkAuth } from "./valeria";
 import { detectCommercialIntent } from "./commercial_intent";
 import { extrairIdentidade } from "./identity_detector";
+import { detectHumanHandoff } from "./handoff_detector";
 
 const COL_ATD = "atendimentos";
 const SUB_MSG = "mensagens";
@@ -178,14 +179,17 @@ async function detectarEPersistirIdentidade(atendimentoId: string, texto: string
  * ao Chatvolt — na pior hipótese, cai de volta no comportamento anterior
  * (depende da Tool call do LLM).
  */
-async function dispararExecucaoComercialServerSide(atendimentoId: string, channelPhone: string | null): Promise<void> {
+async function dispararExecucaoComercialServerSide(
+  atendimentoId: string, channelPhone: string | null
+): Promise<{ pricingUnsupported: boolean; produtoComplexoSemReceita: boolean; erroSistemaReal: boolean }> {
+  const sinais = { pricingUnsupported: false, produtoComplexoSemReceita: false, erroSistemaReal: false };
   const bearer = process.env.VALERIA_BEARER_SECRET;
   if (!bearer) {
     console.error("[atendimentos.dispararExecucaoComercialServerSide] VALERIA_BEARER_SECRET ausente — pulando execução proativa.");
-    return;
+    return sinais;
   }
   try {
-    await axios.post(
+    const res = await axios.post(
       VALERIA_GET_CONTEXTO_URL,
       {
         conversationId: atendimentoId,
@@ -198,8 +202,63 @@ async function dispararExecucaoComercialServerSide(atendimentoId: string, channe
         timeout: 15_000,
       }
     );
+    const ea = res.data?.data?.executedAction;
+    if (ea?.action === "calculate_quote") {
+      const elig = ea.result?.eligibility;
+      if (elig === "HUMAN_VALIDATION_REQUIRED") sinais.pricingUnsupported = true;
+      if (elig === "TEMPORARILY_UNAVAILABLE") sinais.erroSistemaReal = true;
+      if ((ea.result?.warnings ?? []).some((w: string) => w.includes("não é uma receita embutida conhecida"))) {
+        sinais.produtoComplexoSemReceita = true;
+      }
+    }
   } catch (e) {
     console.error("[atendimentos.dispararExecucaoComercialServerSide] falha ao disparar execução comercial (não bloqueia envio):", (e as Error).message);
+  }
+  return sinais;
+}
+
+/** Sprint P1.0 — mesma disciplina de detectarEPersistirConfirmacao: classifica e persiste, nunca bloqueia envio. */
+async function avaliarEPersistirHandoff(
+  atendimentoId: string,
+  texto: string,
+  sinais: { pricingUnsupported: boolean; produtoComplexoSemReceita: boolean; erroSistemaReal: boolean }
+): Promise<void> {
+  try {
+    const r = detectHumanHandoff({ texto, ...sinais });
+    if (!r.requiresHuman) return;
+    await db().collection(COL_ATD).doc(atendimentoId).set(
+      { requiresHuman: true, humanReason: r.humanReason, priority: r.priority, handoffAt: Date.now(), updatedAt: Date.now() },
+      { merge: true }
+    );
+  } catch (e) {
+    console.error("[atendimentos.avaliarEPersistirHandoff] falha (não bloqueia):", (e as Error).message);
+  }
+}
+
+/**
+ * Sprint P1.0 (achado real de auditoria) — modoAtendimento="humano" só
+ * parava a Valéria no caminho ERP-simulado (atdSimularMensagemCliente
+ * verifica esse campo antes de chamar o Chatvolt). Para WhatsApp real, o
+ * Chatvolt recebe a mensagem DIRETO da Meta — nosso backend nunca está no
+ * meio — então só mudar o campo local não impedia a Valéria de responder
+ * no WhatsApp de verdade. A API do Chatvolt expõe `isAiEnabled` por
+ * conversa (confirmado real, GET/PATCH /api/conversations/{id}) — esse é
+ * o único jeito real de silenciar a IA no canal, e é usado aqui como
+ * best-effort (nunca bloqueia Assumir/Devolver no ERP se a chamada falhar
+ * ou se a conversa ainda não tiver providerConversationId).
+ */
+async function setChatvoltAiEnabled(providerConversationId: string | null, enabled: boolean): Promise<void> {
+  if (!providerConversationId) return;
+  const apiKey = process.env.CHATVOLT_API_KEY;
+  if (!apiKey) return;
+  try {
+    await axios.patch(
+      `https://app.chatvolt.ai/api/conversations/${providerConversationId}`,
+      { isAiEnabled: enabled },
+      { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 10_000 }
+    );
+  } catch (e) {
+    console.error("[atendimentos.setChatvoltAiEnabled] falha (não bloqueia Assumir/Devolver):", (e as Error).message);
   }
 }
 
@@ -326,7 +385,12 @@ export const atdSimularMensagemCliente = functions
     // das duas depende do LLM decidir chamar uma Tool.
     await detectarEPersistirConfirmacao(atendimentoId, texto);
     const { telefone: telefoneExtraidoAgora } = extrairIdentidade(texto);
-    await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || telefoneExtraidoAgora || null);
+    const sinaisHandoff = await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || telefoneExtraidoAgora || null);
+
+    // Sprint P1.0 — handoff humano server-side, mesma disciplina de
+    // confirmação/identidade: nunca depende do LLM decidir chamar
+    // transferir_humano.
+    await avaliarEPersistirHandoff(atendimentoId, texto, sinaisHandoff);
 
     const result = await provider.sendMessage({
       atendimentoId,
@@ -491,7 +555,9 @@ export const atdRetentarMensagem = functions
   });
 
 // ── 3. Enviar mensagem humana (modo humano, nunca aciona a Valéria) ────────
-export const atdEnviarMensagemHumano = functions.https.onCall(async (data, context) => {
+export const atdEnviarMensagemHumano = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30 })
+  .https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, ["comercial"], "enviar mensagem humana em Atendimentos");
 
@@ -512,8 +578,34 @@ export const atdEnviarMensagemHumano = functions.https.onCall(async (data, conte
   if (!acquired) return { ok: true, jaProcessado: true };
 
   const nome = await nomeStaff(caller.uid);
-  const msgRef = snap.ref.collection(SUB_MSG).doc();
   const now = Date.now();
+
+  // Sprint P1.0 (achado real de auditoria, Parte Y) — atdEnviarMensagemHumano
+  // só gravava no Firestore; o cliente no WhatsApp NUNCA recebia a
+  // resposta do humano. Confirmado real via API: POST
+  // /api/conversations/{id}/message com {channel, message} relaya a
+  // mensagem pelo canal de origem da conversa (testado em produção,
+  // resposta 200 com from:"agent"). Best-effort: se o canal ainda não
+  // tiver providerConversationId (conversa nunca chegou a falar com o
+  // Chatvolt) ou a chamada falhar, a mensagem ainda fica registrada no
+  // ERP — nunca perde o texto do humano, só não sai pelo canal externo.
+  let enviadoAoCanal = false;
+  const providerConversationId = (atd.providerConversationId as string | null) ?? atendimentoId;
+  const apiKey = process.env.CHATVOLT_API_KEY;
+  if (apiKey && atd.channel && atd.channel !== "erp_web") {
+    try {
+      const resp = await axios.post(
+        `https://app.chatvolt.ai/api/conversations/${providerConversationId}/message`,
+        { channel: atd.channel, message: texto },
+        { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 15_000 }
+      );
+      enviadoAoCanal = resp.status === 200;
+    } catch (e) {
+      console.error("[atendimentos.atdEnviarMensagemHumano] falha ao relayar para o canal (mensagem ainda registrada no ERP):", (e as Error).message);
+    }
+  }
+
+  const msgRef = snap.ref.collection(SUB_MSG).doc();
   await msgRef.set({
     id: msgRef.id,
     atendimentoId,
@@ -524,22 +616,25 @@ export const atdEnviarMensagemHumano = functions.https.onCall(async (data, conte
     actorName: nome,
     text: texto,
     attachments: [],
-    deliveryStatus: "sent",
-    provider: "erp",
+    deliveryStatus: enviadoAoCanal ? "sent" : (atd.channel === "erp_web" ? "sent" : "failed"),
+    provider: enviadoAoCanal ? "chatvolt" : "erp",
     createdAt: now,
   });
   await snap.ref.set({ ultimaMensagem: texto, ultimaInteracaoEm: now, updatedAt: now }, { merge: true });
-  return { ok: true, jaProcessado: false };
+  return { ok: true, jaProcessado: false, enviadoAoCanal };
 });
 
 // ── 4. Assumir atendimento ──────────────────────────────────────────────────
-export const atdAssumirAtendimento = functions.https.onCall(async (data, context) => {
+export const atdAssumirAtendimento = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30 })
+  .https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, ["comercial"], "assumir atendimento");
 
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
   const snap = await carregarAtendimento(atendimentoId);
+  const atd = snap.data()!;
 
   const nome = await nomeStaff(caller.uid);
   const now = Date.now();
@@ -549,10 +644,15 @@ export const atdAssumirAtendimento = functions.https.onCall(async (data, context
       responsavelUid: caller.uid,
       responsavelNome: nome,
       status: "aberto",
+      assumedBy: caller.uid,
+      assumedAt: now,
       updatedAt: now,
     },
     { merge: true }
   );
+  // Silencia a IA de verdade no canal (WhatsApp real inclusive) — nunca só
+  // localmente no ERP, ver setChatvoltAiEnabled.
+  await setChatvoltAiEnabled((atd.providerConversationId as string | null) ?? atendimentoId, false);
   const sysRef = snap.ref.collection(SUB_MSG).doc();
   await sysRef.set({
     id: sysRef.id, atendimentoId, providerMessageId: null, idempotencyKey: null,
@@ -565,19 +665,23 @@ export const atdAssumirAtendimento = functions.https.onCall(async (data, context
 });
 
 // ── 5. Devolver para Valéria ─────────────────────────────────────────────────
-export const atdDevolverParaValeria = functions.https.onCall(async (data, context) => {
+export const atdDevolverParaValeria = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30 })
+  .https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, ["comercial"], "devolver atendimento para a Valéria");
 
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
   const snap = await carregarAtendimento(atendimentoId);
+  const atd = snap.data()!;
 
   const now = Date.now();
   await snap.ref.set(
-    { modoAtendimento: "valeria", responsavelUid: null, responsavelNome: null, updatedAt: now },
+    { modoAtendimento: "valeria", responsavelUid: null, responsavelNome: null, resumedAt: now, updatedAt: now },
     { merge: true }
   );
+  await setChatvoltAiEnabled((atd.providerConversationId as string | null) ?? atendimentoId, true);
   const nome = await nomeStaff(caller.uid);
   const sysRef = snap.ref.collection(SUB_MSG).doc();
   await sysRef.set({
@@ -600,7 +704,8 @@ export const atdResolverAtendimento = functions.https.onCall(async (data, contex
   const snap = await carregarAtendimento(atendimentoId);
 
   const now = Date.now();
-  await snap.ref.set({ status: "resolvido", updatedAt: now }, { merge: true });
+  // Sprint P1.0 — resolver limpa a pendência de handoff (nunca apaga histórico).
+  await snap.ref.set({ status: "resolvido", requiresHuman: false, updatedAt: now }, { merge: true });
   await writeAudit("atendimentos_audit_log", "resolver", caller.uid, caller.role, { atendimentoId });
   return { ok: true };
 });
