@@ -17431,17 +17431,34 @@ function comercialRender() {
 
   // HOTFIX saneamento (2026-08-10) — Ticket Médio nunca soma lançamento
   // de teste/fixture (isTest) no cálculo.
-  var txVR  = FIN_TX.filter(function(t){return t.marca==='vr'  && t.status==='recebido' && !_isTestRecord(t);});
-  var txVit = FIN_TX.filter(function(t){return t.marca==='vit' && t.status==='recebido' && !_isTestRecord(t);});
-  var tkVR  = txVR.length  ? txVR.reduce(function(s,t){return s+t.valor;},0)/txVR.length   : 0;
-  var tkVit = txVit.length ? txVit.reduce(function(s,t){return s+t.valor;},0)/txVit.length : 0;
-  var maxTk = Math.max(tkVR, tkVit, 1);
-  setEl('comTkVR',  'R$ '+Math.round(tkVR).toLocaleString('pt-BR'));
-  setEl('comTkVit', 'R$ '+Math.round(tkVit).toLocaleString('pt-BR'));
-  var tkVRBar = document.getElementById('comTkVRBar');
-  var tkVitBar = document.getElementById('comTkVitBar');
-  if(tkVRBar)  tkVRBar.style.width  = Math.round(tkVR/maxTk*100)+'%';
-  if(tkVitBar) tkVitBar.style.width = Math.round(tkVit/maxTk*100)+'%';
+  // HOTFIX CERTIFICAÇÃO FASE 3 (achado 2.3 da auditoria de roles) — Rule
+  // de 'fin_tx' nunca concede leitura a Comercial (só Financeiro/Master);
+  // antes, permission-denied ficava indistinguível de "nenhuma venda
+  // ainda" — o card sempre mostrava "R$ 0" para Comercial, uma métrica
+  // sempre errada e nunca sinalizada como indisponível. Mesmo padrão já
+  // usado em outros widgets (_dashSemAcessoEstoque): mostrar "—" honesto
+  // em vez de um zero fabricado.
+  var _comSemAcessoFinTx = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['fin_tx'];
+  if(_comSemAcessoFinTx){
+    setEl('comTkVR',  '—');
+    setEl('comTkVit', '—');
+    var tkVRBarNA = document.getElementById('comTkVRBar');
+    var tkVitBarNA = document.getElementById('comTkVitBar');
+    if(tkVRBarNA)  tkVRBarNA.style.width  = '0%';
+    if(tkVitBarNA) tkVitBarNA.style.width = '0%';
+  } else {
+    var txVR  = FIN_TX.filter(function(t){return t.marca==='vr'  && t.status==='recebido' && !_isTestRecord(t);});
+    var txVit = FIN_TX.filter(function(t){return t.marca==='vit' && t.status==='recebido' && !_isTestRecord(t);});
+    var tkVR  = txVR.length  ? txVR.reduce(function(s,t){return s+t.valor;},0)/txVR.length   : 0;
+    var tkVit = txVit.length ? txVit.reduce(function(s,t){return s+t.valor;},0)/txVit.length : 0;
+    var maxTk = Math.max(tkVR, tkVit, 1);
+    setEl('comTkVR',  'R$ '+Math.round(tkVR).toLocaleString('pt-BR'));
+    setEl('comTkVit', 'R$ '+Math.round(tkVit).toLocaleString('pt-BR'));
+    var tkVRBar = document.getElementById('comTkVRBar');
+    var tkVitBar = document.getElementById('comTkVitBar');
+    if(tkVRBar)  tkVRBar.style.width  = Math.round(tkVR/maxTk*100)+'%';
+    if(tkVitBar) tkVitBar.style.width = Math.round(tkVit/maxTk*100)+'%';
+  }
 
   // Motivos de perdas (from CRM leads with etapa = 'perdido' or motivo field, or static for now)
   var perdasData = {};
