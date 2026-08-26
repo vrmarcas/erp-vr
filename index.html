@@ -1366,18 +1366,12 @@ function _e2eDlgConfirm(msg) {
   return confirm(msg);
 }
 
-// Arquitetura oficial de Compras (RODADA FINAL, 2026-08-06) — independente
-// de _HOMOLOG_MODE (que só decide A QUAL projeto Firebase conectar,
-// nunca qual arquitetura de negócio usar). Antes desta rodada, Compras
-// v1 (array legado erp_vr/compras, escrita direta de stock) e v2 (Cloud
-// Functions, erp_vr_compras_*) coexistiam escondidos atrás de
-// _HOMOLOG_MODE — o que significava que PRODUÇÃO sempre rodava v1 (o
-// caminho inseguro), e só localhost+?emulator=1 via v2. Esta flag torna
-// v2 a única arquitetura candidata, em qualquer ambiente. O ramo v1
-// permanece no código (rollback), mas nenhum caminho ativo o alcança
-// mais enquanto esta flag for true. Ver
-// scripts/AUDITORIA_FASE2_COMPRAS_V1_V2_PARIDADE_2026-08-06.md.
-var _COMPRAS_V2_OFICIAL = true;
+// HOTFIX BLOCO P (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+// a declaração acima e este comentário inteiro estavam DUPLICADOS
+// (copy-paste, texto idêntico repetido) logo depois do adaptador de
+// diálogo de E2E — inofensivo em runtime (`var` só reatribui o mesmo
+// valor), mas confuso para quem lê o arquivo. Removido aqui; a declaração
+// real (com o comentário completo) continua acima, intocada.
 var firebaseConfig = _HOMOLOG_MODE ? {
   apiKey: "demo-homolog-key",
   authDomain: "demo-erp-homolog.firebaseapp.com",
@@ -1706,11 +1700,24 @@ function _btnBusy(btn, textoCarregando, maxMs) {
   return restore;
 }
 
+// HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+// diferente de _cloudWatch() (que já tem _CLOUD_WATCH_CONFIRMED/_CLOUD_WATCH_ERROR
+// desde a Rodada 9), _cloudLoad() — usado por ~42 chaves de boot em
+// _cloudLoadAll(), incluindo 'erp_fornecedores', 'clientes_lixeira' etc. —
+// nunca teve NENHUM sinal por chave: uma falha de rede/permissão sempre
+// virava cb(null), indistinguível de "documento vazio de verdade" para
+// qualquer tela que consultasse o array resultante. Mesma classe de bug,
+// mesmo padrão de correção, agora estendido à família de leitura one-shot
+// inteira de uma vez (nunca uma segunda fórmula por tela).
+var _CLOUD_LOAD_CONFIRMED = {};
+var _CLOUD_LOAD_ERROR = {};
 // Carregar documento do Firestore
 function _cloudLoad(key, cb) {
   if(!_db) { cb(null); return; }
   _homologGuardOrThrow();
   _db.collection(_COL).doc(key).get().then(function(doc) {
+    _CLOUD_LOAD_ERROR[key] = false;
+    _CLOUD_LOAD_CONFIRMED[key] = true;
     if(doc.exists && doc.data() && doc.data().data) {
       try {
         var raw = doc.data().data;
@@ -1719,7 +1726,7 @@ function _cloudLoad(key, cb) {
       } catch(e){}
     }
     cb(null);
-  }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); cb(null); });
+  }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); _CLOUD_LOAD_ERROR[key] = true; cb(null); });
 }
 
 // RODADA 9 (2026-08-22, Bloco B) — achado real: erro de leitura de
@@ -2025,49 +2032,79 @@ function _cloudLoadAll() {
     if(d&&d.length){ _USR_DATA=d; var sw=document.getElementById('authSyncWarn'); if(sw) sw.style.display='none'; try{ usrRender(); }catch(e){} }
     done();
   });
-  _cloudLoad("erp_config", function(d){
-    if(d && typeof d==='object'){
-      var local = cfgLoad();
-      var merged = Object.assign({}, local, d);
-      // Deep merge: materiais por id estável (fallback nome+esp p/ legado
-      // sem id) — nunca por nome sozinho. Cloud vazio não sobrescreve local.
-      if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
-        // HOTFIX 2026-08-13: idem ao watch — nunca reanexar o bootstrap CFG_DEFAULT.
-        merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? local.materiais : [], true);
-      } else {
-        // Cloud sem materiais — usa local ou CFG_DEFAULT como fallback
-        merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
-        merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
-        merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
-      }
-      _cfgRecalcRsm2Todos(merged.materiais);
-      _cfgData = merged;
-      _cfgDataLoaded = true;
-      try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
-    }
-    done();
-  });
+  // HOTFIX BLOCO O (Rodada de Hardening, Fase 2, 2026-08-26) — antes desta
+  // rodada, este ponto chamava seu PRÓPRIO _cloudLoad("erp_config", ...)
+  // independente do de _cloudIniciar() (~800ms mais cedo) — 2 leituras de
+  // rede reais do mesmo documento, com uma janela de corrida onde a mais
+  // ANTIGA podia resolver por último (rede lenta) e sobrescrever o merge
+  // mais NOVO. Agora reutiliza a MESMA Promise (_cfgBootPromise, criada em
+  // _cloudIniciar() com o merge completo idêntico ao que existia aqui) —
+  // uma só leitura, nenhuma corrida entre duas respostas do mesmo doc.
+  // _cloudLoadAll() só roda via setTimeout(_cloudLoadAll, 800) disparado
+  // de dentro de _cloudIniciar(), que sempre cria _cfgBootPromise antes
+  // desse agendamento — nunca null aqui de verdade (nenhum guard `else`
+  // morto, mesma classe de bug de contagem da conclusão já corrigida
+  // nesta função para crmBaseLoadIdx, ver test_cloud_ready_never_stuck).
+  // .finally(): sucesso ou falha, a conclusão abaixo sempre roda exatamente
+  // uma vez — nunca trava o contador de boot (_cloudReady) esperando por
+  // uma Promise que rejeitou (ver _homologGuardOrThrow, único caminho
+  // síncrono de exceção dentro de _cloudLoad, restrito ao modo homologação).
+  _cfgBootPromise.finally(function(){ done(); });
 }
 
 // Iniciar após login anônimo — com timeout + retry (o SDK pode travar por
 // interferência de antivírus/extensões; nesse caso tentamos de novo sem persistência)
 var _cloudIniciou = false;
+// HOTFIX BLOCO O (Rodada de Hardening, Fase 2, 2026-08-26) — INVESTIGAÇÃO:
+// erp_config era lido por 2 chamadas _cloudLoad() independentes (esta e a
+// de dentro de _cloudLoadAll(), ~800ms depois) — nunca uma leitura de fato
+// "carregada 2x em paralelo" no sentido de dado divergente no caso comum
+// (mesma requisição do mesmo doc, quase sempre a de cá resolve bem antes
+// dos 800ms), mas uma janela de corrida real e concreta EXISTE: se esta
+// leitura estiver anormalmente lenta (rede ruim) e só resolver DEPOIS da
+// segunda, e uma escrita concorrente de outra aba acontecer nesse meio-
+// tempo, a leitura mais ANTIGA (esta) podia terminar por último e
+// sobrescrever o merge mais NOVO já aplicado pela segunda — exatamente a
+// classe "resposta antiga sobrescreve estado novo" que esta rodada ataca.
+// Também eram 2 requisições de rede reais para o mesmo documento sempre,
+// mesmo no caso feliz — desperdício, nunca inofensivo por design, só por
+// timing favorável na prática. Corrigido com a mudança MÍNIMA possível:
+// uma única leitura, cujo resultado (Promise) é compartilhado com
+// _cloudLoadAll() (ver _cfgBootPromise abaixo) — nunca duas leituras
+// concorrentes do mesmo doc, então não há mais "qual resposta chega por
+// último" para decidir. O merge em si (_cfgMergeMateriais, cloudWins e
+// fallback de maquinas/maodeobra) NÃO mudou — só passou a rodar uma vez
+// em vez de potencialmente duas. Ver scripts/test_hardening_fase2_blocoo_erp_config_boot_2026-08-26.js.
+var _cfgBootPromise = null;
 function _cloudIniciar(){
   if(_cloudIniciou) return;
   _cloudIniciou = true;
   // Carregar erp_config imediatamente (sem delay) para materiais disponíveis no orçamento
-  _cloudLoad('erp_config', function(d){
-    if(d && typeof d==='object'){
-      var local = cfgLoad();
-      var merged = Object.assign({}, local, d);
-      if(Array.isArray(d.materiais) && d.materiais.length){
-        // HOTFIX 2026-08-13: idem — nunca reanexar o bootstrap CFG_DEFAULT.
-        merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? (local.materiais||[]) : [], true);
+  _cfgBootPromise = new Promise(function(resolve){
+    _cloudLoad('erp_config', function(d){
+      if(d && typeof d==='object'){
+        var local = cfgLoad();
+        var merged = Object.assign({}, local, d);
+        // Deep merge: materiais por id estável (fallback nome+esp p/ legado
+        // sem id) — nunca por nome sozinho. Cloud vazio não sobrescreve local.
+        if(Array.isArray(d.materiais) && d.materiais.length && Array.isArray(local.materiais)) {
+          // HOTFIX 2026-08-13: idem ao watch — nunca reanexar o bootstrap CFG_DEFAULT.
+          merged.materiais = _cfgMergeMateriais(d.materiais, _cfgDataLoaded ? local.materiais : [], true);
+        } else {
+          // Cloud sem materiais — usa local ou CFG_DEFAULT como fallback
+          // (idêntico ao que _cloudLoadAll() fazia na sua própria leitura
+          // separada de erp_config, agora unificada aqui).
+          merged.materiais = (Array.isArray(local.materiais) && local.materiais.length) ? local.materiais : JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
+          merged.maquinas  = (Array.isArray(d.maquinas)  && d.maquinas.length)  ? d.maquinas  : ((Array.isArray(local.maquinas)  && local.maquinas.length)  ? local.maquinas  : JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas)));
+          merged.maodeobra = (Array.isArray(d.maodeobra) && d.maodeobra.length) ? d.maodeobra : ((Array.isArray(local.maodeobra) && local.maodeobra.length) ? local.maodeobra : JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra)));
+        }
+        _cfgRecalcRsm2Todos(merged.materiais);
+        _cfgData = merged;
+        _cfgDataLoaded = true;
+        try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
       }
-      _cfgRecalcRsm2Todos(merged.materiais);
-      _cfgData = merged;
-      _cfgDataLoaded = true;
-    }
+      resolve();
+    });
   });
   setTimeout(_cloudLoadAll, 800);
   setTimeout(kbProntaSync, 600);
@@ -8434,7 +8471,35 @@ function fornRender() {
   var grid=document.getElementById('fornGrid');
   var empty=document.getElementById('fornEmpty');
   if(!grid) return;
-  if(!filtered.length){ grid.innerHTML=''; if(empty) empty.style.display='block'; return; }
+  if(!filtered.length){
+    grid.innerHTML='';
+    if(empty){
+      // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
+      // os sinais genéricos de _cloudLoad('erp_fornecedores',...) (ver
+      // _CLOUD_LOAD_CONFIRMED/_CLOUD_LOAD_ERROR, Bloco B) — antes, "Nenhum
+      // fornecedor cadastrado" (com botão "Cadastrar Primeiro Fornecedor")
+      // aparecia mesmo antes da 1ª resposta do servidor ou numa falha real,
+      // sugerindo recadastrar por cima de dados que só não chegaram ainda.
+      var _fornErro = typeof _CLOUD_LOAD_ERROR!=='undefined' && _CLOUD_LOAD_ERROR['erp_fornecedores'];
+      var _fornConfirmado = typeof _CLOUD_LOAD_CONFIRMED!=='undefined' && _CLOUD_LOAD_CONFIRMED['erp_fornecedores'];
+      if(_fornErro){
+        empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">⚠️</div>'
+          + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Não foi possível carregar os fornecedores</div>'
+          + '<div style="font-size:13px;color:var(--muted)">Verifique sua conexão/permissão e recarregue a página — seus fornecedores podem já existir, isto não é uma lista vazia.</div>';
+      } else if(!_fornConfirmado){
+        empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.5">⏳</div>'
+          + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Carregando fornecedores...</div>'
+          + '<div style="font-size:13px;color:var(--muted)">Aguarde a confirmação do servidor.</div>';
+      } else {
+        empty.innerHTML = '<div style="font-size:64px;margin-bottom:16px;opacity:.5">🏭</div>'
+          + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhum fornecedor cadastrado</div>'
+          + '<div style="font-size:13px;color:var(--muted);margin-bottom:24px">Cadastre seus fornecedores para ter controle de compras, histórico e contato rápido</div>'
+          + '<button onclick="fornNovoModal()" style="padding:14px 32px;background:linear-gradient(135deg,#17A0BD,#1EB8D8);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(79,70,229,.4)">🏭 Cadastrar Primeiro Fornecedor</button>';
+      }
+      empty.style.display='block';
+    }
+    return;
+  }
   if(empty) empty.style.display='none';
 
   grid.innerHTML=filtered.map(function(f){
@@ -17686,7 +17751,23 @@ function renderOsTable() {
   });
   var cnt=document.getElementById('osTableCount');
   if(cnt) cnt.textContent='('+rows.length+' OS)';
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';return;}
+  if(!rows.length){
+    // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
+    // os sinais genéricos já existentes (_CLOUD_WATCH_CONFIRMED/_CLOUD_WATCH_ERROR,
+    // já preenchidos pelo próprio _cloudWatch('kb_os',...) sem nenhuma
+    // mudança na leitura) — "Nenhuma OS encontrada" nunca mais aparece
+    // antes da 1ª confirmação do servidor, nem disfarça uma falha real.
+    var _osErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['kb_os'];
+    var _osConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['kb_os'];
+    if(_osErro){
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar as Ordens de Serviço — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    } else if(!_osConfirmado){
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando ordens de serviço...</td></tr>';
+    } else {
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">Nenhuma OS encontrada</td></tr>';
+    }
+    return;
+  }
   // HOTFIX OPERACIONAL 2026-08-12, P0.7 — achado real no smoke de produção
   // (OS #011): esta tabela mostrava o status cru "aguardando_saldo" em vez
   // de um rótulo, divergindo do Kanban (que, após o P0.6, mostra "Iniciada"
@@ -18001,13 +18082,19 @@ function comprasSolicitarDeOS(os, matKey, qtdFalta){
     return Promise.resolve(null);
   }
   // Arquitetura v2 (documento-por-registro, mediada por Cloud Function) —
-  // ver bloco "COMPRAS v2" abaixo. Em _COMPRAS_V2_OFICIAL a UI NUNCA mais cria
-  // solicitação no array legado (COMPRAS/erp_vr/compras); o ramo legado
-  // logo abaixo só continua ativo fora de homologação (produção real ainda
-  // não tem as Cloud Functions de Compras publicadas — ver relatório de
-  // homologação, Task 4). Critério objetivo de remoção do ramo legado:
-  // Functions de compras publicadas + firestore.rules normalizadas
-  // publicadas + migração de erp_vr/compras executada contra produção.
+  // ver bloco "COMPRAS v2" abaixo. HOTFIX BLOCO P (Rodada de Hardening,
+  // Fase 2, 2026-08-26) — comentário anterior aqui estava DESATUALIZADO:
+  // dizia que o ramo legado abaixo "continua ativo fora de homologação
+  // (produção ainda não tem as Functions publicadas)" — não é mais
+  // verdade. _COMPRAS_V2_OFICIAL é `true` incondicionalmente (não depende
+  // de ambiente/homologação — ver declaração da flag), então a UI NUNCA
+  // mais cria solicitação no array legado (COMPRAS/erp_vr/compras) em
+  // NENHUM ambiente, produção incluída — confirmado ao vivo: `COMPRAS`
+  // tem 0 registros em produção hoje (nenhum dado histórico real ali). O
+  // ramo abaixo é código morto mantido só como rollback manual (nunca
+  // alcançado por nenhum caminho ativo); ver
+  // scripts/AUDITORIA_FASE2_COMPRAS_V1_V2_PARIDADE_2026-08-06.md para o
+  // histórico completo da decisão.
   if(_COMPRAS_V2_OFICIAL){
     var jaExisteV2 = COMPRAS_V2_CACHE.some(function(pc){ return pc.origem && (pc.origem.osId===os.id || pc.origem.osNum===os.num) && pc.status!=='cancelada'; });
     if(jaExisteV2){
@@ -18238,13 +18325,16 @@ function comprasCancelar(id){
 // função chama uma Cloud Function que verifica o perfil no servidor,
 // valida a transição de status e é transacional/idempotente.
 //
-// Escopo desta rodada: implementado e testado contra o Firebase Emulator
-// Suite (Functions+Firestore+Auth). Só ativo/chamável quando _COMPRAS_V2_OFICIAL
-// está ligado — em produção estas funções não são invocadas por nenhum
-// botão existente (a UI de Compras em produção continua no fluxo antigo,
-// acima, intocado). Ativar isso em produção exige plano de integração
-// próprio (ver relatório de homologação) — não é este commit que decide
-// isso, só prova que o mecanismo funciona.
+// HOTFIX BLOCO P (Rodada de Hardening, Fase 2, 2026-08-26) — comentário
+// anterior aqui estava DESATUALIZADO: dizia que "em produção estas funções
+// não são invocadas por nenhum botão existente" e que ativar em produção
+// "exige plano de integração próprio". Isso já não é verdade — uma rodada
+// posterior (RODADA FINAL, 2026-08-06, ver a declaração de
+// _COMPRAS_V2_OFICIAL) tornou v2 a arquitetura oficial incondicional, em
+// qualquer ambiente. Confirmado ao vivo em produção: comprasV2Init() está
+// ativo (2 listeners reais), a tela renderiza via comprasV2Render(), e
+// COMPRAS (v1) tem 0 registros. Testado contra o Firebase Emulator Suite
+// (Functions+Firestore+Auth) e verificado em produção real.
 function comprasV2RequerHomolog(){
   if(!_COMPRAS_V2_OFICIAL) throw new Error('[Compras v2] arquitetura v2 desativada (_COMPRAS_V2_OFICIAL=false) nesta build.');
 }
@@ -18280,9 +18370,15 @@ function comprasV2Cancelar(compraId, motivo){
 // O cache abaixo é alimentado por um listener REAL do Firestore
 // (erp_vr_compras / erp_vr_fin_cp) — leitura pura, nunca escrita direta do
 // cliente (Rules dessas coleções: allow write: if false; toda escrita passa
-// por Cloud Function, ver functions/src/compras.ts). Só é inicializado em
-// _COMPRAS_V2_OFICIAL; fora de homologação essas variáveis ficam sempre vazias e
-// a tela de Compras usa exclusivamente o fluxo legado (COMPRAS).
+// por Cloud Function, ver functions/src/compras.ts). HOTFIX BLOCO P
+// (Rodada de Hardening, Fase 2, 2026-08-26) — comentário anterior aqui
+// dizia "fora de homologação essas variáveis ficam sempre vazias e a tela
+// usa exclusivamente o fluxo legado (COMPRAS)" — desatualizado.
+// _COMPRAS_V2_OFICIAL é incondicional (não depende de homologação), então
+// este cache é a ÚNICA fonte que a tela de Compras usa, em qualquer
+// ambiente; COMPRAS (v1) nunca mais é renderizado (comprasRender()
+// redireciona para comprasV2Render() sempre) — confirmado ao vivo em
+// produção.
 var COMPRAS_V2_CACHE = [];
 var COMPRAS_V2_FINCP_CACHE = [];
 var _comprasV2Unsubs = null;
@@ -19077,7 +19173,20 @@ function finCRRender() {
   if(cnt) cnt.textContent='('+list.length+' registro'+(list.length!==1?'s':'')+')';
   finCRUpdateSummary();
   finRenderAging();
-  if(!list.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
+  if(!list.length){
+    // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
+    // os sinais genéricos já existentes de _cloudWatch('fin_cr',...).
+    var _crErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['fin_cr'];
+    var _crConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['fin_cr'];
+    if(_crErro){
+      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Receber — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    } else if(!_crConfirmado){
+      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando Contas a Receber...</td></tr>';
+    } else {
+      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';
+    }
+    return;
+  }
   tbody.innerHTML=list.map(function(r){
     var mLabel=r.marca==='vr'
       ?'<span class="fin-marca-badge fin-marca-vr">VR — MP</span>'
@@ -19766,7 +19875,20 @@ function finCPRender() {
   // incluindo essas ocorrências normalmente (list.length).
   var total=list.reduce(function(s,r){return s+finCPValorNum(r);},0);
   if(cnt) cnt.textContent='('+list.length+' lançamento'+(list.length!==1?'s':'')+' · '+finFmt(total)+')';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';return;}
+  if(!list.length){
+    // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
+    // os sinais genéricos já existentes de _cloudWatch('fin_cp',...).
+    var _cpErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['fin_cp'];
+    var _cpConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['fin_cp'];
+    if(_cpErro){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Pagar — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    } else if(!_cpConfirmado){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando Contas a Pagar...</td></tr>';
+    } else {
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum registro encontrado</td></tr>';
+    }
+    return;
+  }
   tbody.innerHTML=list.map(function(r){
     var statusMapCP={pendente:'pendente',pago:'pago',vencido:'vencido',agendado:'agendado'};
     var badge='<span class="fin-badge fin-badge-'+(statusMapCP[r.status]||'pendente')+'">'+r.status.charAt(0).toUpperCase()+r.status.slice(1)+'</span>';
@@ -22312,7 +22434,27 @@ function renderClientes() {
       ||(c.email||'').toLowerCase().includes(ql);
   });
   if(cntEl) cntEl.textContent='('+list.length+' clientes)';
-  if(!list.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum cliente encontrado</td></tr>';return;}
+  if(!list.length){
+    // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+    // real: "Nenhum cliente encontrado" era mostrado sempre que a lista
+    // filtrada ficava vazia, mesmo quando o listener de 'clientes' ainda
+    // não tinha recebido a 1ª resposta do servidor OU quando falhou —
+    // indistinguível de "0 clientes cadastrados de verdade". Reutiliza os
+    // sinais genéricos já existentes (_CLOUD_WATCH_CONFIRMED/_CLOUD_WATCH_ERROR,
+    // já preenchidos pelo próprio _cloudWatch('clientes',...) sem nenhuma
+    // mudança na leitura) — nunca uma segunda fórmula, só passou a ser
+    // consultada aqui.
+    var _cliErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['clientes'];
+    var _cliConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['clientes'];
+    if(_cliErro){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar os clientes — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    } else if(!_cliConfirmado){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando clientes...</td></tr>';
+    } else {
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nenhum cliente encontrado</td></tr>';
+    }
+    return;
+  }
   tbody.innerHTML=list.map(function(c){
     var tipoBg=c.tipo==='PJ'?'#E3F7FB':'#FEF3C7', tipoCor=c.tipo==='PJ'?'#983C8F':'#92400E';
     var mBg=c.marca==='vr'?'#E3F7FB':'#E3F0F1', mCor=c.marca==='vr'?'#983C8F':'#134F57';
@@ -33061,17 +33203,30 @@ function atdInit(){
   atdListenerInit();
 }
 
+// HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — mesmo padrão
+// já usado em _VITRE_CAT_LOADED/_VITRE_CAT_LOAD_ERROR (Bloco J): distingue
+// "ainda não confirmado" de "confirmado" e sinaliza falha real — antes,
+// uma falha do listener só gerava console.error, indistinguível de "0
+// atendimentos" para quem vê a lista.
+var _ATD_LOADED = false;
+var _ATD_LOAD_ERROR = false;
 function atdListenerInit(){
   if(ATD_UNSUB || typeof _db==='undefined' || !_db) return;
   ATD_UNSUB = _db.collection('atendimentos').orderBy('updatedAt','desc').limit(200).onSnapshot(function(snap){
     ATD_CACHE = snap.docs.map(function(d){ return d.data(); });
+    _ATD_LOADED = true;
+    _ATD_LOAD_ERROR = false;
     atdRenderLista();
     atdSyncBadge();
     if(ATD_SELECTED_ID){
       var atual = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
       if(atual){ atdRenderThreadHeader(atual); atdRenderPainel(atual); } else { atdFecharThread(); }
     }
-  }, function(e){ console.error('[Atendimentos] listener falhou:', e); });
+  }, function(e){
+    console.error('[Atendimentos] listener falhou:', e);
+    _ATD_LOAD_ERROR = true;
+    atdRenderLista();
+  });
 }
 
 function atdSyncBadge(){
@@ -33124,7 +33279,16 @@ function atdRenderLista(){
     }
     return true;
   });
-  if(!lista.length){ wrap.innerHTML = '<div class="atd-empty">Nenhum atendimento encontrado.</div>'; return; }
+  if(!lista.length){
+    if(_ATD_LOAD_ERROR){
+      wrap.innerHTML = '<div class="atd-empty" style="color:#B91C1C;font-weight:700">⚠️ Não foi possível carregar os atendimentos — verifique sua conexão/permissão e recarregue a página.</div>';
+    } else if(!_ATD_LOADED){
+      wrap.innerHTML = '<div class="atd-empty">⏳ Carregando atendimentos...</div>';
+    } else {
+      wrap.innerHTML = '<div class="atd-empty">Nenhum atendimento encontrado.</div>';
+    }
+    return;
+  }
   wrap.innerHTML = lista.map(function(a){
     var modo = atdModoLabel(a);
     var testeTag = a.isTeste ? '<span class="badge" style="background:#FEF3C7;color:#92400E">🧪 teste</span>' : '';
@@ -34392,6 +34556,17 @@ function crmRenderBoard(marca) {
   var leads = crmLeadsFor(marca);
   var parsVal=_parsVal;
   var fmtV=_fmtV;
+  // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
+  // os sinais genéricos já existentes (_CLOUD_WATCH_CONFIRMED/_CLOUD_WATCH_ERROR,
+  // já preenchidos por _cloudWatch('crm_leads',...) sem nenhuma mudança na
+  // leitura). Antes, todas as colunas mostravam "Nenhum lead aqui" antes
+  // da 1ª confirmação do servidor — indistinguível de um funil realmente
+  // vazio numa sessão fresca.
+  var _crmErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['crm_leads'];
+  var _crmConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['crm_leads'];
+  var _crmMsgVazio = _crmErro
+    ? '<div style="text-align:center;color:#B91C1C;font-size:11px;padding:20px 8px;font-weight:700">⚠️ Falha ao carregar</div>'
+    : (!_crmConfirmado ? '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">⏳ Carregando...</div>' : '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">Nenhum lead aqui</div>');
   boardEl.innerHTML = CRM_FASES.map(function(fase){
     var cards = leads.filter(function(l){ return l.etapa === fase.id; });
     var colVal = cards.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
@@ -34405,7 +34580,7 @@ function crmRenderBoard(marca) {
       +(valStr ? '<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.75);margin-top:3px">'+valStr+'</div>' : '')
       +'</div>'
       +'<div class="crm-body" style="min-height:120px">'
-      +(cards.length ? cards.map(crmCardHTML).join('') : '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">Nenhum lead aqui</div>')
+      +(cards.length ? cards.map(crmCardHTML).join('') : _crmMsgVazio)
       +'</div>'
       +'</div>';
   }).join('');
