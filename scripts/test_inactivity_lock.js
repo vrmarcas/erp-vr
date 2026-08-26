@@ -148,6 +148,7 @@ global._comprasV2ComprasSub = function () {};
 global._comprasV2FinCpSub = function () {};
 global._vitreCatUnsub = function () { _unsubCalls.vitre++; };
 global._stockUnsub = function () {};
+global._stockTombUnsub = function () {};
 global._normalizeRole = function (v) {
   if (typeof v !== 'string') return null;
   var r = v.trim().toLowerCase();
@@ -192,6 +193,7 @@ function resetAll() {
   global._comprasV2Unsubs = [function () { _unsubCalls.comprasV2++; }];
   global._vitreCatUnsub = function () { _unsubCalls.vitre++; };
   global._stockUnsub = function () {};
+global._stockTombUnsub = function () {};
   global._SEC_INACT_MINS = 10;
   global._secTimer = null;
   global._tokenRenewalTimer = null;
@@ -480,6 +482,13 @@ async function main() {
     _dom.lockPwd.value = 'ok';
     await authUnlock();
     assertEq(_cloudIniciarCallCount, 1, 'authUnlock() bem-sucedido deve reconectar tudo via _cloudIniciar() — exatamente como um login novo, nunca uma segunda fórmula');
+  });
+
+  await test('18d. ACHADO REAL corrigido (smoke ao vivo pós-desbloqueio, Certificação Fase 3 R2): secEngageLock() também reseta o guard de _watchStockTomb() — sem isto, só o Estoque em si reconectava; a lápide de itens excluídos (stock_deleted) ficava presa em "Sem permissão" para sempre após qualquer bloqueio, porque _watchStock()/_watchStockTomb() são registrados uma única vez no boot do script, fora da bateria de _cloudLoadAll()', function () {
+    resetAll(); loginSessionFixture('uid-stocktomb', 'master');
+    global._stockTombUnsub = function () {};
+    secEngageLock('manual');
+    assertEq(global._stockTombUnsub, null, 'ACHADO REAL: sem isto, _watchStockTomb() nunca recriava a inscrição (seu guard "if(_stockTombUnsub) return;" ficava preso apontando pro listener morto) — mesmo problema que _stockUnsub já tinha antes de ser corrigido');
   });
 
   await test('19. conta sem perfil (erp_vr_usuarios inexistente) não desbloqueia mesmo com senha certa', async function () {

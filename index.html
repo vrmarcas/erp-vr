@@ -1475,16 +1475,26 @@ function _stockTombSave() {
   if(typeof _cloudSave !== 'function') return Promise.resolve({ok:false, reason:'cloudsave-indisponivel'});
   return _cloudSave('stock_deleted', _STOCK_TOMB);
 }
-_CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
-  if(doc.exists && doc.data() && doc.data().data){
-    try{
-      var d = JSON.parse(doc.data().data);
-      if(d && typeof d === 'object') _STOCK_TOMB = d;
-    }catch(e){}
-  }
-  _stockTombLoaded = true;
-  if(_stockApplyTomb()){ try{ stockRenderItems(); }catch(e){} }
-},function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; }));
+// HOTFIX CERTIFICAÇÃO FASE 3 R2 (2026-08-26) — mesmo achado do _watchStock()
+// abaixo: extraído para função nomeada com guard, reconectável por
+// _cloudIniciar() após um ciclo bloquear/desbloquear (antes era um
+// onSnapshot direto de boot único — nunca reconectava sozinho).
+var _stockTombUnsub = null;
+function _watchStockTomb(){
+  if(_stockTombUnsub) return;
+  _stockTombUnsub = _db.collection(_COL).doc('stock_deleted').onSnapshot(function(doc){
+    if(doc.exists && doc.data() && doc.data().data){
+      try{
+        var d = JSON.parse(doc.data().data);
+        if(d && typeof d === 'object') _STOCK_TOMB = d;
+      }catch(e){}
+    }
+    _stockTombLoaded = true;
+    if(_stockApplyTomb()){ try{ stockRenderItems(); }catch(e){} }
+  },function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; _stockTombUnsub = null; });
+  _CLOUD_UNSUBS.push(_stockTombUnsub);
+}
+_watchStockTomb();
 
 // Listener de estoque em tempo real — registrado imediatamente, sem esperar _cloudReady
 // Isso garante que todos os usuários vejam mudanças em tempo real
@@ -2248,6 +2258,16 @@ function _cloudIniciar(){
   });
   setTimeout(_cloudLoadAll, 800);
   setTimeout(kbProntaSync, 600);
+  // HOTFIX CERTIFICAÇÃO FASE 3 R2 (2026-08-26) — achado real ao vivo:
+  // _watchStock()/_watchStockTomb() são registrados uma única vez no
+  // carregamento do script (fora da bateria de _cloudLoadAll), então nunca
+  // reconectavam sozinhos depois de um ciclo bloquear/desbloquear — Estoque
+  // ficava preso em "Sem permissão" até F5 manual. Ambas as funções já têm
+  // guard próprio (_stockUnsub/_stockTombUnsub) — chamar aqui é idempotente
+  // no boot inicial (guard já setado, retorna na hora) e é o que garante a
+  // reconexão real após secEngageLock() zerar os dois guards.
+  if(typeof _watchStock==='function') _watchStock();
+  if(typeof _watchStockTomb==='function') _watchStockTomb();
 }
 function _cloudAuthAviso(msg){
   var ct=document.getElementById('cloudTxt');
@@ -33280,6 +33300,7 @@ function secEngageLock(motivo){
   if(typeof _comprasV2FinCpSub!=='undefined') _comprasV2FinCpSub=null;
   if(typeof _vitreCatUnsub!=='undefined' && _vitreCatUnsub){ try{_vitreCatUnsub();}catch(e){} _vitreCatUnsub=null; }
   if(typeof _stockUnsub!=='undefined'){ _stockUnsub=null; }
+  if(typeof _stockTombUnsub!=='undefined'){ _stockTombUnsub=null; }
   _cloudIniciou = false;
   try{ firebase.auth().signOut(); }catch(e){}
   _currentSession = null;
