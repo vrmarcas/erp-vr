@@ -31,6 +31,215 @@ import {
   type AnexoMeta,
   type BloqueioInfo,
 } from "./types";
+import { detectCommercialIntent } from "./confirmation_detector";
+
+/**
+ * Sprint P1.0 (achado real de auditoria) — valeriaWebhookChatvolt era
+ * PASSIVO: só logava eventos em valeria_webhook_events/valeria_msgs,
+ * nunca criava atendimentos/{id} nem disparava confirmação/identidade/
+ * execução server-side. Toda a arquitetura determinística de P0.6-P0.9
+ * (confirmation detector, identity detector, action_executor) só rodava
+ * via atdSimularMensagemCliente — o caminho ERP-only de homologação.
+ * Mensagens REAIS do WhatsApp nunca passavam por nenhuma dessas
+ * garantias. Este bloco fecha esse gap no único ponto de entrada real
+ * que existe para WhatsApp (o webhook), sem esperar o LLM chamar Tool
+ * nenhuma — mesma disciplina de sempre.
+ */
+
+const NOME_TOKEN = "[A-ZÀ-Ý][a-zà-ÿ]+(?:\\s+[A-ZÀ-Ý][a-zà-ÿ]+){0,3}";
+const NOME_PATTERNS: RegExp[] = [
+  new RegExp(`\\b[Ss]ou\\s+(?:o\\s+|a\\s+)?(${NOME_TOKEN})`),
+  new RegExp(`\\b[Mm]eu nome\\s*(?:e|eh|:)?\\s*(${NOME_TOKEN})`),
+  new RegExp(`\\b[Aa]qui\\s*(?:e|eh)?\\s*(?:o\\s+|a\\s+)?(${NOME_TOKEN})`),
+  new RegExp(`\\b[Mm]e chamo\\s+(${NOME_TOKEN})`),
+];
+/** Espelha functions/src/identity_detector.ts (nome apenas — telefone do WhatsApp já vem do canal, nunca do texto). */
+function extrairNomeDoTexto(textoOriginal: string): string | null {
+  const texto = textoOriginal.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const pattern of NOME_PATTERNS) {
+    const m = texto.match(pattern);
+    if (m && m[1]) return m[1].trim();
+  }
+  return null;
+}
+
+const VALERIA_GET_CONTEXTO_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaGetContexto";
+const VALERIA_CRIAR_OPORTUNIDADE_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaCriarOportunidade";
+
+/**
+ * Upsert do atendimento canônico + mensagem do cliente. Idempotente por
+ * design (mesma mensagem só é processada uma vez, ver withIdempotency no
+ * chamador) — usa conversationId do Chatvolt DIRETO como atendimentoId
+ * (sem indireção extra) para eliminar qualquer race condition de busca.
+ */
+async function upsertAtendimentoWhatsApp(params: {
+  conversationId: string;
+  channelPhone: string | null;
+  texto: string;
+}): Promise<{ isNovo: boolean; atd: FirebaseFirestore.DocumentData }> {
+  const admin = (await import("firebase-admin")).default;
+  const db = admin.firestore();
+  const ref = db.collection("atendimentos").doc(params.conversationId);
+  const snap = await ref.get();
+  const now = Date.now();
+
+  if (!snap.exists) {
+    const registro = {
+      id: params.conversationId,
+      channel: "whatsapp",
+      externalConversationId: null,
+      providerConversationId: params.conversationId,
+      contactId: null,
+      leadId: null,
+      clienteId: null,
+      telefoneE164: params.channelPhone ?? null,
+      nome: null,
+      empresa: null,
+      modoAtendimento: "valeria",
+      responsavelUid: null,
+      responsavelNome: null,
+      status: "aberto",
+      classificacao: "nao_classificado",
+      marca: "indefinido",
+      resumo: null,
+      briefingRef: null,
+      oportunidadeId: null,
+      orcamentoId: null,
+      naoLidas: 0,
+      ultimaMensagem: params.texto,
+      ultimaInteracaoEm: now,
+      createdAt: now,
+      updatedAt: now,
+      isTeste: false,
+      requiresHuman: false,
+      humanReason: null,
+      priority: "NORMAL",
+    };
+    await ref.set(registro);
+    const msgRef = ref.collection("mensagens").doc();
+    await msgRef.set({
+      id: msgRef.id, atendimentoId: params.conversationId, providerMessageId: null,
+      idempotencyKey: null, actorType: "customer", actorId: null, actorName: null,
+      text: params.texto, attachments: [], deliveryStatus: "sent",
+      provider: "whatsapp", createdAt: now,
+    });
+    return { isNovo: true, atd: registro };
+  }
+
+  const atd = snap.data()!;
+  const patch: Record<string, unknown> = {
+    ultimaMensagem: params.texto, ultimaInteracaoEm: now, updatedAt: now,
+  };
+  // Nunca sobrescreve um telefone já conhecido com null; nunca apaga se o canal já informou antes.
+  if (!atd.telefoneE164 && params.channelPhone) patch.telefoneE164 = params.channelPhone;
+  await ref.set(patch, { merge: true });
+  const msgRef = ref.collection("mensagens").doc();
+  await msgRef.set({
+    id: msgRef.id, atendimentoId: params.conversationId, providerMessageId: null,
+    idempotencyKey: null, actorType: "customer", actorId: null, actorName: null,
+    text: params.texto, attachments: [], deliveryStatus: "sent",
+    provider: "whatsapp", createdAt: now,
+  });
+  return { isNovo: false, atd: { ...atd, ...patch } };
+}
+
+async function detectarEPersistirConfirmacaoWhatsApp(conversationId: string, texto: string): Promise<void> {
+  try {
+    const admin = (await import("firebase-admin")).default;
+    const db = admin.firestore();
+    const tbRef = db.collection("valeria_technical_briefings").doc(conversationId);
+    const tbSnap = await tbRef.get();
+    if (!tbSnap.exists) return;
+    const tbData = tbSnap.data() ?? {};
+    const awaitingConfirmation = !!tbData.lastEligibleSimulation;
+    if (!awaitingConfirmation) return;
+    const intent = detectCommercialIntent({ texto, awaitingConfirmation });
+    await tbRef.set({ clientConfirmedQuote: intent.confirmQuote, updatedAt: Date.now() }, { merge: true });
+  } catch (e) {
+    console.error("[webhook.detectarEPersistirConfirmacaoWhatsApp] falha (não bloqueia):", (e as Error).message);
+  }
+}
+
+async function detectarEPersistirIdentidadeWhatsApp(
+  conversationId: string, texto: string, atd: FirebaseFirestore.DocumentData, agentId: string, organizationId: string
+): Promise<void> {
+  if (atd.leadId || atd.clienteId) return;
+  const nome = extrairNomeDoTexto(texto) || (atd.nome as string | null) || null;
+  const telefone = atd.telefoneE164 as string | undefined;
+  if (!nome || !telefone) return;
+  const bearer = process.env.VALERIA_BEARER_SECRET;
+  if (!bearer) return;
+  try {
+    const resp = await fetch(VALERIA_CRIAR_OPORTUNIDADE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId, agentId, organizationId, nome, tel: telefone, origem: "valeria_whatsapp_identity_detector" }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const json = await resp.json() as { data?: { leadId?: string } };
+    const leadId = json.data?.leadId;
+    if (leadId) {
+      const admin = (await import("firebase-admin")).default;
+      await admin.firestore().collection("atendimentos").doc(conversationId).set(
+        { leadId, nome: (atd.nome as string | null) ?? nome, updatedAt: Date.now() },
+        { merge: true }
+      );
+    }
+  } catch (e) {
+    console.error("[webhook.detectarEPersistirIdentidadeWhatsApp] falha (não bloqueia):", (e as Error).message);
+  }
+}
+
+/** Dispara a execução comercial server-side e devolve sinais para o handoff detector (nunca lança). */
+async function dispararExecucaoComercialWhatsApp(
+  conversationId: string, agentId: string, organizationId: string, channelPhone: string | null
+): Promise<{ pricingUnsupported: boolean; produtoComplexoSemReceita: boolean; erroSistemaReal: boolean }> {
+  const sinais = { pricingUnsupported: false, produtoComplexoSemReceita: false, erroSistemaReal: false };
+  const bearer = process.env.VALERIA_BEARER_SECRET;
+  if (!bearer) return sinais;
+  try {
+    const resp = await fetch(VALERIA_GET_CONTEXTO_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId, agentId, organizationId, channelPhone: channelPhone || undefined }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const json = await resp.json() as {
+      data?: { executedAction?: { action?: string; result?: { eligibility?: string; warnings?: string[]; errorCode?: string } } };
+    };
+    const ea = json.data?.executedAction;
+    if (ea?.action === "calculate_quote") {
+      const elig = ea.result?.eligibility;
+      if (elig === "HUMAN_VALIDATION_REQUIRED") sinais.pricingUnsupported = true;
+      if (elig === "TEMPORARILY_UNAVAILABLE") sinais.erroSistemaReal = true;
+      if ((ea.result?.warnings ?? []).some((w) => w.includes("não é uma receita embutida conhecida"))) {
+        sinais.produtoComplexoSemReceita = true;
+      }
+    }
+  } catch (e) {
+    console.error("[webhook.dispararExecucaoComercialWhatsApp] falha (não bloqueia):", (e as Error).message);
+  }
+  return sinais;
+}
+
+async function avaliarEPersistirHandoff(
+  conversationId: string,
+  texto: string,
+  sinais: { pricingUnsupported: boolean; produtoComplexoSemReceita: boolean; erroSistemaReal: boolean }
+): Promise<void> {
+  try {
+    const { detectHumanHandoff } = await import("./handoff_detector");
+    const r = detectHumanHandoff({ texto, ...sinais });
+    if (!r.requiresHuman) return;
+    const admin3 = (await import("firebase-admin")).default;
+    await admin3.firestore().collection("atendimentos").doc(conversationId).set(
+      { requiresHuman: true, humanReason: r.humanReason, priority: r.priority, handoffAt: Date.now(), updatedAt: Date.now() },
+      { merge: true }
+    );
+  } catch (e) {
+    console.error("[webhook.avaliarEPersistirHandoff] falha (não bloqueia):", (e as Error).message);
+  }
+}
 
 const SECRET_NAMES = ["VALERIA_BEARER_SECRET", "VALERIA_BEARER_SECRET_PREV"];
 
@@ -165,6 +374,52 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       const respostaAgente  =
         (body["respostaAgente"]  ?? body["agentMessage"] ?? body["response"])                as string | undefined;
       const mensagemLog = direcao === "entrada" ? mensagemCliente : respostaAgente;
+
+      // ── P1.0 — espelho operacional no ERP + pipeline determinístico ────────
+      // Só para mensagem real de cliente COM telefone de canal conhecido
+      // (WhatsApp real) — nunca para o chat de teste interno do Chatvolt
+      // (sem channelPhone) nem para eventos de saída/log da própria agente.
+      if (eventType === "USER_MESSAGE_RECEIVED" && ctx.channelPhone && mensagemCliente) {
+        try {
+          const { atd } = await upsertAtendimentoWhatsApp({
+            conversationId: ctx.conversationId,
+            channelPhone: ctx.channelPhone,
+            texto: mensagemCliente,
+          });
+          if (atd.modoAtendimento !== "humano") {
+            await detectarEPersistirIdentidadeWhatsApp(ctx.conversationId, mensagemCliente, atd, ctx.agentId, ctx.organizationId);
+            await detectarEPersistirConfirmacaoWhatsApp(ctx.conversationId, mensagemCliente);
+            const sinais = await dispararExecucaoComercialWhatsApp(ctx.conversationId, ctx.agentId, ctx.organizationId, ctx.channelPhone);
+            await avaliarEPersistirHandoff(ctx.conversationId, mensagemCliente, sinais);
+          }
+        } catch (e) {
+          console.error("[webhook] falha no espelho operacional WhatsApp (não bloqueia log do evento):", (e as Error).message);
+        }
+      }
+
+      // Resposta da Valéria também espelhada — só se o atendimento já existe
+      // (criado pela mensagem de entrada correspondente); nunca cria um
+      // atendimento a partir de uma mensagem de saída sozinha.
+      if (eventType === "AGENT_USER_MESSAGE" && respostaAgente) {
+        try {
+          const admin2 = (await import("firebase-admin")).default;
+          const ref = admin2.firestore().collection("atendimentos").doc(ctx.conversationId);
+          const snap = await ref.get();
+          if (snap.exists) {
+            const nowResp = Date.now();
+            await ref.set({ ultimaMensagem: respostaAgente, ultimaInteracaoEm: nowResp, updatedAt: nowResp }, { merge: true });
+            const respRef = ref.collection("mensagens").doc();
+            await respRef.set({
+              id: respRef.id, atendimentoId: ctx.conversationId, providerMessageId: explicitMsgId ?? null,
+              idempotencyKey: null, actorType: "valeria", actorId: null, actorName: "Valéria",
+              text: respostaAgente, attachments: [], deliveryStatus: "sent",
+              provider: "whatsapp", createdAt: nowResp,
+            });
+          }
+        } catch (e) {
+          console.error("[webhook] falha ao espelhar resposta da Valéria (não bloqueia log do evento):", (e as Error).message);
+        }
+      }
 
       // Metadados de anexos — NUNCA conteúdo
       const anexos: AnexoMeta[] = extractAnexosMeta(body["anexos"] ?? body["attachments"]);
