@@ -42,20 +42,52 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_kbOpenProdOverlay', 'kbProdSetTipo', 'kbProdOnMatChange', 'kbProdCheckStock', 'kbSugerirMaterial', 'kbSugestaoHtml', 'kbNecessidadesPecasOS', 'kbNecessidadeDimsOS', 'kbRetalhoCobertura', 'kbRetalhoCabeGeometricamente', 'kbCalcAreaOS', 'kbMargemSegurancaRetalhoCm', 'kbParseDimsWH', 'kbParseDimsArea', '_kbRetalhoOptionLabel', 'cfgEsc'];
+// RODADA CRÍTICA 2026-08-26 — _kbOpenProdOverlay() passou a aguardar
+// confirmação real do servidor (_stockServerConfirmed/_CLOUD_WATCH_CONFIRMED)
+// antes de popular os selects, com um ciclo de espera/retry — ver
+// scripts/test_rodada_critica_leitura_iniciar_producao_2026-08-26.js para
+// os testes dedicados a esse ciclo. Este arquivo testa a lógica de
+// auto-seleção/avisos, que roda DEPOIS da confirmação — por isso o reset()
+// abaixo agora marca os dados como já confirmados por padrão (mesmo
+// comportamento síncrono que este arquivo sempre testou), e extrai as
+// novas funções/variável de apoio que _kbOpenProdOverlay passou a chamar.
+var FN_NAMES = ['_kbOpenProdOverlay', '_kbProdDadosProntos', '_kbProdMostrarCarregando', '_kbProdMostrarFalhaCarregamento', '_kbProdTentarNovamente', '_kbProdAguardarDadosERenderizar', '_kbProdRenderSelects', 'kbCloseProd', 'kbProdSetTipo', 'kbProdOnMatChange', 'kbProdCheckStock', 'kbSugerirMaterial', 'kbSugestaoHtml', 'kbNecessidadesPecasOS', 'kbNecessidadeDimsOS', 'kbRetalhoCobertura', 'kbRetalhoCabeGeometricamente', 'kbCalcAreaOS', 'kbMargemSegurancaRetalhoCm', 'kbParseDimsWH', 'kbParseDimsArea', '_kbRetalhoOptionLabel', 'cfgEsc'];
 global.window = global;
 global.cfgLoad = function () { return { producao: {} }; };
-var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+function extractVar(name) {
+  var marker = 'var ' + name + ' = ';
+  var start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  var end = html.indexOf(';', start);
+  return html.slice(start, end + 1);
+}
+var src = extractVar('_kbProdOverlayEpoch') + '\n\n' + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_os_producao_modal_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 
 var _els = {};
-function makeEl() { return { value: '', style: {}, innerHTML: '', classList: { add: function () {}, remove: function () {} }, disabled: false, querySelector: function () { return null; } }; }
+function makeEl() {
+  var el = { value: '', style: {}, innerHTML: '', disabled: false, querySelector: function () { return null; } };
+  var _open = false;
+  el.classList = {
+    add: function (c) { if (c === 'open') _open = true; },
+    remove: function (c) { if (c === 'open') _open = false; },
+    contains: function (c) { return c === 'open' ? _open : false; },
+  };
+  return el;
+}
 global.document = {
-  getElementById: function (id) { return _els[id] || (_els[id] = makeEl()); }
+  getElementById: function (id) { return _els[id] || (_els[id] = makeEl()); },
+  querySelector: function () { return _els['__submitBtn'] || (_els['__submitBtn'] = makeEl()); },
 };
 var _toasts = [];
 global.showToast = function (msg, kind) { _toasts.push({ msg: msg, kind: kind }); };
+// _kbProdAguardarDadosERenderizar agenda retries via setTimeout quando os
+// dados ainda não confirmaram — este arquivo testa o caminho já
+// confirmado (síncrono), então nenhum teste aqui depende de um timer
+// realmente disparar; um stub simples evita processo pendurado se algum
+// cenário cair no ramo de espera por engano (sinal de regressão real).
+global.setTimeout = function () {};
 
 delete require.cache[require.resolve(modPath)];
 var mod = require(modPath);
@@ -68,6 +100,12 @@ function reset() {
   global.RETALHOS = [];
   global._STOCK_LOAD_ERROR = false;
   global._CLOUD_WATCH_ERROR = {};
+  // Dados já confirmados pelo servidor por padrão — este arquivo testa a
+  // lógica de auto-seleção/avisos, que roda depois da confirmação (ver
+  // comentário acima). Testes que simulam erro real de carregamento
+  // (_STOCK_LOAD_ERROR/_CLOUD_WATCH_ERROR) sobrescrevem isto abaixo.
+  global._stockServerConfirmed = true;
+  global._CLOUD_WATCH_CONFIRMED = { retalhos: true };
   // _kbOpenProdOverlay agenda kbProdOnMatChange/kbProdCheckStock via
   // setTimeout(...,50) quando o material já vem pré-selecionado — dispara
   // DEPOIS do teste síncrono terminar; precisa de KB_OS/_kbOsId no escopo

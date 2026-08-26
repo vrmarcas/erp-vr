@@ -1729,6 +1729,16 @@ function _cloudLoad(key, cb) {
 // telas que precisam diferenciar "vazio de verdade" de "falhou ao
 // carregar" (ver _kbOpenProdOverlay).
 var _CLOUD_WATCH_ERROR = {};
+// HOTFIX CRÍTICO 2026-08-26 (Rodada Crítica de Confiabilidade de Leitura)
+// — _CLOUD_WATCH_ERROR só sinalizava FALHA; não havia nenhum jeito
+// genérico de saber se um listener AINDA NÃO recebeu a 1ª resposta do
+// servidor (ainda carregando) — indistinguível de "confirmado vazio" para
+// quem lê a variável global síncrona no meio tempo (ex.: RETALHOS lido
+// por _kbOpenProdOverlay). Puramente aditivo: nenhum callback existente
+// muda de comportamento, só passamos a registrar quando a 1ª resposta
+// real do servidor (sucesso OU "documento ainda não existe" — nunca erro)
+// chega para cada chave.
+var _CLOUD_WATCH_CONFIRMED = {};
 // Listener em tempo real
 function _cloudWatch(key, callback) {
   if(!_db) return;
@@ -1739,10 +1749,18 @@ function _cloudWatch(key, callback) {
         var raw = doc.data().data;
         _cloudLastPayload[key] = raw; // registrar para o anti-eco
         _CLOUD_WATCH_ERROR[key] = false;
+        _CLOUD_WATCH_CONFIRMED[key] = true;
         // Passa fromCache como 2º argumento — callbacks que não precisam ignoram silenciosamente
         var fromCache = doc.metadata ? doc.metadata.fromCache : false;
         callback(JSON.parse(raw), fromCache);
       } catch(e){}
+    } else if(!doc.exists) {
+      // Documento ainda não existe no Firebase — resposta REAL do
+      // servidor (nunca "ainda carregando"), conta como confirmado; nunca
+      // chama callback aqui (mesmo comportamento de sempre — quem depende
+      // deste watch mantém seu default local/em memória).
+      _CLOUD_WATCH_ERROR[key] = false;
+      _CLOUD_WATCH_CONFIRMED[key] = true;
     }
   }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); _CLOUD_WATCH_ERROR[key] = true; });
   _CLOUD_UNSUBS.push(unsub); // [S4] acumular para cleanup no pagehide
@@ -4306,9 +4324,9 @@ function _authFirebaseError(code){
             <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:5px">Bloqueio automático por inatividade</div>
             <select id="secInactTime" onchange="secSaveInactTime()"
               style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg)">
-              <option value="10" selected>10 minutos</option>
+              <option value="10">10 minutos</option>
               <option value="20">20 minutos</option>
-              <option value="30">30 minutos</option>
+              <option value="30" selected>30 minutos</option>
               <option value="60">1 hora</option>
               <option value="0">Desativado</option>
             </select>
@@ -15286,21 +15304,117 @@ function kbProdOnMatChange() {
   kbProdCheckStock();
 }
 
+// HOTFIX CRÍTICO 2026-08-26 (Rodada Crítica de Confiabilidade de Leitura)
+// — causa raiz real das falhas intermitentes "Iniciar Produção" não
+// carrega Estoque/Retalhos: este overlay lia STOCK/RETALHOS de forma
+// SÍNCRONA no instante do clique. STOCK vem de um onSnapshot próprio
+// (linha ~1523) e RETALHOS de _cloudWatch('retalhos', ...) — nenhum dos
+// dois é gated por _cloudReady (cada coleção resolve seu próprio
+// round-trip de rede de forma independente). Numa sessão recém-aberta
+// (login fresco, navegação rápida Kanban→OS→Iniciar Produção), era
+// perfeitamente possível clicar ANTES da 1ª resposta do servidor chegar —
+// STOCK/RETALHOS ainda nos valores default (vazios), e nem
+// _STOCK_LOAD_ERROR nem _CLOUD_WATCH_ERROR['retalhos'] ficavam true
+// (não houve erro nenhum — só ainda não chegou), então o aviso de "falha
+// ao carregar" (RODADA 9, Bloco B) nunca disparava: o operador só via os
+// dois dropdowns vazios, indistinguível de "não há nada cadastrado".
+// Reproduzido ao vivo: funcionava depois de visitar Estoque antes (dava
+// tempo do listener resolver) — exatamente o sintoma relatado.
+// Corrigido diferenciando 3 estados reais — carregando / confirmado
+// (com ou sem erro) / falhou — e só populando os selects quando o
+// servidor já respondeu (ver _stockServerConfirmed e o novo
+// _CLOUD_WATCH_CONFIRMED, ambos setados nos pontos reais onde a resposta
+// chega). Enquanto pendente, mostra um estado de carregamento explícito
+// e reavalia em polling curto e limitado (200ms × 25 = 5s, nunca
+// infinito); se esgotar sem resposta, ou se already houver erro
+// conhecido, mostra um estado de falha com "🔄 Tentar novamente" — nunca
+// mascarado como "vazio". _kbProdOverlayEpoch invalida qualquer polling
+// pendente se o operador fechar o modal ou abrir outra OS enquanto
+// esperava (mesma disciplina de token/versão pedida para listeners
+// antigos nunca atualizarem a tela nova).
+var _kbProdOverlayEpoch = 0;
+
 function _kbOpenProdOverlay(os) {
+  _kbProdOverlayEpoch++;
+  var _epoch = _kbProdOverlayEpoch;
   // Subtitle
   var sub = document.getElementById('kbProdSubtitle');
   if (sub) sub.textContent = 'OS #' + (os.num||os.id) + ' — ' + (os.titulo||'');
-  // RODADA 9, Bloco B — achado real: quando o listener de estoque/retalhos
-  // falhava (permissão, rede), o operador só via os dropdowns vazios, sem
-  // nenhuma explicação — indistinguível de "não há nada cadastrado".
-  // Avisa explicitamente quando a causa é uma falha de carregamento
-  // conhecida, nunca um silêncio.
-  if (typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR && typeof showToast === 'function') {
-    showToast('⚠️ Não foi possível carregar o Estoque de chapas — verifique sua conexão/permissão e tente novamente.', 'err');
+  document.getElementById('kbProdOverlay').classList.add('open');
+  _kbProdAguardarDadosERenderizar(os, _epoch, 0);
+}
+
+function _kbProdDadosProntos() {
+  var stockPronto = !!(typeof _stockServerConfirmed !== 'undefined' && _stockServerConfirmed) || !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR);
+  var retalhosPronto = !!(typeof _CLOUD_WATCH_CONFIRMED !== 'undefined' && _CLOUD_WATCH_CONFIRMED['retalhos']) || !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']);
+  var stockErro = !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR);
+  var retalhosErro = !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']);
+  return { pronto: stockPronto && retalhosPronto, erro: stockErro || retalhosErro, stockErro: stockErro, retalhosErro: retalhosErro };
+}
+
+function _kbProdMostrarCarregando() {
+  var matSel = document.getElementById('kbProdMatSel');
+  if (matSel) matSel.innerHTML = '<option value="">⏳ Carregando materiais…</option>';
+  var retSel = document.getElementById('kbProdRetalhoSel');
+  if (retSel) retSel.innerHTML = '<option value="">⏳ Carregando retalhos…</option>';
+  var submitBtn = document.querySelector('#kbProdOverlay .gen-submit');
+  if (submitBtn) submitBtn.disabled = true;
+}
+
+function _kbProdMostrarFalhaCarregamento(os, motivo) {
+  var msg = motivo === 'timeout'
+    ? '⚠️ Estoque/Retalhos demoraram demais para responder — verifique sua conexão.'
+    : '⚠️ Falha ao carregar Estoque/Retalhos — verifique sua conexão/permissão.';
+  var optHtml = '<option value="">' + msg + '</option>';
+  var matSel = document.getElementById('kbProdMatSel'); if (matSel) matSel.innerHTML = optHtml;
+  var retSel = document.getElementById('kbProdRetalhoSel'); if (retSel) retSel.innerHTML = optHtml;
+  var submitBtn = document.querySelector('#kbProdOverlay .gen-submit'); if (submitBtn) submitBtn.disabled = true;
+  var si = document.getElementById('kbProdStockInfo');
+  if (si) {
+    si.style.display = '';
+    si.innerHTML = '<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:8px 10px;color:#991B1B;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:8px">'
+      + '<span>' + msg + '</span>'
+      + '<button type="button" onclick="_kbProdTentarNovamente()" style="padding:5px 10px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">🔄 Tentar novamente</button>'
+      + '</div>';
   }
-  if (typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos'] && typeof showToast === 'function') {
-    showToast('⚠️ Não foi possível carregar os Retalhos — verifique sua conexão/permissão e tente novamente.', 'err');
+  if (typeof showToast === 'function') showToast(msg, 'err');
+}
+
+// Botão manual "Tentar novamente" do estado de falha — relê a OS atual
+// (nunca o objeto `os` capturado na tentativa anterior, que pode estar
+// desatualizado) e reinicia o ciclo de espera com um epoch novo.
+function _kbProdTentarNovamente() {
+  var os = KB_OS[_kbOsId]; if (!os) return;
+  _kbProdOverlayEpoch++;
+  _kbProdAguardarDadosERenderizar(os, _kbProdOverlayEpoch, 0);
+}
+
+function _kbProdAguardarDadosERenderizar(os, epoch, tentativa) {
+  // Modal fechado, outra OS aberta enquanto esperava, ou uma nova
+  // tentativa mais recente já assumiu — esta chamada não vale mais nada.
+  if (epoch !== _kbProdOverlayEpoch) return;
+  var overlayEl = document.getElementById('kbProdOverlay');
+  if (!overlayEl || !overlayEl.classList.contains('open')) return;
+  var estado = _kbProdDadosProntos();
+  if (estado.pronto) {
+    if (estado.erro) {
+      if (estado.stockErro && typeof showToast === 'function') showToast('⚠️ Não foi possível carregar o Estoque de chapas — verifique sua conexão/permissão e tente novamente.', 'err');
+      if (estado.retalhosErro && typeof showToast === 'function') showToast('⚠️ Não foi possível carregar os Retalhos — verifique sua conexão/permissão e tente novamente.', 'err');
+      _kbProdMostrarFalhaCarregamento(os, 'erro');
+      return;
+    }
+    _kbProdRenderSelects(os);
+    return;
   }
+  if (tentativa === 0) _kbProdMostrarCarregando();
+  if (tentativa >= 25) { _kbProdMostrarFalhaCarregamento(os, 'timeout'); return; }
+  setTimeout(function () { _kbProdAguardarDadosERenderizar(os, epoch, tentativa + 1); }, 200);
+}
+
+// Popula os dois selects (material/retalho) e o restante do formulário —
+// corpo original de _kbOpenProdOverlay, só chamado depois de confirmar
+// que o servidor já respondeu (ver _kbProdDadosProntos).
+function _kbProdRenderSelects(os) {
   // Populate material select from STOCK
   var matSel = document.getElementById('kbProdMatSel');
   if (matSel) {
@@ -15336,6 +15450,8 @@ function _kbOpenProdOverlay(os) {
       + rList.map(function(r,i){ return '<option value="'+i+'">'+_kbRetalhoOptionLabel(os, r)+'</option>'; }).join('');
     if (_kbProdEditMode && os.matProd && os.matProd.isRetalho && os.matProd.retalhoIdx != null) retSel.value = os.matProd.retalhoIdx;
   }
+  var submitBtn = document.querySelector('#kbProdOverlay .gen-submit');
+  if (submitBtn) submitBtn.disabled = false;
   // Qty
   var qtyEl = document.getElementById('kbProdQty');
   if (qtyEl) qtyEl.value = (_kbProdEditMode && os.matProd && !os.matProd.isRetalho) ? (os.matProd.qty||1) : 1;
@@ -15350,10 +15466,9 @@ function _kbOpenProdOverlay(os) {
   var si = document.getElementById('kbProdStockInfo'); if (si) si.style.display = 'none';
   var sugBoxInit = document.getElementById('kbProdSugestaoBox'); if (sugBoxInit) sugBoxInit.style.display = 'none';
   if (matSel && matSel.value) setTimeout(_kbProdEditMode ? kbProdCheckStock : kbProdOnMatChange, 50);
-  document.getElementById('kbProdOverlay').classList.add('open');
 }
 
-function kbCloseProd() { document.getElementById('kbProdOverlay').classList.remove('open'); _kbProdSubmitting = false; }
+function kbCloseProd() { _kbProdOverlayEpoch++; document.getElementById('kbProdOverlay').classList.remove('open'); _kbProdSubmitting = false; }
 
 function kbProdSetTipo(tipo) {
   _kbProdTipo = tipo;
@@ -26255,7 +26370,12 @@ var _METAS_VENDEDOR = {};
 var _PERM_DATA = null;
 var _SEC_MASTER = null;
 var _SEC_AUDIT = [];
-var _SEC_INACT_MINS = 10; // padrão de bloqueio automático (era 5 — não é mais o padrão)
+// RODADA CRÍTICA 2026-08-26 — 5/10 min era curto demais para a operação
+// real (bloqueava no meio do atendimento/produção); único ponto que
+// precisa mudar é este default — secGetInactMins()/secSaveInactTime()
+// (abaixo) e o <select> de Config → Segurança só refletem este valor,
+// nunca duplicam a constante.
+var _SEC_INACT_MINS = 30; // padrão de bloqueio automático (era 10, antes 5)
 var _SEC_LOCKOUT = {count:0,until:0}; // in-memory — não resetável via sessionStorage.clear()
 var _chatvoltAgentId = '';
 var _chatvoltMarca   = 'vr';
@@ -31570,10 +31690,10 @@ function secHash(s) {
 // ausente e caem no default — a opção "Desativado" nunca funcionava de
 // verdade. 0 agora é um valor explícito válido, só ausência real (undefined/
 // NaN) cai no default de 10 min.
-function secGetInactMins(){ return (typeof _SEC_INACT_MINS==='number' && !isNaN(_SEC_INACT_MINS)) ? _SEC_INACT_MINS : 10; }
+function secGetInactMins(){ return (typeof _SEC_INACT_MINS==='number' && !isNaN(_SEC_INACT_MINS)) ? _SEC_INACT_MINS : 30; }
 function secSaveInactTime(){
   var v=parseInt((document.getElementById('secInactTime')||{}).value,10);
-  if(isNaN(v)) v=10;
+  if(isNaN(v)) v=30;
   _SEC_INACT_MINS=v;
   if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_inact_mins', v);
   // Restart timer
