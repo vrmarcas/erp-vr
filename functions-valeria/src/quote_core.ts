@@ -46,6 +46,14 @@ export interface PersonalizedProductInput {
    * mencionado pela Tool (não um bloqueio proativo/permanente).
    */
   solicitacoesNaoSuportadas?: string[];
+  /**
+   * Sprint P1.2 — sinal já persistido pelo detector determinístico
+   * (complexity_detector.ts): quando não-vazio, bloqueia ANTES de calcular
+   * qualquer preço, mesmo que o produto não bata em nenhuma receita
+   * embutida (nunca deixa o fallback de peça plana calcular um preço
+   * "válido" tecnicamente mas fisicamente errado para LED/motor/madeira).
+   */
+  unsupportedComplexityReasonCodes?: string[] | null;
 }
 
 /**
@@ -145,6 +153,34 @@ export async function calculatePersonalizedProduct(
 ): Promise<PersonalizedProductResult> {
   const warnings: string[] = [];
   const rec = resolveRecipe(input.produto);
+
+  // Sprint P1.2 (Bloco 5 — guard explícito no fallback de peça plana) —
+  // bloqueia ANTES de qualquer geometria/preço quando o detector
+  // determinístico já sinalizou elementos que nenhuma receita conhecida
+  // representa (LED/motor/madeira/etc.). Roda antes até do warning de
+  // "não é receita embutida" porque aqui nem o fallback deve calcular.
+  if (input.unsupportedComplexityReasonCodes && input.unsupportedComplexityReasonCodes.length > 0) {
+    return {
+      ok: false,
+      produto: input.produto,
+      dim3d: rec.dim3d,
+      desc: rec.desc,
+      pieces: [],
+      pricing: {
+        eligibility: "HUMAN_VALIDATION_REQUIRED",
+        missingFields: [
+          `Produto com elementos fora da receita conhecida (${input.unsupportedComplexityReasonCodes.join(", ")}) — precisa de validação humana antes de calcular preço.`,
+        ],
+        blockedItems: input.unsupportedComplexityReasonCodes.map((code) => ({
+          campo: code,
+          reasonCode: "UNSUPPORTED_COMPLEXITY",
+          motivo: "Elemento não representável pela receita/geometria conhecida — preço não pode ser calculado automaticamente.",
+        })),
+      },
+      warnings,
+    };
+  }
+
   if (!PLAN_BUILTIN_NAMES.includes(input.produto)) {
     warnings.push(
       `Produto "${input.produto}" não é uma receita embutida conhecida — calculado como peça plana simples (largura×altura). Se o produto real tem múltiplas peças, este resultado está incompleto.`

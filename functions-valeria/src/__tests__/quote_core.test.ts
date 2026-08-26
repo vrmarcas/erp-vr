@@ -283,3 +283,26 @@ describe("QUOTE CORE — Bloco C: itens sem fonte canônica (reasonCode, nunca i
     expect(semBloqueio.pricing.eligibility).toBe("ELIGIBLE"); // confirma que adesivo sozinho não é bloqueado
   });
 });
+
+describe("P1.2 — guard explícito no fallback de peça plana (produto complexo sem receita)", () => {
+  test("unsupportedComplexityReasonCodes presente → HUMAN_VALIDATION_REQUIRED, nunca chega a calcular geometria/preço", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Troféu personalizado", larg: 40, alt: 30, esp: 5, matKey: "cfg_0", qty: 1,
+      unsupportedComplexityReasonCodes: ["LED_ILUMINACAO", "MATERIAL_NAO_ACRILICO"],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.pricing.eligibility).toBe("HUMAN_VALIDATION_REQUIRED");
+    expect(r.pricing.finalPrice).toBeUndefined();
+    expect(r.pieces).toEqual([]);
+    expect(r.pricing.blockedItems?.map((b) => b.campo).sort()).toEqual(["LED_ILUMINACAO", "MATERIAL_NAO_ACRILICO"]);
+  });
+
+  test("array vazio/null nunca bloqueia (mesmo produto sem receita continua caindo no fallback normal de peça plana)", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Display simples", larg: 30, alt: 20, esp: 3, matKey: "cfg_0", qty: 1,
+      unsupportedComplexityReasonCodes: [],
+    });
+    expect(r.pricing.eligibility).toBe("ELIGIBLE");
+    expect(r.warnings.some((w) => w.includes("não é uma receita embutida conhecida"))).toBe(true);
+  });
+});

@@ -328,3 +328,46 @@ describe("ORCHESTRATOR — Bloco F: technicalBriefing como fonte de verdade (pro
     }
   });
 });
+
+describe("P1.2 — gate de produto complexo sem receita compatível", () => {
+  const tbCaixaCompleto: TechnicalBriefing = {
+    ...emptyTechnicalBriefing(),
+    productId: "Caixa",
+    dimensions: { larguraMm: 150, alturaMm: 150, profundidadeMm: 150 },
+    thicknessMm: 3, materialId: "cfg_0", quantity: 1,
+  };
+
+  test("S6. Mesmo com TODOS os campos de preço completos, unsupportedComplexityReasonCodes vence e bloqueia calculate_quote", () => {
+    const tbComplexo: TechnicalBriefing = {
+      ...tbCaixaCompleto,
+      unsupportedComplexityReasonCodes: ["LED_ILUMINACAO", "MATERIAL_NAO_ACRILICO"],
+    };
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbComplexo,
+    });
+    expect(r.nextAction).toBe("handoff");
+    expect(r.actionPayload.reasonCode).toBe("UNSUPPORTED_PRODUCT");
+    expect(r.actionPayload.askPermission).toBe(false);
+  });
+
+  test("Sem productId ainda (nenhuma dimensão pedida) — bloqueia igual, nunca chega a classify_demand/ask_required_fields", () => {
+    const tbSoComplexidade: TechnicalBriefing = {
+      ...emptyTechnicalBriefing(),
+      unsupportedComplexityReasonCodes: ["ELETRONICA_MOTOR_MECANISMO"],
+    };
+    const r = nextCommercialAction({
+      briefing: null, cliente: null, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbSoComplexidade,
+    });
+    expect(r.nextAction).toBe("handoff");
+  });
+
+  test("array vazio/ausente nunca bloqueia (produto normal segue fluxo normal)", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaCompleto,
+    });
+    expect(r.nextAction).toBe("calculate_quote");
+  });
+});

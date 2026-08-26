@@ -190,6 +190,41 @@ async function detectarEPersistirIdentidadeWhatsApp(
   }
 }
 
+/**
+ * Sprint P1.2 — roda o detector determinístico de complexidade sem receita
+ * (complexity_detector.ts) e persiste o sinal no MESMO documento que
+ * valeria.ts/orchestrator.ts leem (valeria_technical_briefings/{id}) —
+ * ANTES de dispararExecucaoComercialWhatsApp, para que o gate do
+ * orchestrator já veja o sinal neste mesmo turno, mesmo que productId
+ * ainda não tenha sido definido. Nunca sobrescreve com array vazio (um
+ * bloqueio de um turno anterior continua valendo mesmo que a mensagem
+ * atual não repita a palavra) — mesma disciplina de nunca "esquecer" um
+ * sinal de segurança já detectado.
+ */
+async function avaliarEPersistirComplexidadeWhatsApp(conversationId: string, texto: string): Promise<boolean> {
+  try {
+    const { detectUnsupportedComplexity } = await import("./complexity_detector");
+    const admin4 = (await import("firebase-admin")).default;
+    const tbRef = admin4.firestore().collection("valeria_technical_briefings").doc(conversationId);
+    const tbSnap = await tbRef.get();
+    const tbData = tbSnap.exists ? tbSnap.data() ?? {} : {};
+    const productId = (tbData.productId as string | undefined) ?? null;
+    const jaBloqueado = Array.isArray(tbData.unsupportedComplexityReasonCodes) && tbData.unsupportedComplexityReasonCodes.length > 0;
+
+    const r = detectUnsupportedComplexity({ texto, productId });
+    if (!r.unsupportedComplexity) return jaBloqueado;
+
+    const mudou = JSON.stringify(tbData.unsupportedComplexityReasonCodes ?? []) !== JSON.stringify(r.reasonCodes);
+    if (mudou) {
+      await tbRef.set({ unsupportedComplexityReasonCodes: r.reasonCodes, updatedAt: Date.now() }, { merge: true });
+    }
+    return true;
+  } catch (e) {
+    console.error("[webhook.avaliarEPersistirComplexidadeWhatsApp] falha (não bloqueia):", (e as Error).message);
+    return false;
+  }
+}
+
 /** Dispara a execução comercial server-side e devolve sinais para o handoff detector (nunca lança). */
 async function dispararExecucaoComercialWhatsApp(
   conversationId: string, agentId: string, organizationId: string, channelPhone: string | null
@@ -389,7 +424,9 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           if (atd.modoAtendimento !== "humano") {
             await detectarEPersistirIdentidadeWhatsApp(ctx.conversationId, mensagemCliente, atd, ctx.agentId, ctx.organizationId);
             await detectarEPersistirConfirmacaoWhatsApp(ctx.conversationId, mensagemCliente);
+            const complexidadeDetectada = await avaliarEPersistirComplexidadeWhatsApp(ctx.conversationId, mensagemCliente);
             const sinais = await dispararExecucaoComercialWhatsApp(ctx.conversationId, ctx.agentId, ctx.organizationId, ctx.channelPhone);
+            if (complexidadeDetectada) sinais.produtoComplexoSemReceita = true;
             await avaliarEPersistirHandoff(ctx.conversationId, mensagemCliente, sinais);
           }
         } catch (e) {
