@@ -66,17 +66,124 @@ function extrairNomeDoTexto(textoOriginal: string): string | null {
 const VALERIA_GET_CONTEXTO_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaGetContexto";
 const VALERIA_CRIAR_OPORTUNIDADE_URL = "https://us-central1-erp-vrmarcas.cloudfunctions.net/valeriaCriarOportunidade";
 
+interface SincroniaConversa {
+  nome: string | null;
+  telefoneE164: string | null;
+  novasMensagens: number;
+  totalMensagens: number;
+  ultimaMensagem: string | null;
+  ultimaMensagemEm: number | null;
+}
+
+const SINCRONIA_VAZIA: SincroniaConversa = {
+  nome: null, telefoneE164: null, novasMensagens: 0, totalMensagens: 0, ultimaMensagem: null, ultimaMensagemEm: null,
+};
+
 /**
- * Upsert do atendimento canônico + mensagem do cliente. Idempotente por
- * design (mesma mensagem só é processada uma vez, ver withIdempotency no
- * chamador) — usa conversationId do Chatvolt DIRETO como atendimentoId
- * (sem indireção extra) para eliminar qualquer race condition de busca.
+ * Sprint P1.2b (achado real de E2E) — o webhook só passou a existir no
+ * MEIO de conversas reais já em andamento (Tools sempre funcionaram,
+ * technicalBriefing nunca ficou incompleto — só o espelho ERP/mensagens
+ * ficou para trás). Além disso, o payload de push do ChatVolt não é
+ * confiável para o CONTEÚDO da resposta da Valéria (eventType
+ * AGENT_MESSAGE_SENDED chega sem texto em nenhum campo) nem para nome do
+ * contato (nunca vem no payload do evento).
+ *
+ * Fonte de verdade única: GET /api/conversations/{id} — devolve
+ * participantsContacts (nome/telefone reais do canal) e messages[] com
+ * id/from/text/createdAt de TODO o histórico. Cada mensagem é escrita em
+ * atendimentos/{id}/mensagens usando o id REAL do ChatVolt como doc id —
+ * isso torna a sincronização idempotente por natureza (nunca duplica,
+ * mesmo chamada várias vezes ou concorrente): reprocessar a mesma
+ * conversa só grava o que ainda não existe. Roda tanto na primeira
+ * mensagem de uma conversa nova (backfill do histórico anterior) quanto
+ * em toda mensagem seguinte (para capturar a resposta real da Valéria,
+ * que não vem no payload do evento) — nunca inventa texto: se a API
+ * falhar, retorna vazio e quem chama decide o fallback.
+ */
+async function sincronizarConversaCompleta(conversationId: string): Promise<SincroniaConversa> {
+  const apiKey = process.env.CHATVOLT_API_KEY;
+  if (!apiKey) return SINCRONIA_VAZIA;
+  try {
+    const resp = await fetch(`https://app.chatvolt.ai/api/conversations/${conversationId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!resp.ok) return SINCRONIA_VAZIA;
+    const json = (await resp.json()) as {
+      participantsContacts?: Array<{ firstName?: string; lastName?: string; phoneNumber?: string }>;
+      messages?: Array<{ id: string; from?: string; text?: string | null; createdAt: string }>;
+    };
+
+    const contato = json.participantsContacts?.[0];
+    const nome = contato ? ([contato.firstName, contato.lastName].filter(Boolean).join(" ").trim() || null) : null;
+    const telefoneE164 = contato?.phoneNumber ? `+${String(contato.phoneNumber).replace(/\D/g, "")}` : null;
+
+    const admin = (await import("firebase-admin")).default;
+    const db = admin.firestore();
+    const msgsCol = db.collection("atendimentos").doc(conversationId).collection("mensagens");
+
+    const mensagens = (json.messages ?? []).filter((m) => !!m.text);
+    const ordenadas = [...mensagens].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    let ultimaMensagem: string | null = null;
+    let ultimaMensagemEm: number | null = null;
+    for (const m of ordenadas) {
+      const createdAtMs = new Date(m.createdAt).getTime();
+      ultimaMensagem = m.text ?? ultimaMensagem;
+      ultimaMensagemEm = createdAtMs;
+    }
+
+    // Achado real (P1.2c) — checar cada mensagem com um .get() sequencial
+    // (18 mensagens = 18 round-trips) levou a sincronia a 17s+, tempo
+    // suficiente para uma reentrega/retry do ChatVolt colidir com o lock
+    // de idempotência (ver withIdempotency) e virar um 500 falso. Uma
+    // única leitura em lote (getAll) para checar existência + escritas em
+    // paralelo reduz isso a uma fração do tempo.
+    const refs = ordenadas.map((m) => msgsCol.doc(m.id));
+    const existentes = refs.length > 0 ? await db.getAll(...refs) : [];
+    const faltando = ordenadas.filter((_, i) => !existentes[i]?.exists);
+
+    await Promise.all(
+      faltando.map((m) => {
+        const createdAtMs = new Date(m.createdAt).getTime();
+        // "human" no vocabulário do ChatVolt = o CLIENTE do outro lado da
+        // conversa (não confundir com humano do ERP assumindo o
+        // atendimento — esse é sempre escrito por atdEnviarMensagemHumano,
+        // outro codebase, actorType:"human").
+        const actorType = m.from === "agent" ? "valeria" : m.from === "human" ? "customer" : "system";
+        return msgsCol.doc(m.id).set({
+          id: m.id, atendimentoId: conversationId, providerMessageId: m.id,
+          idempotencyKey: null, actorType, actorId: null, actorName: actorType === "valeria" ? "Valéria" : null,
+          text: m.text, attachments: [], deliveryStatus: "sent",
+          provider: "whatsapp", createdAt: createdAtMs,
+        });
+      })
+    );
+
+    return { nome, telefoneE164, novasMensagens: faltando.length, totalMensagens: ordenadas.length, ultimaMensagem, ultimaMensagemEm };
+  } catch (e) {
+    console.error("[webhook.sincronizarConversaCompleta] falha (não bloqueia):", (e as Error).message);
+    return SINCRONIA_VAZIA;
+  }
+}
+
+/**
+ * Upsert do atendimento canônico. Idempotente por design (mensagens
+ * escritas por sincronizarConversaCompleta usam id real do ChatVolt como
+ * doc id) — usa conversationId do Chatvolt DIRETO como atendimentoId (sem
+ * indireção extra) para eliminar qualquer race condition de busca.
+ *
+ * `permiteCriar=false` (eventos de saída/log em conversa ainda
+ * desconhecida) nunca cria um atendimento novo — só atualiza um que já
+ * existe (mesma disciplina de sempre: nunca cria atendimento a partir de
+ * uma mensagem de saída sozinha).
  */
 async function upsertAtendimentoWhatsApp(params: {
   conversationId: string;
   channelPhone: string | null;
   texto: string;
-}): Promise<{ isNovo: boolean; atd: FirebaseFirestore.DocumentData }> {
+  permiteCriar: boolean;
+}): Promise<{ isNovo: boolean; atd: FirebaseFirestore.DocumentData } | null> {
   const admin = (await import("firebase-admin")).default;
   const db = admin.firestore();
   const ref = db.collection("atendimentos").doc(params.conversationId);
@@ -84,6 +191,19 @@ async function upsertAtendimentoWhatsApp(params: {
   const now = Date.now();
 
   if (!snap.exists) {
+    if (!params.permiteCriar) return null;
+    // P1.2b — backfill: busca TODO o histórico real da conversa (a
+    // primeira vez que ela chega ao ERP pode já vir no meio de uma
+    // conversa em andamento — Tools sempre funcionaram, só o espelho ERP
+    // ficou para trás) + nome/telefone reais do contato do canal.
+    const sync = await sincronizarConversaCompleta(params.conversationId);
+    // P1.2c (achado real de E2E) — número na allowlist (config Firestore,
+    // nunca hardcoded) já nasce isTeste=true. Todo o resto da cadeia
+    // (lead/simulação/orçamento) já lê atendimentos/{id}.isTeste como
+    // fonte de verdade (valeriaCriarOportunidade, executeCalculateQuote/
+    // executeCreateQuote) — nenhuma mudança adicional foi necessária ali.
+    const { isNumeroDeTeste } = await import("./test_phone_allowlist");
+    const ehNumeroDeTeste = await isNumeroDeTeste(params.channelPhone ?? sync.telefoneE164);
     const registro = {
       id: params.conversationId,
       channel: "whatsapp",
@@ -92,8 +212,8 @@ async function upsertAtendimentoWhatsApp(params: {
       contactId: null,
       leadId: null,
       clienteId: null,
-      telefoneE164: params.channelPhone ?? null,
-      nome: null,
+      telefoneE164: params.channelPhone ?? sync.telefoneE164 ?? null,
+      nome: sync.nome,
       empresa: null,
       modoAtendimento: "valeria",
       responsavelUid: null,
@@ -106,40 +226,42 @@ async function upsertAtendimentoWhatsApp(params: {
       oportunidadeId: null,
       orcamentoId: null,
       naoLidas: 0,
-      ultimaMensagem: params.texto,
-      ultimaInteracaoEm: now,
+      ultimaMensagem: sync.ultimaMensagem ?? params.texto,
+      ultimaInteracaoEm: sync.ultimaMensagemEm ?? now,
       createdAt: now,
       updatedAt: now,
-      isTeste: false,
+      isTeste: ehNumeroDeTeste,
       requiresHuman: false,
       humanReason: null,
       priority: "NORMAL",
+      historyBackfilledAt: now,
+      historyBackfillCount: sync.novasMensagens,
     };
     await ref.set(registro);
-    const msgRef = ref.collection("mensagens").doc();
-    await msgRef.set({
-      id: msgRef.id, atendimentoId: params.conversationId, providerMessageId: null,
-      idempotencyKey: null, actorType: "customer", actorId: null, actorName: null,
-      text: params.texto, attachments: [], deliveryStatus: "sent",
-      provider: "whatsapp", createdAt: now,
-    });
     return { isNovo: true, atd: registro };
   }
 
   const atd = snap.data()!;
-  const patch: Record<string, unknown> = {
-    ultimaMensagem: params.texto, ultimaInteracaoEm: now, updatedAt: now,
-  };
+  const sync = await sincronizarConversaCompleta(params.conversationId);
+  const patch: Record<string, unknown> = { updatedAt: now };
+  if (sync.ultimaMensagem) {
+    patch.ultimaMensagem = sync.ultimaMensagem;
+    patch.ultimaInteracaoEm = sync.ultimaMensagemEm ?? now;
+  } else {
+    patch.ultimaMensagem = params.texto || atd.ultimaMensagem;
+    patch.ultimaInteracaoEm = now;
+  }
   // Nunca sobrescreve um telefone já conhecido com null; nunca apaga se o canal já informou antes.
-  if (!atd.telefoneE164 && params.channelPhone) patch.telefoneE164 = params.channelPhone;
+  if (!atd.telefoneE164 && (params.channelPhone || sync.telefoneE164)) patch.telefoneE164 = params.channelPhone ?? sync.telefoneE164;
+  // P1.2b — backfill do nome do contato só quando ainda não há nenhum
+  // (nem do canal, nem dito pelo cliente) — nunca sobrescreve um nome já
+  // confirmado.
+  if (!atd.nome && !atd.leadId && !atd.clienteId && sync.nome) patch.nome = sync.nome;
+  if (sync.novasMensagens > 0) {
+    patch.historyBackfillCount = ((atd.historyBackfillCount as number) || 0) + sync.novasMensagens;
+    if (!atd.historyBackfilledAt) patch.historyBackfilledAt = now;
+  }
   await ref.set(patch, { merge: true });
-  const msgRef = ref.collection("mensagens").doc();
-  await msgRef.set({
-    id: msgRef.id, atendimentoId: params.conversationId, providerMessageId: null,
-    idempotencyKey: null, actorType: "customer", actorId: null, actorName: null,
-    text: params.texto, attachments: [], deliveryStatus: "sent",
-    provider: "whatsapp", createdAt: now,
-  });
   return { isNovo: false, atd: { ...atd, ...patch } };
 }
 
@@ -276,7 +398,7 @@ async function avaliarEPersistirHandoff(
   }
 }
 
-const SECRET_NAMES = ["VALERIA_BEARER_SECRET", "VALERIA_BEARER_SECRET_PREV"];
+const SECRET_NAMES = ["VALERIA_BEARER_SECRET", "VALERIA_BEARER_SECRET_PREV", "CHATVOLT_API_KEY"];
 
 const RUN_OPTS = functions.runWith({
   secrets:        SECRET_NAMES,
@@ -401,75 +523,70 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
       const now    = Date.now();
       const nowIso = new Date().toISOString();
 
-      const { direcao, tipo } = mapEventToInteracao(eventType as WebhookEventType);
-
       // Campos de conteúdo (vários aliases do Chatvolt)
       const mensagemCliente =
         (body["mensagemCliente"] ?? body["userMessage"]  ?? body["message"] ?? body["text"]) as string | undefined;
       const respostaAgente  =
         (body["respostaAgente"]  ?? body["agentMessage"] ?? body["response"])                as string | undefined;
+
+      // Sprint P1.2b (achado real de E2E, primeira entrega genuína do
+      // ChatVolt) — eventType="AGENT_USER_MESSAGE" chegou carregando o
+      // TEXTO DO CLIENTE (mensagemCliente preenchido, respostaAgente
+      // null), não a resposta da Valéria como a documentação levava a
+      // supor (nunca confirmado contra payload real até este teste).
+      // Como o mesmo eventType aparentemente cobre as duas direções, o
+      // discriminador confiável é o CONTEÚDO — nunca só o nome do evento.
+      const { tipo } = mapEventToInteracao(eventType as WebhookEventType);
+      const direcao: "entrada" | "saida" =
+        mensagemCliente && !respostaAgente ? "entrada" : (respostaAgente ? "saida" : mapEventToInteracao(eventType as WebhookEventType).direcao);
       const mensagemLog = direcao === "entrada" ? mensagemCliente : respostaAgente;
 
-      // ── P1.0 — espelho operacional no ERP + pipeline determinístico ────────
-      // Só para mensagem real de cliente COM telefone de canal conhecido
-      // (WhatsApp real) — nunca para o chat de teste interno do Chatvolt
-      // (sem channelPhone) nem para eventos de saída/log da própria agente.
-      if (eventType === "USER_MESSAGE_RECEIVED" && ctx.channelPhone && mensagemCliente) {
+      // ── P1.0/P1.2b — espelho operacional no ERP + pipeline determinístico ──
+      // Só para eventos reais de WhatsApp COM telefone de canal conhecido
+      // (nunca para o chat de teste interno do Chatvolt, sem channelPhone).
+      // upsertAtendimentoWhatsApp roda para QUALQUER direção (entrada ou
+      // saída) — internamente chama sincronizarConversaCompleta, que busca
+      // o histórico REAL da conversa (API do ChatVolt), então tanto a
+      // mensagem do cliente quanto a resposta real da Valéria acabam
+      // espelhadas, mesmo que o payload do evento em si não carregue o
+      // texto da resposta (achado real: AGENT_MESSAGE_SENDED não carrega
+      // texto em nenhum campo). Só CRIA um atendimento novo a partir de
+      // mensagem de entrada — evento de saída sozinho em conversa
+      // desconhecida nunca cria nada (permiteCriar).
+      if (ctx.channelPhone) {
         try {
-          // upsertAtendimentoWhatsApp roda SEMPRE — preserva a mensagem e
-          // mantém o atendimento visível no ERP para qualquer número, com
-          // ou sem allowlist (nunca perde dado de cliente real).
-          const { atd } = await upsertAtendimentoWhatsApp({
+          const resultado = await upsertAtendimentoWhatsApp({
             conversationId: ctx.conversationId,
             channelPhone: ctx.channelPhone,
-            texto: mensagemCliente,
+            texto: mensagemCliente ?? "",
+            permiteCriar: direcao === "entrada" && !!mensagemCliente,
           });
-          // Sprint P1.2, item 10 — allowlist de números de teste
-          // (test_phone_allowlist.ts, config Firestore, nunca hardcoded).
-          // Allowlist vazia = sem restrição (produção normal). Allowlist
-          // não-vazia = só os números listados disparam o pipeline de AÇÃO
-          // comercial (identidade/confirmação/complexidade/handoff/
-          // execução) — qualquer outro número só tem a mensagem
-          // preservada acima, nunca cria orçamento nem altera estado
-          // comercial. NUNCA impede o próprio Chatvolt de responder
-          // automaticamente (isso não passa pelo nosso backend) — ver
-          // aviso completo no cabeçalho de test_phone_allowlist.ts.
-          const { permitidoParaPipeline } = await import("./test_phone_allowlist");
-          const podeExecutarPipeline = await permitidoParaPipeline(ctx.channelPhone);
-          if (podeExecutarPipeline && atd.modoAtendimento !== "humano") {
-            await detectarEPersistirIdentidadeWhatsApp(ctx.conversationId, mensagemCliente, atd, ctx.agentId, ctx.organizationId);
-            await detectarEPersistirConfirmacaoWhatsApp(ctx.conversationId, mensagemCliente);
-            const complexidadeDetectada = await avaliarEPersistirComplexidadeWhatsApp(ctx.conversationId, mensagemCliente);
-            const sinais = await dispararExecucaoComercialWhatsApp(ctx.conversationId, ctx.agentId, ctx.organizationId, ctx.channelPhone);
-            if (complexidadeDetectada) sinais.produtoComplexoSemReceita = true;
-            await avaliarEPersistirHandoff(ctx.conversationId, mensagemCliente, sinais);
+          if (resultado && direcao === "entrada" && mensagemCliente) {
+            const { atd } = resultado;
+            // Sprint P1.2, item 10 — allowlist de números de teste
+            // (test_phone_allowlist.ts, config Firestore, nunca
+            // hardcoded). Allowlist vazia = sem restrição (produção
+            // normal). Allowlist não-vazia = só os números listados
+            // disparam o pipeline de AÇÃO comercial (identidade/
+            // confirmação/complexidade/handoff/execução) — qualquer
+            // outro número só tem a mensagem preservada acima, nunca cria
+            // orçamento nem altera estado comercial. NUNCA impede o
+            // próprio Chatvolt de responder automaticamente (isso não
+            // passa pelo nosso backend) — ver aviso completo no
+            // cabeçalho de test_phone_allowlist.ts.
+            const { permitidoParaPipeline } = await import("./test_phone_allowlist");
+            const podeExecutarPipeline = await permitidoParaPipeline(ctx.channelPhone);
+            if (podeExecutarPipeline && atd.modoAtendimento !== "humano") {
+              await detectarEPersistirIdentidadeWhatsApp(ctx.conversationId, mensagemCliente, atd, ctx.agentId, ctx.organizationId);
+              await detectarEPersistirConfirmacaoWhatsApp(ctx.conversationId, mensagemCliente);
+              const complexidadeDetectada = await avaliarEPersistirComplexidadeWhatsApp(ctx.conversationId, mensagemCliente);
+              const sinais = await dispararExecucaoComercialWhatsApp(ctx.conversationId, ctx.agentId, ctx.organizationId, ctx.channelPhone);
+              if (complexidadeDetectada) sinais.produtoComplexoSemReceita = true;
+              await avaliarEPersistirHandoff(ctx.conversationId, mensagemCliente, sinais);
+            }
           }
         } catch (e) {
           console.error("[webhook] falha no espelho operacional WhatsApp (não bloqueia log do evento):", (e as Error).message);
-        }
-      }
-
-      // Resposta da Valéria também espelhada — só se o atendimento já existe
-      // (criado pela mensagem de entrada correspondente); nunca cria um
-      // atendimento a partir de uma mensagem de saída sozinha.
-      if (eventType === "AGENT_USER_MESSAGE" && respostaAgente) {
-        try {
-          const admin2 = (await import("firebase-admin")).default;
-          const ref = admin2.firestore().collection("atendimentos").doc(ctx.conversationId);
-          const snap = await ref.get();
-          if (snap.exists) {
-            const nowResp = Date.now();
-            await ref.set({ ultimaMensagem: respostaAgente, ultimaInteracaoEm: nowResp, updatedAt: nowResp }, { merge: true });
-            const respRef = ref.collection("mensagens").doc();
-            await respRef.set({
-              id: respRef.id, atendimentoId: ctx.conversationId, providerMessageId: explicitMsgId ?? null,
-              idempotencyKey: null, actorType: "valeria", actorId: null, actorName: "Valéria",
-              text: respostaAgente, attachments: [], deliveryStatus: "sent",
-              provider: "whatsapp", createdAt: nowResp,
-            });
-          }
-        } catch (e) {
-          console.error("[webhook] falha ao espelhar resposta da Valéria (não bloqueia log do evento):", (e as Error).message);
         }
       }
 
@@ -544,6 +661,13 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
     }
   );
 
-  // 200 sempre (incluindo replay idempotente)
-  res.status(result.success ? 200 : 500).json(result);
+  // Achado real (P1.2c) — "IDEMPOTENT_PROCESSING" (outra requisição com a
+  // MESMA chave ainda em andamento, ver idempotency.ts) não é uma falha —
+  // é esperado sempre que o ChatVolt reentrega/duplica um evento enquanto
+  // o primeiro ainda está processando (mais provável agora que a
+  // sincronia de histórico pode levar alguns segundos). Responder 500
+  // para isso fazia o ChatVolt (e o log) registrar erro onde não havia
+  // nenhum — 200 sempre, exceto falha real.
+  const emProcessamento = (result.warnings ?? []).some((w) => w.startsWith("IDEMPOTENT_PROCESSING"));
+  res.status(result.success || emProcessamento ? 200 : 500).json(result);
 });

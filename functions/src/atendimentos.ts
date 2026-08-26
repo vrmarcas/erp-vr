@@ -632,6 +632,17 @@ export const atdEnviarMensagemHumano = functions
   // a mensagem de fato criada. Best-effort: qualquer falha aqui nunca
   // perde o texto do humano, só não sai pelo canal externo.
   let enviadoAoCanal = false;
+  // Sprint P1.2c (achado real de E2E) — o ChatVolt atribui QUALQUER
+  // mensagem enviada por esta API como from:"agent" (não distingue
+  // humano de IA do lado dele). A sincronização de histórico
+  // (sincronizarConversaCompleta, functions-valeria/webhook.ts) lê essa
+  // mesma conversa depois e, sem essa chave, recriava a mensagem como se
+  // fosse da Valéria — duplicata com autor errado. Capturando o id REAL
+  // que o ChatVolt atribuiu e usando-o como doc id aqui (mesma convenção
+  // da sincronização), o dedup por id acontece naturalmente: quando a
+  // sincronização ver esse id, o doc já existe (actorType:"human"
+  // correto) e ela pula, sem duplicar nem trocar o autor.
+  let providerMessageIdReal: string | null = null;
   const providerConversationId = (atd.providerConversationId as string | null) ?? atendimentoId;
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (apiKey && atd.channel && atd.channel !== "erp_web") {
@@ -647,8 +658,10 @@ export const atdEnviarMensagemHumano = functions
           { channel: canalReal, message: texto },
           { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 15_000 }
         );
-        const criadas = resp.data?.messages as Array<{ text?: string }> | undefined;
-        enviadoAoCanal = resp.status === 200 && Array.isArray(criadas) && criadas.some((m) => m.text === texto);
+        const criadas = resp.data?.messages as Array<{ id?: string; text?: string }> | undefined;
+        const criada = criadas?.find((m) => m.text === texto);
+        enviadoAoCanal = resp.status === 200 && !!criada;
+        providerMessageIdReal = criada?.id ?? null;
       } else {
         console.error("[atendimentos.atdEnviarMensagemHumano] canal real da conversa não encontrado no Chatvolt — não relayado (mensagem ainda registrada no ERP).");
       }
@@ -657,11 +670,13 @@ export const atdEnviarMensagemHumano = functions
     }
   }
 
-  const msgRef = snap.ref.collection(SUB_MSG).doc();
+  const msgRef = providerMessageIdReal
+    ? snap.ref.collection(SUB_MSG).doc(providerMessageIdReal)
+    : snap.ref.collection(SUB_MSG).doc();
   await msgRef.set({
     id: msgRef.id,
     atendimentoId,
-    providerMessageId: null,
+    providerMessageId: providerMessageIdReal,
     idempotencyKey: requestId,
     actorType: "human",
     actorId: caller.uid,

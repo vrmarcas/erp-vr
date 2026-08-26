@@ -16,7 +16,7 @@ jest.mock("firebase-admin", () => ({
   })),
 }));
 
-import { permitidoParaPipeline, _resetCacheParaTeste } from "../test_phone_allowlist";
+import { permitidoParaPipeline, isNumeroDeTeste, _resetCacheParaTeste } from "../test_phone_allowlist";
 
 beforeEach(() => {
   _docData = undefined;
@@ -65,5 +65,41 @@ describe("Cache — não lê o Firestore a cada chamada dentro do TTL", () => {
     expect(await permitidoParaPipeline("+5511988887777")).toBe(false);
     _resetCacheParaTeste();
     expect(await permitidoParaPipeline("+5511988887777")).toBe(true);
+  });
+});
+
+describe("P1.2c — isNumeroDeTeste (propagação de isTest a partir da allowlist)", () => {
+  test("allowlist vazia/ausente → nunca marca como teste (nunca 'teste por padrão')", async () => {
+    _docData = undefined;
+    expect(await isNumeroDeTeste("+5511999998888")).toBe(false);
+    _docData = { numeros: [] };
+    expect(await isNumeroDeTeste("+5511999998888")).toBe(false);
+  });
+
+  test("número exatamente na allowlist → true", async () => {
+    _docData = { numeros: ["+5511999998888"] };
+    expect(await isNumeroDeTeste("+5511999998888")).toBe(true);
+  });
+
+  test("mesmo número em formato legado (sem +55, sem 9º dígito) → true (matching robusto)", async () => {
+    _docData = { numeros: ["+5511999998888"] };
+    expect(await isNumeroDeTeste("1199998888")).toBe(true);
+  });
+
+  test("número fora da allowlist → false (fluxo real normal, nunca marcado como teste)", async () => {
+    _docData = { numeros: ["+5511999998888"] };
+    expect(await isNumeroDeTeste("+5511988887777")).toBe(false);
+  });
+
+  test("channelPhone nulo → false", async () => {
+    _docData = { numeros: ["+5511999998888"] };
+    expect(await isNumeroDeTeste(null)).toBe(false);
+  });
+
+  test("dois números na allowlist — ambos reconhecidos (número antigo + novo continuam válidos)", async () => {
+    _docData = { numeros: ["+5562999396135", "+556234133888"] };
+    expect(await isNumeroDeTeste("+5562999396135")).toBe(true);
+    expect(await isNumeroDeTeste("556234133888")).toBe(true);
+    expect(await isNumeroDeTeste("+5511988887777")).toBe(false);
   });
 });
