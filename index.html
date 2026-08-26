@@ -4830,6 +4830,7 @@ function _authFirebaseError(code){
               </div>
             </div>
             <div id="atdTesteBanner" style="display:none" class="atd-teste-banner">🧪 CONVERSA DE HOMOLOGAÇÃO — não é um cliente real</div>
+            <div id="atdHandoffBanner" style="display:none;background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;padding:8px 12px;text-align:center">⚠️ Precisa de atendimento humano</div>
             <div class="atd-thread-msgs" id="atdThreadMsgs"></div>
             <div class="atd-composer" id="atdComposer">
               <textarea id="atdComposerInput" rows="1" placeholder="Simular mensagem do cliente…" onkeydown="atdComposerKeydown(event)"></textarea>
@@ -32227,6 +32228,12 @@ function atdRenderThreadHeader(atd){
   var modo = atdModoLabel(atd);
   document.getElementById('atdThreadModoBadge').innerHTML = '<span class="badge '+modo.cls+'">'+modo.txt+'</span>';
   document.getElementById('atdTesteBanner').style.display = atd.isTeste ? '' : 'none';
+  var handoffBanner = document.getElementById('atdHandoffBanner');
+  var precisaHumanoHeader = atd.requiresHuman===true && atd.status!=='resolvido';
+  handoffBanner.style.display = precisaHumanoHeader ? '' : 'none';
+  if(precisaHumanoHeader){
+    handoffBanner.textContent = '⚠️ Precisa de atendimento humano · '+atdHumanReasonLabel(atd.humanReason)+(atd.priority==='URGENT'?' · 🔴 URGENTE':'');
+  }
 
   var podeAgir = atdSouMaster() || (typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='comercial');
   var resolvido = atd.status==='resolvido';
