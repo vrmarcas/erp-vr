@@ -35,6 +35,8 @@
 const fs = require('fs');
 const path = require('path');
 
+if (typeof global.window === 'undefined') global.window = {}; // orcSalvarOrcamento() real tem hook fire-and-forget (RODADA 9) que lê window._atdOrigemAtendimentoId — no browser window sempre existe; aqui só precisa não ser undefined
+
 let passed = 0, failed = 0;
 async function test(desc, fn) {
   try { await fn(); console.log('  ✅  ' + desc); passed++; }
@@ -94,7 +96,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   // (mesmo que a UI real faria: a situação financeira já está confirmada
   // antes de "Gerar OS" ficar habilitado); as 10 "abas" concorrem só na
   // etapa Gerar OS — que é onde o idempotency guard real está.
-  var FN_NAMES_OS = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
+  var FN_NAMES_OS = ['orcEnvNormalizar', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
   var srcOS = [
     'var _ORC_ENVIADOS_DATA = [];',
     'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',

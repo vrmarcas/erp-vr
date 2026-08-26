@@ -108,6 +108,7 @@ function buildSugestaoModule(stockGlobal, retalhosGlobal) {
     "function cfgLoad(){ return { producao: { margemSegurancaRetalhoCm: 5 } }; }",
     extractFn('kbMargemSegurancaRetalhoCm'),
     extractFn('kbNecessidadeDimsOS'),
+    extractFn('kbNecessidadesPecasOS'),
     extractFn('kbRetalhoCabeGeometricamente'),
     extractFn('kbParseDimsWH'),
     extractFn('kbParseDimsArea'),
