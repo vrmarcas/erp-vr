@@ -12830,6 +12830,16 @@ async function orcConfirmarPagamentoWizard(){
   var btn = document.getElementById('orcBtnConfirmarPagamento');
   if(btn && btn.disabled) return; // operação já em andamento ou já concluída
   if(btn){ btn.disabled = true; btn.textContent = 'Salvando…'; }
+  // HOTFIX BLOCO N (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+  // orcSalvarOrcamento() (chamado abaixo) pode rejeitar por uma exceção
+  // não tratada dentro de _orcSalvarOrcamentoImpl() (função de ~400 linhas
+  // com try/catch só em pontos específicos, nunca um catch-all) — sem este
+  // try/catch aqui, essa rejeição escapava de uma async function sem
+  // nenhum catch, o botão ficava travado em "Salvando…" para sempre, e
+  // nenhum toast/erro avisava o operador. NÃO altera cálculo/preço/
+  // pagamento — só garante que QUALQUER falha inesperada sempre libere o
+  // botão e mostre um erro claro, nunca um estado travado ou silencioso.
+  try {
   // HOTFIX CRÍTICO 2026-08-25 — achado real de produção: confirmar
   // pagamento de um orçamento JÁ ENVIADO/APROVADO sempre chamava
   // orcSalvarOrcamento(), que reconstrói valorFinal/valorBase/
@@ -12888,6 +12898,11 @@ async function orcConfirmarPagamentoWizard(){
   var btnOS = document.getElementById('orcBtnGerarOSWizard');
   if(btnOS){ btnOS.disabled=false; btnOS.style.background='linear-gradient(90deg,#059669,#047857)'; btnOS.style.opacity='1'; btnOS.style.cursor='pointer'; }
   if(!resultado.jaConfirmado) showToast(tipoConfirmado==='futuro' ? 'Registrado como A Receber — Contas a Receber atualizado.' : 'Pagamento confirmado!', 'ok');
+  } catch (e) {
+    console.error('[orcConfirmarPagamentoWizard] falhou:', e);
+    if(btn){ btn.disabled = false; btn.textContent = '💳 Confirmar Pagamento'; }
+    showToast('Não foi possível confirmar o pagamento — erro inesperado, tente novamente.', 'err');
+  }
 }
 
 // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — grava SOMENTE a situação
