@@ -33210,12 +33210,24 @@ function atdInit(){
 // atendimentos" para quem vê a lista.
 var _ATD_LOADED = false;
 var _ATD_LOAD_ERROR = false;
+// HOTFIX BLOCO C (Rodada de Hardening, Fase 2, 2026-08-26) — retry
+// controlado: permission-denied é um estado TERMINAL (nunca some sozinho,
+// nunca deve oferecer retry — reautorização é decisão de administrador,
+// não de tentar de novo) — sinalizado à parte de falhas transitórias
+// (unavailable/network/timeout), que SIM podem se recuperar com uma nova
+// tentativa. _ATD_RETRY_COUNT limita tentativas manuais consecutivas (nunca
+// loop automático/infinito) com backoff crescente entre cliques.
+var _ATD_FORBIDDEN = false;
+var _ATD_RETRY_COUNT = 0;
+var _ATD_RETRY_BUSY = false;
 function atdListenerInit(){
   if(ATD_UNSUB || typeof _db==='undefined' || !_db) return;
   ATD_UNSUB = _db.collection('atendimentos').orderBy('updatedAt','desc').limit(200).onSnapshot(function(snap){
     ATD_CACHE = snap.docs.map(function(d){ return d.data(); });
     _ATD_LOADED = true;
     _ATD_LOAD_ERROR = false;
+    _ATD_FORBIDDEN = false;
+    _ATD_RETRY_COUNT = 0;
     atdRenderLista();
     atdSyncBadge();
     if(ATD_SELECTED_ID){
@@ -33224,9 +33236,27 @@ function atdListenerInit(){
     }
   }, function(e){
     console.error('[Atendimentos] listener falhou:', e);
-    _ATD_LOAD_ERROR = true;
+    if(e && e.code==='permission-denied'){ _ATD_FORBIDDEN = true; } else { _ATD_LOAD_ERROR = true; }
+    // Listener morreu no servidor — solta a referência para que uma
+    // tentativa (manual, ver atdTentarNovamente) possa recriar um novo.
+    ATD_UNSUB = null;
     atdRenderLista();
   });
+}
+// Botão manual "Tentar novamente" — nunca chamado para permission-denied
+// (ver atdRenderLista), só para falha transitória. Backoff crescente entre
+// cliques consecutivos (500ms × tentativa, teto de 5) — nunca retry
+// automático, sempre uma ação explícita do operador.
+function atdTentarNovamente(){
+  if(_ATD_RETRY_BUSY || _ATD_FORBIDDEN) return;
+  if(_ATD_RETRY_COUNT >= 5){ showToast('Muitas tentativas — recarregue a página.','warn'); return; }
+  _ATD_RETRY_BUSY = true;
+  _ATD_RETRY_COUNT++;
+  var espera = Math.min(500 * _ATD_RETRY_COUNT, 3000);
+  setTimeout(function(){
+    _ATD_RETRY_BUSY = false;
+    atdListenerInit();
+  }, espera);
 }
 
 function atdSyncBadge(){
@@ -33280,8 +33310,15 @@ function atdRenderLista(){
     return true;
   });
   if(!lista.length){
-    if(_ATD_LOAD_ERROR){
-      wrap.innerHTML = '<div class="atd-empty" style="color:#B91C1C;font-weight:700">⚠️ Não foi possível carregar os atendimentos — verifique sua conexão/permissão e recarregue a página.</div>';
+    // HOTFIX BLOCO C (Rodada de Hardening, Fase 2, 2026-08-26) — permission-
+    // denied (_ATD_FORBIDDEN) é terminal: nunca oferece "Tentar novamente"
+    // (reautorização não é decisão que um retry resolve). Falha transitória
+    // (_ATD_LOAD_ERROR) ganha o botão — recuperação sem reload completo.
+    if(_ATD_FORBIDDEN){
+      wrap.innerHTML = '<div class="atd-empty" style="color:#B91C1C;font-weight:700">🔒 Sem permissão para ver Atendimentos — contate o administrador.</div>';
+    } else if(_ATD_LOAD_ERROR){
+      wrap.innerHTML = '<div class="atd-empty" style="color:#B91C1C;font-weight:700">⚠️ Não foi possível carregar os atendimentos — verifique sua conexão.'
+        + '<div style="margin-top:10px"><button onclick="atdTentarNovamente()" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></div>';
     } else if(!_ATD_LOADED){
       wrap.innerHTML = '<div class="atd-empty">⏳ Carregando atendimentos...</div>';
     } else {
