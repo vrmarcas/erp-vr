@@ -150,15 +150,36 @@ service cloud.firestore {
       // Financeiro: Contas a Pagar/Receber e transações de caixa — é aqui
       // (não em "compras") que aprovação de preço/pagamento/quitação
       // realmente acontece, então a restrição de perfil aqui É efetiva.
-      // 'fin_cr' também aceita isComercial() (achado 2026-08-07): gerar OS
-      // a partir de um orçamento aprovado (orcEnvGerarOS()) grava a
-      // entrada/saldo em fin_cr na MESMA transação que atualiza o próprio
-      // orçamento — sem isso, a transação inteira falhava com permissão
-      // negada para qualquer conta que não fosse master/admin, quebrando
-      // por completo o botão "Gerar OS" para o perfil Comercial (o único
-      // que legitimamente aciona essa ação). Alargamento aditivo — não
-      // remove nada do que Financeiro já podia fazer.
-      allow read, write: if (isFinanceiro() || (isComercial() && docId=='fin_cr')) && docId in
+      //
+      // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — o
+      // alargamento aditivo 'isComercial() && docId==\"fin_cr\"' (achado
+      // 2026-08-07, comentário histórico abaixo) dava a QUALQUER conta
+      // Comercial leitura E escrita do documento COMPLETO de Contas a
+      // Receber de toda a empresa — cliente, valor, telefone (indireto via
+      // clienteId), vencimento, status de TODOS os clientes, não só os
+      // próprios. Provado ao vivo via Emulator (GET/PATCH retornavam 200
+      // para Comercial) — ver scripts/test_hardening_fin_cr_seguranca_por_role_2026-08-26.js.
+      // Removido. As 5 operações que antes exigiam esse alargamento
+      // (confirmar pagamento, gerar OS, receber saldo, registrar
+      // recebimento parcial, auto-criar CR ao aprovar orçamento) agora
+      // passam por Cloud Functions dedicadas (Admin SDK, mesmo padrão já
+      // em produção em Compras v2 — functions/src/compras.ts): o client
+      // nunca mais lê nem escreve fin_cr diretamente para completar essas
+      // ações. A única leitura legítima que Comercial tinha (histórico de
+      // recebimentos de UM orçamento específico, em orcFinanceiroReal())
+      // também virou uma Cloud Function read-only, que filtra no servidor
+      // e nunca devolve o array inteiro. Ver functions/src/finCr.ts.
+      //
+      // Comentário histórico (motivo do alargamento original, mantido
+      // como contexto): 'fin_cr' aceitava isComercial() porque gerar OS a
+      // partir de um orçamento aprovado (orcEnvGerarOS()) gravava a
+      // entrada/saldo em fin_cr na MESMA transação client-side que
+      // atualizava o próprio orçamento — sem isso, a transação inteira
+      // falhava com permissão negada. Essa necessidade continua existindo,
+      // só que a transação agora roda inteira no servidor (Admin SDK
+      // ignora Rules por natureza), então a Rule do client não precisa
+      // mais acomodá-la.
+      allow read, write: if isFinanceiro() && docId in
         ['fin_tx', 'fin_cp', 'fin_cr', 'erp_caixa_ant',
          // Rodada 4 — despesas recorrentes, cartões/faturas: mesmo grupo
          // de acesso do restante do Financeiro. Produção nunca acessa.

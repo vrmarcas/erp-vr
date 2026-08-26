@@ -13202,42 +13202,37 @@ function orcRegistrarSituacaoFinanceira(orcId, dados){
     return Promise.resolve({ok:true, jaConfirmado:false, dados:o.pgtoConfirmado});
   }
 
-  var refOrc=_db.collection(_COL).doc('orcamentos');
-  var refCR =_db.collection(_COL).doc('fin_cr');
-  var refTx =_db.collection(_COL).doc('fin_tx');
-  return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refCR), txn.get(refTx)]).then(function(snaps){
-      var docOrc=snaps[0], docCR=snaps[1], docTx=snaps[2];
-      var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
-      var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
-      var arrTx  = (docTx.exists  && docTx.data()  && docTx.data().data)  ? JSON.parse(docTx.data().data)  : [];
-      var idxOrc = arrOrc.findIndex(function(x){ return x.id===orcId; });
-      if(idxOrc<0) throw new Error('ORC_NAO_ENCONTRADO');
-      // Idempotência REAL: checada contra o documento fresco do servidor,
-      // dentro da própria transação — double-click ou retry após falha de
-      // rede nunca re-registram um segundo recebimento.
-      if(arrOrc[idxOrc].pgtoConfirmado){
-        return {ok:true, jaConfirmado:true, dados:arrOrc[idxOrc].pgtoConfirmado, arrOrc:arrOrc, semGravar:true};
-      }
-      var txMutado = aplicarCRTx(arrOrc[idxOrc], arrCR, arrTx, false);
-      arrOrc[idxOrc].pgtoConfirmado = montarPgtoConfirmado();
-      txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
-      txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
-      if(txMutado) txn.set(refTx, {data:JSON.stringify(arrTx), ts:Date.now()});
-      return {ok:true, jaConfirmado:false, dados:arrOrc[idxOrc].pgtoConfirmado, arrOrc:arrOrc, arrCR:arrCR, arrTx:arrTx, txMutado:txMutado};
-    });
-  }).then(function(resultado){
-    _ORC_ENVIADOS_DATA = resultado.arrOrc;
-    _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
-    if(!resultado.semGravar){
-      if(resultado.arrCR){ FIN_CR = resultado.arrCR; _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR); }
-      if(resultado.txMutado){ FIN_TX = resultado.arrTx; _cloudLastPayload['fin_tx'] = JSON.stringify(resultado.arrTx); }
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — esta transação
+  // lia+regravava fin_cr/fin_tx inteiros no client, o que exigia Comercial
+  // ter leitura direta de TODA a Conta a Receber da empresa (não só a
+  // própria). Migrado para a Cloud Function finCrConfirmarPagamento()
+  // (Admin SDK, mesma lógica de aplicarCRTx() portada 1:1 — ver
+  // functions/src/finCr.ts) — Comercial não lê mais fin_cr/fin_tx
+  // diretamente. orcamentos continua com Rules próprias, intocadas; o
+  // vínculo o.pgtoConfirmado chega de volta pela resposta da Function, e o
+  // listener em tempo real de 'orcamentos' converge para o mesmo estado.
+  var _oParaFn = orcGetEnviados().find(function(x){ return x.id===orcId; }) || {};
+  var _nParaFn = (typeof orcEnvNormalizar==='function') ? orcEnvNormalizar(_oParaFn) : {};
+  return firebase.functions().httpsCallable('finCrConfirmarPagamento')({
+    orcId: orcId, tipo: tipo, forma: forma, valorEfetivo: valorTotal, valorEntrada: valorEntrada,
+    restante: restante, obs: obs, nf: nf,
+    cliente: (_nParaFn.cliente && _nParaFn.cliente!=='(sem nome)') ? _nParaFn.cliente : 'Cliente',
+    tel: _nParaFn.tel||'', numOrc: _nParaFn.num||'',
+    prodNome: (_nParaFn.produto && _nParaFn.produto!=='—') ? _nParaFn.produto : 'Produto',
+    marca: _oParaFn.marca||'vr'
+  }).then(function(res){
+    var resultado = res.data || {};
+    if(!resultado.semGravar && _oParaFn.id){
+      _oParaFn.pgtoConfirmado = resultado.dados;
+      // FIN_CR/FIN_TX não são mais lidos por Comercial — quem tiver acesso
+      // real (Financeiro/Master) já os recebe pelo próprio listener em
+      // tempo real; não há nada local para reconciliar aqui.
     }
     try{ orcEnviadosRender(); }catch(e){}
     return resultado;
   }).catch(function(e){
     console.warn('[orcRegistrarSituacaoFinanceira] falhou:', e);
-    return {ok:false, motivo: e && e.message};
+    return {ok:false, motivo: (e && e.message) || 'ERRO'};
   });
 }
 
@@ -16105,73 +16100,20 @@ function kbReceberSaldo() {
   os._recebendoSaldo = true;
   var _osIdSnap = _kbOsId;
   var _osNumSnap = os.num;
-  var hoje = new Date();
-  var dia = hoje.getDate().toString().padStart(2,'0')+'/'+(hoje.getMonth()+1).toString().padStart(2,'0')+'/'+hoje.getFullYear();
-  var dtCurta = dia.slice(0,5);
 
   var _btnSaldo = document.getElementById('kbReceberSaldoBtn');
   if (_btnSaldo) _btnSaldo.disabled = true;
 
-  function _parsedDoc(snap) {
-    var raw = (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? snap.data().data : null;
-    if (raw === null) return null;
-    try { return JSON.parse(raw); } catch (e) { return null; }
-  }
-
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — esta transação
+  // lia+regravava fin_cr/fin_tx inteiros no client (exigia Comercial ter
+  // leitura direta de TODA a Conta a Receber da empresa). Migrada para a
+  // Cloud Function finCrReceberSaldo() (Admin SDK, mesma lógica portada
+  // 1:1 — ver functions/src/finCr.ts). kb_os/kb_os_fin/orcamentos
+  // continuam com Rules próprias de Comercial, intocadas — só fin_cr/
+  // fin_tx saíram do alcance direto do client.
   function _tentar() {
-    var refKb = _db.collection(_COL).doc('kb_os');
-    // Rodada 2, P0.6 — restante/valorEntrada/formaPgto agora vivem em
-    // kb_os_fin (fora do alcance de leitura da Produção); esta transação
-    // precisa reler e regravar os dois documentos juntos.
-    var refKbFin = _db.collection(_COL).doc('kb_os_fin');
-    var refCr = _db.collection(_COL).doc('fin_cr');
-    var refTx = _db.collection(_COL).doc('fin_tx');
-    var refOrc = _db.collection(_COL).doc('orcamentos');
-    return _db.runTransaction(function (txn) {
-      return Promise.all([txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
-        var kbData = _parsedDoc(snaps[0]) || {};
-        var kbFinData = _parsedDoc(snaps[1]) || {};
-        var crArr = _parsedDoc(snaps[2]) || [];
-        var txArr = _parsedDoc(snaps[3]) || [];
-        var orcArr = _parsedDoc(snaps[4]);
-
-        var osServidor = kbData[_osIdSnap];
-        var finServidor = kbFinData[_osIdSnap] || {};
-        if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
-        if ((finServidor.restante || 0) <= 0) {
-          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = Object.assign({}, osServidor, finServidor); throw eJa;
-        }
-
-        var valorRecebido = finServidor.restante || 0;
-        osServidor.status = 'iniciada';
-        finServidor.restante = 0;
-        kbData[_osIdSnap] = osServidor;
-        kbFinData[_osIdSnap] = finServidor;
-
-        var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
-        if (crEntry) { crEntry.status = 'recebido'; crEntry.dataRecebimento = dia; }
-
-        var novaTx = { data: dtCurta, cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: valorRecebido, metodo: finServidor.formaPgto || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
-        txArr = [novaTx].concat(txArr);
-
-        var orcMutado = false;
-        if (osServidor.orcRef && Array.isArray(orcArr)) {
-          var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
-          if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
-        }
-
-        var kbPayload = JSON.stringify(kbData), kbFinPayload = JSON.stringify(kbFinData), txPayload = JSON.stringify(txArr);
-        var crPayload = crEntry ? JSON.stringify(crArr) : null;
-        var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
-
-        txn.set(refKb, { data: kbPayload, ts: Date.now() });
-        txn.set(refKbFin, { data: kbFinPayload, ts: Date.now() });
-        txn.set(refTx, { data: txPayload, ts: Date.now() });
-        if (crEntry) txn.set(refCr, { data: crPayload, ts: Date.now() });
-        if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
-
-        return { osServidor: Object.assign({}, osServidor, finServidor), valorRecebido: valorRecebido, kbPayload: kbPayload, kbFinPayload: kbFinPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
-      });
+    return firebase.functions().httpsCallable('finCrReceberSaldo')({ osId: _osIdSnap }).then(function (res) {
+      return res.data || {};
     });
   }
 
@@ -16185,35 +16127,40 @@ function kbReceberSaldo() {
 
   function _finalizarSucesso(r) {
     os._recebendoSaldo = false;
-    _cloudLastPayload['kb_os'] = r.kbPayload;
-    _cloudLastPayload['kb_os_fin'] = r.kbFinPayload;
-    _cloudLastPayload['fin_tx'] = r.txPayload;
-    if (r.crPayload) _cloudLastPayload['fin_cr'] = r.crPayload;
-    if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
-    // r.osServidor já vem com kb_os + kb_os_fin mesclados (ver _tentar) —
-    // KB_OS[id] continua com os campos financeiros para quem tem permissão
-    // de tê-los (esta ação só é alcançável por Financeiro/Comercial/Master).
-    KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
-    if (r.crPayload) FIN_CR = r.crArr;
-    FIN_TX = r.txArr;
-    if (r.orcPayload) { _ORC_ENVIADOS_DATA = r.orcArr; try { orcEnviadosRender(); } catch (e) {} }
+    // O servidor (Admin SDK) já gravou kb_os/kb_os_fin/fin_tx/fin_cr/
+    // orcamentos — os campos abaixo são a mesma reconciliação otimista já
+    // usada por producaoIniciarOuEditar(): aplica localmente o que a
+    // Function confirmou, sem esperar o listener em tempo real (que
+    // também vai convergir para o mesmo estado logo em seguida).
+    if (KB_OS[_osIdSnap]) {
+      KB_OS[_osIdSnap].status = 'iniciada';
+      if (_KB_OS_FIN_CACHE && _KB_OS_FIN_CACHE[_osIdSnap]) _KB_OS_FIN_CACHE[_osIdSnap].restante = 0;
+      if (typeof _kbMergeFinCache === 'function') _kbMergeFinCache();
+    }
+    if (r.orcRef && typeof _ORC_ENVIADOS_DATA !== 'undefined' && Array.isArray(_ORC_ENVIADOS_DATA)) {
+      var _orcLocal = _ORC_ENVIADOS_DATA.find(function(o){ return o.id === r.orcRef; });
+      if (_orcLocal && _orcLocal.status === 'aguardando_pagamento') { _orcLocal.status = 'pago'; try { orcEnviadosRender(); } catch (e) {} }
+    }
     if (_btnSaldo) _btnSaldo.disabled = false;
     _refletirNaTela();
-    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento', 'Saldo de ' + finFmt(r.valorRecebido) + ' recebido — OS #' + _osNumSnap);
+    if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento', 'Saldo de ' + finFmt(r.valorRecebido || 0) + ' recebido — OS #' + _osNumSnap);
     showToast('✅ Saldo recebido! OS liberada para produção.', 'ok');
     return true;
   }
 
   function _tratarErro(e, jaRenovouToken) {
-    if (e && e.code === 'SALDO_JA_QUITADO') {
+    if (e && e.code === 'failed-precondition' && (e.message || '').indexOf('SALDO_JA_QUITADO') >= 0) {
       os._recebendoSaldo = false;
-      KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], e.osServidor);
+      if (KB_OS[_osIdSnap] && _KB_OS_FIN_CACHE && _KB_OS_FIN_CACHE[_osIdSnap]) {
+        _KB_OS_FIN_CACHE[_osIdSnap].restante = 0;
+        if (typeof _kbMergeFinCache === 'function') _kbMergeFinCache();
+      }
       if (_btnSaldo) _btnSaldo.disabled = false;
       _refletirNaTela();
       showToast('ℹ️ Este saldo já havia sido recebido em outra sessão — tela atualizada.', 'info');
       return true;
     }
-    if (e && e.code === 'OS_NAO_ENCONTRADA') {
+    if (e && e.code === 'not-found') {
       os._recebendoSaldo = false;
       if (_btnSaldo) _btnSaldo.disabled = false;
       showToast('⚠️ OS não encontrada no servidor — atualize a página.', 'err');
@@ -16296,102 +16243,18 @@ function finRegistrarRecebimento(id, valorPagoInput, forma, dataISOInput, obs, o
   var _btnSaldo = document.getElementById('osPgtoSaldoBtn');
   if (_btnSaldo) _btnSaldo.disabled = true;
 
-  function _parsedDoc(snap) {
-    var raw = (snap.exists && snap.data() && typeof snap.data().data !== 'undefined') ? snap.data().data : null;
-    if (raw === null) return null;
-    try { return JSON.parse(raw); } catch (e) { return null; }
-  }
-
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — esta transação
+  // lia+regravava fin_cr/fin_tx inteiros no client (exigia Comercial ter
+  // leitura direta de TODA a Conta a Receber da empresa). Migrada para a
+  // Cloud Function finCrRegistrarRecebimento() (Admin SDK, mesma lógica
+  // portada 1:1, incluindo a releitura do saldo real DENTRO da transação
+  // do servidor — ver functions/src/finCr.ts). kb_os/kb_os_fin/orcamentos
+  // continuam com Rules próprias de Comercial, intocadas.
   function _tentar() {
-    var refKb = _db.collection(_COL).doc('kb_os');
-    var refKbFin = _db.collection(_COL).doc('kb_os_fin');
-    var refCr = _db.collection(_COL).doc('fin_cr');
-    var refTx = _db.collection(_COL).doc('fin_tx');
-    var refOrc = _db.collection(_COL).doc('orcamentos');
-    return _db.runTransaction(function (txn) {
-      return Promise.all([txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc)]).then(function (snaps) {
-        var kbData = _parsedDoc(snaps[0]) || {};
-        var kbFinData = _parsedDoc(snaps[1]) || {};
-        var crArr = _parsedDoc(snaps[2]) || [];
-        var txArr = _parsedDoc(snaps[3]) || [];
-        var orcArr = _parsedDoc(snaps[4]);
-
-        var osServidor = kbData[_osIdSnap];
-        var finServidor = kbFinData[_osIdSnap] || {};
-        if (!osServidor) { var eNF = new Error('OS_NAO_ENCONTRADA'); eNF.code = 'OS_NAO_ENCONTRADA'; throw eNF; }
-        var restanteServidorCents = moneyToCents(finServidor.restante || 0);
-        if (restanteServidorCents <= 0) {
-          var eJa = new Error('SALDO_JA_QUITADO'); eJa.code = 'SALDO_JA_QUITADO'; eJa.osServidor = Object.assign({}, osServidor, finServidor); throw eJa;
-        }
-        // P0.16 — reler o saldo real dentro da própria transação, nunca
-        // confiar no valor que a tela tinha ao abrir o modal.
-        if (valorPagoCents > restanteServidorCents) {
-          var eExc = new Error('VALOR_MAIOR_QUE_SALDO'); eExc.code = 'VALOR_MAIOR_QUE_SALDO'; eExc.restanteServidor = centsToMoney(restanteServidorCents); throw eExc;
-        }
-
-        var novoRestanteCents = restanteServidorCents - valorPagoCents;
-        var quitado = novoRestanteCents <= 0;
-
-        // Status operacional: só o caminho legado aguardando_saldo→iniciada
-        // é preservado; qualquer outro status (ex.: "pronta") NUNCA regride
-        // — pagar o saldo não pode mandar uma OS pronta de volta à produção.
-        if (quitado && osServidor.status === 'aguardando_saldo') {
-          osServidor.status = 'iniciada';
-        }
-        finServidor.restante = centsToMoney(novoRestanteCents);
-        kbData[_osIdSnap] = osServidor;
-        kbFinData[_osIdSnap] = finServidor;
-
-        var crEntry = crArr.find(function (c) { return c.osRef && c.osRef.indexOf(String(osServidor.num)) >= 0 && c.status === 'pendente'; });
-        if (crEntry) {
-          if (quitado) {
-            // Quitado — a entrada "Restante" pendente é ABSORVIDA pela nova
-            // entrada "recebido" criada abaixo (nunca as duas ficam
-            // 'recebido' ao mesmo tempo, senão o histórico contaria o
-            // mesmo dinheiro duas vezes).
-            crArr = crArr.filter(function (c) { return c !== crEntry; });
-          } else {
-            // Pagamento parcial — reduz o valor ainda pendente, NUNCA apaga
-            // a entrada (ela continua representando o restante real).
-            crEntry.valor = centsToMoney(novoRestanteCents);
-          }
-        }
-        // O recebimento de agora vira sua PRÓPRIA entrada em FIN_CR — o
-        // histórico nunca funde dois pagamentos num só nem apaga a entrada
-        // anterior (entrada original preservada, ver orcFinanceiroReal).
-        var descBase = (quitado ? 'Pagamento do saldo' : 'Pagamento parcial do saldo') + ' — OS #' + osServidor.num;
-        var novoRecebimento = {
-          id: 'cr' + Date.now() + '_pgtosaldo',
-          cliente: osServidor.cliente, clienteId: '',
-          orcamentoId: osServidor.orcRef || null, osId: _osIdSnap,
-          descricao: descBase + (obs ? ' — ' + obs : ''),
-          valor: centsToMoney(valorPagoCents), vencimento: dia, status: 'recebido',
-          marca: osServidor.mk || 'vr', metodo: forma || 'PIX', osRef: 'OS #' + osServidor.num,
-          dataCriacao: dia, dataRecebimento: dia,
-        };
-        crArr = [novoRecebimento].concat(crArr);
-
-        var novaTx = { data: dia.slice(0,5), cliente: osServidor.cliente, os: String(osServidor.num), marca: osServidor.mk || 'vr', valor: centsToMoney(valorPagoCents), metodo: forma || 'PIX', status: 'recebido', dia: 1, sem: 1, mes: hoje.getMonth() + 1 };
-        txArr = [novaTx].concat(txArr);
-
-        var orcMutado = false;
-        if (quitado && osServidor.orcRef && Array.isArray(orcArr)) {
-          var orcEntry = orcArr.find(function (o) { return o.id === osServidor.orcRef; });
-          if (orcEntry && orcEntry.status === 'aguardando_pagamento') { orcEntry.status = 'pago'; orcMutado = true; }
-        }
-
-        var kbPayload = JSON.stringify(kbData), kbFinPayload = JSON.stringify(kbFinData), txPayload = JSON.stringify(txArr), crPayload = JSON.stringify(crArr);
-        var orcPayload = orcMutado ? JSON.stringify(orcArr) : null;
-
-        txn.set(refKb, { data: kbPayload, ts: Date.now() });
-        txn.set(refKbFin, { data: kbFinPayload, ts: Date.now() });
-        txn.set(refTx, { data: txPayload, ts: Date.now() });
-        txn.set(refCr, { data: crPayload, ts: Date.now() });
-        if (orcMutado) txn.set(refOrc, { data: orcPayload, ts: Date.now() });
-
-        return { osServidor: Object.assign({}, osServidor, finServidor), valorPago: centsToMoney(valorPagoCents), quitado: quitado, kbPayload: kbPayload, kbFinPayload: kbFinPayload, txPayload: txPayload, crPayload: crPayload, orcPayload: orcPayload, crArr: crArr, txArr: txArr, orcArr: orcArr };
-      });
-    });
+    return firebase.functions().httpsCallable('finCrRegistrarRecebimento')({
+      osId: _osIdSnap, valorPago: centsToMoney(valorPagoCents), forma: forma || 'PIX',
+      obs: obs || '', origem: origem, diaBR: dia
+    }).then(function (res) { return res.data || {}; });
   }
 
   function _refletirNaTela() {
@@ -16404,15 +16267,19 @@ function finRegistrarRecebimento(id, valorPagoInput, forma, dataISOInput, obs, o
 
   function _finalizarSucesso(r) {
     os._pagandoSaldo = false;
-    _cloudLastPayload['kb_os'] = r.kbPayload;
-    _cloudLastPayload['kb_os_fin'] = r.kbFinPayload;
-    _cloudLastPayload['fin_tx'] = r.txPayload;
-    _cloudLastPayload['fin_cr'] = r.crPayload;
-    if (r.orcPayload) _cloudLastPayload['orcamentos'] = r.orcPayload;
-    KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], r.osServidor);
-    FIN_CR = r.crArr;
-    FIN_TX = r.txArr;
-    if (r.orcPayload) { _ORC_ENVIADOS_DATA = r.orcArr; try { orcEnviadosRender(); } catch (e) {} }
+    // O servidor (Admin SDK) já gravou kb_os/kb_os_fin/fin_tx/fin_cr/
+    // orcamentos — reconciliação otimista local com o que a Function
+    // confirmou (mesmo padrão de producaoIniciarOuEditar/kbReceberSaldo);
+    // o listener em tempo real converge para o mesmo estado em seguida.
+    if (KB_OS[_osIdSnap]) {
+      if (r.quitado && KB_OS[_osIdSnap].status === 'aguardando_saldo') KB_OS[_osIdSnap].status = 'iniciada';
+      if (_KB_OS_FIN_CACHE && _KB_OS_FIN_CACHE[_osIdSnap]) _KB_OS_FIN_CACHE[_osIdSnap].restante = r.restanteAtual != null ? r.restanteAtual : 0;
+      if (typeof _kbMergeFinCache === 'function') _kbMergeFinCache();
+    }
+    if (r.orcRef && typeof _ORC_ENVIADOS_DATA !== 'undefined' && Array.isArray(_ORC_ENVIADOS_DATA)) {
+      var _orcLocal2 = _ORC_ENVIADOS_DATA.find(function(o){ return o.id === r.orcRef; });
+      if (_orcLocal2 && _orcLocal2.status === 'aguardando_pagamento') { _orcLocal2.status = 'pago'; try { orcEnviadosRender(); } catch (e) {} }
+    }
     if (_btnSaldo) _btnSaldo.disabled = false;
     _refletirNaTela();
     if (typeof secAuditLog === 'function') secAuditLog('fin_recebimento_saldo_os', (r.quitado ? 'Saldo quitado' : 'Pagamento parcial do saldo') + ' de ' + finFmt(r.valorPago) + ' — OS #' + _osNumSnap + ' — origem: ' + origem);
@@ -16421,21 +16288,25 @@ function finRegistrarRecebimento(id, valorPagoInput, forma, dataISOInput, obs, o
   }
 
   function _tratarErro(e, jaRenovouToken) {
-    if (e && e.code === 'SALDO_JA_QUITADO') {
+    if (e && e.code === 'failed-precondition' && (e.message || '').indexOf('SALDO_JA_QUITADO') >= 0) {
       os._pagandoSaldo = false;
-      KB_OS[_osIdSnap] = Object.assign({}, KB_OS[_osIdSnap], e.osServidor);
+      if (KB_OS[_osIdSnap] && _KB_OS_FIN_CACHE && _KB_OS_FIN_CACHE[_osIdSnap]) {
+        _KB_OS_FIN_CACHE[_osIdSnap].restante = 0;
+        if (typeof _kbMergeFinCache === 'function') _kbMergeFinCache();
+      }
       if (_btnSaldo) _btnSaldo.disabled = false;
       _refletirNaTela();
       showToast('ℹ️ Este saldo já havia sido quitado em outra sessão — tela atualizada.', 'info');
       return true;
     }
-    if (e && e.code === 'VALOR_MAIOR_QUE_SALDO') {
+    if (e && e.code === 'failed-precondition' && (e.message || '').indexOf('VALOR_MAIOR_QUE_SALDO') >= 0) {
       os._pagandoSaldo = false;
       if (_btnSaldo) _btnSaldo.disabled = false;
-      showToast('⚠️ O saldo real é ' + finFmt(e.restanteServidor) + ' (atualizado por outra sessão) — revise o valor.', 'err');
+      var _restanteMsg = (e.message || '').split(':')[1];
+      showToast('⚠️ O saldo real é ' + finFmt(_restanteMsg ? parseFloat(_restanteMsg) : 0) + ' (atualizado por outra sessão) — revise o valor.', 'err');
       return false;
     }
-    if (e && e.code === 'OS_NAO_ENCONTRADA') {
+    if (e && e.code === 'not-found') {
       os._pagandoSaldo = false;
       if (_btnSaldo) _btnSaldo.disabled = false;
       showToast('⚠️ OS não encontrada no servidor — atualize a página.', 'err');
@@ -26464,25 +26335,36 @@ function orcFinanceiroReal(o){
     recebidoCents = 0;
     saldoCents = totalCents;
   }
-  var historico = [];
-  if(typeof FIN_CR!=='undefined' && Array.isArray(FIN_CR) && o){
-    FIN_CR.filter(function(c){
-      return c.status==='recebido' && (c.orcamentoId===o.id || (o.osRef && c.osId===o.osRef));
-    }).forEach(function(c){
-      historico.push({ data: c.dataRecebimento||c.dataCriacao||'', valorCents: moneyToCents(c.valor||0), forma: c.metodo||'—', descricao: c.descricao||'' });
-    });
-    historico.sort(function(a,b){
-      var da=orcEnvParseDataSalvo(a.data), db=orcEnvParseDataSalvo(b.data);
-      return (da?da.getTime():0) - (db?db.getTime():0);
-    });
-  }
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — o histórico de
+  // recebimentos não vem mais de FIN_CR em memória (Comercial não lê mais
+  // esse array). orcFinanceiroReal() continua síncrona (total/recebido/
+  // saldo/condição vêm de kb_os_fin, inalterado) e devolve historico:[]
+  // aqui; quem chama (orcEnvAbrir()) busca o histórico real de forma
+  // assíncrona via a Cloud Function finCrHistoricoRecebimento() — só os
+  // recebimentos DESTE orçamento, nunca o array completo. Ver
+  // functions/src/finCr.ts.
   return {
     totalCents: totalCents,
     recebidoCents: recebidoCents,
     saldoCents: saldoCents,
     condicaoLabel: orcCondicaoPagamentoAtual(o),
-    historico: historico
+    historico: []
   };
+}
+// Monta o HTML da tabela de histórico de recebimentos — extraído de dentro
+// de orcEnvAbrir() para ser reutilizável tanto na 1ª renderização (vazia)
+// quanto no patch assíncrono que chega depois (ver finCrHistoricoRecebimento).
+function orcFinHistoricoHtml(historico, fmtVal){
+  if(!historico || !historico.length) return '';
+  return '<div style="margin-top:10px">'
+    +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Histórico de recebimentos</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +historico.map(function(h){
+      return '<tr><td style="padding:3px 6px 3px 0;color:var(--muted)">'+(h.data||'—')+'</td>'
+        +'<td style="padding:3px 6px;font-weight:700">'+fmtVal(h.valorCents/100)+'</td>'
+        +'<td style="padding:3px 0;color:var(--muted)">'+h.forma+'</td></tr>';
+    }).join('')
+    +'</table></div>';
 }
 
 // RODADA CIRÚRGICA 2026-08-17 (medidas na descrição comercial) — fonte
@@ -28462,38 +28344,34 @@ function orcEnvSetStatus(id, status) {
     // Auto-cria entrada em Contas a Receber
     if(!orc.crId) {
       var crId = 'cr'+Date.now();
-      orc.crId = crId;
+      orc.crId = crId; // guard síncrono contra duplo-clique, igual antes
       orcSetEnviados(lista); // salva crId no orçamento
-      var hoje = new Date();
-      var dd = hoje.getDate().toString().padStart(2,'0');
-      var mm = (hoje.getMonth()+1).toString().padStart(2,'0');
-      var yyyy = hoje.getFullYear();
-      var vencDate = new Date(hoje);
-      vencDate.setDate(vencDate.getDate()+30);
-      var vdd = vencDate.getDate().toString().padStart(2,'0');
-      var vmm = (vencDate.getMonth()+1).toString().padStart(2,'0');
-      var venc = vdd+'/'+vmm+'/'+vencDate.getFullYear();
-      // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — aprovar
-      // um orçamento ValerIA aqui criava CR com cliente "(não informado)",
-      // valor R$0,00 e "#undefined" — orcEnvNormalizar() reutilizado.
+      // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — a escrita
+      // direta em FIN_CR (+_finSaveCR()) exigia Comercial ter leitura E
+      // escrita do documento fin_cr inteiro. Migrada para a Cloud Function
+      // finCrAutoAprovarOrcamento() (Admin SDK — ver functions/src/finCr.ts),
+      // que recebe os mesmos campos já normalizados (orcEnvNormalizar(),
+      // igual antes) e faz a mesma criação idempotente no servidor.
       var _nSet = orcEnvNormalizar(orc);
       var _clienteSet = _nSet.cliente!=='(sem nome)' ? _nSet.cliente : '(não informado)';
-      FIN_CR.unshift({
-        id: crId,
-        cliente: _clienteSet,
-        clienteId: (typeof finResolveClienteId==='function' ? finResolveClienteId(_clienteSet, _nSet.tel) : ''),
-        orcamentoId: orc.id,
-        descricao: 'ORC #'+_nSet.num+' — '+(_nSet.produto!=='—'?_nSet.produto:'Produto'),
-        valor: _nSet.valorFinal||0,
-        vencimento: venc,
-        status: 'pendente',
-        marca: orc.marca||'vr',
-        metodo: orc.pgto||'PIX',
-        osRef: 'ORC-'+_nSet.num,
-        dataCriacao: dd+'/'+mm+'/'+yyyy,
-        dataRecebimento: null
-      });
-      _finSaveCR();
+      if(typeof firebase!=='undefined' && firebase.functions){
+        firebase.functions().httpsCallable('finCrAutoAprovarOrcamento')({
+          orcId: orc.id, crId: crId, cliente: _clienteSet, numOrc: _nSet.num||'',
+          prodNome: (_nSet.produto && _nSet.produto!=='—') ? _nSet.produto : 'Produto',
+          valor: _nSet.valorFinal||0, marca: orc.marca||'vr', metodo: orc.pgto||'PIX'
+        }).catch(function(e){ console.warn('[orcEnvSetStatus] finCrAutoAprovarOrcamento falhou (orçamento já aprovado, CR pode não ter sido criado):', e); });
+      } else if(typeof FIN_CR!=='undefined'){
+        // Fallback só para harness de teste local sem Firebase Functions —
+        // mesmo comportamento local que existia antes desta rodada.
+        FIN_CR.unshift({
+          id: crId, cliente: _clienteSet,
+          clienteId: (typeof finResolveClienteId==='function' ? finResolveClienteId(_clienteSet, _nSet.tel) : ''),
+          orcamentoId: orc.id, descricao: 'ORC #'+_nSet.num+' — '+(_nSet.produto!=='—'?_nSet.produto:'Produto'),
+          valor: _nSet.valorFinal||0, vencimento: '', status: 'pendente', marca: orc.marca||'vr',
+          metodo: orc.pgto||'PIX', osRef: 'ORC-'+_nSet.num, dataCriacao: '', dataRecebimento: null
+        });
+        if(typeof _finSaveCR==='function') _finSaveCR();
+      }
       showToast('Orçamento aprovado! Entrada criada em Contas a Receber. 🎉','ok');
     } else {
       showToast('Orçamento marcado como Aprovado! 🎉','ok');
@@ -28571,18 +28449,11 @@ function orcEnvAbrir(id) {
   // (mesclado em KB_OS), histórico de recebimentos vem de FIN_CR — as
   // MESMAS fontes que Contas a Receber/Caixa já usam.
   var finReal = orcFinanceiroReal(o);
-  var historicoHtml = '';
-  if(finReal.historico.length){
-    historicoHtml = '<div style="margin-top:10px">'
-      +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Histórico de recebimentos</div>'
-      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
-      +finReal.historico.map(function(h){
-        return '<tr><td style="padding:3px 6px 3px 0;color:var(--muted)">'+(h.data||'—')+'</td>'
-          +'<td style="padding:3px 6px;font-weight:700">'+fmtVal(h.valorCents/100)+'</td>'
-          +'<td style="padding:3px 0;color:var(--muted)">'+h.forma+'</td></tr>';
-      }).join('')
-      +'</table></div>';
-  }
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — historico
+  // chega vazio na 1ª renderização (síncrona); o container abaixo tem id
+  // fixo para receber um patch assíncrono logo depois (ver
+  // finCrHistoricoRecebimento mais abaixo, após modal.innerHTML=...).
+  var historicoHtml = '<div id="orcFinHistoricoBox">'+orcFinHistoricoHtml(finReal.historico, fmtVal)+'</div>';
   var financeiroHtml = '<div style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">'
     +'<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Valor contratado</div><div style="font-size:14px;font-weight:800">'+fmtVal(finReal.totalCents/100)+'</div></div>'
@@ -28637,6 +28508,23 @@ function orcEnvAbrir(id) {
     +(orcObterConfirmacaoEntrada(o.id).pode ? '<button class="topbar-btn ghost" style="color:#D97706;border-color:#D97706" onclick="orcGerarReciboEntrada(\''+o.id+'\')" >🧾 Recibo de Entrada</button>' : '')
     +'</div></div>';
   modal.style.display='flex';
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — histórico de
+  // recebimentos deste orçamento, buscado via Cloud Function (nunca lê
+  // fin_cr inteiro no client — ver finCrHistoricoRecebimento,
+  // functions/src/finCr.ts). modal.dataset.orcId identifica QUAL
+  // orçamento está aberto agora — se o operador fechar/abrir outro
+  // orçamento antes desta resposta chegar, o patch é descartado (nunca
+  // pinta o histórico errado por cima de um orçamento diferente).
+  modal.dataset.orcId = o.id;
+  if(typeof firebase!=='undefined' && firebase.functions){
+    firebase.functions().httpsCallable('finCrHistoricoRecebimento')({ orcamentoId:o.id, osRef:o.osRef||'' })
+      .then(function(res){
+        if(modal.dataset.orcId!==o.id) return; // modal já mudou de orçamento — descarta
+        var box = document.getElementById('orcFinHistoricoBox');
+        if(box) box.innerHTML = orcFinHistoricoHtml((res.data&&res.data.historico)||[], fmtVal);
+      })
+      .catch(function(e){ console.warn('[orcEnvAbrir] finCrHistoricoRecebimento falhou (total/recebido/saldo continuam corretos, só o histórico detalhado não carregou):', e); });
+  }
 }
 
 function orcEnvExcluir(id) {
@@ -29339,26 +29227,24 @@ function orcEnvGerarOS(){
   // Produção. Gravado dentro da MESMA transação que kb_os — nunca fica
   // um sem o outro.
   var refOSFin=_db.collection(_COL).doc('kb_os_fin');
-  var refCR =_db.collection(_COL).doc('fin_cr');
-  // HOTFIX recebimentos canônicos (2026-08-10) — a entrada é um recebimento
-  // real e precisa aparecer no Caixa igual qualquer outro (achado real:
-  // esta transação nunca escrevia em fin_tx; a entrada ficava "recebida" no
-  // CR mas invisível no Caixa, mesmo bug de fundo que motivou toda esta
-  // rodada de hotfix — cada recebimento real deve gerar exatamente 1
-  // movimento de Caixa, nunca zero).
-  var refTx =_db.collection(_COL).doc('fin_tx');
+  // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — fin_cr/fin_tx
+  // saíram desta transação (Comercial não lê mais nenhum dos dois
+  // diretamente; fin_tx nem sequer tinha Rule de escrita para Comercial
+  // antes desta rodada, um achado adicional). "Vincular" as entradas já
+  // criadas por orcRegistrarSituacaoFinanceira() à OS recém-gerada agora é
+  // um passo best-effort DEPOIS desta transação confirmar — ver
+  // finCrVincularOS() mais abaixo e functions/src/finCr.ts. O restante
+  // desta função (orcamentos/kb_os/kb_os_fin/erp_os_counter) não mudou.
   var refCnt=_db.collection(_COL).doc('erp_os_counter');
   var _newIdCaptured = null; // grupoPedidoId/kbOsRef para vínculo Vitre — capturado dentro da transação, usado depois que ela confirmar
 
   return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCR), txn.get(refTx), txn.get(refCnt)])
+    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCnt)])
       .then(function(snaps){
-        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCR=snaps[3], docTx=snaps[4], docCnt=snaps[5];
+        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCnt=snaps[3];
         var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
         var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
         var objOSFin = (docOSFin.exists && docOSFin.data() && docOSFin.data().data) ? JSON.parse(docOSFin.data().data) : {};
-        var arrCR  = (docCR.exists  && docCR.data()  && docCR.data().data)  ? JSON.parse(docCR.data().data)  : [];
-        var arrTx  = (docTx.exists  && docTx.data()  && docTx.data().data)  ? JSON.parse(docTx.data().data)  : [];
         var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
 
         var idxOrc = arrOrc.findIndex(function(x){ return x.id===o.id; });
@@ -29420,24 +29306,12 @@ function orcEnvGerarOS(){
         arrOrc[idxOrc].status = 'enviado_producao';
         arrOrc[idxOrc].osRef = newId;
 
-        var txMutado = false;
-        // HOTFIX OPERACIONAL 2026-08-12, P0.3/P0.4 — o CR (e o FIN_TX,
-        // quando houve dinheiro real) já foram registrados por
-        // orcRegistrarSituacaoFinanceira() no momento da Confirmação, sem
-        // osId (a OS ainda não existia). Aqui só VINCULA esses registros à
-        // OS recém-criada, dentro da MESMA transação — nunca cria um
-        // segundo lançamento financeiro para o mesmo pagamento.
-        arrCR.forEach(function(c){ if(c.orcamentoId===o.id && !c.osId){ c.osId=newId; c.osRef='OS #'+n; } });
-        arrTx.forEach(function(t){ if(t.orcamentoId===o.id && !t.os){ t.os=String(n); txMutado=true; } });
-
         txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
         txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
         txn.set(refOSFin, {data:JSON.stringify(objOSFin), ts:Date.now()});
-        txn.set(refCR,  {data:JSON.stringify(arrCR),  ts:Date.now()});
-        if(txMutado) txn.set(refTx, {data:JSON.stringify(arrTx), ts:Date.now()});
         txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
 
-        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin, arrCR:arrCR, arrTx:arrTx, txMutado:txMutado};
+        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin};
       });
   }).then(function(resultado){
     // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
@@ -29450,15 +29324,26 @@ function orcEnvGerarOS(){
     KB_OS = resultado.objOS;
     _KB_OS_FIN_CACHE = resultado.objOSFin;
     if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
-    FIN_CR = resultado.arrCR;
-    if(resultado.txMutado) FIN_TX = resultado.arrTx;
     _OS_COUNTER = resultado.num;
     _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
     _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
     _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
-    _cloudLastPayload['fin_cr'] = JSON.stringify(resultado.arrCR);
-    if(resultado.txMutado) _cloudLastPayload['fin_tx'] = JSON.stringify(resultado.arrTx);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
+    // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — vincular as
+    // entradas de fin_cr/fin_tx já criadas por orcRegistrarSituacaoFinanceira()
+    // à OS recém-gerada é, a partir de agora, um passo DEPOIS da transação
+    // acima (mesmo idioma do passo Vitre logo abaixo, aguardado igual a
+    // ele): se falhar, a OS/orçamento já confirmados NUNCA são desfeitos —
+    // o vínculo é idempotente (só toca entradas ainda sem osId/os) e pode
+    // ser tentado de novo. Aguardado (não fire-and-forget) para que quem
+    // chama orcEnvGerarOS() só veja sucesso depois do CR genuinamente
+    // vinculado — nunca uma janela onde a OS já existe mas o CR ainda
+    // aponta para lugar nenhum. Comercial não lê mais fin_cr/fin_tx
+    // diretamente — ver functions/src/finCr.ts.
+    var _vincularCrPromise = (typeof firebase!=='undefined' && firebase.functions)
+      ? firebase.functions().httpsCallable('finCrVincularOS')({ orcamentoId:o.id, osId:_newIdCaptured, osNum:resultado.num })
+          .catch(function(e){ console.warn('[orcEnvGerarOS] finCrVincularOS falhou (OS já confirmada, vínculo pode ser retomado depois):', e); })
+      : Promise.resolve();
     // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas",
     // decisão do usuário): a OS/orçamento/financeiro VR (únicos) já estão
     // confirmados acima. Se o pedido tinha itens do catálogo Vitre, eles
@@ -29468,50 +29353,52 @@ function orcEnvGerarOS(){
     // segundo orçamento/venda/lançamento financeiro. Se esta etapa falhar,
     // a OS/orçamento VR permanecem válidos (o operador pode tentar de novo
     // pelo Kanban); nunca desfazemos a transação já confirmada por isso.
-    if(_vitreItensPayload.length && _newIdCaptured && typeof firebase!=='undefined' && firebase.functions){
-      var _vitreReqId = 'vitreunif:'+_newIdCaptured+':'+Date.now()+':'+Math.random().toString(36).slice(2);
-      return firebase.functions().httpsCallable('vitreClassificarItensPedidoUnificado')({
-        grupoPedidoId: _newIdCaptured, kbOsRef: _newIdCaptured, requestId: _vitreReqId,
-        clienteNome: _clienteOS, clienteTel: _nOS.tel, itens: _vitreItensPayload
-      }).then(function(res){
-        var _vitreOsIdResolvido = (res && res.data && res.data.id) || null;
-        if(res && res.data && res.data.bloqueado) showToast('OS criada, mas alguns itens Vitre não puderam ser classificados (produto removido do catálogo) — revise pelo Kanban.','warn');
-        if(KB_OS[_newIdCaptured]){
-          KB_OS[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
-          KB_OS[_newIdCaptured].grupoPedidoId = _newIdCaptured;
-        }
-        // Grava o vínculo com uma transação dedicada (lê o kb_os direto do
-        // Firestore, nunca o global KB_OS em memória) — o listener ao vivo de
-        // kb_os pode reatribuir KB_OS inteiro entre o commit da transação
-        // acima e esta chamada assíncrona à Cloud Function; um kbSaveKbos()
-        // simples correria risco real de perder este patch por last-write-
-        // wins contra essa recarga. Achado nesta rodada via E2E real no
-        // Emulator: o vínculo silenciosamente não persistia no Firestore
-        // mesmo com o patch em memória e o toast de sucesso aparecendo.
-        if(typeof _db!=='undefined' && _db && typeof _db.runTransaction==='function'){
-          var _refOSLink = _db.collection(_COL).doc('kb_os');
-          return _db.runTransaction(function(txnLink){
-            return txnLink.get(_refOSLink).then(function(snapLink){
-              var objOSLink = (snapLink.exists && snapLink.data() && snapLink.data().data) ? JSON.parse(snapLink.data().data) : {};
-              if(objOSLink[_newIdCaptured]){
-                objOSLink[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
-                objOSLink[_newIdCaptured].grupoPedidoId = _newIdCaptured;
-                txnLink.set(_refOSLink, {data:JSON.stringify(objOSLink), ts:Date.now()});
-              }
+    return _vincularCrPromise.then(function(){
+      if(_vitreItensPayload.length && _newIdCaptured && typeof firebase!=='undefined' && firebase.functions){
+        var _vitreReqId = 'vitreunif:'+_newIdCaptured+':'+Date.now()+':'+Math.random().toString(36).slice(2);
+        return firebase.functions().httpsCallable('vitreClassificarItensPedidoUnificado')({
+          grupoPedidoId: _newIdCaptured, kbOsRef: _newIdCaptured, requestId: _vitreReqId,
+          clienteNome: _clienteOS, clienteTel: _nOS.tel, itens: _vitreItensPayload
+        }).then(function(res){
+          var _vitreOsIdResolvido = (res && res.data && res.data.id) || null;
+          if(res && res.data && res.data.bloqueado) showToast('OS criada, mas alguns itens Vitre não puderam ser classificados (produto removido do catálogo) — revise pelo Kanban.','warn');
+          if(KB_OS[_newIdCaptured]){
+            KB_OS[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
+            KB_OS[_newIdCaptured].grupoPedidoId = _newIdCaptured;
+          }
+          // Grava o vínculo com uma transação dedicada (lê o kb_os direto do
+          // Firestore, nunca o global KB_OS em memória) — o listener ao vivo de
+          // kb_os pode reatribuir KB_OS inteiro entre o commit da transação
+          // acima e esta chamada assíncrona à Cloud Function; um kbSaveKbos()
+          // simples correria risco real de perder este patch por last-write-
+          // wins contra essa recarga. Achado nesta rodada via E2E real no
+          // Emulator: o vínculo silenciosamente não persistia no Firestore
+          // mesmo com o patch em memória e o toast de sucesso aparecendo.
+          if(typeof _db!=='undefined' && _db && typeof _db.runTransaction==='function'){
+            var _refOSLink = _db.collection(_COL).doc('kb_os');
+            return _db.runTransaction(function(txnLink){
+              return txnLink.get(_refOSLink).then(function(snapLink){
+                var objOSLink = (snapLink.exists && snapLink.data() && snapLink.data().data) ? JSON.parse(snapLink.data().data) : {};
+                if(objOSLink[_newIdCaptured]){
+                  objOSLink[_newIdCaptured].vitreOsRef = _vitreOsIdResolvido;
+                  objOSLink[_newIdCaptured].grupoPedidoId = _newIdCaptured;
+                  txnLink.set(_refOSLink, {data:JSON.stringify(objOSLink), ts:Date.now()});
+                }
+              });
+            }).then(function(){ return resultado; }).catch(function(eLink){
+              console.warn('[orcEnvGerarOS] falha ao gravar vínculo vitreOsRef no kb_os (classificação Vitre já concluída):', eLink);
+              return resultado;
             });
-          }).then(function(){ return resultado; }).catch(function(eLink){
-            console.warn('[orcEnvGerarOS] falha ao gravar vínculo vitreOsRef no kb_os (classificação Vitre já concluída):', eLink);
-            return resultado;
-          });
-        }
-        return resultado;
-      }).catch(function(e){
-        console.warn('[orcEnvGerarOS] classificação Vitre falhou — OS/orçamento VR já confirmados, itens Vitre pendentes:', e);
-        showToast('OS criada, mas os itens Vitre não puderam ser classificados agora — tente novamente pelo Kanban.','warn');
-        return resultado;
-      });
-    }
-    return resultado;
+          }
+          return resultado;
+        }).catch(function(e){
+          console.warn('[orcEnvGerarOS] classificação Vitre falhou — OS/orçamento VR já confirmados, itens Vitre pendentes:', e);
+          showToast('OS criada, mas os itens Vitre não puderam ser classificados agora — tente novamente pelo Kanban.','warn');
+          return resultado;
+        });
+      }
+      return resultado;
+    });
   }).then(function(resultado){
     finalizar(true, resultado);
   }).catch(function(e){

@@ -45,6 +45,20 @@ export {
 // ── Produção (fronteira server-side de autorização de estoque) ──────────────
 export { producaoIniciarOuEditar } from "./producao";
 
+// ── fin_cr (HARDENING DE CONFIDENCIALIDADE FINANCEIRA, 2026-08-26) — as 5
+//    ações de Comercial que exigiam ler+regravar Contas a Receber inteiro,
+//    mais a única leitura legítima (histórico por orçamento), migraram
+//    para cá; Comercial perdeu leitura/escrita direta de erp_vr/fin_cr
+//    (ver firestore.rules) ───────────────────────────────────────────────
+export {
+  finCrConfirmarPagamento,
+  finCrVincularOS,
+  finCrReceberSaldo,
+  finCrRegistrarRecebimento,
+  finCrAutoAprovarOrcamento,
+  finCrHistoricoRecebimento,
+} from "./finCr";
+
 // ── Estoque (fronteira server-side para o restante da superfície de
 //    escrita de stock/retalhos/erp_stock_log — auditoria Fase F, FASE 2-8) ──
 export {
