@@ -8338,7 +8338,12 @@ function cliImportDownloadTemplate() {
 // ════════════════════════════════════════════════════════════════════════
 var FORN_KEY = 'erp_fornecedores';
 function fornLoad(){ return _FORN_DATA.slice(); }
-function fornSaveAll(arr){ _FORN_DATA=arr; if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_fornecedores', arr); }
+// HOTFIX BLOCO Q (Rodada de Hardening, Fase 2, 2026-08-26) — retorna a
+// Promise real de _cloudSave (já existente, com {ok,reason}) em vez de
+// disparar e esquecer; chamadores que ignoram o retorno continuam
+// funcionando exatamente como antes (nunca quebra os 4 call sites já
+// existentes) — só fornSalvar() passou a esperar por ela.
+function fornSaveAll(arr){ _FORN_DATA=arr; return (typeof _cloudSave==='function' && _cloudReady) ? _cloudSave('erp_fornecedores', arr) : Promise.resolve({ok:true}); }
 
 var FORN_CAT_COLOR = {
   'Matéria-Prima':'#1EB8D8','Mão de Obra':'#059669','Serviços':'#3B82F6',
@@ -8530,10 +8535,32 @@ function fornSalvar() {
     obj.historico=[];
     list.unshift(obj);
   }
-  fornSaveAll(list);
-  fornCloseModal();
-  fornRender();
-  showToast((editId?'Fornecedor atualizado':'Fornecedor cadastrado')+'!','ok');
+  // HOTFIX BLOCO Q (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+  // real: o toast "cadastrado!"/"atualizado!" e o fechamento do modal
+  // aconteciam ANTES de qualquer confirmação real do servidor — uma falha
+  // de rede/permissão em _cloudSave (que já detecta e trata isso) passava
+  // despercebida: o operador via "sucesso" e seguia em frente, mas o
+  // fornecedor nunca chegou a existir de verdade. Reutiliza a Promise já
+  // existente de _cloudSave (fornSaveAll agora a repassa) — só confirma
+  // sucesso ao operador depois do commit real; falha desfaz a mutação
+  // local (fornSaveAll já mutou _FORN_DATA de forma otimista) e mantém o
+  // modal aberto para nova tentativa, em vez de fingir que salvou.
+  var _fornBackup = _FORN_DATA.slice();
+  var _fornBtn = document.querySelector('#fornOverlay .gen-submit');
+  if (_fornBtn) _fornBtn.disabled = true;
+  return fornSaveAll(list).then(function(res){
+    if (_fornBtn) _fornBtn.disabled = false;
+    if (res && res.ok) {
+      fornCloseModal();
+      fornRender();
+      showToast((editId?'Fornecedor atualizado':'Fornecedor cadastrado')+'!','ok');
+    } else {
+      _FORN_DATA = _fornBackup;
+      fornRender();
+      // _cloudSaveExec já mostra o toast de erro específico (permissão/
+      // conflito/cota) — aqui só garante que o operador continue no modal.
+    }
+  });
 }
 
 function fornExcluir(id) {
@@ -13722,6 +13749,14 @@ function kbPlanificacaoGerarSVG(pecas) {
 function kbAbrirPlanificacaoItem(idx){
   var os = KB_OS[_kbOsId]; if(!os) return;
   var it = (os.itens||[])[idx]; if(!it) return;
+  // HOTFIX BLOCO L (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+  // esta função inteira não tinha try/catch; qualquer exceção ao montar o
+  // desenho/tabela (snapshot de peças malformado, SVG inválido) fazia o
+  // clique em "Abrir Planificação" não fazer NADA visível — parecia botão
+  // quebrado, sem nenhuma pista do que houve. Nunca recalcula/altera o
+  // snapshot — só garante que uma falha ao RENDERIZAR fique visível e
+  // acionável em vez de silenciosa.
+  try {
   // RODADA 5 — BUG PRÉ-EXISTENTE corrigido: para itens de receita
   // customizada, `recipeSnapshot.pecas` guarda as FÓRMULAS da receita (ex.:
   // larg="L - 2*e"), não as peças calculadas — priorizar isso fazia esta
@@ -13795,6 +13830,10 @@ function kbAbrirPlanificacaoItem(idx){
     + '</div></div>';
   kbFecharPlanificacaoItemModal();
   document.body.insertAdjacentHTML('beforeend', html);
+  } catch (e) {
+    console.error('[kbAbrirPlanificacaoItem] falhou:', e);
+    if (typeof showToast === 'function') showToast('Não foi possível abrir a planificação deste item — snapshot pode estar corrompido/incompleto. Detalhe no console.', 'err');
+  }
 }
 
 function kbOpen(id) {
@@ -13978,12 +14017,25 @@ function kbOpen(id) {
   var _matProdQty = document.getElementById('kbMatProdQtyLabel');
   if (_iniciarBox) {
     var _ibBtn = _iniciarBox.querySelector('button');
+    // HOTFIX BLOCO M (Rodada de Hardening, Fase 2, 2026-08-26) — achado
+    // real: este botão só checava os.status, nunca o perfil de quem está
+    // vendo — Comercial tem acesso de tela ao Kanban (PERM_DEFAULT), mas as
+    // Rules de 'stock'/'retalhos' são só para isProducao() (deliberado,
+    // ver firestore.rules). Clicar aqui como Comercial abria o modal
+    // "Iniciar Produção" e travava com permission-denied — parecia bug,
+    // era a Rule funcionando como projetada. Decisão (nunca suposta): esta
+    // é uma ação operacional de Produção — oculta para quem não é
+    // Master/Produção, em vez de abrir a Rule de estoque para mais
+    // perfis só para o botão parar de "falhar".
+    var _podeIniciarProd = typeof _currentSession==='undefined' || !_currentSession || _currentSession.funcao==='master' || _currentSession.funcao==='producao';
     // Regra operacional corrigida (2026-08-07): "aguardando_saldo" (50%
     // pago, 50% pendente até a retirada) NUNCA deve bloquear o início da
     // produção — só a entrada/aprovação importa aqui. O saldo pendente
     // continua bloqueando a ENTREGA final (ver osLiberar()), nunca o
     // início do trabalho.
-    if (os.status === 'iniciada' || os.status === 'aguardando_saldo') {
+    if (!_podeIniciarProd) {
+      _iniciarBox.style.display = 'none';
+    } else if (os.status === 'iniciada' || os.status === 'aguardando_saldo') {
       _iniciarBox.style.display = '';
       if(_ibBtn){ _ibBtn.innerHTML='🔧 Iniciar Produção'; _ibBtn.style.background='linear-gradient(90deg,#D97706,#B45309)'; _ibBtn.onclick=function(){ kbIniciarProd(); }; }
     } else if (os.status === 'producao') {
@@ -21847,6 +21899,19 @@ function relatoriosRender() {
 function stockRenderItems() {
   var el = document.getElementById('stockItemsList');
   if (!el) return;
+  // HOTFIX BLOCO K (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+  // esta tela nunca checava _STOCK_LOAD_ERROR (já existente, usado em
+  // _kbOpenProdOverlay/Dashboard) — uma falha real (permission-denied,
+  // rede) deixava o operador preso em "Carregando estoque..." para sempre,
+  // indistinguível de uma demora normal. Reutiliza o mesmo sinal, nunca
+  // uma segunda fórmula. O onSnapshot de 'stock' é realtime — reconecta
+  // sozinho em falha transitória (chama stockRenderItems() de novo ao
+  // confirmar), então "recarregar a página" é a ação honesta aqui, igual
+  // ao padrão já usado em Orçamentos Enviados para o mesmo tipo de falha.
+  if(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR) {
+    el.innerHTML = '<div style="color:#B91C1C;font-size:12px;padding:12px 0;text-align:center;font-weight:700">⚠️ Não foi possível carregar o Estoque — verifique sua conexão/permissão e recarregue a página.</div>';
+    return;
+  }
   // Aguardar confirmação do servidor antes de renderizar — evita exibir dados do cache local desatualizado
   if(!_stockServerConfirmed) {
     el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center">⏳ Carregando estoque...</div>';
@@ -23286,14 +23351,30 @@ function vitreCatMinhaFuncao() {
   return _normalizeRole((typeof _currentSession !== 'undefined' && _currentSession && _currentSession.funcao) || '') || '';
 }
 
+// HOTFIX BLOCO J (Rodada de Hardening, Fase 2, 2026-08-26) — achado real:
+// uma falha do listener (rede/permissão) só gerava console.warn — a tela
+// mostrava exatamente o mesmo empty-state de "catálogo genuinamente vazio"
+// ("Importe a planilha... ou cadastre manualmente"), instruindo o operador
+// a reimportar por cima de dados que na verdade só não chegaram a esta
+// aba. _VITRE_CAT_LOADED distingue "ainda não confirmado" (nem sucesso nem
+// erro) de "confirmado", e _VITRE_CAT_LOAD_ERROR sinaliza falha real —
+// mesmo padrão já usado em _STOCK_LOAD_ERROR/_CLOUD_WATCH_ERROR.
+var _VITRE_CAT_LOADED = false;
+var _VITRE_CAT_LOAD_ERROR = false;
 function vitreCatalogoInit() {
   if (_vitreCatUnsub || typeof _db === 'undefined' || !_db) return;
   _vitreCatUnsub = _db.collection('vitre_produtos').onSnapshot(function (snap) {
     VITRE_CATALOGO_CACHE = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (a.sku || '').localeCompare(b.sku || ''); });
+    _VITRE_CAT_LOADED = true;
+    _VITRE_CAT_LOAD_ERROR = false;
     if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
     var _incPanel = document.getElementById('vitreCatIncompletosPanel');
     if (_incPanel && _incPanel.style.display !== 'none') vitreCatIncompletosRender();
-  }, function (err) { console.warn('[Vitre] listener vitre_produtos falhou:', err); });
+  }, function (err) {
+    console.warn('[Vitre] listener vitre_produtos falhou:', err);
+    _VITRE_CAT_LOAD_ERROR = true;
+    if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
+  });
 }
 
 // RODADA 2, P2 — alternância Grade | Lista do Catálogo Vitre. Preferência
@@ -23363,8 +23444,30 @@ function vitreCatalogoRender() {
 
   var totEl = document.getElementById('vitreCatTotal');
   if (totEl) totEl.textContent = lista.length + ' produto(s) de ' + VITRE_CATALOGO_CACHE.length;
+  // HOTFIX BLOCO J (Rodada de Hardening, Fase 2, 2026-08-26) — diferencia
+  // carregando/falhou/genuinamente vazio; nunca sugere reimportar por uma
+  // falha de leitura transitória.
   var empty = document.getElementById('vitreCatEmpty');
-  if (empty) empty.style.display = VITRE_CATALOGO_CACHE.length ? 'none' : '';
+  if (empty) {
+    if (VITRE_CATALOGO_CACHE.length) {
+      empty.style.display = 'none';
+    } else if (_VITRE_CAT_LOAD_ERROR) {
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">⚠️</div>'
+        + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Não foi possível carregar o catálogo Vitre</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Verifique sua conexão/permissão e recarregue a página — os produtos podem já existir, isto não é um catálogo vazio.</div>';
+    } else if (!_VITRE_CAT_LOADED) {
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.5">⏳</div>'
+        + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Carregando catálogo...</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Aguarde a confirmação do servidor.</div>';
+    } else {
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:64px;margin-bottom:16px;opacity:.5">🌸</div>'
+        + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhum produto no catálogo Vitre</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Importe a planilha de produtos ou cadastre manualmente.</div>';
+    }
+  }
 
   var souMaster = vitreCatSouMaster();
   var minhaFuncao = vitreCatMinhaFuncao();
@@ -32580,6 +32683,13 @@ function authLogout(){
   // mesma aba não deve herdar nada da sessão anterior.
   if(typeof ATD_UNSUB!=='undefined' && ATD_UNSUB){ try{ATD_UNSUB();}catch(e){} ATD_UNSUB=null; }
   if(typeof ATD_MSG_UNSUB!=='undefined' && ATD_MSG_UNSUB){ try{ATD_MSG_UNSUB();}catch(e){} ATD_MSG_UNSUB=null; }
+  // HOTFIX BLOCO E (Rodada de Hardening, Fase 2, 2026-08-26) — achado da
+  // rodada anterior, ainda não corrigido: o listener do briefing ValerIA
+  // (ATD_BRIEFING_UNSUB, painel de um atendimento aberto) nunca era
+  // encerrado aqui, ao contrário de ATD_UNSUB/ATD_MSG_UNSUB logo acima —
+  // mesma classe de vazamento (perfil seguinte na mesma aba podia herdar
+  // callback de briefing da conta anterior).
+  if(typeof ATD_BRIEFING_UNSUB!=='undefined' && ATD_BRIEFING_UNSUB){ try{ATD_BRIEFING_UNSUB();}catch(e){} ATD_BRIEFING_UNSUB=null; }
   if(typeof ATD_CACHE!=='undefined') ATD_CACHE=[];
   if(typeof ATD_SELECTED_ID!=='undefined') ATD_SELECTED_ID=null;
   // Encerrar sessão Firebase Auth (FASE 5) — só depois que o delete acima
