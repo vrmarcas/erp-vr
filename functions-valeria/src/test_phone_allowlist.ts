@@ -59,6 +59,26 @@ export async function permitidoParaPipeline(channelPhone: string | null): Promis
   return numeros.some((n) => telefonesEquivalentes(n, channelPhone));
 }
 
+/**
+ * Sprint P1.2c (achado real de E2E) — número na allowlist deve propagar
+ * isTest=true por toda a cadeia comercial derivada (atendimento → lead →
+ * simulação → orçamento), nunca só ganhar acesso ao pipeline. Ao
+ * contrário de permitidoParaPipeline, allowlist VAZIA nunca marca nada
+ * como teste (não existe "teste por padrão" — só quando o número está
+ * EXPLICITAMENTE na lista). Chamado só na CRIAÇÃO do atendimento (ver
+ * webhook.ts) — depois disso, a maior parte do sistema já lê
+ * atendimentos/{id}.isTeste como fonte de verdade (valeriaCriarOportunidade,
+ * executeCalculateQuote/executeCreateQuote em action_executor.ts e
+ * valeria.ts já propagam isso para lead/simulação/orçamento — nenhuma
+ * mudança adicional foi necessária nesses pontos).
+ */
+export async function isNumeroDeTeste(channelPhone: string | null): Promise<boolean> {
+  if (!channelPhone) return false;
+  const numeros = await loadAllowlist();
+  if (numeros.length === 0) return false;
+  return numeros.some((n) => telefonesEquivalentes(n, channelPhone));
+}
+
 /** Só para testes — nunca chamado em produção. */
 export function _resetCacheParaTeste(): void {
   _cache = null;

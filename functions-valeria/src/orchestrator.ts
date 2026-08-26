@@ -265,9 +265,15 @@ function nextCommercialActionCore(params: {
   );
 
   if (readiness.ready && !readiness.customerIdentityReady) {
+    // P1.2b (achado real de E2E) — só chega aqui quando NENHUMA fonte deu
+    // nome (nem o contato do canal, nem o texto do cliente — ver
+    // webhook.ts::buscarNomeContatoChatvolt, que já resolve isso antes
+    // para WhatsApp real). Pergunta curta, nunca "nome completo".
     return {
       nextAction: "identify_customer", missingFields: [], reason: "Dados de especificação completos — falta identificar o cliente antes de orçar.",
-      actionPayload: {},
+      actionPayload: {
+        instrucao: "Pergunte apenas: \"Qual é o seu nome?\" — nunca peça \"nome completo\", nunca peça telefone se o canal já informou (WhatsApp já dá o telefone automaticamente). Seja direto, uma frase só.",
+      },
     };
   }
 
@@ -289,7 +295,14 @@ function nextCommercialActionCore(params: {
     return {
       nextAction: "create_quote", missingFields: [], reason: "Simulação elegível confere com os dados atuais e o cliente já confirmou — criar o orçamento formal.",
       actionPayload: {
-        instrucao: "Orçamento já criado pelo backend — apresente o resultado ao cliente, não chame nenhuma Tool.",
+        // P1.2c (achado real de E2E) — customerIdentityReady já é
+        // garantidamente true neste ponto (identify_customer sempre roda
+        // antes), mas o modelo (GPT-4.1 Mini) às vezes pede nome/telefone
+        // por conta própria mesmo assim, ignorando a regra geral do
+        // prompt — reforço explícito aqui porque instrucao literal do
+        // backend historicamente é seguido com mais disciplina que regra
+        // geral do prompt.
+        instrucao: "Orçamento já criado pelo backend — apresente o resultado ao cliente, não chame nenhuma Tool. Nome e telefone já estão confirmados — nunca peça nome completo nem telefone.",
         toolToCall: "criar_orcamento_vr",
       },
     };
@@ -306,7 +319,12 @@ function nextCommercialActionCore(params: {
       nextAction: "confirm_quote", missingFields: [], reason: "Preço já calculado — aguardando confirmação explícita do cliente antes de criar o orçamento.",
       actionPayload: {
         finalPrice: params.lastEligibleSimulation!.finalPrice,
-        instrucao: `Preço já calculado: R$ ${params.lastEligibleSimulation!.finalPrice.toFixed(2)}. Apresente esse valor e pergunte se o cliente confirma — não recalcule, não crie o orçamento ainda.`,
+        // P1.2c (achado real de E2E) — mesmo com customerIdentityReady
+        // já garantidamente true aqui, o modelo às vezes pede nome
+        // completo/telefone por conta própria ("para formalizar"),
+        // ignorando a regra geral do prompt. Reforço explícito porque
+        // instrucao literal do backend é seguido com mais disciplina.
+        instrucao: `Preço já calculado: R$ ${params.lastEligibleSimulation!.finalPrice.toFixed(2)}. Apresente esse valor e pergunte se o cliente confirma — não recalcule, não crie o orçamento ainda. Nome e telefone já estão confirmados — nunca peça nome completo nem telefone.`,
       },
     };
   }
