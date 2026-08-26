@@ -25586,6 +25586,15 @@ function crmSalvarAgenda(id) {
   d.data_retorno=dt; d.nota_followup=nota;
   crmUpdateFollowBar();
   showToast('Agenda salva para '+d.nome,'ok');
+  // HOTFIX CERTIFICAÇÃO FASE 3 (achado ao vivo, Rodada 2, 2026-08-26) —
+  // achado real: esta função nunca chamava crmSaveLeads() — mutava só
+  // CRM_LEADS em memória e mostrava "Agenda salva" mesmo sem gravar nada
+  // no Firestore. Reproduzido ao vivo: nota de follow-up e data de
+  // retorno desapareciam por completo após reload, apesar do toast de
+  // sucesso. Toda função irmã nesta mesma região do arquivo
+  // (crmCongelar, crmConverterEmOS, crmAvançarEtapa) já chama
+  // crmSaveLeads() — era só esta que ficou de fora.
+  crmSaveLeads();
 }
 
 function crmUpdateFollowBar() { if(typeof tarefasAtualizarBadge==='function') tarefasAtualizarBadge(); }
