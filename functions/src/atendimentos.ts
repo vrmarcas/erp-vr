@@ -29,6 +29,7 @@ import { checkAuth } from "./valeria";
 import { detectCommercialIntent } from "./commercial_intent";
 import { extrairIdentidade } from "./identity_detector";
 import { detectHumanHandoff } from "./handoff_detector";
+import { detectUnsupportedComplexity } from "./complexity_detector";
 
 const COL_ATD = "atendimentos";
 const SUB_MSG = "mensagens";
@@ -151,6 +152,37 @@ async function detectarEPersistirIdentidade(atendimentoId: string, texto: string
     }
   } catch (e) {
     console.error("[atendimentos.detectarEPersistirIdentidade] falha ao detectar/persistir identidade (não bloqueia envio):", (e as Error).message);
+  }
+}
+
+/**
+ * Sprint P1.2 — espelha functions-valeria/src/webhook.ts::avaliarEPersistirComplexidadeWhatsApp.
+ * Roda o detector determinístico de complexidade sem receita e persiste o
+ * sinal em valeria_technical_briefings/{atendimentoId} (mesmo doc que o
+ * orchestrator, no outro codebase, lê) ANTES de dispararExecucaoComercialServerSide
+ * — para que o gate já valha neste mesmo turno, mesmo sem productId ainda
+ * definido. Nunca sobrescreve com array vazio (bloqueio de turno anterior
+ * continua valendo).
+ */
+async function avaliarEPersistirComplexidade(atendimentoId: string, texto: string): Promise<boolean> {
+  try {
+    const tbRef = db().collection("valeria_technical_briefings").doc(atendimentoId);
+    const tbSnap = await tbRef.get();
+    const tbData = tbSnap.exists ? tbSnap.data() ?? {} : {};
+    const productId = (tbData.productId as string | undefined) ?? null;
+    const jaBloqueado = Array.isArray(tbData.unsupportedComplexityReasonCodes) && tbData.unsupportedComplexityReasonCodes.length > 0;
+
+    const r = detectUnsupportedComplexity({ texto, productId });
+    if (!r.unsupportedComplexity) return jaBloqueado;
+
+    const mudou = JSON.stringify(tbData.unsupportedComplexityReasonCodes ?? []) !== JSON.stringify(r.reasonCodes);
+    if (mudou) {
+      await tbRef.set({ unsupportedComplexityReasonCodes: r.reasonCodes, updatedAt: Date.now() }, { merge: true });
+    }
+    return true;
+  } catch (e) {
+    console.error("[atendimentos.avaliarEPersistirComplexidade] falha (não bloqueia):", (e as Error).message);
+    return false;
   }
 }
 
@@ -384,8 +416,15 @@ export const atdSimularMensagemCliente = functions
     // aqui, e a execução comercial é disparada logo em seguida — nenhuma
     // das duas depende do LLM decidir chamar uma Tool.
     await detectarEPersistirConfirmacao(atendimentoId, texto);
+
+    // Sprint P1.2 — bloqueio de produto complexo sem receita, ANTES de
+    // disparar a execução comercial: garante que o gate do orchestrator já
+    // vale neste mesmo turno, mesmo sem productId definido ainda.
+    const complexidadeDetectada = await avaliarEPersistirComplexidade(atendimentoId, texto);
+
     const { telefone: telefoneExtraidoAgora } = extrairIdentidade(texto);
     const sinaisHandoff = await dispararExecucaoComercialServerSide(atendimentoId, atd.telefoneE164 || telefoneExtraidoAgora || null);
+    if (complexidadeDetectada) sinaisHandoff.produtoComplexoSemReceita = true;
 
     // Sprint P1.0 — handoff humano server-side, mesma disciplina de
     // confirmação/identidade: nunca depende do LLM decidir chamar

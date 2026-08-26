@@ -205,6 +205,24 @@ function nextCommercialActionCore(params: {
   technicalBriefing?: TechnicalBriefing | null;
   lastEligibleSimulation?: { fingerprint: string; finalPrice: number; simulationId: string } | null;
 }): NextActionResult {
+  // P1.2 — bloqueio de produto complexo sem receita compatível
+  // (complexity_detector.ts). O sinal é persistido no technicalBriefing
+  // ANTES deste turno rodar (webhook.ts/atendimentos.ts, a partir do
+  // texto real do cliente) — vence sobre TUDO abaixo, inclusive antes de
+  // handoffReasonCode, porque o objetivo é nunca deixar o fluxo chegar a
+  // ask_required_fields/calculate_quote para este pedido, mesmo que o
+  // cliente informe dimensões depois.
+  if (params.technicalBriefing?.unsupportedComplexityReasonCodes && params.technicalBriefing.unsupportedComplexityReasonCodes.length > 0) {
+    return {
+      nextAction: "handoff", missingFields: [], reason: "UNSUPPORTED_PRODUCT",
+      actionPayload: {
+        reasonCode: "UNSUPPORTED_PRODUCT",
+        instrucao:
+          "Este pedido tem elementos que nenhuma receita conhecida cobre (ex.: LED, motor, madeira, componente elétrico) — nunca pergunte medidas nem calcule preço para isso, mesmo que o cliente informe dimensões depois. Diga algo como: \"Esse projeto precisa de uma validação da nossa equipe. Já deixei tudo registrado e vou chamar alguém para continuar com você por aqui.\" Nunca mencione ferramentas internas.",
+      },
+    };
+  }
+
   if (params.handoffReasonCode) {
     return {
       nextAction: "handoff", missingFields: [], reason: params.handoffReasonCode,

@@ -165,6 +165,7 @@ export async function executeCalculateQuote(
     adesivo: !!technicalBriefing.adesivo,
     adesivoBranco: !!technicalBriefing.adesivoBranco,
     solicitacoesNaoSuportadas: technicalBriefing.solicitacoesNaoSuportadas ?? [],
+    unsupportedComplexityReasonCodes: technicalBriefing.unsupportedComplexityReasonCodes ?? null,
   });
   const pricing = calc.pricing;
 

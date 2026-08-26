@@ -57,6 +57,15 @@ export interface TechnicalBriefing {
    */
   solicitacoesNaoSuportadas?: string[] | null;
   /**
+   * Sprint P1.2 — sinal de bloqueio determinístico (complexity_detector.ts):
+   * quando não-vazio, o produto pedido tem elementos que nenhuma receita
+   * conhecida cobre (LED, motor, madeira, componente elétrico externo
+   * etc.). O orchestrator trava nextAction="handoff" ANTES de qualquer
+   * readiness/pricing enquanto este campo estiver presente — nunca
+   * limpo automaticamente (mesma disciplina de solicitacoesNaoSuportadas).
+   */
+  unsupportedComplexityReasonCodes?: string[] | null;
+  /**
    * Sprint P0.6 — sinais de controle, nunca de preço (por isso NUNCA
    * entram em technicalBriefingFingerprint). O LLM só EXTRAI esses sinais
    * da linguagem do cliente (confirmação explícita do preço mostrado,
@@ -83,6 +92,7 @@ export function emptyTechnicalBriefing(): TechnicalBriefing {
     materialId: null,
     thicknessMm: null,
     solicitacoesNaoSuportadas: null,
+    unsupportedComplexityReasonCodes: null,
     clientConfirmedQuote: null,
     wantsDeadlineCheck: null,
     dataNecessidadeCliente: null,

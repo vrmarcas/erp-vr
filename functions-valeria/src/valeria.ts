@@ -93,6 +93,17 @@ const TEMP_TO_COR: Record<string, string> = {
   quente: "#FCA5A5", morno: "#FCD34D", frio: "#93C5FD",
 };
 
+/**
+ * Sprint P1.2 — o orchestrator precisa enxergar o technicalBriefing mesmo
+ * antes de productId ser definido quando já existe um bloqueio de
+ * complexidade persistido (o cliente pode mencionar LED/madeira/motor
+ * antes de escolher formalmente o produto) — nunca só quando productId
+ * já está setado, senão o gate de P1.2 nunca roda na primeira mensagem.
+ */
+function precisaOrchestratorTecnico(tb: import("./technical_briefing").TechnicalBriefing): boolean {
+  return !!tb.productId || !!(tb.unsupportedComplexityReasonCodes && tb.unsupportedComplexityReasonCodes.length > 0);
+}
+
 /** Procura um lead no dict por conversationId */
 function findLeadByConv(dict: CrmLeadDict, conversationId: string): { id: string; lead: CrmLead } | null {
   for (const [id, lead] of Object.entries(dict)) {
@@ -211,7 +222,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       // (nunca a checagem genérica de BriefingData quando já existe um
       // produto VR personalizado em andamento nesta conversa).
       const technicalBriefing = await loadTechnicalBriefing(ctx.conversationId);
-      const technicalBriefingParaOrchestrator = technicalBriefing.productId ? technicalBriefing : null;
+      const technicalBriefingParaOrchestrator = precisaOrchestratorTecnico(technicalBriefing) ? technicalBriefing : null;
       // Sprint P0.4 (achado real de E2E, Bloco H2) — carrega a simulação
       // canônica para o orchestrator saber se já existe um cálculo
       // ELIGIBLE pronto para virar orçamento formal (nextAction
@@ -255,7 +266,7 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
       // já calculou neste mesmo turno).
       if (executedAction) {
         const technicalBriefingAtualizado = await loadTechnicalBriefing(ctx.conversationId);
-        const technicalBriefingAtualizadoParaOrchestrator = technicalBriefingAtualizado.productId ? technicalBriefingAtualizado : null;
+        const technicalBriefingAtualizadoParaOrchestrator = precisaOrchestratorTecnico(technicalBriefingAtualizado) ? technicalBriefingAtualizado : null;
         lastEligibleSim = technicalBriefingAtualizadoParaOrchestrator
           ? await loadLastEligibleSimulation(ctx.conversationId)
           : null;
@@ -801,8 +812,23 @@ export const valeriaCalcularProdutoPersonalizado = RUN_OPTS.https.onRequest(asyn
         } as never);
         await saveTechnicalBriefing(ctx.conversationId, briefingSincronizado);
 
+        // Sprint P1.2 — defesa em profundidade: mesmo que o LLM ignore
+        // nextAction="handoff" e chame esta Tool diretamente, o bloqueio já
+        // persistido (detectado a partir do texto real do cliente, ver
+        // webhook.ts/atendimentos.ts) é reaplicado aqui antes de calcular.
+        // Também roda o mesmo detector sobre o `produto` desta chamada como
+        // última rede de segurança (o texto original pode ter sido
+        // resumido pelo LLM ao preencher este parâmetro).
+        const { detectUnsupportedComplexity } = await import("./complexity_detector");
+        const complexidadeDoProduto = detectUnsupportedComplexity({ texto: produto, productId: produto });
+        const unsupportedComplexityReasonCodes =
+          (briefingSincronizado.unsupportedComplexityReasonCodes && briefingSincronizado.unsupportedComplexityReasonCodes.length > 0)
+            ? briefingSincronizado.unsupportedComplexityReasonCodes
+            : (complexidadeDoProduto.unsupportedComplexity ? complexidadeDoProduto.reasonCodes : null);
+
         const calc = await calculatePersonalizedProduct({
           produto, larg, alt, prof, esp, matKey, qty, adesivo, adesivoBranco, solicitacoesNaoSuportadas,
+          unsupportedComplexityReasonCodes,
         });
         const pricing = calc.pricing;
 
