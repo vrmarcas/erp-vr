@@ -81,6 +81,7 @@ console.log('\n=== HARDENING FASE 2, BLOCO B — _cloudLoad() ganha sinal genér
     global._cloudLastPayload = {};
     global._CLOUD_LOAD_CONFIRMED = {};
     global._CLOUD_LOAD_ERROR = {};
+    global._CLOUD_LOAD_FORBIDDEN = {};
     global.console = console;
     _homologThrow = false;
     global._db = {

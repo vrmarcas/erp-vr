@@ -97,8 +97,9 @@ fs.writeFileSync(modPath, src);
 var FN_NAMES_WATCH = ['_homologGuardOrThrow', '_cloudWatch'];
 var srcWatch = extractVar('_CLOUD_WATCH_ERROR') + '\n\n'
   + extractVar('_CLOUD_WATCH_CONFIRMED') + '\n\n'
+  + extractVar('_CLOUD_WATCH_FORBIDDEN') + '\n\n'
   + FN_NAMES_WATCH.map(extractFn).join('\n\n')
-  + '\n\nmodule.exports = {_cloudWatch:_cloudWatch, getErr: function(){return _CLOUD_WATCH_ERROR;}, getConf: function(){return _CLOUD_WATCH_CONFIRMED;}};';
+  + '\n\nmodule.exports = {_cloudWatch:_cloudWatch, getErr: function(){return _CLOUD_WATCH_ERROR;}, getConf: function(){return _CLOUD_WATCH_CONFIRMED;}, getForb: function(){return _CLOUD_WATCH_FORBIDDEN;}};';
 var modPathWatch = path.join(__dirname, '_rodada_critica_cloudwatch.tmp.js');
 fs.writeFileSync(modPathWatch, srcWatch);
 

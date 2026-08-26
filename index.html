@@ -1514,15 +1514,35 @@ function _stockAplicarSnapshot(doc){
 // falha aqui era só console.warn, indistinguível de "estoque vazio de
 // verdade" para quem abre o modal "Iniciar Produção" (ver _kbOpenProdOverlay).
 var _STOCK_LOAD_ERROR = false;
-_CLOUD_UNSUBS.push(_db.collection(_COL).doc('stock').onSnapshot(
-  function(doc){
-    // Marcar como confirmado quando o dado vier do servidor (não do cache IndexedDB)
-    if(doc.metadata && !doc.metadata.fromCache) _stockServerConfirmed = true;
-    _STOCK_LOAD_ERROR = false;
-    try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); }
-  },
-  function(e){ console.warn('[Stock] onSnapshot erro:',e); _STOCK_LOAD_ERROR = true; }
-));
+// HOTFIX BLOCO C/R (fechamento, 2026-08-26) — mesma distinção já aplicada
+// a todos os outros módulos: permission-denied é terminal (nunca retry),
+// falha transitória é recuperável. _stockUnsub / _watchStock() extraídos
+// para uma função nomeada (antes era um onSnapshot direto, sem guard, sem
+// como reconectar) — mesma leitura, agora reutilizável pelo botão
+// "Tentar novamente".
+var _STOCK_FORBIDDEN = false;
+var _stockUnsub = null;
+function _watchStock(){
+  if(_stockUnsub) return;
+  _stockUnsub = _db.collection(_COL).doc('stock').onSnapshot(
+    function(doc){
+      // Marcar como confirmado quando o dado vier do servidor (não do cache IndexedDB)
+      if(doc.metadata && !doc.metadata.fromCache) _stockServerConfirmed = true;
+      _STOCK_LOAD_ERROR = false;
+      _STOCK_FORBIDDEN = false;
+      _retryResetar('stock');
+      try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); }
+    },
+    function(e){
+      console.warn('[Stock] onSnapshot erro:',e);
+      if(e && e.code==='permission-denied'){ _STOCK_FORBIDDEN = true; } else { _STOCK_LOAD_ERROR = true; }
+      _stockUnsub = null; // listener morto — solta a referência p/ retry poder recriar
+      try{ stockRenderItems(); }catch(err){}
+    }
+  );
+  _CLOUD_UNSUBS.push(_stockUnsub);
+}
+_watchStock();
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
 // não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza
@@ -1711,12 +1731,20 @@ function _btnBusy(btn, textoCarregando, maxMs) {
 // inteira de uma vez (nunca uma segunda fórmula por tela).
 var _CLOUD_LOAD_CONFIRMED = {};
 var _CLOUD_LOAD_ERROR = {};
+// HOTFIX BLOCO C/R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+// permission-denied é um estado TERMINAL (nunca deve virar "Tentar
+// novamente" — reautorização não é algo que um retry resolve), distinto
+// de falha transitória (rede/timeout, essa sim recuperável). Sinal
+// genérico por chave, mesmo padrão de _CLOUD_LOAD_ERROR — nenhuma tela
+// precisa inventar sua própria checagem de e.code.
+var _CLOUD_LOAD_FORBIDDEN = {};
 // Carregar documento do Firestore
 function _cloudLoad(key, cb) {
   if(!_db) { cb(null); return; }
   _homologGuardOrThrow();
   _db.collection(_COL).doc(key).get().then(function(doc) {
     _CLOUD_LOAD_ERROR[key] = false;
+    _CLOUD_LOAD_FORBIDDEN[key] = false;
     _CLOUD_LOAD_CONFIRMED[key] = true;
     if(doc.exists && doc.data() && doc.data().data) {
       try {
@@ -1726,7 +1754,11 @@ function _cloudLoad(key, cb) {
       } catch(e){}
     }
     cb(null);
-  }).catch(function(e){ console.warn("[Cloud] _cloudLoad falhou:", e); _CLOUD_LOAD_ERROR[key] = true; cb(null); });
+  }).catch(function(e){
+    console.warn("[Cloud] _cloudLoad falhou:", e);
+    if(e && e.code==='permission-denied'){ _CLOUD_LOAD_FORBIDDEN[key] = true; } else { _CLOUD_LOAD_ERROR[key] = true; }
+    cb(null);
+  });
 }
 
 // RODADA 9 (2026-08-22, Bloco B) — achado real: erro de leitura de
@@ -1746,6 +1778,11 @@ var _CLOUD_WATCH_ERROR = {};
 // real do servidor (sucesso OU "documento ainda não existe" — nunca erro)
 // chega para cada chave.
 var _CLOUD_WATCH_CONFIRMED = {};
+// HOTFIX BLOCO C/R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+// mesmo motivo de _CLOUD_LOAD_FORBIDDEN acima: permission-denied é
+// terminal (nunca oferece retry), distinto de falha transitória. Sinal
+// genérico por chave — nenhuma tela precisa checar e.code por conta própria.
+var _CLOUD_WATCH_FORBIDDEN = {};
 // Listener em tempo real
 function _cloudWatch(key, callback) {
   if(!_db) return;
@@ -1756,6 +1793,7 @@ function _cloudWatch(key, callback) {
         var raw = doc.data().data;
         _cloudLastPayload[key] = raw; // registrar para o anti-eco
         _CLOUD_WATCH_ERROR[key] = false;
+        _CLOUD_WATCH_FORBIDDEN[key] = false;
         _CLOUD_WATCH_CONFIRMED[key] = true;
         // Passa fromCache como 2º argumento — callbacks que não precisam ignoram silenciosamente
         var fromCache = doc.metadata ? doc.metadata.fromCache : false;
@@ -1767,11 +1805,113 @@ function _cloudWatch(key, callback) {
       // chama callback aqui (mesmo comportamento de sempre — quem depende
       // deste watch mantém seu default local/em memória).
       _CLOUD_WATCH_ERROR[key] = false;
+      _CLOUD_WATCH_FORBIDDEN[key] = false;
       _CLOUD_WATCH_CONFIRMED[key] = true;
     }
-  }, function(e){ console.warn("[Cloud] onSnapshot erro:", e); _CLOUD_WATCH_ERROR[key] = true; });
+  }, function(e){
+    console.warn("[Cloud] onSnapshot erro:", e);
+    if(e && e.code==='permission-denied'){ _CLOUD_WATCH_FORBIDDEN[key] = true; } else { _CLOUD_WATCH_ERROR[key] = true; }
+  });
   _CLOUD_UNSUBS.push(unsub); // [S4] acumular para cleanup no pagehide
   return unsub;
+}
+// ── Retry controlado genérico (Bloco C, fechamento) ────────────────────
+// Mesmo padrão já provado em Atendimentos (atdTentarNovamente),
+// generalizado para reutilização por qualquer módulo — nunca uma
+// implementação de retry diferente por tela. Estado por chave (nunca um
+// único contador global): cada módulo tem seu próprio limite/backoff,
+// independente dos outros. permission-denied NUNCA deve ser passado para
+// cá — é responsabilidade do chamador checar _CLOUD_WATCH_FORBIDDEN/
+// _CLOUD_LOAD_FORBIDDEN antes de oferecer o botão "Tentar novamente".
+var _RETRY_STATE = {};
+function _retryEstado(key) {
+  if(!_RETRY_STATE[key]) _RETRY_STATE[key] = { tentativas: 0, ocupado: false };
+  return _RETRY_STATE[key];
+}
+// reconectarFn: função que refaz a leitura (re-chama _cloudWatch/_cloudLoad
+// com a MESMA chave/callback já usados no boot — nunca uma segunda
+// fórmula). maxTentativas: teto de tentativas MANUAIS consecutivas (nunca
+// retry automático em loop). onEsgotado: chamado quando o teto é atingido.
+function _retryComBackoff(key, reconectarFn, maxTentativas, onEsgotado) {
+  var st = _retryEstado(key);
+  if(st.ocupado) return false; // clique duplicado enquanto uma tentativa já está em andamento — ignorado
+  if(st.tentativas >= (maxTentativas||5)) { if(onEsgotado) onEsgotado(); return false; }
+  st.ocupado = true;
+  st.tentativas++;
+  var espera = Math.min(500 * st.tentativas, 3000);
+  setTimeout(function(){
+    st.ocupado = false;
+    // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — achado real: resetar
+    // _RETRY_STATE em authLogout() não cancela um timer de backoff já
+    // agendado (o closure acima ainda aponta para o objeto `st` antigo).
+    // Sem esta checagem, um "Tentar novamente" clicado pouco antes do
+    // logout ainda reconectaria um listener e repintaria a tela DEPOIS da
+    // troca/saída de conta — nunca em nome de uma sessão que já terminou.
+    if(typeof _currentSession!=='undefined' && !_currentSession) return;
+    reconectarFn();
+  }, espera);
+  return true;
+}
+// Chamado pelo próprio callback de sucesso de cada módulo — reseta o
+// contador quando o dado chega limpo, para a PRÓXIMA falha (se houver)
+// começar do zero, nunca acumulando tentativas de incidentes antigos já
+// resolvidos.
+function _retryResetar(key) {
+  if(_RETRY_STATE[key]) { _RETRY_STATE[key].tentativas = 0; _RETRY_STATE[key].ocupado = false; }
+}
+
+// HOTFIX BLOCO C (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+// as 6 leituras abaixo (clientes, kb_os, crm_leads, fin_cr, fin_cp,
+// retalhos) passaram de chamadas _cloudWatch(...) anônimas INLINE dentro
+// de _cloudLoadAll() para funções nomeadas — mesma lógica, nunca uma
+// segunda fórmula — para que o botão "Tentar novamente" de cada tela
+// possa reconectar exatamente o mesmo listener, em vez de precisar
+// reimplementar o callback. _retryResetar(key) zera o contador de
+// tentativas assim que um dado real (sucesso) chega, para uma falha
+// futura começar do zero.
+function _watchClientes(){
+  _cloudWatch("clientes", function(d){ _retryResetar('clientes'); if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
+}
+function _watchKbOs(){
+  _cloudWatch("kb_os", function(d){ _retryResetar('kb_os'); if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+}
+function _watchCrmLeads(){
+  _cloudWatch("crm_leads", function(d){ _retryResetar('crm_leads'); if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'vr');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+}
+function _watchFinCr(){
+  _cloudWatch("fin_cr", function(d){ _retryResetar('fin_cr'); if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+}
+function _watchFinCp(){
+  _cloudWatch("fin_cp", function(d){ _retryResetar('fin_cp'); if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+}
+function _watchRetalhos(){
+  _cloudWatch("retalhos", function(d){ _retryResetar('retalhos'); if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
+}
+function _watchOrcamentos(){
+  _cloudWatch("orcamentos", function(d){ _retryResetar('orcamentos'); if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
+}
+// Botão "Tentar novamente" genérico para as leituras acima — reutiliza
+// _retryComBackoff (mesmo padrão de Atendimentos), nunca uma
+// implementação própria por tela.
+function _watchTentarNovamente(key, watchFn, renderFn){
+  // Checa AMBAS as famílias de sinal (_cloudWatch realtime E _cloudLoad
+  // one-shot) — nunca precisa saber qual delas a chave usa por fora.
+  var forbidden = (typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN[key]) || (typeof _CLOUD_LOAD_FORBIDDEN!=='undefined' && _CLOUD_LOAD_FORBIDDEN[key]);
+  if(forbidden) return; // permission-denied nunca tem retry
+  _retryComBackoff(key, function(){ watchFn(); if(renderFn) renderFn(); }, 5, function(){
+    if(typeof showToast==='function') showToast('Muitas tentativas — recarregue a página.','warn');
+  });
+  if(renderFn) renderFn(); // repinta imediatamente para refletir "tentando..." se o render checar _RETRY_STATE
+}
+// HOTFIX BLOCO C (fechamento, 2026-08-26) — erp_fornecedores é uma
+// leitura ONE-SHOT (_cloudLoad, não _cloudWatch, dentro do lote de boot
+// de _cloudLoadAll()). NUNCA reaproveitar o callback original de boot
+// para o retry: ele chama done() — reexecutá-lo re-disparia TODO o bloco
+// de registro de _cloudWatch(...) que só deve rodar 1x (duplicaria cada
+// listener realtime do sistema). Esta função replica só a leitura+merge
+// de dado, nunca o done() de boot.
+function _loadFornecedoresRetry(){
+  _cloudLoad("erp_fornecedores", function(d){ if(d&&Array.isArray(d)&&d.length) _FORN_DATA=d; if(typeof fornRender==='function') fornRender(); });
 }
 
 // Carregar todos os dados da nuvem ao iniciar
@@ -1811,8 +1951,8 @@ function _cloudLoadAll() {
     // também remove a dependência de "alguém carregar a página no dia" e
     // a ausência de checagem de papel que esta chamada client-side tinha.
     // Listeners em tempo real
-    _cloudWatch("fin_cr", function(d){ if(d&&Array.isArray(d)){ FIN_CR=d; try{finCRRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
-    _cloudWatch("fin_cp", function(d){ if(d&&Array.isArray(d)){ FIN_CP=d; try{finCPRender();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
+    _watchFinCr();
+    _watchFinCp();
     // Leitura legada isolada — só popula COMPRAS (array antigo) para o fluxo
     // pré-v2 continuar funcionando fora de homologação; NUNCA escreve.
     // Critério objetivo de remoção: quando as Cloud Functions de Compras
@@ -1820,14 +1960,14 @@ function _cloudLoadAll() {
     // sido executada (ver Task 4 do relatório de homologação), este watch e
     // o array COMPRAS inteiro podem ser removidos sem perda de dado real.
     _cloudWatch("compras", function(d){ if(d&&Array.isArray(d)){ COMPRAS=d; try{comprasRender();syncSidebarBadges();}catch(e){} } });
-    _cloudWatch("retalhos", function(d){ if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
+    _watchRetalhos();
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
-    _cloudWatch("crm_leads", function(d){ if(d&&typeof d==='object'&&Object.keys(d).length){ CRM_LEADS=d; try{if(typeof crmSetBrand==='function'&&document.getElementById('pg-crm')?.style.display!=='none')crmSetBrand(crmActiveBrand||'vr');if(document.getElementById('pg-tarefas')?.style.display!=='none'&&typeof tarefasRender==='function')tarefasRender();if(typeof tarefasAtualizarBadge==='function')tarefasAtualizarBadge();comercialRender();if(document.getElementById('pg-inteligencia')?.style.display!=='none')intelRender();}catch(e){} } });
+    _watchCrmLeads();
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
     _cloudWatch("erp_permissoes", function(d){ if(d&&typeof d==='object'){ _PERM_DATA=d; if(typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao&&typeof secApplyPerms==='function') try{secApplyPerms(_currentSession.funcao);}catch(e){} } });
     _cloudWatch("erp_sb_state", function(d){ if(d&&typeof d==='object'){ try{_sbState=d;sbRestoreState();}catch(e){} } });
     _cloudWatch("erp_caixa_ant", function(d){ if(d&&typeof d==='object'){ } });
-    _cloudWatch("kb_os", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ KB_OS=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbNormalizarDatas==='function') try{kbNormalizarDatas();}catch(e){} if(typeof kbRender==='function') try{kbRender();}catch(e){} try{renderOsTable();syncSidebarBadges();}catch(e){} } });
+    _watchKbOs();
     // Corrigido 2026-08-07 (Rodada 2, item P0.6) — privacidade financeira
     // real da Produção: campos financeiros da OS (valor/totalGeral/
     // parcelas/formaPgto/pagtoTipo/valorEntrada/restante/itens[].unit/
@@ -1841,9 +1981,9 @@ function _cloudLoadAll() {
     // ausentes). kbSaveKbos() faz o merge inverso na escrita.
     _cloudWatch("kb_os_fin", function(d){ _KB_OS_FIN_CACHE = (d&&typeof d==='object'&&!Array.isArray(d)) ? d : {}; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbRender==='function') try{kbRender();}catch(e){} });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
-    _cloudWatch("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } }); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
+    _watchOrcamentos(); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
-    _cloudWatch("clientes", function(d){ if(d&&d.length){ CLIENTES_DATA=d; try{renderClientes();}catch(e){} } });
+    _watchClientes();
     _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; try{finRenderTx();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
     _cloudWatch("erp_usuarios", function(d){
       if(d&&d.length){
@@ -8480,12 +8620,22 @@ function fornRender() {
       // fornecedor cadastrado" (com botão "Cadastrar Primeiro Fornecedor")
       // aparecia mesmo antes da 1ª resposta do servidor ou numa falha real,
       // sugerindo recadastrar por cima de dados que só não chegaram ainda.
+      // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — permission-denied
+      // nunca oferece retry; falha transitória ganha "Tentar novamente"
+      // real (_loadFornecedoresRetry(), nunca o callback de boot — ver
+      // comentário lá para o porquê).
+      var _fornForbidden = typeof _CLOUD_LOAD_FORBIDDEN!=='undefined' && _CLOUD_LOAD_FORBIDDEN['erp_fornecedores'];
       var _fornErro = typeof _CLOUD_LOAD_ERROR!=='undefined' && _CLOUD_LOAD_ERROR['erp_fornecedores'];
       var _fornConfirmado = typeof _CLOUD_LOAD_CONFIRMED!=='undefined' && _CLOUD_LOAD_CONFIRMED['erp_fornecedores'];
-      if(_fornErro){
+      if(_fornForbidden){
+        empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">🔒</div>'
+          + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Sem permissão para ver Fornecedores</div>'
+          + '<div style="font-size:13px;color:var(--muted)">Contate o administrador.</div>';
+      } else if(_fornErro){
         empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">⚠️</div>'
           + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Não foi possível carregar os fornecedores</div>'
-          + '<div style="font-size:13px;color:var(--muted)">Verifique sua conexão/permissão e recarregue a página — seus fornecedores podem já existir, isto não é uma lista vazia.</div>';
+          + '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Verifique sua conexão — seus fornecedores podem já existir, isto não é uma lista vazia.</div>'
+          + '<button onclick="_watchTentarNovamente(\'erp_fornecedores\',_loadFornecedoresRetry,fornRender)" style="padding:8px 18px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button>';
       } else if(!_fornConfirmado){
         empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.5">⏳</div>'
           + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Carregando fornecedores...</div>'
@@ -15549,11 +15699,25 @@ function _kbOpenProdOverlay(os) {
 }
 
 function _kbProdDadosProntos() {
-  var stockPronto = !!(typeof _stockServerConfirmed !== 'undefined' && _stockServerConfirmed) || !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR);
-  var retalhosPronto = !!(typeof _CLOUD_WATCH_CONFIRMED !== 'undefined' && _CLOUD_WATCH_CONFIRMED['retalhos']) || !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']);
-  var stockErro = !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR);
-  var retalhosErro = !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']);
-  return { pronto: stockPronto && retalhosPronto, erro: stockErro || retalhosErro, stockErro: stockErro, retalhosErro: retalhosErro };
+  // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — achado real: dividir o
+  // sinal de erro único em ERROR (transitório) + FORBIDDEN (permission-
+  // denied, terminal) — feito nesta mesma rodada de fechamento — quebrava
+  // esta função: permission-denied deixou de marcar _STOCK_LOAD_ERROR/
+  // _CLOUD_WATCH_ERROR['retalhos'], e "pronto"/"erro" aqui nunca
+  // consultavam o novo _STOCK_FORBIDDEN/_CLOUD_WATCH_FORBIDDEN — o modal
+  // "Iniciar Produção" ficaria preso em "Carregando materiais..." para
+  // sempre num permission-denied real. Corrigido tratando FORBIDDEN como
+  // "confirmado" (pronto) e como "erro" também, preservando o
+  // comportamento original desta função (que já tratava QUALQUER falha,
+  // inclusive permission-denied antes de existir essa distinção, como
+  // "pronto, mas com erro").
+  var stockForbidden = !!(typeof _STOCK_FORBIDDEN !== 'undefined' && _STOCK_FORBIDDEN);
+  var retalhosForbidden = !!(typeof _CLOUD_WATCH_FORBIDDEN !== 'undefined' && _CLOUD_WATCH_FORBIDDEN['retalhos']);
+  var stockPronto = !!(typeof _stockServerConfirmed !== 'undefined' && _stockServerConfirmed) || !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR) || stockForbidden;
+  var retalhosPronto = !!(typeof _CLOUD_WATCH_CONFIRMED !== 'undefined' && _CLOUD_WATCH_CONFIRMED['retalhos']) || !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']) || retalhosForbidden;
+  var stockErro = !!(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR) || stockForbidden;
+  var retalhosErro = !!(typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['retalhos']) || retalhosForbidden;
+  return { pronto: stockPronto && retalhosPronto, erro: stockErro || retalhosErro, stockErro: stockErro, retalhosErro: retalhosErro, stockForbidden: stockForbidden, retalhosForbidden: retalhosForbidden };
 }
 
 function _kbProdMostrarCarregando() {
@@ -16830,8 +16994,17 @@ function dashRender() {
   // rodada anterior (_stockServerConfirmed/_STOCK_LOAD_ERROR).
   var _dashFuncao = (typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao) || '';
   var _dashSemAcessoEstoque = ['comercial','financeiro'].indexOf(_dashFuncao) >= 0;
-  var _dashEstoqueCarregando = !_dashSemAcessoEstoque && !(typeof _stockServerConfirmed!=='undefined' && _stockServerConfirmed) && !(typeof _STOCK_LOAD_ERROR!=='undefined' && _STOCK_LOAD_ERROR);
-  var _dashEstoqueFalhou = !_dashSemAcessoEstoque && (typeof _STOCK_LOAD_ERROR!=='undefined' && _STOCK_LOAD_ERROR);
+  // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — achado real: dividir o
+  // sinal de erro único em ERROR (transitório) + FORBIDDEN (permission-
+  // denied) nesta mesma rodada quebraria este P0 (Fase 1, protegido):
+  // um permission-denied real (fora dos perfis já tratados por
+  // _dashSemAcessoEstoque acima) deixaria de marcar _STOCK_LOAD_ERROR,
+  // fazendo _dashEstoqueCarregando ficar "carregando" para sempre em vez
+  // de mostrar a falha. _STOCK_FORBIDDEN entra aqui como mais um "é uma
+  // falha real, nunca carregando" — preserva o comportamento original.
+  var _dashEstoqueFalhouOuForbidden = (typeof _STOCK_LOAD_ERROR!=='undefined' && _STOCK_LOAD_ERROR) || (typeof _STOCK_FORBIDDEN!=='undefined' && _STOCK_FORBIDDEN);
+  var _dashEstoqueCarregando = !_dashSemAcessoEstoque && !(typeof _stockServerConfirmed!=='undefined' && _stockServerConfirmed) && !_dashEstoqueFalhouOuForbidden;
+  var _dashEstoqueFalhou = !_dashSemAcessoEstoque && _dashEstoqueFalhouOuForbidden;
   var criticos = (_dashSemAcessoEstoque || _dashEstoqueCarregando || _dashEstoqueFalhou) ? [] : dashCalcularEstoqueCritico(STOCK).itens;
   var dkEstq = document.getElementById('dkEstq');
   var dkEstqSub = document.getElementById('dkEstqSub');
@@ -17757,10 +17930,13 @@ function renderOsTable() {
     // já preenchidos pelo próprio _cloudWatch('kb_os',...) sem nenhuma
     // mudança na leitura) — "Nenhuma OS encontrada" nunca mais aparece
     // antes da 1ª confirmação do servidor, nem disfarça uma falha real.
+    var _osForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['kb_os'];
     var _osErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['kb_os'];
     var _osConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['kb_os'];
-    if(_osErro){
-      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar as Ordens de Serviço — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    if(_osForbidden){
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">🔒 Sem permissão para ver Ordens de Serviço — contate o administrador.</td></tr>';
+    } else if(_osErro){
+      tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar as Ordens de Serviço — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'kb_os\',_watchKbOs,renderOsTable)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></td></tr>';
     } else if(!_osConfirmado){
       tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando ordens de serviço...</td></tr>';
     } else {
@@ -18383,26 +18559,49 @@ var COMPRAS_V2_CACHE = [];
 var COMPRAS_V2_FINCP_CACHE = [];
 var _comprasV2Unsubs = null;
 var _comprasV2RecebendoIds = {}; // mesma trava de reentrância do fluxo legado, aplicada aos ids v2
+// HOTFIX BLOCO R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+// mesmo padrão já usado em Atendimentos/Vitre: distingue "ainda não
+// confirmado" de "confirmado" e sinaliza falha (transitória × permission-
+// denied) — antes, uma falha aqui só gerava console.warn, indistinguível
+// de "nenhuma solicitação de compra" para quem via a tela.
+var _COMPRAS_V2_LOADED = false;
+var _COMPRAS_V2_LOAD_ERROR = false;
+var _COMPRAS_V2_FORBIDDEN = false;
+// Guardas SEPARADAS por sub-listener (nunca um array+null compartilhado) —
+// um retry do listener principal (erp_vr_compras) nunca deve arriscar
+// duplicar o listener de erp_vr_fin_cp, que tem seu próprio ciclo de vida.
+var _comprasV2ComprasSub = null;
 function comprasV2Init(){
-  if(!_COMPRAS_V2_OFICIAL || _comprasV2Unsubs || typeof _db==='undefined' || !_db) return;
-  _comprasV2Unsubs = [
-    _db.collection('erp_vr_compras').onSnapshot(function(snap){
+  if(!_COMPRAS_V2_OFICIAL || typeof _db==='undefined' || !_db) return;
+  if(!_comprasV2Unsubs) _comprasV2Unsubs = [];
+  if(!_comprasV2ComprasSub){
+    _comprasV2ComprasSub = _db.collection('erp_vr_compras').onSnapshot(function(snap){
       COMPRAS_V2_CACHE = snap.docs.map(function(d){ return d.data(); }).sort(function(a,b){ return (b.numero||0)-(a.numero||0); });
+      _COMPRAS_V2_LOADED = true; _COMPRAS_V2_LOAD_ERROR = false; _COMPRAS_V2_FORBIDDEN = false;
+      _retryResetar('erp_vr_compras');
       if(typeof comprasRender==='function') comprasRender();
-    }, function(err){ console.warn('[Compras v2] listener erp_vr_compras falhou:', err); })
-  ];
+    }, function(err){
+      console.warn('[Compras v2] listener erp_vr_compras falhou:', err);
+      if(err && err.code==='permission-denied'){ _COMPRAS_V2_FORBIDDEN = true; } else { _COMPRAS_V2_LOAD_ERROR = true; }
+      _comprasV2ComprasSub = null; // listener morto — solta SÓ esta referência p/ retry poder recriar, sem tocar fin_cp
+      if(typeof comprasRender==='function') comprasRender();
+    });
+    _comprasV2Unsubs.push(_comprasV2ComprasSub);
+  }
   // erp_vr_fin_cp só é legível por financeiro/master (Rules); abrir esse
   // listener para produção/comercial só gera permission-denied em loop, sem
   // nenhum uso — nunca escondemos o erro, simplesmente não fazemos a
   // pergunta que sabemos que as Rules vão negar.
   var minhaFuncaoInit = _normalizeRole((typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao)||'')||'';
-  if(minhaFuncaoInit==='master' || minhaFuncaoInit==='financeiro'){
-    _comprasV2Unsubs.push(_db.collection('erp_vr_fin_cp').onSnapshot(function(snap){
+  if((minhaFuncaoInit==='master' || minhaFuncaoInit==='financeiro') && !_comprasV2FinCpSub){
+    _comprasV2FinCpSub = _db.collection('erp_vr_fin_cp').onSnapshot(function(snap){
       COMPRAS_V2_FINCP_CACHE = snap.docs.map(function(d){ return d.data(); });
       if(typeof comprasRender==='function') comprasRender();
-    }, function(err){ console.warn('[Compras v2] listener erp_vr_fin_cp falhou:', err); }));
+    }, function(err){ console.warn('[Compras v2] listener erp_vr_fin_cp falhou:', err); });
+    _comprasV2Unsubs.push(_comprasV2FinCpSub);
   }
 }
+var _comprasV2FinCpSub = null;
 
 // "Avançar" no v2 tem semântica diferente por estado: solicitada/cotacao →
 // Aprovar (só Master, define fornecedor+preço); aprovada/pedida/
@@ -18649,8 +18848,37 @@ function comprasV2Render(){
   var lista = COMPRAS_V2_CACHE.filter(function(pc){ return !filtro || pc.status===filtro; });
   var totEl = document.getElementById('comprasTotal');
   if(totEl) totEl.textContent = lista.length+' pedido(s) — Compras v2 (Cloud Functions)';
+  // HOTFIX BLOCO R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+  // "Nenhuma solicitação de compra" nunca mais aparece antes da 1ª
+  // confirmação do servidor, nem disfarça uma falha real (transitória ou
+  // permission-denied) — mesmo padrão já usado em Vitre/Fornecedores.
   var empty = document.getElementById('comprasEmpty');
-  if(empty) empty.style.display = lista.length ? 'none' : '';
+  if(empty){
+    if(lista.length){
+      empty.style.display = 'none';
+    } else if(_COMPRAS_V2_FORBIDDEN){
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">🔒</div>'
+        + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Sem permissão para ver Compras</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Contate o administrador.</div>';
+    } else if(_COMPRAS_V2_LOAD_ERROR){
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">⚠️</div>'
+        + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Não foi possível carregar as compras</div>'
+        + '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Verifique sua conexão — os pedidos podem já existir, isto não é uma lista vazia.</div>'
+        + '<button onclick="_watchTentarNovamente(\'erp_vr_compras\',comprasV2Init,comprasV2Render)" style="padding:8px 18px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button>';
+    } else if(!_COMPRAS_V2_LOADED){
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.5">⏳</div>'
+        + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Carregando compras...</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Aguarde a confirmação do servidor.</div>';
+    } else {
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:64px;margin-bottom:16px;opacity:.5">🛒</div>'
+        + '<div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px">Nenhuma solicitação de compra</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Use "Gerar necessidades a partir das OS" ou crie uma solicitação manual.</div>';
+    }
+  }
   var minhaFuncao = _normalizeRole((typeof _currentSession!=='undefined'&&_currentSession&&_currentSession.funcao)||'')||'';
   var souMaster = minhaFuncao==='master';
   wrap.innerHTML = lista.map(function(pc){
@@ -19176,10 +19404,13 @@ function finCRRender() {
   if(!list.length){
     // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
     // os sinais genéricos já existentes de _cloudWatch('fin_cr',...).
+    var _crForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['fin_cr'];
     var _crErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['fin_cr'];
     var _crConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['fin_cr'];
-    if(_crErro){
-      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Receber — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    if(_crForbidden){
+      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">🔒 Sem permissão para ver Contas a Receber — contate o administrador.</td></tr>';
+    } else if(_crErro){
+      tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Receber — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'fin_cr\',_watchFinCr,finCRRender)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></td></tr>';
     } else if(!_crConfirmado){
       tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando Contas a Receber...</td></tr>';
     } else {
@@ -19878,10 +20109,13 @@ function finCPRender() {
   if(!list.length){
     // HOTFIX BLOCO B (Rodada de Hardening, Fase 2, 2026-08-26) — reutiliza
     // os sinais genéricos já existentes de _cloudWatch('fin_cp',...).
+    var _cpForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['fin_cp'];
     var _cpErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['fin_cp'];
     var _cpConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['fin_cp'];
-    if(_cpErro){
-      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Pagar — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    if(_cpForbidden){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">🔒 Sem permissão para ver Contas a Pagar — contate o administrador.</td></tr>';
+    } else if(_cpErro){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar Contas a Pagar — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'fin_cp\',_watchFinCp,finCPRender)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></td></tr>';
     } else if(!_cpConfirmado){
       tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando Contas a Pagar...</td></tr>';
     } else {
@@ -22041,12 +22275,20 @@ function stockRenderItems() {
   // _kbOpenProdOverlay/Dashboard) — uma falha real (permission-denied,
   // rede) deixava o operador preso em "Carregando estoque..." para sempre,
   // indistinguível de uma demora normal. Reutiliza o mesmo sinal, nunca
-  // uma segunda fórmula. O onSnapshot de 'stock' é realtime — reconecta
-  // sozinho em falha transitória (chama stockRenderItems() de novo ao
-  // confirmar), então "recarregar a página" é a ação honesta aqui, igual
-  // ao padrão já usado em Orçamentos Enviados para o mesmo tipo de falha.
+  // uma segunda fórmula.
+  // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — achado real: o comentário
+  // acima dizia "o onSnapshot reconecta sozinho" — não é verdade; um
+  // onSnapshot que dispara seu callback de ERRO é encerrado pelo SDK e
+  // NUNCA mais entrega dados sozinho (confirmado ao investigar o mesmo
+  // padrão em Atendimentos/Vitre). _watchStock() foi extraída para uma
+  // função reconectável — permission-denied é terminal (nunca retry),
+  // falha transitória ganha "Tentar novamente" de verdade.
+  if(typeof _STOCK_FORBIDDEN !== 'undefined' && _STOCK_FORBIDDEN) {
+    el.innerHTML = '<div style="color:#B91C1C;font-size:12px;padding:12px 0;text-align:center;font-weight:700">🔒 Sem permissão para ver o Estoque — contate o administrador.</div>';
+    return;
+  }
   if(typeof _STOCK_LOAD_ERROR !== 'undefined' && _STOCK_LOAD_ERROR) {
-    el.innerHTML = '<div style="color:#B91C1C;font-size:12px;padding:12px 0;text-align:center;font-weight:700">⚠️ Não foi possível carregar o Estoque — verifique sua conexão/permissão e recarregue a página.</div>';
+    el.innerHTML = '<div style="color:#B91C1C;font-size:12px;padding:12px 0;text-align:center;font-weight:700">⚠️ Não foi possível carregar o Estoque — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'stock\',_watchStock,stockRenderItems)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></div>';
     return;
   }
   // Aguardar confirmação do servidor antes de renderizar — evita exibir dados do cache local desatualizado
@@ -22444,10 +22686,17 @@ function renderClientes() {
     // já preenchidos pelo próprio _cloudWatch('clientes',...) sem nenhuma
     // mudança na leitura) — nunca uma segunda fórmula, só passou a ser
     // consultada aqui.
+    // HOTFIX BLOCO C (fechamento, 2026-08-26) — permission-denied é
+    // terminal (nunca oferece retry); falha transitória ganha o botão
+    // "Tentar novamente" (reconecta o MESMO listener via _watchClientes(),
+    // sem reload completo).
+    var _cliForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['clientes'];
     var _cliErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['clientes'];
     var _cliConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['clientes'];
-    if(_cliErro){
-      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar os clientes — verifique sua conexão/permissão e recarregue a página.</td></tr>';
+    if(_cliForbidden){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">🔒 Sem permissão para ver Clientes — contate o administrador.</td></tr>';
+    } else if(_cliErro){
+      tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#B91C1C;padding:20px;font-weight:700">⚠️ Não foi possível carregar os clientes — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'clientes\',_watchClientes,renderClientes)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></td></tr>';
     } else if(!_cliConfirmado){
       tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">⏳ Carregando clientes...</td></tr>';
     } else {
@@ -23116,7 +23365,27 @@ function retalhoRender() {
   var lista=RETALHOS.map(function(r,i){return {r:r,i:i};}).filter(function(x){return x.r.qty>0;});
   if(cnt) cnt.textContent=lista.length+' peça'+(lista.length!==1?'s':'')+' disponível'+(lista.length!==1?'is':'');
   if(!el) return;
-  if(!lista.length){el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0">Nenhum retalho disponível.</div>';return;}
+  if(!lista.length){
+    // HOTFIX BLOCO R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26)
+    // — achado real: "Nenhum retalho disponível" era mostrado mesmo antes
+    // da 1ª confirmação do servidor ou numa falha real de leitura de
+    // 'retalhos' — indistinguível de "não há retalhos de verdade".
+    // Reutiliza os sinais genéricos já existentes de
+    // _cloudWatch('retalhos',...), nunca uma segunda fórmula.
+    var _retForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['retalhos'];
+    var _retErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['retalhos'];
+    var _retConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['retalhos'];
+    if(_retForbidden){
+      el.innerHTML='<div style="color:#B91C1C;font-size:12px;padding:8px 0;font-weight:700">🔒 Sem permissão para ver Retalhos — contate o administrador.</div>';
+    } else if(_retErro){
+      el.innerHTML='<div style="color:#B91C1C;font-size:12px;padding:8px 0;font-weight:700">⚠️ Não foi possível carregar os retalhos — verifique sua conexão.<div style="margin-top:8px"><button onclick="_watchTentarNovamente(\'retalhos\',_watchRetalhos,retalhoRender)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></div>';
+    } else if(!_retConfirmado){
+      el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0">⏳ Carregando retalhos...</div>';
+    } else {
+      el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0">Nenhum retalho disponível.</div>';
+    }
+    return;
+  }
   el.innerHTML='<table class="retalho-table"><thead><tr><th>Código</th><th>Material</th><th>Dimensões (cm)</th><th>Qtd</th><th>Obs</th><th>Entrada</th><th></th></tr></thead><tbody>'+
     lista.map(function(x){
       var r=x.r, ri=x.i;
@@ -23518,18 +23787,25 @@ function vitreCatMinhaFuncao() {
 // mesmo padrão já usado em _STOCK_LOAD_ERROR/_CLOUD_WATCH_ERROR.
 var _VITRE_CAT_LOADED = false;
 var _VITRE_CAT_LOAD_ERROR = false;
+// HOTFIX BLOCO C/R (fechamento, 2026-08-26) — permission-denied é
+// terminal (nunca oferece retry); falha transitória ganha "Tentar
+// novamente" via vitreCatalogoInit() de novo (mesma leitura, sem reload).
+var _VITRE_CAT_FORBIDDEN = false;
 function vitreCatalogoInit() {
   if (_vitreCatUnsub || typeof _db === 'undefined' || !_db) return;
   _vitreCatUnsub = _db.collection('vitre_produtos').onSnapshot(function (snap) {
     VITRE_CATALOGO_CACHE = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (a.sku || '').localeCompare(b.sku || ''); });
     _VITRE_CAT_LOADED = true;
     _VITRE_CAT_LOAD_ERROR = false;
+    _VITRE_CAT_FORBIDDEN = false;
+    _retryResetar('vitre_produtos');
     if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
     var _incPanel = document.getElementById('vitreCatIncompletosPanel');
     if (_incPanel && _incPanel.style.display !== 'none') vitreCatIncompletosRender();
   }, function (err) {
     console.warn('[Vitre] listener vitre_produtos falhou:', err);
-    _VITRE_CAT_LOAD_ERROR = true;
+    if (err && err.code === 'permission-denied') { _VITRE_CAT_FORBIDDEN = true; } else { _VITRE_CAT_LOAD_ERROR = true; }
+    _vitreCatUnsub = null; // listener morto — solta a referência p/ retry poder recriar
     if (typeof vitreCatalogoRender === 'function') vitreCatalogoRender();
   });
 }
@@ -23608,11 +23884,19 @@ function vitreCatalogoRender() {
   if (empty) {
     if (VITRE_CATALOGO_CACHE.length) {
       empty.style.display = 'none';
+    } else if (_VITRE_CAT_FORBIDDEN) {
+      // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — permission-denied
+      // nunca oferece retry (terminal); falha transitória sim.
+      empty.style.display = '';
+      empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">🔒</div>'
+        + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Sem permissão para ver o catálogo Vitre</div>'
+        + '<div style="font-size:13px;color:var(--muted)">Contate o administrador.</div>';
     } else if (_VITRE_CAT_LOAD_ERROR) {
       empty.style.display = '';
       empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.6">⚠️</div>'
         + '<div style="font-size:17px;font-weight:800;color:#B91C1C;margin-bottom:8px">Não foi possível carregar o catálogo Vitre</div>'
-        + '<div style="font-size:13px;color:var(--muted)">Verifique sua conexão/permissão e recarregue a página — os produtos podem já existir, isto não é um catálogo vazio.</div>';
+        + '<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Verifique sua conexão — os produtos podem já existir, isto não é um catálogo vazio.</div>'
+        + '<button onclick="_watchTentarNovamente(\'vitre_produtos\',vitreCatalogoInit,vitreCatalogoRender)" style="padding:8px 18px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button>';
     } else if (!_VITRE_CAT_LOADED) {
       empty.style.display = '';
       empty.innerHTML = '<div style="font-size:48px;margin-bottom:16px;opacity:.5">⏳</div>'
@@ -28033,8 +28317,16 @@ function orcEnviadosRender() {
   // consumidores dela podem depender do schema próprio — mostra os dados
   // reais quando existem, nunca inventa o que falta (fallback "—"/"(sem
   // nome)", nunca R$0,00 fantasioso quando nem total nem totalCost existem).
+  // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — permission-denied é
+  // terminal (nunca oferece retry); falha transitória ganha "Tentar
+  // novamente" real (reconecta o mesmo listener via _watchOrcamentos()).
+  if (typeof _CLOUD_WATCH_FORBIDDEN !== 'undefined' && _CLOUD_WATCH_FORBIDDEN['orcamentos']) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:30px;font-weight:700">🔒 Sem permissão para ver Orçamentos Enviados — contate o administrador.</td></tr>';
+    var totForb = document.getElementById('orcEnvTotal'); if(totForb) totForb.textContent = '— sem permissão';
+    return;
+  }
   if (typeof _CLOUD_WATCH_ERROR !== 'undefined' && _CLOUD_WATCH_ERROR['orcamentos']) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:30px;font-weight:700">⚠️ Não foi possível carregar os Orçamentos Enviados — verifique sua conexão/permissão e tente novamente (recarregue a página).</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#B91C1C;padding:30px;font-weight:700">⚠️ Não foi possível carregar os Orçamentos Enviados — verifique sua conexão.<div style="margin-top:10px"><button onclick="_watchTentarNovamente(\'orcamentos\',_watchOrcamentos,orcEnviadosRender)" style="padding:6px 14px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:12px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div></td></tr>';
     var totErr = document.getElementById('orcEnvTotal'); if(totErr) totErr.textContent = '— erro ao carregar';
     return;
   }
@@ -32831,6 +33123,18 @@ function authLogout(){
   // listeners v2 do perfil anterior — comprasV2Init() é guardado por
   // _comprasV2Unsubs!=null e nunca reavaliaria o novo perfil.
   if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
+  // HOTFIX BLOCO R (Rodada de Hardening, Fase 2, fechamento, 2026-08-26) —
+  // achado real: as guardas por-sub-listener novas (_comprasV2ComprasSub/
+  // _comprasV2FinCpSub, ver comprasV2Init) não eram resetadas aqui — o
+  // PRÓXIMO login na mesma aba encontraria essas variáveis ainda truthy
+  // (referências mortas) e comprasV2Init() pularia a re-inscrição
+  // inteira, exatamente a mesma classe de bug que este bloco já existe
+  // para evitar (perfil novo herdando estado do anterior).
+  if(typeof _comprasV2ComprasSub!=='undefined') _comprasV2ComprasSub=null;
+  if(typeof _comprasV2FinCpSub!=='undefined') _comprasV2FinCpSub=null;
+  if(typeof _COMPRAS_V2_LOADED!=='undefined') _COMPRAS_V2_LOADED=false;
+  if(typeof _COMPRAS_V2_LOAD_ERROR!=='undefined') _COMPRAS_V2_LOAD_ERROR=false;
+  if(typeof _COMPRAS_V2_FORBIDDEN!=='undefined') _COMPRAS_V2_FORBIDDEN=false;
   if(typeof COMPRAS_V2_CACHE!=='undefined') COMPRAS_V2_CACHE=[];
   if(typeof COMPRAS_V2_FINCP_CACHE!=='undefined') COMPRAS_V2_FINCP_CACHE=[];
   // Mesmo achado da Rodada E.1 (troca de conta na mesma aba não recarrega a
@@ -32847,6 +33151,30 @@ function authLogout(){
   // mesma classe de vazamento (perfil seguinte na mesma aba podia herdar
   // callback de briefing da conta anterior).
   if(typeof ATD_BRIEFING_UNSUB!=='undefined' && ATD_BRIEFING_UNSUB){ try{ATD_BRIEFING_UNSUB();}catch(e){} ATD_BRIEFING_UNSUB=null; }
+  // HOTFIX BLOCO C (fechamento, 2026-08-26) — achado real: o estado de
+  // retry introduzido no Bloco C (referência: Atendimentos) nunca era
+  // resetado aqui. Sem isto, se a conta anterior tivesse esgotado as 5
+  // tentativas (_ATD_RETRY_COUNT>=5) antes de deslogar, a PRÓXIMA conta a
+  // logar na mesma aba herdaria esse contador já esgotado — nunca
+  // conseguiria usar "Tentar novamente" nem uma única vez, mesmo numa
+  // falha genuinamente nova e independente. ATD_UNSUB=null (acima) já
+  // garante que atdListenerInit() roda de novo no próximo login; isto
+  // garante que ele comece de um estado limpo.
+  if(typeof _ATD_LOADED!=='undefined') _ATD_LOADED=false;
+  if(typeof _ATD_LOAD_ERROR!=='undefined') _ATD_LOAD_ERROR=false;
+  if(typeof _ATD_FORBIDDEN!=='undefined') _ATD_FORBIDDEN=false;
+  if(typeof _ATD_RETRY_COUNT!=='undefined') _ATD_RETRY_COUNT=0;
+  if(typeof _ATD_RETRY_BUSY!=='undefined') _ATD_RETRY_BUSY=false;
+  // HOTFIX BLOCO C/R (fechamento, 2026-08-26) — mesmo achado acima, agora
+  // para o motor de retry GENÉRICO (_retryComBackoff), usado pelas 11
+  // telas migradas para o padrão único (clientes, kb_os, crm_leads,
+  // fin_cr, fin_cp, retalhos, orcamentos, stock, erp_fornecedores,
+  // erp_vr_compras, vitre_produtos). Sem isto, uma conta que esgotasse as
+  // 5 tentativas de qualquer uma dessas chaves antes de deslogar faria a
+  // PRÓXIMA conta a logar nesta aba herdar o contador já esgotado — nunca
+  // conseguiria usar "Tentar novamente" nem uma vez, mesmo numa falha
+  // genuinamente nova e independente da conta seguinte.
+  if(typeof _RETRY_STATE!=='undefined') _RETRY_STATE={};
   if(typeof ATD_CACHE!=='undefined') ATD_CACHE=[];
   if(typeof ATD_SELECTED_ID!=='undefined') ATD_SELECTED_ID=null;
   // Encerrar sessão Firebase Auth (FASE 5) — só depois que o delete acima
@@ -34599,11 +34927,19 @@ function crmRenderBoard(marca) {
   // leitura). Antes, todas as colunas mostravam "Nenhum lead aqui" antes
   // da 1ª confirmação do servidor — indistinguível de um funil realmente
   // vazio numa sessão fresca.
+  var _crmForbidden = typeof _CLOUD_WATCH_FORBIDDEN!=='undefined' && _CLOUD_WATCH_FORBIDDEN['crm_leads'];
   var _crmErro = typeof _CLOUD_WATCH_ERROR!=='undefined' && _CLOUD_WATCH_ERROR['crm_leads'];
   var _crmConfirmado = typeof _CLOUD_WATCH_CONFIRMED!=='undefined' && _CLOUD_WATCH_CONFIRMED['crm_leads'];
-  var _crmMsgVazio = _crmErro
+  // HOTFIX BLOCO C (fechamento, 2026-08-26) — permission-denied nunca tem
+  // retry; falha transitória ganha "Tentar novamente" (uma única vez, na
+  // primeira coluna, para não repetir o botão 5x no board).
+  var _crmMsgVazio = _crmForbidden
+    ? '<div style="text-align:center;color:#B91C1C;font-size:11px;padding:20px 8px;font-weight:700">🔒 Sem permissão</div>'
+    : _crmErro
     ? '<div style="text-align:center;color:#B91C1C;font-size:11px;padding:20px 8px;font-weight:700">⚠️ Falha ao carregar</div>'
     : (!_crmConfirmado ? '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">⏳ Carregando...</div>' : '<div style="text-align:center;color:var(--muted);font-size:11px;padding:20px 8px">Nenhum lead aqui</div>');
+  var _crmMsgVazioRetry = _crmMsgVazio + (_crmErro && !_crmForbidden ? '<div style="text-align:center;margin-top:6px"><button onclick="_watchTentarNovamente(\'crm_leads\',_watchCrmLeads,function(){crmRenderBoard(\''+marca+'\');})" style="padding:5px 12px;border:none;border-radius:6px;background:#DC2626;color:#fff;font-size:11px;font-weight:700;cursor:pointer">🔄 Tentar novamente</button></div>' : '');
+  var _crmColIdx = 0;
   boardEl.innerHTML = CRM_FASES.map(function(fase){
     var cards = leads.filter(function(l){ return l.etapa === fase.id; });
     var colVal = cards.reduce(function(s,l){ return s+parsVal(l.valor_potencial); },0);
@@ -34617,7 +34953,7 @@ function crmRenderBoard(marca) {
       +(valStr ? '<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.75);margin-top:3px">'+valStr+'</div>' : '')
       +'</div>'
       +'<div class="crm-body" style="min-height:120px">'
-      +(cards.length ? cards.map(crmCardHTML).join('') : _crmMsgVazio)
+      +(cards.length ? cards.map(crmCardHTML).join('') : (_crmColIdx++===0 ? _crmMsgVazioRetry : _crmMsgVazio))
       +'</div>'
       +'</div>';
   }).join('');
