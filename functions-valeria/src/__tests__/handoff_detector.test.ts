@@ -9,6 +9,9 @@ describe("Pedido explícito de humano", () => {
     "Preciso falar com alguem",
     "Posso falar com um atendente?",
     "Não quero falar com robô",
+    // Achado real de E2E (P1.1): "alguém" nunca leva artigo — "falar com
+    // alguém" sem "um/uma" antes é a forma mais comum, tinha regressão.
+    "Oi, preciso fazer uma peça personalizada e quero falar com alguém da equipe.",
   ])('"%s" → requiresHuman=true, CUSTOMER_REQUEST', (texto) => {
     const r = detectHumanHandoff({ texto });
     expect(r.requiresHuman).toBe(true);

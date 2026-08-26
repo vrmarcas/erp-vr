@@ -31,12 +31,13 @@ function normalize(s: string): string {
 }
 
 const CUSTOMER_REQUEST_PATTERNS: RegExp[] = [
-  /\bfalar com (um[a]?|uma) (pessoa|atendente|humano|alguem)\b/,
+  // "alguém" nunca leva artigo ("um alguém" não existe em português) —
+  // padrão próprio, sem exigir um[a]/uma antes.
+  /\bfalar com alguem\b/,
+  /\bfalar com (um[a]?|uma) (pessoa|atendente|humano)\b/,
   /\bquero (um[a]?|uma) (pessoa|atendente|humano)\b/,
-  /\bpreciso falar com alguem\b/,
   /\batendimento humano\b/,
   /\bnao quero falar com (robo|ia|bot|assistente)\b/,
-  /\bposso falar com alguem\b/,
 ];
 
 const COMPLAINT_PATTERNS: RegExp[] = [

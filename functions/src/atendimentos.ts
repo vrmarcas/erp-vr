@@ -580,26 +580,39 @@ export const atdEnviarMensagemHumano = functions
   const nome = await nomeStaff(caller.uid);
   const now = Date.now();
 
-  // Sprint P1.0 (achado real de auditoria, Parte Y) — atdEnviarMensagemHumano
+  // Sprint P1.0/P1.1 (achado real de auditoria, Parte Y) — atdEnviarMensagemHumano
   // só gravava no Firestore; o cliente no WhatsApp NUNCA recebia a
-  // resposta do humano. Confirmado real via API: POST
-  // /api/conversations/{id}/message com {channel, message} relaya a
-  // mensagem pelo canal de origem da conversa (testado em produção,
-  // resposta 200 com from:"agent"). Best-effort: se o canal ainda não
-  // tiver providerConversationId (conversa nunca chegou a falar com o
-  // Chatvolt) ou a chamada falhar, a mensagem ainda fica registrada no
-  // ERP — nunca perde o texto do humano, só não sai pelo canal externo.
+  // resposta do humano. POST /api/conversations/{id}/message com
+  // {channel, message} relaya a mensagem pelo canal de origem — MAS
+  // achado real (P1.1): se `channel` enviado não bater EXATAMENTE com o
+  // canal real da conversa no Chatvolt, o endpoint responde 200 com
+  // corpo vazio e NÃO cria mensagem nenhuma (falha silenciosa). Por
+  // isso nunca supomos o valor de `channel` (ex.: "whatsapp" hardcoded)
+  // — sempre lemos de volta o canal REAL da conversa via GET antes de
+  // enviar, e só consideramos enviadoAoCanal=true se a resposta contiver
+  // a mensagem de fato criada. Best-effort: qualquer falha aqui nunca
+  // perde o texto do humano, só não sai pelo canal externo.
   let enviadoAoCanal = false;
   const providerConversationId = (atd.providerConversationId as string | null) ?? atendimentoId;
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (apiKey && atd.channel && atd.channel !== "erp_web") {
     try {
-      const resp = await axios.post(
-        `https://app.chatvolt.ai/api/conversations/${providerConversationId}/message`,
-        { channel: atd.channel, message: texto },
-        { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 15_000 }
+      const convResp = await axios.get(
+        `https://app.chatvolt.ai/api/conversations/${providerConversationId}`,
+        { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 10_000 }
       );
-      enviadoAoCanal = resp.status === 200;
+      const canalReal = convResp.data?.channel as string | undefined;
+      if (canalReal) {
+        const resp = await axios.post(
+          `https://app.chatvolt.ai/api/conversations/${providerConversationId}/message`,
+          { channel: canalReal, message: texto },
+          { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 15_000 }
+        );
+        const criadas = resp.data?.messages as Array<{ text?: string }> | undefined;
+        enviadoAoCanal = resp.status === 200 && Array.isArray(criadas) && criadas.some((m) => m.text === texto);
+      } else {
+        console.error("[atendimentos.atdEnviarMensagemHumano] canal real da conversa não encontrado no Chatvolt — não relayado (mensagem ainda registrada no ERP).");
+      }
     } catch (e) {
       console.error("[atendimentos.atdEnviarMensagemHumano] falha ao relayar para o canal (mensagem ainda registrada no ERP):", (e as Error).message);
     }
