@@ -8341,6 +8341,20 @@ var FORN_CAT_ICON = {
 };
 
 function fornSeedDemo() {
+  // HOTFIX CRÍTICO 2026-08-26 (Rodada Crítica de Confiabilidade de Leitura,
+  // achado extra P0 — risco imediato de corrupção de dado real, corrigido
+  // fora do escopo original da rodada por se enquadrar na exceção
+  // explícita: mesma classe de bug (decidir "vazio" a partir de estado
+  // AINDA NÃO CONFIRMADO pelo servidor, nunca de uma resposta real) já
+  // corrigida nesta rodada para Estoque/Retalhos, mas aqui a consequência
+  // é pior — GRAVAÇÃO real de 3 fornecedores fictícios em produção, não só
+  // uma tela vazia. _FORN_DATA.length===0 no instante do clique não prova
+  // "conta sem fornecedores" — pode ser só "erp_fornecedores ainda não
+  // respondeu" (mesma corrida de sessão recém-aberta/navegação rápida).
+  // _cloudReady só fica true depois que TODOS os _cloudLoad iniciais
+  // (inclusive erp_fornecedores) já responderam — nunca decide a partir
+  // de estado em memória ainda não confirmado pelo servidor.
+  if(typeof _cloudReady !== 'undefined' && !_cloudReady) return;
   if(fornLoad().length > 0) return;
   var demo = [
     {
