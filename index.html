@@ -33241,6 +33241,37 @@ function secEngageLock(motivo){
   secSetLockState(lockState);
   secStopInactivityTimer();
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  // HOTFIX CERTIFICAÇÃO FASE 3 (achado ao vivo, 2026-08-26) — achado real:
+  // signOut() era chamado aqui sem nunca desinscrever nenhum dos ~20
+  // listeners realtime ativos (_CLOUD_UNSUBS + Atendimentos/Vitre/Compras
+  // v2, que têm ciclo de vida próprio). Cada um recebia permission-denied
+  // no instante do signOut() — reproduzido ao vivo: ~25 avisos/erros de
+  // console de uma vez, TODAS as telas (Clientes/CRM/Financeiro/Estoque/
+  // Vitre/Compras/Atendimentos/Orçamentos) marcadas FORBIDDEN. Pior:
+  // authUnlock() (mesma conta) nunca chamava _cloudLoadAll() de novo
+  // (guardado por _cloudIniciou, pensado só para o boot inicial) — depois
+  // de desbloquear, o app inteiro ficava preso em "🔒 Sem permissão" em
+  // TODAS as telas, sem nenhuma recuperação automática (o próprio design
+  // desta rodada garante que FORBIDDEN nunca oferece retry — correto para
+  // uma negação real, errado aqui, que é só um token temporariamente
+  // trocado). Isso acontece em TODO bloqueio — manual ou pelos 30min de
+  // inatividade — ou seja, rotineiramente, todo dia, para qualquer conta.
+  // Corrigido encerrando todos os listeners ANTES do signOut() (mesmo
+  // padrão já usado por authLogout()/pagehide) e resetando _cloudIniciou —
+  // authUnlock() já chama "if(!_cloudIniciou) _cloudIniciar()" depois da
+  // reautenticação: com o guard liberado, isso agora reconecta tudo do
+  // zero, exatamente como um login novo (nunca uma segunda fórmula).
+  _CLOUD_UNSUBS.forEach(function(u){ try{u();}catch(e){} });
+  _CLOUD_UNSUBS = [];
+  if(typeof ATD_UNSUB!=='undefined' && ATD_UNSUB){ try{ATD_UNSUB();}catch(e){} ATD_UNSUB=null; }
+  if(typeof ATD_MSG_UNSUB!=='undefined' && ATD_MSG_UNSUB){ try{ATD_MSG_UNSUB();}catch(e){} ATD_MSG_UNSUB=null; }
+  if(typeof ATD_BRIEFING_UNSUB!=='undefined' && ATD_BRIEFING_UNSUB){ try{ATD_BRIEFING_UNSUB();}catch(e){} ATD_BRIEFING_UNSUB=null; }
+  if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
+  if(typeof _comprasV2ComprasSub!=='undefined') _comprasV2ComprasSub=null;
+  if(typeof _comprasV2FinCpSub!=='undefined') _comprasV2FinCpSub=null;
+  if(typeof _vitreCatUnsub!=='undefined' && _vitreCatUnsub){ try{_vitreCatUnsub();}catch(e){} _vitreCatUnsub=null; }
+  if(typeof _stockUnsub!=='undefined'){ _stockUnsub=null; }
+  _cloudIniciou = false;
   try{ firebase.auth().signOut(); }catch(e){}
   _currentSession = null;
   secClearSession();

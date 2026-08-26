@@ -129,7 +129,25 @@ global.secCheckLockout = function () {};
 global.authApplySession = function () {};
 global._cloudStartTokenRenewal = function () {};
 global._cloudIniciou = false;
-global._cloudIniciar = function () {};
+var _cloudIniciarCallCount = 0;
+global._cloudIniciar = function () { _cloudIniciarCallCount++; };
+// HOTFIX CERTIFICAÇÃO FASE 3 (achado ao vivo, 2026-08-26) — secEngageLock()
+// passou a encerrar todos os listeners realtime antes do signOut() (mesmo
+// padrão de authLogout()/pagehide), para permitir que authUnlock() os
+// reconecte do zero via _cloudIniciar() (guardado por _cloudIniciou).
+var _unsubCalls = { cloud: 0, atd: 0, atdMsg: 0, atdBriefing: 0, comprasV2: 0, vitre: 0 };
+global._CLOUD_UNSUBS = [
+  function () { _unsubCalls.cloud++; },
+  function () { _unsubCalls.cloud++; }
+];
+global.ATD_UNSUB = function () { _unsubCalls.atd++; };
+global.ATD_MSG_UNSUB = function () { _unsubCalls.atdMsg++; };
+global.ATD_BRIEFING_UNSUB = function () { _unsubCalls.atdBriefing++; };
+global._comprasV2Unsubs = [function () { _unsubCalls.comprasV2++; }];
+global._comprasV2ComprasSub = function () {};
+global._comprasV2FinCpSub = function () {};
+global._vitreCatUnsub = function () { _unsubCalls.vitre++; };
+global._stockUnsub = function () {};
 global._normalizeRole = function (v) {
   if (typeof v !== 'string') return null;
   var r = v.trim().toLowerCase();
@@ -162,6 +180,18 @@ function resetAll() {
   _mockUsuarioDoc = null;
   _capturedIntervalFn = null; _intervalActive = false;
   global._cloudIniciou = false;
+  _cloudIniciarCallCount = 0;
+  _unsubCalls = { cloud: 0, atd: 0, atdMsg: 0, atdBriefing: 0, comprasV2: 0, vitre: 0 };
+  global._CLOUD_UNSUBS = [
+    function () { _unsubCalls.cloud++; },
+    function () { _unsubCalls.cloud++; }
+  ];
+  global.ATD_UNSUB = function () { _unsubCalls.atd++; };
+  global.ATD_MSG_UNSUB = function () { _unsubCalls.atdMsg++; };
+  global.ATD_BRIEFING_UNSUB = function () { _unsubCalls.atdBriefing++; };
+  global._comprasV2Unsubs = [function () { _unsubCalls.comprasV2++; }];
+  global._vitreCatUnsub = function () { _unsubCalls.vitre++; };
+  global._stockUnsub = function () {};
   global._SEC_INACT_MINS = 10;
   global._secTimer = null;
   global._tokenRenewalTimer = null;
@@ -421,6 +451,35 @@ async function main() {
     assertEq(global._currentSession.funcao, 'master', 'perfil deveria vir do Firestore, não do lock state antigo');
     assertTrue(_intervalActive, 'timer de inatividade deveria estar rodando de novo');
     assertEq(secGetLockState(), null, 'lock state deveria ter sido limpo');
+  });
+
+  console.log('\n-- Listeners realtime no bloqueio/desbloqueio (achado ao vivo, 2026-08-26) --');
+  await test('18b. ACHADO REAL: secEngageLock() encerra TODOS os listeners realtime antes do signOut() — nunca mais um permission-denied em massa no instante do bloqueio', function () {
+    resetAll(); loginSessionFixture('uid-listeners', 'master');
+    assertEq(_unsubCalls, { cloud: 0, atd: 0, atdMsg: 0, atdBriefing: 0, comprasV2: 0, vitre: 0 }, 'nenhum unsub deveria ter sido chamado ainda');
+    secEngageLock('manual');
+    assertEq(_unsubCalls.cloud, 2, 'todos os listeners de _CLOUD_UNSUBS (clientes/kb_os/fin_cr/fin_cp/retalhos/orcamentos/stock/...) devem ser encerrados no bloqueio');
+    assertEq(_unsubCalls.atd, 1, 'listener da lista de Atendimentos deve ser encerrado');
+    assertEq(_unsubCalls.atdMsg, 1, 'listener da thread de mensagens deve ser encerrado');
+    assertEq(_unsubCalls.atdBriefing, 1, 'listener do briefing ValerIA deve ser encerrado');
+    assertEq(_unsubCalls.comprasV2, 1, 'listener(s) de Compras v2 devem ser encerrados');
+    assertEq(_unsubCalls.vitre, 1, 'listener do Catálogo Vitre deve ser encerrado');
+    assertEq(global._CLOUD_UNSUBS.length, 0, '_CLOUD_UNSUBS deve ficar vazio após o bloqueio — nunca reaproveitar referências já encerradas');
+    assertEq(global.ATD_UNSUB, null, 'ATD_UNSUB deve voltar a null — mesmo padrão de authLogout()');
+    assertEq(global._comprasV2Unsubs, null, '_comprasV2Unsubs deve voltar a null');
+    assertEq(global._vitreCatUnsub, null, '_vitreCatUnsub deve voltar a null — permite reconectar na próxima visita à tela Vitre');
+  });
+
+  await test('18c. ACHADO REAL corrigido: bloqueio reseta _cloudIniciou — desbloqueio bem-sucedido da MESMA conta reconecta todos os listeners do zero (antes, o app inteiro ficava preso em "sem permissão" após qualquer bloqueio, manual ou pelos 30min de inatividade)', async function () {
+    resetAll(); loginSessionFixture('uid-reconnect', 'master');
+    global._cloudIniciou = true; // simula boot já concluído antes do bloqueio (estado real de qualquer sessão em uso)
+    secEngageLock('manual');
+    assertEq(global._cloudIniciou, false, 'ACHADO REAL: sem isto, authUnlock() nunca chama _cloudIniciar() de novo (guardado por _cloudIniciou), e o app inteiro fica com todos os listeners mortos e todas as flags FORBIDDEN presas para sempre');
+    _mockSignInImpl = function () { return Promise.resolve({ user: mockUser('uid-reconnect') }); };
+    _mockUsuarioDoc = { exists: true, data: function () { return { nome: 'Master X', funcao: 'master' }; } };
+    _dom.lockPwd.value = 'ok';
+    await authUnlock();
+    assertEq(_cloudIniciarCallCount, 1, 'authUnlock() bem-sucedido deve reconectar tudo via _cloudIniciar() — exatamente como um login novo, nunca uma segunda fórmula');
   });
 
   await test('19. conta sem perfil (erp_vr_usuarios inexistente) não desbloqueia mesmo com senha certa', async function () {
