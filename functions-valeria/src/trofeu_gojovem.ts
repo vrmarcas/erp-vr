@@ -39,10 +39,18 @@ function normalize(s: string): string {
  * "gojovem"/"go jovem", em qualquer ordem — cobre "Troféu GoJovem",
  * "troféu do GoJovem", "troféu da premiação GoJovem", "trofeu gojovem",
  * etc. Nunca aproxima: exige AMBOS os termos presentes.
+ *
+ * Sprint P1.3 — também reconhece "Modelo 11"/"Modelo 10" sozinho: é o
+ * nome comercial editado manualmente do MESMO SKU (TFMOD10, ver
+ * cabeçalho do arquivo) — um cliente que já viu o catálogo pode se
+ * referir só pelo nome do modelo, sem mencionar "troféu"/"GoJovem" de
+ * novo na mesma frase.
  */
 export function isTrofeuGoJovemAlias(raw: string): boolean {
   const n = normalize(raw);
-  return /trofeu/.test(n) && /go\s*jovem/.test(n);
+  if (/trofeu/.test(n) && /go\s*jovem/.test(n)) return true;
+  if (/modelo\s*1[01]\b/.test(n)) return true;
+  return false;
 }
 
 /**

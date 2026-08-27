@@ -691,6 +691,108 @@ export const atdEnviarMensagemHumano = functions
   return { ok: true, jaProcessado: false, enviadoAoCanal };
 });
 
+// ── 3b. Confirmar pagamento (Sprint P1.3 — fluxo Pix Troféu GoJovem) ───────
+// "Enviei o pagamento" do cliente NUNCA confirma pagamento sozinho — não é
+// uma verdade operacional garantida (o LLM não pode afirmar isso). Só esta
+// ação explícita, disparada por um humano no ERP, muda
+// paymentStatus PENDING → CONFIRMED e productionStatus → em_producao.
+// Idempotente: reenviar não duplica confirmação nem mensagem final.
+export const orcConfirmarPagamentoValeria = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30 })
+  .https.onCall(async (data, context) => {
+    const caller = await getCallerVerificado(context);
+    requireRole(caller, ["comercial"], "confirmar pagamento de orçamento da Valéria");
+
+    const orcamentoId = String(data?.orcamentoId || "").trim();
+    if (!orcamentoId) throw new functions.https.HttpsError("invalid-argument", "orcamentoId obrigatório.");
+
+    const orcDocRef = db().collection("erp_vr").doc("orcamentos");
+    const orcDoc = await orcDocRef.get();
+    const raw = orcDoc.exists ? (orcDoc.data()?.data as string | undefined) : undefined;
+    const lista: Array<Record<string, unknown>> = raw ? JSON.parse(raw) : [];
+    const idx = lista.findIndex((o) => o.id === orcamentoId);
+    if (idx < 0) throw new functions.https.HttpsError("not-found", "Orçamento não encontrado.");
+    const orc = lista[idx];
+
+    if (orc.origem !== "valeria") {
+      throw new functions.https.HttpsError("failed-precondition", "Confirmação de pagamento só é suportada para orçamentos criados pela Valéria.");
+    }
+    if (orc.paymentStatus === "CONFIRMED") {
+      return { ok: true, jaConfirmado: true };
+    }
+
+    const now = Date.now();
+    lista[idx] = {
+      ...orc,
+      paymentStatus: "CONFIRMED",
+      paymentConfirmedAt: now,
+      paymentConfirmedBy: caller.uid,
+      productionStatus: "em_producao",
+    };
+    await orcDocRef.set({ data: JSON.stringify(lista), ts: now });
+    await writeAudit("atendimentos_audit_log", "confirmar_pagamento_valeria", caller.uid, caller.role, {
+      orcamentoId, atendimentoId: orc.atendimentoId ?? orc.conversationId ?? null,
+    });
+
+    // Mensagem final da Valéria — texto FIXO, nunca gerado pelo LLM, só
+    // sai depois da confirmação real acima. Mesma disciplina de relay de
+    // atdEnviarMensagemHumano (lê o canal real antes de enviar, nunca
+    // supõe) — best-effort: falha aqui nunca desfaz a confirmação de
+    // pagamento já persistida.
+    const atendimentoId = String(orc.atendimentoId ?? orc.conversationId ?? "").trim();
+    let enviadoAoCanal = false;
+    if (atendimentoId) {
+      try {
+        const atdSnap = await db().collection(COL_ATD).doc(atendimentoId).get();
+        if (atdSnap.exists) {
+          const atd = atdSnap.data()!;
+          const texto = "Pagamento confirmado, obrigada! Seu troféu já entrou em produção. 😊";
+          const providerConversationId = (atd.providerConversationId as string | null) ?? atendimentoId;
+          const apiKey = process.env.CHATVOLT_API_KEY;
+          let providerMessageIdReal: string | null = null;
+          if (apiKey && atd.channel && atd.channel !== "erp_web") {
+            try {
+              const convResp = await axios.get(
+                `https://app.chatvolt.ai/api/conversations/${providerConversationId}`,
+                { headers: { Authorization: `Bearer ${apiKey}` }, timeout: 10_000 }
+              );
+              const canalReal = convResp.data?.channel as string | undefined;
+              if (canalReal) {
+                const resp = await axios.post(
+                  `https://app.chatvolt.ai/api/conversations/${providerConversationId}/message`,
+                  { channel: canalReal, message: texto },
+                  { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, timeout: 15_000 }
+                );
+                const criadas = resp.data?.messages as Array<{ id?: string; text?: string }> | undefined;
+                const criada = criadas?.find((m) => m.text === texto);
+                enviadoAoCanal = resp.status === 200 && !!criada;
+                providerMessageIdReal = criada?.id ?? null;
+              } else {
+                console.error("[orcConfirmarPagamentoValeria] canal real da conversa não encontrado (pagamento já confirmado).");
+              }
+            } catch (e) {
+              console.error("[orcConfirmarPagamentoValeria] falha ao relayar mensagem final (pagamento já confirmado):", (e as Error).message);
+            }
+          }
+          const msgRef = providerMessageIdReal
+            ? atdSnap.ref.collection(SUB_MSG).doc(providerMessageIdReal)
+            : atdSnap.ref.collection(SUB_MSG).doc();
+          await msgRef.set({
+            id: msgRef.id, atendimentoId, providerMessageId: providerMessageIdReal,
+            idempotencyKey: null, actorType: "valeria", actorId: null, actorName: "Valéria",
+            text: texto, attachments: [], deliveryStatus: enviadoAoCanal ? "sent" : (atd.channel === "erp_web" ? "sent" : "failed"),
+            provider: enviadoAoCanal ? "chatvolt" : "erp", createdAt: Date.now(),
+          });
+          await atdSnap.ref.set({ ultimaMensagem: texto, ultimaInteracaoEm: Date.now(), updatedAt: Date.now() }, { merge: true });
+        }
+      } catch (e) {
+        console.error("[orcConfirmarPagamentoValeria] falha ao localizar/atualizar atendimento (pagamento já confirmado):", (e as Error).message);
+      }
+    }
+
+    return { ok: true, jaConfirmado: false, enviadoAoCanal };
+  });
+
 // ── 4. Assumir atendimento ──────────────────────────────────────────────────
 export const atdAssumirAtendimento = functions
   .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30 })

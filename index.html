@@ -5050,12 +5050,14 @@ function _authFirebaseError(code){
                 <button id="atdBtnAssumir" onclick="atdAssumir()" style="display:none;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">👤 Assumir</button>
                 <button id="atdBtnDevolver" onclick="atdDevolver()" style="display:none;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">↩ Devolver p/ Valéria</button>
                 <button id="atdBtnResolver" onclick="atdResolver()" style="display:none;border:1px solid var(--ok);color:var(--ok);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">✓ Resolver</button>
+                <button id="atdBtnConfirmarPagamento" onclick="atdConfirmarPagamento()" style="display:none;border:1px solid #16A34A;color:#fff;background:#16A34A;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">💰 Confirmar pagamento</button>
                 <button id="atdBtnPainel" onclick="atdTogglePainelMobile()" style="border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">ℹ️</button>
                 <button id="atdBtnLimparTeste" onclick="atdLimparTeste()" style="display:none;border:1px solid var(--danger);color:var(--danger);background:var(--surface);border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer">🗑️ Limpar teste</button>
               </div>
             </div>
             <div id="atdTesteBanner" style="display:none" class="atd-teste-banner">🧪 CONVERSA DE HOMOLOGAÇÃO — não é um cliente real</div>
             <div id="atdHandoffBanner" style="display:none;background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;padding:8px 12px;text-align:center">⚠️ Precisa de atendimento humano</div>
+            <div id="atdPagamentoBanner" style="display:none;background:#FEF3C7;color:#92400E;font-weight:700;font-size:12px;padding:8px 12px;text-align:center">⏳ Aguardando confirmação de pagamento</div>
             <div class="atd-thread-msgs" id="atdThreadMsgs"></div>
             <div class="atd-composer" id="atdComposer">
               <textarea id="atdComposerInput" rows="1" placeholder="Simular mensagem do cliente…" onkeydown="atdComposerKeydown(event)"></textarea>
@@ -33515,6 +33517,7 @@ var ATD_SELECTED_ID = null;
 var ATD_FILTRO = 'todos';
 var ATD_SENDING = false;
 var ATD_BUSY = false;
+var ATD_ORC_PENDENTE_ID = null; // Sprint P1.3 — orçamento Valéria aguardando confirmação de pagamento (thread atualmente aberta)
 // RODADA 9, Bloco H — briefing estruturado (produto/medidas/material/prazo
 // etc.) extraído pela ValerIA durante a conversa, ver atdBriefingListenerInit.
 var ATD_BRIEFING_UNSUB = null;
@@ -33793,6 +33796,19 @@ function atdRenderThreadHeader(atd){
   document.getElementById('atdBtnResolver').style.display = (podeAgir && !resolvido) ? '' : 'none';
   document.getElementById('atdBtnLimparTeste').style.display = (atdSouMaster() && atd.isTeste) ? '' : 'none';
 
+  // Sprint P1.3 — fluxo Pix Valéria: orçamento vinculado a este atendimento,
+  // ainda não pago. _ORC_ENVIADOS_DATA já é mantido ao vivo (_cloudWatch),
+  // sem precisar buscar de novo aqui.
+  var orcVinculado = atd.orcamentoId ? (_ORC_ENVIADOS_DATA||[]).find(function(o){ return o.id===atd.orcamentoId; }) : null;
+  var aguardandoPagamento = !!(orcVinculado && orcVinculado.origem==='valeria' && orcVinculado.paymentStatus==='PENDING');
+  document.getElementById('atdBtnConfirmarPagamento').style.display = (podeAgir && aguardandoPagamento) ? '' : 'none';
+  var pagBanner = document.getElementById('atdPagamentoBanner');
+  pagBanner.style.display = aguardandoPagamento ? '' : 'none';
+  if(aguardandoPagamento){
+    pagBanner.textContent = '⏳ Aguardando confirmação de pagamento — R$ '+Number(orcVinculado.total||0).toFixed(2).replace('.',',');
+  }
+  ATD_ORC_PENDENTE_ID = aguardandoPagamento ? orcVinculado.id : null;
+
   var composer = document.getElementById('atdComposer');
   var input = document.getElementById('atdComposerInput');
   if(resolvido){
@@ -33924,6 +33940,19 @@ function atdResolver(){
   ATD_BUSY = true;
   firebase.functions().httpsCallable('atdResolverAtendimento')({ atendimentoId: ATD_SELECTED_ID })
     .then(function(){ showToast('Atendimento resolvido.','ok'); })
+    .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
+    .finally(function(){ ATD_BUSY = false; });
+}
+
+// Sprint P1.3 — fluxo Pix Valéria: confirmação explícita de pagamento,
+// nunca automática. "Enviei o pagamento" do cliente nunca dispara isto
+// sozinho — só este clique humano.
+function atdConfirmarPagamento(){
+  if(!ATD_SELECTED_ID || ATD_BUSY || !ATD_ORC_PENDENTE_ID) return;
+  if(!_e2eDlgConfirm('Confirmar pagamento deste orçamento? A Valéria vai avisar o cliente e o pedido entra em produção.')) return;
+  ATD_BUSY = true;
+  firebase.functions().httpsCallable('orcConfirmarPagamentoValeria')({ orcamentoId: ATD_ORC_PENDENTE_ID })
+    .then(function(){ showToast('Pagamento confirmado — pedido em produção.','ok'); })
     .catch(function(e){ showToast('Erro: '+atdErroAmigavel(e),'err'); })
     .finally(function(){ ATD_BUSY = false; });
 }

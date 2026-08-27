@@ -109,6 +109,22 @@ describe("T1 — reconhecimento de alias 'Troféu GoJovem'", () => {
       expect(isTrofeuGoJovemAlias(texto)).toBe(false);
     }
   );
+
+  test.each([
+    "Gostei do Modelo 11 que está no catálogo do WhatsApp.",
+    "Quero o modelo 11",
+    "Modelo 10",
+    "MODELO 11",
+  ])('P1.3 — "%s" é reconhecido pelo nome comercial do modelo (mesmo sem "troféu"/"go jovem" na frase)', (texto) => {
+    expect(isTrofeuGoJovemAlias(texto)).toBe(true);
+  });
+
+  test.each(["Modelo 12", "Modelo 1", "modelo"])(
+    'P1.3 — "%s" NÃO é reconhecido (número de modelo diferente ou ausente)',
+    (texto) => {
+      expect(isTrofeuGoJovemAlias(texto)).toBe(false);
+    }
+  );
 });
 
 describe("T2 — mergeTechnicalBriefing auto-preenche campos técnicos fixos do GoJovem", () => {

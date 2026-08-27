@@ -142,6 +142,7 @@ export {
   atdSimularMensagemCliente,
   atdRetentarMensagem,
   atdEnviarMensagemHumano,
+  orcConfirmarPagamentoValeria,
   atdAssumirAtendimento,
   atdDevolverParaValeria,
   atdResolverAtendimento,
