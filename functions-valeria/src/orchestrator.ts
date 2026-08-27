@@ -15,6 +15,7 @@
 import type { BriefingData, Cliente, CrmLead } from "./types";
 import type { TechnicalBriefing } from "./technical_briefing";
 import { computeTechnicalReadiness, technicalBriefingFingerprint } from "./technical_briefing";
+import { TROFEU_GOJOVEM_PRODUCT_ID } from "./trofeu_gojovem";
 
 export type NextCommercialAction =
   | "greet"
@@ -264,13 +265,21 @@ function nextCommercialActionCore(params: {
     params.briefing, params.cliente, params.lead, params.channelPhone, params.technicalBriefing
   );
 
-  if (readiness.ready && !readiness.customerIdentityReady) {
+  // P1.3 — regra estreita só para o Troféu GoJovem: como o produto já é
+  // 100% conhecido/fixo (material/espessura/dimensões auto-preenchidos,
+  // única variável real é quantidade), identidade tem prioridade sobre
+  // quantidade — nunca o contrário. Sem isso, o fluxo perguntaria
+  // "quantos?" antes de "quem é você?" sempre que o produto já estivesse
+  // setado mas a quantidade ainda não (achado real de E2E, roteiro de
+  // gravação). Não afeta nenhum outro produto/fluxo.
+  const ehGoJovem = params.technicalBriefing?.productId === TROFEU_GOJOVEM_PRODUCT_ID;
+  if ((readiness.ready || ehGoJovem) && !readiness.customerIdentityReady) {
     // P1.2b (achado real de E2E) — só chega aqui quando NENHUMA fonte deu
     // nome (nem o contato do canal, nem o texto do cliente — ver
-    // webhook.ts::buscarNomeContatoChatvolt, que já resolve isso antes
+    // webhook.ts::sincronizarConversaCompleta, que já resolve isso antes
     // para WhatsApp real). Pergunta curta, nunca "nome completo".
     return {
-      nextAction: "identify_customer", missingFields: [], reason: "Dados de especificação completos — falta identificar o cliente antes de orçar.",
+      nextAction: "identify_customer", missingFields: [], reason: "Falta identificar o cliente antes de orçar.",
       actionPayload: {
         instrucao: "Pergunte apenas: \"Qual é o seu nome?\" — nunca peça \"nome completo\", nunca peça telefone se o canal já informou (WhatsApp já dá o telefone automaticamente). Seja direto, uma frase só.",
       },

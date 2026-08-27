@@ -217,6 +217,13 @@ async function upsertAtendimentoWhatsApp(params: {
     // executeCreateQuote) — nenhuma mudança adicional foi necessária ali.
     const { isNumeroDeTeste } = await import("./test_phone_allowlist");
     const ehNumeroDeTeste = await isNumeroDeTeste(params.channelPhone ?? sync.telefoneE164);
+    // P1.3 (achado real de E2E, roteiro de gravação) — para conversas de
+    // teste (número na allowlist), NUNCA herda o nome do contato do canal
+    // automaticamente: força a Valéria a perguntar o nome explicitamente
+    // e o cliente a digitar de verdade, em vez de herdar um nome de
+    // perfil do WhatsApp que pode não ser o nome real da demonstração.
+    // Para número real (fora da allowlist), comportamento inalterado
+    // (herda do canal, ver P1.2b).
     const registro = {
       id: params.conversationId,
       channel: "whatsapp",
@@ -226,7 +233,7 @@ async function upsertAtendimentoWhatsApp(params: {
       leadId: null,
       clienteId: null,
       telefoneE164: params.channelPhone ?? sync.telefoneE164 ?? null,
-      nome: sync.nome,
+      nome: ehNumeroDeTeste ? null : sync.nome,
       empresa: null,
       modoAtendimento: "valeria",
       responsavelUid: null,
@@ -268,8 +275,8 @@ async function upsertAtendimentoWhatsApp(params: {
   if (!atd.telefoneE164 && (params.channelPhone || sync.telefoneE164)) patch.telefoneE164 = params.channelPhone ?? sync.telefoneE164;
   // P1.2b — backfill do nome do contato só quando ainda não há nenhum
   // (nem do canal, nem dito pelo cliente) — nunca sobrescreve um nome já
-  // confirmado.
-  if (!atd.nome && !atd.leadId && !atd.clienteId && sync.nome) patch.nome = sync.nome;
+  // confirmado. P1.3 — pulado para conversas de teste (ver criação acima).
+  if (!atd.nome && !atd.leadId && !atd.clienteId && sync.nome && !atd.isTeste) patch.nome = sync.nome;
   if (sync.novasMensagens > 0) {
     patch.historyBackfillCount = ((atd.historyBackfillCount as number) || 0) + sync.novasMensagens;
     if (!atd.historyBackfilledAt) patch.historyBackfilledAt = now;

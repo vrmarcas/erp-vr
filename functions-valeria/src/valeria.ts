@@ -33,6 +33,7 @@ import { paraE164BR, encontrarPorTelefone } from "./telefone";
 import { fsRead, fsWrite } from "./kv_store";
 import { saveSimulation, SIM_COL, SIM_TTL_MS } from "./simulation_store";
 import { uid } from "./ids";
+import { TROFEU_GOJOVEM_PRODUCT_ID } from "./trofeu_gojovem";
 
 import type {
   Cliente,
@@ -92,6 +93,26 @@ const ETAPA_TO_TEMP: Record<string, string> = {
 const TEMP_TO_COR: Record<string, string> = {
   quente: "#FCA5A5", morno: "#FCD34D", frio: "#93C5FD",
 };
+
+/**
+ * Sprint P1.3 — chave Pix real da VR, lida da MESMA fonte canônica que o
+ * ERP humano usa (erp_vr/erp_bank_config, editada em Configurações →
+ * Dados Bancários → bankSalvarForm('vr') no index.html) — nunca hardcoded
+ * no prompt/código. Usa a conta marcada `principal`; se nenhuma, a
+ * primeira da lista. Retorna null se não houver chave configurada (quem
+ * chama decide o que fazer — nunca inventa um valor).
+ */
+async function getChavePixVR(): Promise<{ chave: string; titular: string } | null> {
+  const doc = await admin.firestore().collection(COL).doc("erp_bank_config").get();
+  if (!doc.exists) return null;
+  const raw = doc.data()?.data as string | undefined;
+  let cfg: { vr?: Array<{ pix?: string; titular?: string; principal?: boolean }> } | null = null;
+  try { cfg = raw ? JSON.parse(raw) : null; } catch { return null; }
+  const contas = cfg?.vr ?? [];
+  const conta = contas.find((b) => b.principal) ?? contas[0];
+  if (!conta?.pix) return null;
+  return { chave: conta.pix, titular: conta.titular || "" };
+}
 
 /**
  * Sprint P1.2 — o orchestrator precisa enxergar o technicalBriefing mesmo
@@ -282,6 +303,27 @@ export const valeriaGetContexto = RUN_OPTS.https.onRequest(async (req, res) => {
           technicalBriefing: technicalBriefingAtualizadoParaOrchestrator,
           lastEligibleSimulation: lastEligibleSim,
         });
+      }
+
+      // Sprint P1.3 — depois de criar o orçamento do Troféu GoJovem, a
+      // próxima mensagem precisa trazer a chave Pix real (nunca inventada
+      // pelo LLM) — enriquece o actionPayload que o orchestrator já
+      // devolveu (present_quote, genérico) só para este produto
+      // específico, sem alterar o branch genérico em orchestrator.ts.
+      if (
+        executedAction?.action === "create_quote" && executedAction.result.success &&
+        (await loadTechnicalBriefing(ctx.conversationId)).productId === TROFEU_GOJOVEM_PRODUCT_ID
+      ) {
+        const pix = await getChavePixVR();
+        if (pix) {
+          nextAction = {
+            ...nextAction,
+            actionPayload: {
+              ...nextAction.actionPayload,
+              instrucao: `Diga algo como: "Perfeito! O total é R$ ${executedAction.result.total.toFixed(2)}. Você pode pagar via Pix pela chave: ${pix.chave}." Curto, direto, sem outras perguntas.`,
+            },
+          };
+        }
       }
 
       const quoteReadiness = computeQuoteReadiness(

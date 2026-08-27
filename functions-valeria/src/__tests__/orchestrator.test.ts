@@ -371,3 +371,52 @@ describe("P1.2 — gate de produto complexo sem receita compatível", () => {
     expect(r.nextAction).toBe("calculate_quote");
   });
 });
+
+describe("P1.3 — Troféu GoJovem: identidade tem prioridade sobre quantidade", () => {
+  const tbGoJovemSemQty: TechnicalBriefing = {
+    ...emptyTechnicalBriefing(),
+    productId: "Troféu GoJovem",
+    dimensions: { larguraMm: 160, alturaMm: 220, profundidadeMm: null },
+    thicknessMm: 8, materialId: "cfg_5", quantity: null,
+  };
+  const tbGoJovemCompleto: TechnicalBriefing = { ...tbGoJovemSemQty, quantity: 1 };
+  const tbCaixaSemQty: TechnicalBriefing = {
+    ...emptyTechnicalBriefing(),
+    productId: "Caixa",
+    dimensions: { larguraMm: 150, alturaMm: 150, profundidadeMm: 150 },
+    thicknessMm: 3, materialId: "cfg_0", quantity: null,
+  };
+
+  test("GoJovem sem quantidade e sem identidade → pergunta identidade (não quantidade)", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: null, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbGoJovemSemQty,
+    });
+    expect(r.nextAction).toBe("identify_customer");
+  });
+
+  test("GoJovem sem quantidade mas COM identidade → segue pedindo quantidade normalmente (não regride)", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbGoJovemSemQty,
+    });
+    expect(r.nextAction).toBe("ask_required_fields");
+    expect(r.missingFields).toContain("quantity");
+  });
+
+  test("GoJovem com quantidade e identidade → calculate_quote normalmente", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: clienteConfirmado, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbGoJovemCompleto,
+    });
+    expect(r.nextAction).toBe("calculate_quote");
+  });
+
+  test("outro produto (Caixa) sem quantidade e sem identidade → NÃO prioriza identidade (comportamento inalterado, pede o que falta normalmente)", () => {
+    const r = nextCommercialAction({
+      briefing: null, cliente: null, lead: null, channelPhone: null,
+      temHistoricoConversa: true, orcamentoJaCriado: false, technicalBriefing: tbCaixaSemQty,
+    });
+    expect(r.nextAction).not.toBe("identify_customer");
+  });
+});

@@ -114,6 +114,19 @@ export interface OrcamentoEnviado {
    * sem precisar tocar em index.html.
    */
   isTest: boolean;
+  /**
+   * Sprint P1.3 — estrutura mínima de pagamento para pré-orçamentos
+   * criados pela Valéria (fluxo Pix). "Enviei o pagamento" do cliente
+   * NUNCA confirma sozinho — só uma ação explícita no ERP
+   * (orcConfirmarPagamentoValeria) muda PENDING → CONFIRMED. Ausente
+   * (undefined) em orçamentos anteriores a este campo existir — trate
+   * como PENDING para fins de UI.
+   */
+  paymentStatus?: "PENDING" | "CONFIRMED";
+  paymentConfirmedAt?: number | null;
+  paymentConfirmedBy?: string | null;
+  /** Reaproveita o vocabulário real de status de produção já usado em OS (ver index.html). */
+  productionStatus?: "aguardando_pagamento" | "em_producao";
   [key: string]: unknown;
 }
 

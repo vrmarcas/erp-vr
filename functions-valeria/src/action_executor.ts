@@ -294,6 +294,8 @@ export async function executeCreateQuote(params: {
     isTest: isTestFromAtd || sim.isTest === true,
     recipeSnapshot: briefingSnap ? { productId: briefingSnap.productId ?? null, recipeVersion: briefingSnap.recipeVersion ?? null } : null,
     technicalBriefingSnapshot: sim.technicalBriefingSnapshot ?? null,
+    paymentStatus: "PENDING", paymentConfirmedAt: null, paymentConfirmedBy: null,
+    productionStatus: "aguardando_pagamento",
   };
 
   orcamentos.unshift(orc);
