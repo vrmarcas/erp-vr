@@ -1429,6 +1429,19 @@ var _CLOUD_UNSUBS = [];
 window.addEventListener('pagehide', function() {
   _CLOUD_UNSUBS.forEach(function(u){ try{ u(); }catch(e){} });
 });
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — JS não consegue bloquear um
+// fechar-de-aba/recarregar de verdade, mas pode avisar o usuário e deixar
+// ELE decidir (mesmo padrão de "alterações não salvas" de qualquer app
+// web) — a única proteção real possível neste caso, diferente de
+// secEngageLock()/authLogout() (ver _aguardarCloudSavesPendentes()), onde
+// o código controla o momento do signOut() e pode genuinamente esperar.
+window.addEventListener('beforeunload', function(e){
+  if(_CLOUD_SAVES_EM_VOO > 0){
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  }
+});
 // ── TOMBSTONES DE ESTOQUE ────────────────────────────────────────────
 // Problema: clientes com versão ANTIGA do ERP aberta gravam o STOCK inteiro
 // da memória deles (desatualizada), fazendo itens excluídos "voltarem".
@@ -1579,6 +1592,35 @@ var _cloudLastPayload = {};
 // aba. Ver comentário completo em _cloudSave().
 var _cloudSaveQueue = {};
 
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de produção:
+// mover uma OS no Kanban podia "sumir" depois de reload/bloqueio/nova aba
+// mesmo dentro da mesma semana. Causa raiz: nenhuma das escritas críticas
+// (kbDrop/kbSalvarPrazo/kbAceitarSugestaoBtn) esperava a Promise de
+// _cloudSave() confirmar antes de secEngageLock()/authLogout() encerrarem
+// a sessão (signOut invalida o token — uma escrita ainda em voo é
+// abortada sem toast visível) ou antes de pagehide/beforeunload deixarem a
+// aba fechar/recarregar. _cloudSaveQueue já rastreia a Promise mais
+// recente por chave (ver _cloudSave() abaixo) — esta função só espera
+// TODAS as chaves atualmente em voo resolverem (sucesso OU falha; nunca
+// trava numa que já rejeitou) antes do chamador prosseguir com uma ação
+// destrutiva para a sessão. Timeout de segurança: nunca atrasa
+// indefinidamente o bloqueio se uma gravação genuinamente travar.
+function _aguardarCloudSavesPendentes(timeoutMs){
+  var pendentes = Object.keys(_cloudSaveQueue).map(function(k){
+    return (_cloudSaveQueue[k] || Promise.resolve()).catch(function(){});
+  });
+  if(!pendentes.length) return Promise.resolve();
+  var todas = Promise.all(pendentes);
+  var limite = new Promise(function(resolve){ setTimeout(resolve, timeoutMs||8000); });
+  return Promise.race([todas, limite]);
+}
+// Verdadeiro só enquanto existe uma gravação _cloudSave() genuinamente em
+// voo nesta aba — usado pelo guard de beforeunload (fechar aba/recarregar
+// não pode ser interrompido por JS, mas podemos avisar o usuário e deixar
+// ele decidir, mesmo padrão já usado por qualquer app com rascunho não
+// salvo).
+var _CLOUD_SAVES_EM_VOO = 0;
+
 // Salvar documento no Firestore.
 //
 // Protege contra sobrescrita por estado local obsoleto (achado real, não
@@ -1630,7 +1672,9 @@ function _cloudSave(key, data, opts) {
   if(_cloudLastPayload[key] === payload) return Promise.resolve({ok:true, unchanged:true}); // dado idêntico — nada a gravar
 
   var fila = (_cloudSaveQueue[key] || Promise.resolve()).catch(function(){});
-  var atual = fila.then(function(){ return _cloudSaveExec(key, payload, opts); });
+  if(typeof _CLOUD_SAVES_EM_VOO!=='undefined') _CLOUD_SAVES_EM_VOO++;
+  var atual = fila.then(function(){ return _cloudSaveExec(key, payload, opts); })
+    .then(function(res){ if(typeof _CLOUD_SAVES_EM_VOO!=='undefined') _CLOUD_SAVES_EM_VOO--; return res; }, function(err){ if(typeof _CLOUD_SAVES_EM_VOO!=='undefined') _CLOUD_SAVES_EM_VOO--; throw err; });
   _cloudSaveQueue[key] = atual;
   return atual;
 }
@@ -33191,8 +33235,21 @@ function authLogout(){
   // (se houver) terminar, nunca em paralelo com ele.
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
   var _fazerSignOut = function(){ try{ firebase.auth().signOut(); }catch(ex){ console.warn('[Auth] signOut falhou:',ex); } };
-  if(_limparRascunhoPromise && typeof _limparRascunhoPromise.then==='function') _limparRascunhoPromise.then(_fazerSignOut, _fazerSignOut);
-  else _fazerSignOut();
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — mesmo achado do
+  // secEngageLock() (ver comentário lá): logout tampouco pode invalidar o
+  // token enquanto uma gravação do usuário (Kanban ou qualquer outra)
+  // ainda está em voo — ela seria abortada sem toast visível. Caminho
+  // síncrono do "else" original (sem rascunho a limpar) preservado quando
+  // também não há nada em voo — só combina as duas esperas quando alguma
+  // delas é genuinamente necessária.
+  var _temSaveEmVooLogout = typeof _CLOUD_SAVES_EM_VOO!=='undefined' && _CLOUD_SAVES_EM_VOO>0 && typeof _aguardarCloudSavesPendentes==='function';
+  if(_limparRascunhoPromise && typeof _limparRascunhoPromise.then==='function'){
+    _limparRascunhoPromise.then(function(){ return _temSaveEmVooLogout ? _aguardarCloudSavesPendentes(8000) : null; }, function(){ return _temSaveEmVooLogout ? _aguardarCloudSavesPendentes(8000) : null; }).then(_fazerSignOut, _fazerSignOut);
+  } else if(_temSaveEmVooLogout){
+    _aguardarCloudSavesPendentes(8000).then(_fazerSignOut, _fazerSignOut);
+  } else {
+    _fazerSignOut();
+  }
   secStopInactivityTimer();
   var lo=document.getElementById('lockOverlay'); if(lo) lo.classList.remove('show');
   // Restore all sidebar items
@@ -33214,8 +33271,14 @@ function authLogout(){
 // O DOM da aplicação NÃO é resetado (só coberto pelo overlay) — é assim que
 // um formulário em edição (ex.: Novo Orçamento) sobrevive ao bloqueio sem
 // precisarmos gravar dado de cliente em nenhum armazenamento local.
+var _secLockTeardownEmAndamento = false;
 function secEngageLock(motivo){
   if(!_currentSession) return;
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — o teardown de listeners/
+  // signOut agora é assíncrono (espera _cloudSave() em voo, ver abaixo);
+  // sem este guard, uma segunda chamada durante a espera (ex.: dois
+  // gatilhos quase simultâneos) rodaria o teardown duas vezes.
+  if(typeof _secLockTeardownEmAndamento!=='undefined' && _secLockTeardownEmAndamento) return;
   var fbUser = firebase.auth().currentUser;
   var lockState = {
     uid: (fbUser && fbUser.uid) || _currentSession.uid || null,
@@ -33234,6 +33297,15 @@ function secEngageLock(motivo){
   secSetLockState(lockState);
   secStopInactivityTimer();
   if(_tokenRenewalTimer){ clearInterval(_tokenRenewalTimer); _tokenRenewalTimer=null; }
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — tela de bloqueio cobre a
+  // aba JÁ AQUI, antes de qualquer espera abaixo (erp_lock_state já foi
+  // persistido por secSetLockState() — mesmo F5 durante a espera cai
+  // corretamente na tela de desbloqueio, ver authInit()). Só o teardown de
+  // listeners + signOut() (destrutivo — invalida o token) é adiado até
+  // qualquer _cloudSave() em voo confirmar, para nunca abortar uma
+  // movimentação do Kanban (ou qualquer outra escrita) já em trânsito.
+  secApplyLockUI(lockState);
+  secAuditLog('lock', (motivo==='auto'?'Sessão bloqueada por inatividade — ':'Tela bloqueada — ')+lockState.nome);
   // HOTFIX CERTIFICAÇÃO FASE 3 (achado ao vivo, 2026-08-26) — achado real:
   // signOut() era chamado aqui sem nunca desinscrever nenhum dos ~20
   // listeners realtime ativos (_CLOUD_UNSUBS + Atendimentos/Vitre/Compras
@@ -33254,23 +33326,40 @@ function secEngageLock(motivo){
   // authUnlock() já chama "if(!_cloudIniciou) _cloudIniciar()" depois da
   // reautenticação: com o guard liberado, isso agora reconecta tudo do
   // zero, exatamente como um login novo (nunca uma segunda fórmula).
-  _CLOUD_UNSUBS.forEach(function(u){ try{u();}catch(e){} });
-  _CLOUD_UNSUBS = [];
-  if(typeof ATD_UNSUB!=='undefined' && ATD_UNSUB){ try{ATD_UNSUB();}catch(e){} ATD_UNSUB=null; }
-  if(typeof ATD_MSG_UNSUB!=='undefined' && ATD_MSG_UNSUB){ try{ATD_MSG_UNSUB();}catch(e){} ATD_MSG_UNSUB=null; }
-  if(typeof ATD_BRIEFING_UNSUB!=='undefined' && ATD_BRIEFING_UNSUB){ try{ATD_BRIEFING_UNSUB();}catch(e){} ATD_BRIEFING_UNSUB=null; }
-  if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
-  if(typeof _comprasV2ComprasSub!=='undefined') _comprasV2ComprasSub=null;
-  if(typeof _comprasV2FinCpSub!=='undefined') _comprasV2FinCpSub=null;
-  if(typeof _vitreCatUnsub!=='undefined' && _vitreCatUnsub){ try{_vitreCatUnsub();}catch(e){} _vitreCatUnsub=null; }
-  if(typeof _stockUnsub!=='undefined'){ _stockUnsub=null; }
-  if(typeof _stockTombUnsub!=='undefined'){ _stockTombUnsub=null; }
-  _cloudIniciou = false;
-  try{ firebase.auth().signOut(); }catch(e){}
-  _currentSession = null;
-  secClearSession();
-  secApplyLockUI(lockState);
-  secAuditLog('lock', (motivo==='auto'?'Sessão bloqueada por inatividade — ':'Tela bloqueada — ')+lockState.nome);
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — nunca encerrar listeners/
+  // sessão enquanto uma gravação do usuário (ex.: mover um card no
+  // Kanban) ainda está em voo — ver _aguardarCloudSavesPendentes() e
+  // comentário logo acima. A tela já está coberta (secApplyLockUI já
+  // rodou), então o atraso é invisível — só adia o momento em que o token
+  // é invalidado. Caminho SÍNCRONO preservado quando não há nada em voo
+  // (o caso comum, e o único que existia antes desta correção) — só
+  // desvia para a espera assíncrona quando _CLOUD_SAVES_EM_VOO>0 de
+  // verdade, nunca adicionando latência artificial ao bloqueio comum.
+  var _temSaveEmVoo = typeof _CLOUD_SAVES_EM_VOO!=='undefined' && _CLOUD_SAVES_EM_VOO>0 && typeof _aguardarCloudSavesPendentes==='function';
+  function _secEngageLockTeardown(){
+    _CLOUD_UNSUBS.forEach(function(u){ try{u();}catch(e){} });
+    _CLOUD_UNSUBS = [];
+    if(typeof ATD_UNSUB!=='undefined' && ATD_UNSUB){ try{ATD_UNSUB();}catch(e){} ATD_UNSUB=null; }
+    if(typeof ATD_MSG_UNSUB!=='undefined' && ATD_MSG_UNSUB){ try{ATD_MSG_UNSUB();}catch(e){} ATD_MSG_UNSUB=null; }
+    if(typeof ATD_BRIEFING_UNSUB!=='undefined' && ATD_BRIEFING_UNSUB){ try{ATD_BRIEFING_UNSUB();}catch(e){} ATD_BRIEFING_UNSUB=null; }
+    if(typeof _comprasV2Unsubs!=='undefined' && _comprasV2Unsubs){ _comprasV2Unsubs.forEach(function(u){ try{u();}catch(e){} }); _comprasV2Unsubs=null; }
+    if(typeof _comprasV2ComprasSub!=='undefined') _comprasV2ComprasSub=null;
+    if(typeof _comprasV2FinCpSub!=='undefined') _comprasV2FinCpSub=null;
+    if(typeof _vitreCatUnsub!=='undefined' && _vitreCatUnsub){ try{_vitreCatUnsub();}catch(e){} _vitreCatUnsub=null; }
+    if(typeof _stockUnsub!=='undefined'){ _stockUnsub=null; }
+    if(typeof _stockTombUnsub!=='undefined'){ _stockTombUnsub=null; }
+    _cloudIniciou = false;
+    try{ firebase.auth().signOut(); }catch(e){}
+    _currentSession = null;
+    secClearSession();
+    _secLockTeardownEmAndamento = false;
+  }
+  if(_temSaveEmVoo){
+    _secLockTeardownEmAndamento = true;
+    _aguardarCloudSavesPendentes(8000).then(_secEngageLockTeardown);
+  } else {
+    _secEngageLockTeardown();
+  }
 }
 
 function secApplyLockUI(lockState){
