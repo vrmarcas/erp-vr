@@ -39,8 +39,14 @@ export interface RecipePiece {
 export interface Recipe {
   dim3d: boolean;
   desc: string;
-  /** L=comprimento, A=altura, P=profundidade (0 se dim3d=false), e=espessura mm */
-  pieces: (L: number, A: number, P: number, e: number) => RecipePiece[];
+  /**
+   * L=comprimento, A=altura, P=profundidade (0 se dim3d=false), e=espessura mm.
+   * `extra` — RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3: mesmo
+   * parâmetro opcional já usado por index.html (PLAN_RECIPES) para o
+   * toggle "Aplicar descontos de montagem" da receita 'Caixa'. Opcional e
+   * ignorado pelas outras 12 receitas — nenhuma delas foi tocada.
+   */
+  pieces: (L: number, A: number, P: number, e: number, extra?: { descontosMontagemAplicados?: boolean }) => RecipePiece[];
 }
 
 // Porta fiel de PLAN_RECIPES (index.html ~9267-9385) — mesmas 13 receitas,
@@ -56,14 +62,23 @@ export const PLAN_RECIPES: Record<string, Recipe> = {
       { qty: 2, nome: "Porta", larg: (L - 2 * e) / 2, alt: A - 2 * e },
     ],
   },
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — paridade com
+  // index.html: o desconto de montagem (reduzir Lateral/Frente/Fundo pela
+  // espessura) deixou de ser incondicional — só aplica quando
+  // extra.descontosMontagemAplicados===true. Nenhum caller atual em
+  // functions-valeria (quote_core.ts) passa `extra`, então o comportamento
+  // automático (Valéria/quote) é o mesmo default do humano: SEM desconto.
   "Caixa": {
     dim3d: true, desc: "Laterais, frente/fundo, base e tampa",
-    pieces: (L, A, P, e) => [
-      { qty: 2, nome: "Lateral", larg: P - 2 * e, alt: A - e },
-      { qty: 2, nome: "Frente/Fundo", larg: L - 2 * e, alt: A - e },
-      { qty: 1, nome: "Base", larg: L, alt: P },
-      { qty: 1, nome: "Tampa", larg: L, alt: P },
-    ],
+    pieces: (L, A, P, e, extra) => {
+      const d = extra?.descontosMontagemAplicados ? e : 0;
+      return [
+        { qty: 2, nome: "Lateral", larg: P - 2 * d, alt: A - d },
+        { qty: 2, nome: "Frente/Fundo", larg: L - 2 * d, alt: A - d },
+        { qty: 1, nome: "Base", larg: L, alt: P },
+        { qty: 1, nome: "Tampa", larg: L, alt: P },
+      ];
+    },
   },
   "Expositor": {
     dim3d: true, desc: "Laterais, tampo, base e fundo (sem frente)",

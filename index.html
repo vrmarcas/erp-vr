@@ -9714,11 +9714,23 @@ var PLAN_RECIPES = {
       {qty:2,nome:'Porta',       larg:(L-(2*e))/2,   alt:A-(2*e)      },
     ];}
   },
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — desconto de
+  // montagem (reduzir Lateral/Frente/Fundo pela espessura do material,
+  // para as peças encaixarem) deixou de ser automático/incondicional.
+  // descontoMontagemOpcional:true sinaliza ao modal de Planificação
+  // (planCalc()) para mostrar o toggle "Aplicar descontos de montagem" —
+  // default DESLIGADO (extra.descontosMontagemAplicados só é true quando
+  // o vendedor liga o toggle explicitamente, ver planToggleDescontoMontagem()).
+  // Peças adicionais/overrides manuais/consumíveis por peça não são
+  // afetados — o toggle só muda a FÓRMULA de largura/altura das duas
+  // peças automáticas abaixo, nunca a existência/qty delas.
   'Caixa': {
-    dim3d:true, desc:'Laterais, frente/fundo, base e tampa',
-    pieces:function(L,A,P,e){return[
-      {qty:2,nome:'Lateral',     larg:P-(2*e),       alt:A-(e)        },
-      {qty:2,nome:'Frente/Fundo',larg:L-(2*e),       alt:A-(e)        },
+    dim3d:true, desc:'Laterais, frente/fundo, base e tampa', descontoMontagemOpcional:true,
+    pieces:function(L,A,P,e,extra){
+      var d = (extra && extra.descontosMontagemAplicados) ? e : 0;
+      return[
+      {qty:2,nome:'Lateral',     larg:P-(2*d),       alt:A-(d)        },
+      {qty:2,nome:'Frente/Fundo',larg:L-(2*d),       alt:A-(d)        },
       {qty:1,nome:'Base',        larg:L,             alt:P            },
       {qty:1,nome:'Tampa',       larg:L,             alt:P            },
     ];}
@@ -10288,6 +10300,9 @@ function orcItemVRRestaurarDados(itemSalvo) {
     // restaurada — reabrir e editar apagava as peças manuais do item ao
     // reaplicar. Derivada aqui do próprio `pieces` salvo, sem novo campo.
     planPecasManual: (itemSalvo.pieces || []).filter(function (p) { return p && p.origem === 'MANUAL'; }),
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — estado do
+    // toggle "Aplicar descontos de montagem" (hoje só receita 'Caixa').
+    descontosMontagemAplicados: !!itemSalvo.descontosMontagemAplicados,
   };
 }
 // HOTFIX 2026-08-16 (P0.5) — achado real: um item pode ter peças
@@ -10903,6 +10918,11 @@ function _planResincronizarPecasHerdadas(idx) {
       if (_camposRes.faltando.length) return; // campo obrigatório ausente — não arrisca calcular errado
       extra = _camposRes.ctx;
     }
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — troca de
+    // material/espessura não pode reintroduzir o desconto de montagem se
+    // o vendedor tinha deixado desligado (nem removê-lo se tinha ligado)
+    // — mesmo estado persistido de sempre, nunca um default silencioso.
+    if (rec.descontoMontagemOpcional) extra.descontosMontagemAplicados = row.dataset.descontosMontagemAplicados==='true';
 
     var freshPieces;
     try { freshPieces = rec.pieces(L, A, P, e, extra) || []; } catch(_e3) { return; } // fórmula falhou — mantém o snapshot existente
@@ -11006,6 +11026,20 @@ function planLerCamposExtras() {
   return valores;
 }
 
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — toggle "Aplicar
+// descontos de montagem" (hoje só a receita 'Caixa', ver
+// descontoMontagemOpcional em PLAN_RECIPES). Persiste no dataset do item
+// (mesma sobrevivência a planAplicar()/reabertura que os demais campos de
+// planificação — ver orcItemVRRestaurarDados/_orcSalvarOrcamentoImpl) e
+// recalcula na hora via planCalc(), mesmo motor de sempre.
+function planToggleDescontoMontagem(){
+  if(_planIdx===null) return;
+  var row = document.getElementById('oir_'+_planIdx);
+  var cb = document.getElementById('planDescMontagem');
+  if(row) row.dataset.descontosMontagemAplicados = (cb && cb.checked) ? 'true' : 'false';
+  planCalc();
+}
+
 function planCalc() {
   if(_planIdx===null) return;
   var prodEl  = document.getElementById('oi_prod_'+_planIdx);
@@ -11019,6 +11053,17 @@ function planCalc() {
   var _savedSnapshotCalc = null;
   try { _savedSnapshotCalc = _rowCalc && _rowCalc.dataset.recipeSnapshot ? JSON.parse(_rowCalc.dataset.recipeSnapshot) : null; } catch(e){ _savedSnapshotCalc = null; }
   var rec     = planGetRecipe(produto, _savedSnapshotCalc);
+
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — mostra/esconde
+  // o toggle "Aplicar descontos de montagem" só para receitas que o
+  // suportam (hoje só 'Caixa', ver descontoMontagemOpcional) e sincroniza
+  // seu estado visual com o que já está persistido no item (nunca reseta
+  // sozinho ao reabrir o modal ou trocar L/A/P).
+  var _descWrap = document.getElementById('planDescMontagemWrap');
+  var _descCb = document.getElementById('planDescMontagem');
+  var _descontoOpcional = !!rec.descontoMontagemOpcional;
+  if(_descWrap) _descWrap.style.display = _descontoOpcional ? '' : 'none';
+  if(_descCb) _descCb.checked = (_rowCalc && _rowCalc.dataset.descontosMontagemAplicados==='true');
 
   var L = parseFloat(document.getElementById('planLarg')?.value)||0;
   var A = parseFloat(document.getElementById('planAlt')?.value)||0;
@@ -11059,6 +11104,7 @@ function planCalc() {
     }
   }
   if(_camposAviso) _camposAviso.style.display='none';
+  if(_descontoOpcional) extra.descontosMontagemAplicados = !!(_descCb && _descCb.checked);
 
   var pieces = rec.pieces(L, A, P, e, extra);
   var totalArea = 0, totalQty = 0;
@@ -27818,6 +27864,12 @@ async function _orcSalvarOrcamentoImpl() {
       planArea: parseFloat(row.dataset.planArea)||0,
       planManualMatCost: parseFloat(row.dataset.planManualMatCost)||0,
       planManualAreaM2: parseFloat(row.dataset.planManualAreaM2)||0,
+      // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — estado do
+      // toggle "Aplicar descontos de montagem" (hoje só receita 'Caixa').
+      // Persistido explicitamente (nunca implícito via presença/ausência
+      // de outro campo) — reabertura precisa saber COM CERTEZA se o
+      // vendedor tinha ligado ou não, nunca assumir um default.
+      descontosMontagemAplicados: row.dataset.descontosMontagemAplicados==='true',
       pieces: _pecasSalvas || [],
       productId: row.dataset.recipeProductId || null,
       recipeVersion: row.dataset.recipeVersion ? parseInt(row.dataset.recipeVersion,10) : null,
@@ -28949,6 +29001,13 @@ function orcEnvEditar(id) {
             if(_rd.planLarg) row.dataset.planLarg = _rd.planLarg;
             if(_rd.planAlt)  row.dataset.planAlt  = _rd.planAlt;
             if(_rd.planProf) row.dataset.planProf = _rd.planProf;
+            // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 —
+            // restaura o estado do toggle de desconto de montagem
+            // explicitamente (sempre grava, mesmo 'false' — nunca deixa
+            // ausente, que planCalc()/_planResincronizarPecasHerdadas()
+            // tratariam como 'false' de qualquer forma, mas explícito
+            // evita ambiguidade com um item salvo antes desta rodada).
+            row.dataset.descontosMontagemAplicados = _rd.descontosMontagemAplicados ? 'true' : 'false';
             if(_rd.planPecasManual && _rd.planPecasManual.length) row.dataset.planPecasManual = JSON.stringify(_rd.planPecasManual);
           }
           // Espelha o feedback visual de planAplicar(): esconde larg/alt,
@@ -34631,6 +34690,15 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- RODADA 6, seção 1 — campos de entrada extras da receita (além de L/A/P), renderizados dinamicamente por planRenderCamposExtras() -->
     <div class="plan-dim-row" id="planCamposExtrasRow"></div>
     <div id="planCamposExtrasAviso" style="display:none;color:#DC2626;font-size:11px;margin-bottom:8px"></div>
+    <!-- RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — desconto de
+         montagem opt-in (hoje só a receita 'Caixa'). Escondido por padrão;
+         planCalc() mostra só quando rec.descontoMontagemOpcional. -->
+    <div class="fg-s" id="planDescMontagemWrap" style="display:none;margin-bottom:10px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:12px">
+        <input type="checkbox" id="planDescMontagem" onchange="planToggleDescontoMontagem()">
+        Aplicar descontos de montagem (reduz Laterais/Frente/Fundo pela espessura do material, para as peças encaixarem)
+      </label>
+    </div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-style:italic">✏️ As dimensões abaixo são editáveis — ajuste diretamente se precisar corrigir alguma peça.</div>
     <table class="plan-ptable">
       <thead><tr>

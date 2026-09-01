@@ -89,5 +89,23 @@ DIMENSOES.forEach((d) => {
   assertEq(resolveRecipe('Caixa').pieces(d.L, d.A, d.P, d.e), ORIGINAL['Caixa'].pieces(d.L, d.A, d.P, d.e), `resolveRecipe('Caixa') @ L${d.L}A${d.A}P${d.P}e${d.e}`);
 });
 
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — desconto de
+// montagem da Caixa virou opt-in via `extra.descontosMontagemAplicados`
+// (index.html) — mesmo parâmetro portado para functions-valeria/src/
+// recipes.ts. Sem este bloco, uma futura mudança em só um dos dois lados
+// (client ou porta server-side usada pela Valéria) voltaria a divergir
+// silenciosamente, exatamente como já aconteceu nesta própria rodada
+// (a porta ficou com a fórmula antiga incondicional por alguns minutos
+// até este teste apontar a quebra de paridade).
+console.log('\n=== Paridade: Caixa com extra.descontosMontagemAplicados (Bloco 3, 2026-09-01) ===');
+DIMENSOES.forEach((d) => {
+  const semExtra = ORIGINAL['Caixa'].pieces(d.L, d.A, d.P, d.e);
+  const comExtraFalse = ORIGINAL['Caixa'].pieces(d.L, d.A, d.P, d.e, { descontosMontagemAplicados: false });
+  const comExtraTrue = ORIGINAL['Caixa'].pieces(d.L, d.A, d.P, d.e, { descontosMontagemAplicados: true });
+  assertEq(semExtra, comExtraFalse, `Caixa (original): sem extra === extra.descontosMontagemAplicados=false @ L${d.L}A${d.A}P${d.P}e${d.e}`);
+  assertEq(resolveRecipe('Caixa').pieces(d.L, d.A, d.P, d.e), semExtra, `resolveRecipe('Caixa') sem extra bate com ORIGINAL sem extra (default: SEM desconto) @ L${d.L}A${d.A}P${d.P}e${d.e}`);
+  assertEq(resolveRecipe('Caixa').pieces(d.L, d.A, d.P, d.e, { descontosMontagemAplicados: true }), comExtraTrue, `resolveRecipe('Caixa') com extra.descontosMontagemAplicados=true bate com ORIGINAL @ L${d.L}A${d.A}P${d.P}e${d.e}`);
+});
+
 console.log(`\n${passed} passou, ${failed} falhou`);
 process.exitCode = failed > 0 ? 1 : 0;

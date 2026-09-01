@@ -147,12 +147,28 @@ describe("QUOTE CORE — calculatePersonalizedProduct", () => {
   });
 
   test("11. Dimensão que gera peça inválida (área zero/negativa) → NEEDS_INFORMATION antes de chamar o motor", async () => {
-    // Caixa: Lateral = P-(2*e) x A-e — com P muito pequeno e e grande, fica negativo
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — este teste
+    // usava "Caixa" (Lateral = P-(2*e) x A-e) para forçar geometria
+    // negativa com P pequeno e e grande. Desde que o desconto de montagem
+    // da Caixa virou opt-in (default: SEM desconto — ver recipes.ts), essa
+    // combinação deixou de gerar área negativa de propósito: sem nenhum
+    // caller de functions-valeria passando extra.descontosMontagemAplicados
+    // (nenhum flow automático da Valéria tem esse toggle), Lateral.larg
+    // agora é só P (sempre positivo se P>0). Trocado para "Armário"
+    // (Fundo = L-2e x A-2e, ainda incondicional — fora do escopo do Bloco
+    // 3) para continuar exercitando exatamente esta guarda de geometria.
     const r = await calculatePersonalizedProduct({
-      produto: "Caixa", larg: 15, alt: 15, prof: 2, esp: 5, matKey: "cfg_0", qty: 1,
+      produto: "Armário", larg: 8, alt: 8, prof: 2, esp: 5, matKey: "cfg_0", qty: 1,
     });
     expect(r.ok).toBe(false);
     expect(r.pricing.eligibility).toBe("NEEDS_INFORMATION");
+  });
+
+  test("11b. Caixa com a mesma combinação P pequeno/e grande NÃO gera mais geometria inválida — desconto de montagem é opt-in e nenhum flow da Valéria o ativa (mudança de comportamento intencional do Bloco 3)", async () => {
+    const r = await calculatePersonalizedProduct({
+      produto: "Caixa", larg: 15, alt: 15, prof: 2, esp: 5, matKey: "cfg_0", qty: 1,
+    });
+    expect(r.pricing.eligibility).not.toBe("NEEDS_INFORMATION");
   });
 
   test("12. Todas as 13 receitas embutidas calculam sem lançar exceção com dimensões razoáveis", async () => {
