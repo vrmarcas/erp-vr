@@ -47,13 +47,16 @@ console.log('\n=== OS — planificação visual real (desenho do corte), não s�
 // ── 1. HTML estático: kbAbrirPlanificacaoItem injeta o SVG gerado, nunca só o botão ──
 (function () {
   var fnSrc = extractFn('kbAbrirPlanificacaoItem');
-  ok('1a. kbAbrirPlanificacaoItem chama kbPlanificacaoGerarSVG (gera o desenho, não só texto)', /kbPlanificacaoGerarSVG\(pecas\)/.test(fnSrc));
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 9 — kbPlanificacaoGerarSVG
+  // passou a receber também o matKey (dimensão real da chapa no lugar do
+  // fallback fixo 200×100cm) — regex atualizado para o novo call site.
+  ok('1a. kbAbrirPlanificacaoItem chama kbPlanificacaoGerarSVG (gera o desenho, não só texto)', /kbPlanificacaoGerarSVG\(pecas, it\.matKey\)/.test(fnSrc));
   ok('1b. o desenho gerado é injetado no HTML do modal (desenhoHtml)', /desenhoHtml/.test(fnSrc) && /svgDesenho/.test(fnSrc));
   ok('1c. nomes de peça no template SVG do catálogo passam por svgSanitizar antes de ir para o DOM', /svgSanitizar\(s\.svgData\)/.test(fnSrc));
 })();
 
 // ── 2. Execução real de kbPlanificacaoGerarSVG (função pura, sem DOM) ──
-var FN_NAMES = ['cfgEsc', 'kbPlanificacaoGerarSVG'];
+var FN_NAMES = ['cfgEsc', '_planResolveSheetDims', 'kbPlanificacaoGerarSVG'];
 var src = [FN_NAMES.map(extractFn).join('\n\n'), 'module.exports = { kbPlanificacaoGerarSVG: kbPlanificacaoGerarSVG };'].join('\n\n');
 var modPath = path.join(__dirname, '_kb_plan_visual_extracted.tmp.js');
 fs.writeFileSync(modPath, src);

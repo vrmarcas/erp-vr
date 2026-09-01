@@ -10346,6 +10346,11 @@ function osProjecaoOperacionalItem(item) {
     // de materiais/espessuras (nunca recalculado depois — a OS lê este
     // campo direto em todos os pontos de exibição/PDF).
     mat: osItemMateriaisResumo(item), det: item.det,
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 9 — identificador
+    // do material (não financeiro, mesma categoria de `mat` acima), para
+    // kbPlanificacaoGerarSVG() usar a dimensão REAL da chapa cadastrada em
+    // vez do fallback fixo 200×100cm.
+    matKey: item.matKey || null,
     planArea: item.planArea, pieces: item.pieces,
     productId: item.productId || null,
     recipeVersion: item.recipeVersion || null,
@@ -10941,7 +10946,18 @@ function _planResincronizarPecasHerdadas(idx) {
         return prev || Object.assign({}, pc, { espOverride:_espOverride, esp:_espOverride, espessuraMm: parseInt(_espOverride,10)||null, origem:'AUTOMATICA', _deleted:false, adesivoNormal:false, adesivoBranco:false, gravacao:0, spray:0, extra:0 });
       }
       var novaLarg = Math.round(pc.larg*100)/100, novaAlt = Math.round(pc.alt*100)/100;
-      if (!prev || prev.larg!==novaLarg || prev.alt!==novaAlt) mudou = true;
+      // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3/9 — achado real
+      // (regressão introduzida pelo próprio Bloco 3): com o desconto de
+      // montagem desligado (default da Caixa), a geometria de Lateral/
+      // Frente-Fundo deixa de depender de `e` — trocar só a espessura do
+      // material não muda mais larg/alt de nenhuma peça, então `mudou`
+      // nunca disparava e o campo `esp`/`espessuraMm` da peça (usado pela
+      // Produção) ficava PRESO no valor antigo. Comparar também
+      // prev.esp/prev.espessuraMm garante que uma troca de espessura pura
+      // (sem mudança geométrica) ainda atualiza o rótulo — mesma garantia
+      // que já existia para todas as OUTRAS receitas (sempre dependentes
+      // de `e`), agora explícita aqui também.
+      if (!prev || prev.larg!==novaLarg || prev.alt!==novaAlt || parseFloat(prev.espessuraMm)!==espMm) mudou = true;
       var _adesResync = prev ? _planPecaAdesivos(prev) : { normal:false, branco:false };
       return {
         id: id, nome: pc.nome, qty: prev ? prev.qty : pc.qty,
@@ -14082,7 +14098,30 @@ function kbFecharPlanificacaoItemModal(){
 // uma receita/config recalculada agora), extraído aqui como função pura
 // (sem DOM) para poder ser reaproveitado tanto no preview do wizard
 // quanto, somente-leitura, dentro da OS.
-function kbPlanificacaoGerarSVG(pecas) {
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 9 — achado real: o
+// layout de planificação (packing/nesting) sempre usava chapa fixa
+// 200×100cm, mesmo quando o material real cadastrado tem outro formato
+// (ex.: acrílico 122×244cm) — distorcendo número de chapas, aproveitamento,
+// sobra, retalho, custo e baixa de estoque. `comp`/`larg` reais já
+// existiam em _cfgData.materiais e já alimentavam o cálculo de % de
+// utilização/custo (ver planSumProporcao) — nunca o nesting visual. Mesma
+// leitura, agora compartilhada pelas 3 funções de packing (antes cada uma
+// tinha sua própria constante hardcoded). Fallback 200×100 preservado só
+// quando o material não tem dimensão cadastrada (nunca quebra).
+function _planResolveSheetDims(matKey) {
+  var w = 200, h = 100;
+  if (matKey && matKey.indexOf('cfg_') === 0) {
+    var idx = parseInt(matKey.replace('cfg_', ''));
+    var arr = (typeof _cfgData!=='undefined' && _cfgData && _cfgData.materiais && _cfgData.materiais.length) ? _cfgData.materiais : ((typeof cfgLoad==='function' ? cfgLoad().materiais : null) || []);
+    var m = arr[idx];
+    var comp = parseFloat(m && m.comp) || 0;
+    var larg = parseFloat(m && m.larg) || 0;
+    if (comp > 0 && larg > 0) { w = comp; h = larg; }
+  }
+  return { w: w, h: h };
+}
+
+function kbPlanificacaoGerarSVG(pecas, matKey) {
   var allPieces = [];
   (pecas || []).forEach(function (p) {
     var larg = parseFloat(p.larg != null ? p.larg : p.l) || 0;
@@ -14099,7 +14138,8 @@ function kbPlanificacaoGerarSVG(pecas) {
   var colorMap = {}, colorIdx = 0;
   allPieces.forEach(function (p) { if (!colorMap[p.nome]) { colorMap[p.nome] = PALETA[colorIdx % PALETA.length]; colorIdx++; } });
 
-  var SHEET_W = 200, SHEET_H = 100;
+  var _dimsKb = _planResolveSheetDims(matKey);
+  var SHEET_W = _dimsKb.w, SHEET_H = _dimsKb.h;
   var sorted = allPieces.slice().sort(function (a, b) { return (b.alt - a.alt) || (b.larg - a.larg); });
   var chapas = [], curChapa = [], curX = 0, curY = 0, rowH = 0;
   sorted.forEach(function (p) {
@@ -14117,7 +14157,7 @@ function kbPlanificacaoGerarSVG(pecas) {
   svgParts.push('<rect width="' + svgW + '" height="' + svgH + '" fill="#e8eaed"/>');
   chapas.forEach(function (pieces, si) {
     var offY = PAD + si * (SHEET_H * SC + GAP + LABEL_H);
-    svgParts.push('<text x="' + PAD + '" y="' + (offY - 8) + '" font-family="sans-serif" font-size="14" font-weight="bold" fill="' + (chapas.length > 1 ? '#983C8F' : '#555') + '">Chapa ' + (si + 1) + (chapas.length > 1 ? ' de ' + chapas.length : '') + ' — 200×100 cm</text>');
+    svgParts.push('<text x="' + PAD + '" y="' + (offY - 8) + '" font-family="sans-serif" font-size="14" font-weight="bold" fill="' + (chapas.length > 1 ? '#983C8F' : '#555') + '">Chapa ' + (si + 1) + (chapas.length > 1 ? ' de ' + chapas.length : '') + ' — ' + SHEET_W + '×' + SHEET_H + ' cm</text>');
     svgParts.push('<rect x="' + PAD + '" y="' + offY + '" width="' + (SHEET_W * SC) + '" height="' + (SHEET_H * SC) + '" fill="#fff" stroke="#aaa" stroke-width="2"/>');
     for (var gx = 20; gx < SHEET_W; gx += 20) svgParts.push('<line x1="' + (PAD + gx * SC) + '" y1="' + offY + '" x2="' + (PAD + gx * SC) + '" y2="' + (offY + SHEET_H * SC) + '" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>');
     for (var gy = 20; gy < SHEET_H; gy += 20) svgParts.push('<line x1="' + PAD + '" y1="' + (offY + gy * SC) + '" x2="' + (PAD + SHEET_W * SC) + '" y2="' + (offY + gy * SC) + '" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>');
@@ -14206,7 +14246,7 @@ function kbAbrirPlanificacaoItem(idx){
   var dimsHtml = (it.planLarg||it.planAlt||it.planProf)
     ? '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Dimensões planificadas: '+(it.planLarg||'—')+' × '+(it.planAlt||'—')+(it.planProf?(' × '+it.planProf):'')+' cm</div>'
     : '';
-  var svgDesenho = kbPlanificacaoGerarSVG(pecas);
+  var svgDesenho = kbPlanificacaoGerarSVG(pecas, it.matKey);
   var desenhoHtml = svgDesenho
     ? '<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:340px;background:var(--bg)">'+svgDesenho+'</div>'
     : '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Este item não tem peças com medidas suficientes para desenhar o layout de corte — use as medidas abaixo.</div>';
@@ -34736,7 +34776,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <!-- Layout Visual da Planificação -->
     <div id="planLayoutBox" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🗂️ Layout Visual na Chapa (200×100 cm)</div>
+        <div id="planLayoutBoxTitle" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🗂️ Layout Visual na Chapa</div>
         <button id="planBtnExport" onclick="planExportPNG()" style="background:var(--brand-mid);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer">📥 Baixar PNG</button>
       <button onclick="planExportSVG()" style="background:#983C8F;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;margin-left:4px">📐 Baixar SVG</button>
       </div>
@@ -35720,7 +35760,13 @@ function planDrawCanvas() {
   if (layoutBox) layoutBox.style.display = '';
 
   // ── Configurações ───────────────────────────────────────────────
-  var SHEET_W=200, SHEET_H=100, SCALE=2.8, PAD=18, GAP=24;
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 9 — dimensão real da
+  // chapa do material selecionado no item (_planIdx), nunca mais fixo.
+  var _matElCanvas = document.getElementById('oi_mat_'+_planIdx);
+  var _dimsCanvas = _planResolveSheetDims(_matElCanvas ? _matElCanvas.value : null);
+  var SHEET_W=_dimsCanvas.w, SHEET_H=_dimsCanvas.h, SCALE=2.8, PAD=18, GAP=24;
+  var _titleBox = document.getElementById('planLayoutBoxTitle');
+  if(_titleBox) _titleBox.textContent = '🗂️ Layout Visual na Chapa ('+SHEET_W+'×'+SHEET_H+' cm)';
   var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#7DD3E8','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
   var colorMap={}, colorIdx=0;
   allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
@@ -35782,11 +35828,11 @@ function planDrawCanvas() {
     // Rótulo do grupo (espessura)
     if(chapaData.espLabel) {
       ctx.fillStyle = '#1EB8D8'; ctx.font = 'bold 10px sans-serif';
-      ctx.fillText('▪ Chapa ' + chapaData.espLabel + ' — ' + chapaData.sheetInGrp + (chapaData.totalInGrp>1?'/'+chapaData.totalInGrp:'') + ' — 200×100 cm  (utilização: '+usedPct+'%)', PAD, offY-7);
+      ctx.fillText('▪ Chapa ' + chapaData.espLabel + ' — ' + chapaData.sheetInGrp + (chapaData.totalInGrp>1?'/'+chapaData.totalInGrp:'') + ' — '+SHEET_W+'×'+SHEET_H+' cm  (utilização: '+usedPct+'%)', PAD, offY-7);
     } else {
       ctx.fillStyle = numChapas > 1 ? '#983C8F' : '#888';
       ctx.font = 'bold 9px sans-serif';
-      ctx.fillText('Chapa '+(sheetIdx+1)+(numChapas>1?' de '+numChapas:'')+'  — 200×100 cm  ('+usedPct+'% util.)', PAD+4, offY-5);
+      ctx.fillText('Chapa '+(sheetIdx+1)+(numChapas>1?' de '+numChapas:'')+'  — '+SHEET_W+'×'+SHEET_H+' cm  ('+usedPct+'% util.)', PAD+4, offY-5);
     }
     ctx.fillStyle='#aaa'; ctx.font='8px sans-serif';
     [0,50,100,150,200].forEach(function(v){ ctx.fillText(v+'cm', PAD+v*SCALE-(v===200?18:0), offY-5); });
@@ -35865,7 +35911,10 @@ function planExportSVG() {
   planManualPieces.forEach(function(p){ if(p.larg>0&&p.alt>0) for(var i=0;i<(p.qty||1);i++) allPieces.push({nome:(p.nome||'Manual'),larg:p.larg,alt:p.alt,esp:p.esp||'',manual:true}); });
   if(!allPieces.length){ showToast('Calcule as dimensões antes de exportar','warn'); return; }
 
-  var SHEET_W=200, SHEET_H=100; // cm
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 9 — dimensão real.
+  var _matElExport = document.getElementById('oi_mat_'+_planIdx);
+  var _dimsExport = _planResolveSheetDims(_matElExport ? _matElExport.value : null);
+  var SHEET_W=_dimsExport.w, SHEET_H=_dimsExport.h; // cm
   var PALETA=['#93C5FD','#86EFAC','#FCA5A5','#FCD34D','#7DD3E8','#6EE7B7','#F9A8D4','#FDA4AF','#A5F3FC','#BBF7D0','#FEF08A','#DDD6FE'];
   var colorMap={}, colorIdx=0;
   allPieces.forEach(function(p){ if(!colorMap[p.nome]){ colorMap[p.nome]=PALETA[colorIdx%PALETA.length]; colorIdx++; } });
@@ -35894,7 +35943,7 @@ function planExportSVG() {
   chapas.forEach(function(pieces,si){
     var offY=PAD+si*(SHEET_H*SC+GAP+LABEL_H);
     // Label
-    svgParts.push('<text x="'+PAD+'" y="'+(offY-8)+'" font-family="sans-serif" font-size="14" font-weight="bold" fill="'+(chapas.length>1?'#983C8F':'#555')+'">Chapa '+(si+1)+(chapas.length>1?' de '+chapas.length:'')+' — 200×100 cm</text>');
+    svgParts.push('<text x="'+PAD+'" y="'+(offY-8)+'" font-family="sans-serif" font-size="14" font-weight="bold" fill="'+(chapas.length>1?'#983C8F':'#555')+'">Chapa '+(si+1)+(chapas.length>1?' de '+chapas.length:'')+' — '+SHEET_W+'×'+SHEET_H+' cm</text>');
     // Sheet background
     svgParts.push('<rect x="'+PAD+'" y="'+offY+'" width="'+(SHEET_W*SC)+'" height="'+(SHEET_H*SC)+'" fill="#fff" stroke="#aaa" stroke-width="2"/>');
     // Grid a cada 20cm = 200mm
