@@ -28492,6 +28492,66 @@ function orcEnvSetStatus(id, status) {
   }
 }
 
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 8 — reversão segura de
+// status Aprovado→Aguardando (achado real: "Cliente aprovou" marcado por
+// engano não tinha nenhum caminho de volta). Regra: AGUARDANDO→APROVADO→
+// AGUARDANDO é permitido só quando ainda não houver efeito irreversível —
+// nunca quando há OS gerada (bloqueado na própria UI, ver orcEnvAbrir) e
+// nunca quando há pagamento confirmado (checado aqui E de novo no servidor
+// por finCrCancelarAutoAprovacao — nunca confia só numa camada). Reverter
+// o status TAMBÉM cancela o CR pendente criado automaticamente na
+// aprovação (orcEnvSetStatus acima) — nunca deixa um CR órfão divergente
+// do status comercial real.
+function orcEnvReverterParaAguardando(id){
+  var lista = orcGetEnviados();
+  var orc = lista.find(function(o){ return o.id===id; });
+  if(!orc) return;
+  if(orc.status!=='aprovado'){ showToast('Este orçamento não está com status Aprovado.','warn'); return; }
+  if(orc.osRef){ showToast('❌ Não é possível reverter: já existe OS gerada para este orçamento.','err'); return; }
+  var finReal = (typeof orcFinanceiroReal==='function') ? orcFinanceiroReal(orc) : {recebidoCents:0};
+  if(finReal.recebidoCents>0){ showToast('❌ Não é possível reverter: já existe pagamento confirmado para este orçamento. Reversão bloqueada para nunca apagar dinheiro real recebido.','err'); return; }
+  var _crIdAntes = orc.crId;
+  var _prevStatus = orc.status;
+  orc.status = 'aguardando';
+  orcSetEnviados(lista);
+  orcAtualizarBadgeEnviados();
+  if(!_crIdAntes){ showToast('Orçamento revertido para "Aguardando Cliente".','ok'); return; }
+  function _reverterStatusLocal(){
+    var lista2 = orcGetEnviados();
+    var orc2 = lista2.find(function(o){ return o.id===id; });
+    if(orc2){ orc2.status = _prevStatus; orcSetEnviados(lista2); orcAtualizarBadgeEnviados(); }
+  }
+  if(typeof firebase!=='undefined' && firebase.functions){
+    firebase.functions().httpsCallable('finCrCancelarAutoAprovacao')({orcId: orc.id, crId: _crIdAntes})
+      .then(function(){
+        var lista3 = orcGetEnviados();
+        var orc3 = lista3.find(function(o){ return o.id===id; });
+        if(orc3){ delete orc3.crId; orcSetEnviados(lista3); }
+        showToast('Orçamento revertido para "Aguardando Cliente" — Conta a Receber pendente cancelada.','ok');
+      })
+      .catch(function(e){
+        console.warn('[orcEnvReverterParaAguardando] finCrCancelarAutoAprovacao falhou:', e);
+        _reverterStatusLocal();
+        showToast('❌ Não foi possível reverter: '+(e&&e.message||'erro ao cancelar Conta a Receber')+'. Nada foi alterado.','err');
+      });
+  } else if(typeof FIN_CR!=='undefined'){
+    // Fallback só para harness de teste local sem Firebase Functions —
+    // mesmo padrão de fallback já usado em orcEnvSetStatus() acima.
+    var crIdx = FIN_CR.findIndex(function(c){ return c.id===_crIdAntes; });
+    if(crIdx>=0){
+      if(FIN_CR[crIdx].status!=='pendente' || FIN_CR[crIdx].dataRecebimento){
+        _reverterStatusLocal();
+        showToast('❌ Não foi possível reverter: Conta a Receber já tem pagamento registrado.','err');
+        return;
+      }
+      FIN_CR.splice(crIdx,1);
+      if(typeof _finSaveCR==='function') _finSaveCR();
+    }
+    delete orc.crId; orcSetEnviados(lista);
+    showToast('Orçamento revertido para "Aguardando Cliente" — Conta a Receber pendente cancelada.','ok');
+  }
+}
+
 function orcEnvAbrir(id) {
   var lista = orcGetEnviados();
   var o = lista.find(function(x){ return x.id===id; });
@@ -28611,6 +28671,18 @@ function orcEnvAbrir(id) {
     +(o.status==='aguardando' ? (
         '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
        +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
+      ) : '')
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 8 — reversão segura
+    // Aprovado→Aguardando (ex.: "Cliente aprovou" marcado por engano). Só
+    // oferece o botão quando ainda não há OS gerada (o.osRef) — nunca criar
+    // inconsistência entre status comercial e produção já iniciada. A
+    // checagem de pagamento confirmado acontece dentro de
+    // orcEnvReverterParaAguardando() (client) E de novo no servidor
+    // (finCrCancelarAutoAprovacao) — nunca confia só numa camada.
+    +(o.status==='aprovado' ? (
+        o.osRef
+          ? '<span style="font-size:11px;color:var(--muted);padding:6px 10px;display:inline-flex;align-items:center" title="Já existe OS gerada para este orçamento — reversão de status bloqueada para nunca criar inconsistência com produção já iniciada.">🔒 OS já gerada — não é possível reverter</span>'
+          : '<button class="topbar-btn ghost" style="color:#D97706;border-color:#D97706" onclick="orcEnvReverterParaAguardando(\''+o.id+'\'); orcEnvAbrir(\''+o.id+'\')">↩️ Reverter p/ Aguardando</button>'
       ) : '')
     +'<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvConfirmarPgto(\''+ o.id +'\')" >💳 Confirmar Pgt</button>'
     // Rodada 2, P0.3 — só aparece quando existe entrada realmente

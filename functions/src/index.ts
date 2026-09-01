@@ -56,6 +56,7 @@ export {
   finCrReceberSaldo,
   finCrRegistrarRecebimento,
   finCrAutoAprovarOrcamento,
+  finCrCancelarAutoAprovacao,
   finCrHistoricoRecebimento,
 } from "./finCr";
 

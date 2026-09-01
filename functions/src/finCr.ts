@@ -518,6 +518,66 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+// finCrCancelarAutoAprovacao — RODADA DE CORREÇÃO DEFINITIVA (2026-09-01),
+// Bloco 8. Contraparte de finCrAutoAprovarOrcamento(): usada por
+// orcEnvReverterParaAguardando() (index.html) quando um orçamento marcado
+// "Aprovado" por engano precisa voltar para "Aguardando Cliente" ANTES de
+// qualquer OS/pagamento existir. Auditoria prévia (2026-08-31/09-01)
+// confirmou: reverter o status no client, sozinho, nunca desfazia o CR
+// pendente criado — o orçamento voltava a "Aguardando" mas o CR ficava
+// órfão em Contas a Receber, divergência real entre as duas telas.
+//
+// Guarda de segurança ABSOLUTA (nunca contorná-la por nenhum motivo): só
+// remove o CR se `status==='pendente'` — qualquer traço de pagamento real
+// (status 'recebido'/'parcial', ou dataRecebimento preenchida) BLOQUEIA a
+// remoção e devolve erro explícito. Nunca apaga dinheiro real recebido.
+// ══════════════════════════════════════════════════════════════════════════
+export const finCrCancelarAutoAprovacao = functions.https.onCall(async (data, context) => {
+  const caller = await getCallerVerificado(context);
+  requireRole(caller, ["comercial", "financeiro"], "reverter aprovação de orçamento (cancelar Conta a Receber pendente)");
+
+  const orcId = String(data?.orcId || "");
+  const crId = String(data?.crId || "");
+  if (!orcId) throw new functions.https.HttpsError("invalid-argument", "orcId obrigatório.");
+  if (!crId) throw new functions.https.HttpsError("invalid-argument", "crId obrigatório.");
+
+  const db = admin.firestore();
+  const refCR = db.collection(COL).doc("fin_cr");
+
+  try {
+    const resultado = await db.runTransaction(async (txn) => {
+      const snapCR = await txn.get(refCR);
+      const arrCR = parseDoc<CrEntry[]>(snapCR, []);
+      const idx = arrCR.findIndex((c) => c.id === crId);
+      if (idx < 0) return { removido: false, jaAusente: true };
+
+      const entry = arrCR[idx];
+      // Nunca remover um CR que não é mais a mesma coisa que foi criada
+      // automaticamente — vincula por orcamentoId também, nunca só pelo id.
+      if (entry.orcamentoId && entry.orcamentoId !== orcId) {
+        throw new functions.https.HttpsError("failed-precondition", "Esta Conta a Receber não pertence a este orçamento.");
+      }
+      if (entry.status !== "pendente" || entry.dataRecebimento) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Esta Conta a Receber já tem pagamento registrado — reversão bloqueada para nunca apagar dinheiro real recebido."
+        );
+      }
+      arrCR.splice(idx, 1);
+      txn.set(refCR, { data: JSON.stringify(arrCR), ts: Date.now() });
+      return { removido: true, jaAusente: false };
+    });
+
+    if (resultado.removido) await writeAudit("cancelar_ao_reverter_aprovacao", caller, { orcId, crId });
+    return { ok: true, ...resultado };
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    functions.logger.error("[finCr] finCrCancelarAutoAprovacao erro inesperado:", e);
+    throw new functions.https.HttpsError("internal", "Erro ao cancelar Conta a Receber.");
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
 // finCrHistoricoRecebimento — READ-ONLY. Porte do filtro já usado por
 // orcFinanceiroReal() (index.html) — única leitura de fin_cr que Comercial
 // legitimamente precisa (histórico de recebimentos de UM orçamento
