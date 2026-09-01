@@ -53,7 +53,7 @@ interface MatProd {
 }
 interface OS {
   num?: string | number; status?: string; producaoStartId?: string; producaoIniciadaEm?: number;
-  inicioProducaoTs?: number; matProd?: MatProd; orcRef?: string | null;
+  inicioProducaoTs?: number; matProd?: MatProd; matProdOrigens?: MatProd[]; orcRef?: string | null;
   [key: string]: unknown;
 }
 interface Orcamento {
@@ -67,16 +67,44 @@ interface LogEntry {
   autorizadoPorUid?: string; autorizadoPorRole?: string; justificativa?: string;
 }
 
-interface ProducaoInput {
-  osId: string;
-  editMode: boolean;
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — MVP de multi-
+// origem: uma OS pode usar mais de uma origem de material (chapa+chapa,
+// chapa+retalho, retalho+retalho, múltiplos materiais/espessuras), cada
+// uma com baixa independente. `origens` é o formato novo (array, 1+
+// entradas); quando o client não o envia, `tipo/matKey/qty/retalhoCodigo`
+// legados são empacotados como uma única origem — MESMO código de
+// validação/baixa para os dois casos, nunca uma segunda fórmula.
+// `justificativa` continua nível-de-chamada (não por origem): exceção de
+// estoque insuficiente em QUALQUER origem exige a mesma justificativa
+// única do Master, mesmo padrão já usado antes desta rodada.
+interface OrigemInput {
   tipo: "chapa" | "retalho";
   matKey?: string;
   qty?: number;
   retalhoCodigo?: string;
   obs?: string;
+}
+interface ProducaoInput {
+  osId: string;
+  editMode: boolean;
+  origens: OrigemInput[];
   justificativa?: string;
   requestId: string;
+}
+
+function validarOrigem(o: Record<string, unknown>, idx: number): OrigemInput {
+  const tipo = o.tipo === "retalho" ? "retalho" : "chapa";
+  const obs = typeof o.obs === "string" ? o.obs.slice(0, 500) : "";
+  if (tipo === "chapa") {
+    const matKey = String(o.matKey || "");
+    if (!matKey) throw new functions.https.HttpsError("invalid-argument", `origens[${idx}].matKey obrigatório para tipo chapa.`);
+    const qty = Number(o.qty);
+    if (!qty || qty <= 0) throw new functions.https.HttpsError("invalid-argument", `origens[${idx}].qty deve ser um número positivo.`);
+    return { tipo, matKey, qty, obs };
+  }
+  const retalhoCodigo = String(o.retalhoCodigo || "");
+  if (!retalhoCodigo) throw new functions.https.HttpsError("invalid-argument", `origens[${idx}].retalhoCodigo obrigatório para tipo retalho.`);
+  return { tipo, retalhoCodigo, obs };
 }
 
 function validarInput(data: unknown): ProducaoInput {
@@ -85,20 +113,18 @@ function validarInput(data: unknown): ProducaoInput {
   if (!osId) throw new functions.https.HttpsError("invalid-argument", "osId obrigatório.");
   const requestId = String(d.requestId || "");
   if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório (idempotência).");
-  const tipo = d.tipo === "retalho" ? "retalho" : "chapa";
   const editMode = d.editMode === true;
-  const obs = typeof d.obs === "string" ? d.obs.slice(0, 500) : "";
   const justificativa = typeof d.justificativa === "string" ? d.justificativa.trim().slice(0, 1000) : "";
-  if (tipo === "chapa") {
-    const matKey = String(d.matKey || "");
-    if (!matKey) throw new functions.https.HttpsError("invalid-argument", "matKey obrigatório para tipo chapa.");
-    const qty = Number(d.qty);
-    if (!qty || qty <= 0) throw new functions.https.HttpsError("invalid-argument", "qty deve ser um número positivo.");
-    return { osId, editMode, tipo, matKey, qty, obs, justificativa, requestId };
+
+  let origens: OrigemInput[];
+  if (Array.isArray(d.origens) && d.origens.length > 0) {
+    if (d.origens.length > 20) throw new functions.https.HttpsError("invalid-argument", "Máximo de 20 origens por produção.");
+    origens = d.origens.map((o, i) => validarOrigem((o || {}) as Record<string, unknown>, i));
+  } else {
+    // Formato legado (single-origin) — empacotado como array de 1.
+    origens = [validarOrigem(d, 0)];
   }
-  const retalhoCodigo = String(d.retalhoCodigo || "");
-  if (!retalhoCodigo) throw new functions.https.HttpsError("invalid-argument", "retalhoCodigo obrigatório para tipo retalho.");
-  return { osId, editMode, tipo, retalhoCodigo, obs, justificativa, requestId };
+  return { osId, editMode, origens, justificativa, requestId };
 }
 
 function buildLogEntry(
@@ -175,95 +201,132 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
       const logEntries: LogEntry[] = [];
       let retListMutada = false;
 
-      // Edição: restaura a baixa anterior antes de aplicar a nova.
-      if (input.editMode && osFresh.matProd) {
-        const mp = osFresh.matProd;
-        if (mp.isRetalho) {
-          if (!mp.retalhoMat && !mp.retalhoCodigo) {
-            throw new functions.https.HttpsError("failed-precondition", "EDICAO_RETALHO_LEGADO_SEM_MARCA");
+      // Edição: restaura a(s) baixa(s) anterior(es) antes de aplicar a(s)
+      // nova(s). RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 —
+      // matProdOrigens (novo, array completo) é a fonte preferida; matProd
+      // sozinho (formato legado, produção iniciada antes desta rodada)
+      // cobre só a origem única — nunca reverte as duas ao mesmo tempo.
+      if (input.editMode) {
+        const anteriores: MatProd[] = (osFresh.matProdOrigens && osFresh.matProdOrigens.length)
+          ? osFresh.matProdOrigens
+          : (osFresh.matProd ? [osFresh.matProd] : []);
+        anteriores.forEach((mp, ai) => {
+          if (mp.isRetalho) {
+            if (!mp.retalhoMat && !mp.retalhoCodigo) {
+              throw new functions.https.HttpsError("failed-precondition", "EDICAO_RETALHO_LEGADO_SEM_MARCA");
+            }
+            const oldIdx = retList.findIndex((r) =>
+              mp.retalhoCodigo ? r.codigo === mp.retalhoCodigo : (r.mat === mp.retalhoMat && r.dims === mp.retalhoDims)
+            );
+            if (oldIdx >= 0) { retList[oldIdx].qty = (retList[oldIdx].qty || 0) + 1; retListMutada = true; }
+          } else if (mp.matKey && sd[mp.matKey]) {
+            const prevChapas = mp.chapasRetiradas || mp.qty || 1;
+            sd[mp.matKey].qty = (sd[mp.matKey].qty || 0) + prevChapas;
+            logEntries.push(buildLogEntry(
+              "entrada", mp.matKey, sd[mp.matKey].label, prevChapas, osFresh, input.osId,
+              "Correção — material trocado na OS", "edicao_producao_estorno",
+              `producao_edicao_estorno:${input.osId}:${Date.now()}:${ai}`, caller
+            ));
           }
-          const oldIdx = retList.findIndex((r) =>
-            mp.retalhoCodigo ? r.codigo === mp.retalhoCodigo : (r.mat === mp.retalhoMat && r.dims === mp.retalhoDims)
-          );
-          if (oldIdx >= 0) { retList[oldIdx].qty = (retList[oldIdx].qty || 0) + 1; retListMutada = true; }
-        } else if (mp.matKey && sd[mp.matKey]) {
-          const prevChapas = mp.chapasRetiradas || mp.qty || 1;
-          sd[mp.matKey].qty = (sd[mp.matKey].qty || 0) + prevChapas;
+        });
+      }
+
+      // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — multi-origem:
+      // processa CADA origem em sequência, na MESMA transação (mutações em
+      // `sd`/`retList` acumulam entre origens — duas origens da mesma
+      // chapa descontam corretamente as duas). Cada origem gera sua PRÓPRIA
+      // entrada em erp_stock_log, com idempotencyKey própria (sufixo :oi) —
+      // nunca uma baixa "combinada" ilegível. `justificativa` continua
+      // nível-de-chamada: qualquer origem com estoque insuficiente exige a
+      // MESMA justificativa única do Master (nunca uma por origem).
+      const matProdEntries: MatProd[] = [];
+      const excecoesOrigem: Array<{ matKey: string; saldoAntes: number; chapasRetirar: number }> = [];
+      let justificativaUsadaGlobal: string | undefined;
+
+      for (let oi = 0; oi < input.origens.length; oi++) {
+        const origem = input.origens[oi];
+        // Formato da chave preservado EXATAMENTE igual ao de antes desta
+        // rodada para o caso comum (1 única origem) — sufixo ":oi" só
+        // aparece quando há multi-origem de verdade, nunca muda a chave de
+        // negócio já usada por auditoria/relatórios existentes.
+        const movIdemKey = input.origens.length > 1
+          ? (input.editMode ? `producao_edicao:${input.osId}:${Date.now()}:${oi}` : `${osProducaoIdemKey}:${oi}`)
+          : (input.editMode ? `producao_edicao:${input.osId}:${Date.now()}` : osProducaoIdemKey);
+
+        if (origem.tipo === "retalho") {
+          const idx = retList.findIndex((r) => r.codigo === origem.retalhoCodigo);
+          if (idx < 0 || !retList[idx] || (retList[idx].qty || 0) <= 0) {
+            throw new functions.https.HttpsError("failed-precondition", `RETALHO_INDISPONIVEL:${origem.retalhoCodigo}`);
+          }
+          retList[idx].qty -= 1;
+          retListMutada = true;
+          const r = retList[idx];
+          matProdEntries.push({ matKey: null, label: r.label + " " + r.dims, isRetalho: true, retalhoMat: r.mat, retalhoDims: r.dims, retalhoCodigo: r.codigo || "", obs: origem.obs || "" });
           logEntries.push(buildLogEntry(
-            "entrada", mp.matKey, sd[mp.matKey].label, prevChapas, osFresh, input.osId,
-            "Correção — material trocado na OS", "edicao_producao_estorno",
-            `producao_edicao_estorno:${input.osId}:${Date.now()}`, caller
+            "retalho-saida", r.mat, r.label + " " + r.dims + " cm", 1, osFresh, input.osId,
+            r.codigo ? "Cód: " + r.codigo : "", input.editMode ? "edicao_producao" : "inicio_producao",
+            movIdemKey, caller
+          ));
+        } else {
+          const mk = origem.matKey as string;
+          const qty = origem.qty as number;
+          if (!sd[mk]) throw new functions.https.HttpsError("failed-precondition", `Material não encontrado no estoque: ${mk}`);
+          const chapasRetirar = Math.ceil(qty);
+          const saldoAtual = sd[mk].qty || 0;
+          const estoqueSuficiente = saldoAtual >= chapasRetirar;
+
+          let justificativaUsada: string | undefined;
+          if (!estoqueSuficiente) {
+            // ── A FRONTEIRA: nenhum campo do cliente decide isto. Só a role
+            // verificada no servidor + uma justificativa textual real. ──
+            if (caller.role !== "master") {
+              throw new functions.https.HttpsError(
+                "permission-denied",
+                `ESTOQUE_INSUFICIENTE: faltam ${(chapasRetirar - saldoAtual).toFixed(2)} chapa(s) de ${sd[mk].label}. Somente Master pode autorizar produção com estoque insuficiente.`
+              );
+            }
+            if (!input.justificativa || input.justificativa.length < JUSTIFICATIVA_MIN_LEN) {
+              throw new functions.https.HttpsError(
+                "invalid-argument",
+                `JUSTIFICATIVA_OBRIGATORIA: autorizar estoque insuficiente exige justificativa com pelo menos ${JUSTIFICATIVA_MIN_LEN} caracteres.`
+              );
+            }
+            justificativaUsada = input.justificativa;
+            justificativaUsadaGlobal = input.justificativa;
+            excecoesOrigem.push({ matKey: mk, saldoAntes: saldoAtual, chapasRetirar });
+          }
+
+          sd[mk].qty = saldoAtual - chapasRetirar;
+          const sobra = +(chapasRetirar - qty).toFixed(4);
+          matProdEntries.push({
+            matKey: mk, label: sd[mk].label + (sd[mk].cor ? " " + sd[mk].cor : "") + (sd[mk].esp ? " — " + sd[mk].esp + "mm" : ""),
+            qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: origem.obs || "",
+            sobra: sobra > 0.01 ? sobra : 0,
+          });
+          const obsLog = "Produção OS #" + (osFresh.num ?? input.osId) + (origem.obs ? " · " + origem.obs : "") +
+            (sobra > 0.01 ? " (sobra " + sobra.toFixed(2) + " chapa)" : "") +
+            (justificativaUsada ? " · EXCEÇÃO autorizada por Master: " + justificativaUsada : "");
+          logEntries.push(buildLogEntry(
+            "saida", mk, sd[mk].label, chapasRetirar, osFresh, input.osId, obsLog,
+            input.editMode ? "edicao_producao" : "inicio_producao",
+            movIdemKey, caller, justificativaUsada
           ));
         }
       }
 
-      let novoMatProd: MatProd;
-      if (input.tipo === "retalho") {
-        const idx = retList.findIndex((r) => r.codigo === input.retalhoCodigo);
-        if (idx < 0 || !retList[idx] || (retList[idx].qty || 0) <= 0) {
-          throw new functions.https.HttpsError("failed-precondition", "RETALHO_INDISPONIVEL");
-        }
-        retList[idx].qty -= 1;
-        retListMutada = true;
-        const r = retList[idx];
-        novoMatProd = { matKey: null, label: r.label + " " + r.dims, isRetalho: true, retalhoMat: r.mat, retalhoDims: r.dims, retalhoCodigo: r.codigo || "", obs: input.obs || "" };
-        logEntries.push(buildLogEntry(
-          "retalho-saida", r.mat, r.label + " " + r.dims + " cm", 1, osFresh, input.osId,
-          r.codigo ? "Cód: " + r.codigo : "", input.editMode ? "edicao_producao" : "inicio_producao",
-          input.editMode ? `producao_edicao:${input.osId}:${Date.now()}` : osProducaoIdemKey, caller
-        ));
-      } else {
-        const mk = input.matKey as string;
-        const qty = input.qty as number;
-        if (!sd[mk]) throw new functions.https.HttpsError("failed-precondition", "Material não encontrado no estoque.");
-        const chapasRetirar = Math.ceil(qty);
-        const saldoAtual = sd[mk].qty || 0;
-        const estoqueSuficiente = saldoAtual >= chapasRetirar;
-
-        let justificativaUsada: string | undefined;
-        if (!estoqueSuficiente) {
-          // ── A FRONTEIRA: nenhum campo do cliente decide isto. Só a role
-          // verificada no servidor + uma justificativa textual real. ──
-          if (caller.role !== "master") {
-            throw new functions.https.HttpsError(
-              "permission-denied",
-              `ESTOQUE_INSUFICIENTE: faltam ${(chapasRetirar - saldoAtual).toFixed(2)} chapa(s) de ${sd[mk].label}. Somente Master pode autorizar produção com estoque insuficiente.`
-            );
-          }
-          if (!input.justificativa || input.justificativa.length < JUSTIFICATIVA_MIN_LEN) {
-            throw new functions.https.HttpsError(
-              "invalid-argument",
-              `JUSTIFICATIVA_OBRIGATORIA: autorizar estoque insuficiente exige justificativa com pelo menos ${JUSTIFICATIVA_MIN_LEN} caracteres.`
-            );
-          }
-          justificativaUsada = input.justificativa;
-        }
-
-        sd[mk].qty = saldoAtual - chapasRetirar;
-        const sobra = +(chapasRetirar - qty).toFixed(4);
-        novoMatProd = {
-          matKey: mk, label: sd[mk].label + (sd[mk].cor ? " " + sd[mk].cor : "") + (sd[mk].esp ? " — " + sd[mk].esp + "mm" : ""),
-          qty, chapasRetiradas: chapasRetirar, isRetalho: false, obs: input.obs || "",
-          sobra: sobra > 0.01 ? sobra : 0,
-        };
-        const obsLog = "Produção OS #" + (osFresh.num ?? input.osId) + (input.obs ? " · " + input.obs : "") +
-          (sobra > 0.01 ? " (sobra " + sobra.toFixed(2) + " chapa)" : "") +
-          (justificativaUsada ? " · EXCEÇÃO autorizada por Master: " + justificativaUsada : "");
-        logEntries.push(buildLogEntry(
-          "saida", mk, sd[mk].label, chapasRetirar, osFresh, input.osId, obsLog,
-          input.editMode ? "edicao_producao" : "inicio_producao",
-          input.editMode ? `producao_edicao:${input.osId}:${Date.now()}` : osProducaoIdemKey, caller, justificativaUsada
-        ));
-
-        if (justificativaUsada) {
-          await writeAudit("producao_autorizada_estoque_insuficiente", caller.uid, caller.role, {
-            osId: input.osId, osNum: osFresh.num, matKey: mk, saldoAntes: saldoAtual, chapasRetirar,
-            saldoDepois: sd[mk].qty, justificativa: justificativaUsada, editMode: input.editMode,
-          });
-        }
+      if (justificativaUsadaGlobal) {
+        await writeAudit("producao_autorizada_estoque_insuficiente", caller.uid, caller.role, {
+          osId: input.osId, osNum: osFresh.num, justificativa: justificativaUsadaGlobal, editMode: input.editMode,
+          origensCount: input.origens.length, excecoes: excecoesOrigem,
+        });
       }
 
-      osFresh.matProd = novoMatProd;
+      // matProd (legado, objeto único) preserva a 1ª origem para
+      // compatibilidade com telas/relatórios ainda não atualizados para
+      // multi-origem; matProdOrigens (novo, array completo) é a fonte de
+      // verdade para qualquer tela que precise de TODAS as origens.
+      osFresh.matProd = matProdEntries[0];
+      osFresh.matProdOrigens = matProdEntries;
       let orcListMutada = false;
       if (!input.editMode) {
         osFresh.status = "producao";
@@ -306,14 +369,14 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
       if (retListMutada) tx.set(retRef, { data: JSON.stringify(retList), ts: Date.now() });
       if (orcListMutada) tx.set(orcRef, { data: JSON.stringify(orcList), ts: Date.now() });
 
-      return { osFresh, matProd: novoMatProd };
+      return { osFresh, matProd: matProdEntries[0], matProdOrigens: matProdEntries };
     });
 
     await writeAudit(input.editMode ? "producao_editada" : "producao_iniciada", caller.uid, caller.role, {
-      osId: input.osId, osNum: resultado.osFresh.num, matProd: resultado.matProd,
+      osId: input.osId, osNum: resultado.osFresh.num, matProd: resultado.matProd, origensCount: resultado.matProdOrigens.length,
     });
 
-    return { ok: true, jaProcessado: false, matProd: resultado.matProd, osStatus: resultado.osFresh.status };
+    return { ok: true, jaProcessado: false, matProd: resultado.matProd, matProdOrigens: resultado.matProdOrigens, osStatus: resultado.osFresh.status };
   } catch (e) {
     if (e instanceof functions.https.HttpsError) throw e;
     functions.logger.error("[producao] erro inesperado:", e);

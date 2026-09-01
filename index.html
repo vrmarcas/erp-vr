@@ -8040,6 +8040,14 @@ function _authFirebaseError(code){
           </select>
         </div>
       </div>
+      <!-- RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — multi-
+           origem (MVP, sem sugestão automática): lista de origens já
+           adicionadas + botão para acrescentar mais uma antes de
+           confirmar. Fluxo de origem única (nunca clicar aqui) continua
+           idêntico a antes desta rodada — zero mudança de UX para quem
+           usa 1 origem só. -->
+      <div id="kbProdOrigensExtrasList" style="margin-top:10px"></div>
+      <button type="button" onclick="kbProdAdicionarOrigem()" style="margin-top:8px;width:100%;padding:7px;border-radius:7px;border:1.5px dashed var(--border);background:transparent;color:var(--brand-mid);font-size:11px;font-weight:700;cursor:pointer">➕ Adicionar outra origem (chapa ou retalho)</button>
       <div style="margin-top:4px">
         <div class="fg">
           <label>Observação (opcional)</label>
@@ -15522,6 +15530,64 @@ function kbToggle(i) {
 // ============================================================
 var _kbProdTipo = 'chapa'; // 'chapa' | 'retalho'
 var _kbProdEditMode = false; // true quando editando seleção já feita
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — multi-origem
+// (MVP): origens já confirmadas via "➕ Adicionar outra origem", ANTES do
+// clique final em "Confirmar". A origem visível nos seletores no momento
+// do clique final em "Confirmar" (se preenchida) é sempre incluída como a
+// ÚLTIMA — nunca precisa ser adicionada manualmente também.
+var _kbProdOrigensExtras = []; // [{tipo, matKey|retalhoCodigo, qty, obs}, ...]
+
+// Lê a origem ATUALMENTE selecionada nos campos do modal (chapa ou
+// retalho), sem submeter nada — mesma leitura que kbConfirmarProd() já
+// fazia para a origem única, extraída para reuso por
+// kbProdAdicionarOrigem(). Retorna null se nada de válido está selecionado
+// (nunca lança — quem chama decide o que fazer com null).
+function _kbProdLerOrigemAtual() {
+  if (_kbProdTipo === 'retalho') {
+    var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
+    var rListUi = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
+    if (isNaN(retIdx) || !rListUi[retIdx] || !rListUi[retIdx].codigo) return null;
+    return { tipo: 'retalho', retalhoCodigo: rListUi[retIdx].codigo, label: rListUi[retIdx].label + ' ' + rListUi[retIdx].dims + ' (retalho)' };
+  }
+  var matKey = (document.getElementById('kbProdMatSel')||{}).value||'';
+  var qty = parseFloat((document.getElementById('kbProdQty')||{}).value)||0;
+  if (!matKey || qty<=0 || !STOCK[matKey]) return null;
+  return { tipo: 'chapa', matKey: matKey, qty: qty, label: (STOCK[matKey].label||matKey) + ' — ' + qty + (qty===1?' chapa':' chapas') };
+}
+
+function kbProdRenderOrigensExtras() {
+  var box = document.getElementById('kbProdOrigensExtrasList'); if (!box) return;
+  if (!_kbProdOrigensExtras.length) { box.innerHTML=''; return; }
+  box.innerHTML = '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Origens já adicionadas (' + _kbProdOrigensExtras.length + ')</div>'
+    + _kbProdOrigensExtras.map(function(o, i){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border-radius:6px;padding:5px 8px;font-size:11px;margin-bottom:4px">'
+          + '<span>' + (o.tipo==='retalho' ? '✂️ ' : '📦 ') + cfgEsc(o.label||'') + '</span>'
+          + '<button type="button" onclick="kbProdRemoverOrigem(' + i + ')" style="background:none;border:none;color:#DC2626;font-size:13px;cursor:pointer;padding:0 4px">×</button>'
+          + '</div>';
+      }).join('');
+}
+
+function kbProdAdicionarOrigem() {
+  var origem = _kbProdLerOrigemAtual();
+  if (!origem) { showToast(_kbProdTipo==='retalho' ? 'Selecione um retalho para adicionar' : 'Selecione o material e a quantidade para adicionar', 'warn'); return; }
+  _kbProdOrigensExtras.push(origem);
+  kbProdRenderOrigensExtras();
+  // Limpa a seleção atual para o operador escolher a PRÓXIMA origem —
+  // nunca deixa a mesma origem parecendo "ainda por adicionar" depois de
+  // já ter sido adicionada.
+  if (origem.tipo==='chapa') {
+    var matSel = document.getElementById('kbProdMatSel'); if (matSel) matSel.value = '';
+    var qtyEl = document.getElementById('kbProdQty'); if (qtyEl) qtyEl.value = 1;
+  } else {
+    var retSel = document.getElementById('kbProdRetalhoSel'); if (retSel) retSel.value = '';
+  }
+  showToast('Origem adicionada — selecione a próxima ou confirme.', 'ok');
+}
+
+function kbProdRemoverOrigem(idx) {
+  _kbProdOrigensExtras.splice(idx, 1);
+  kbProdRenderOrigensExtras();
+}
 
 function kbIniciarProd() {
   var os = KB_OS[_kbOsId]; if (!os) return;
@@ -15907,6 +15973,11 @@ function _kbOpenProdOverlay(os) {
   var sub = document.getElementById('kbProdSubtitle');
   if (sub) sub.textContent = 'OS #' + (os.num||os.id) + ' — ' + (os.titulo||'');
   document.getElementById('kbProdOverlay').classList.add('open');
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — nunca herdar
+  // origens extras adicionadas numa OS anterior (mesma classe de bug já
+  // corrigida antes para outros campos do modal/wizard).
+  if (typeof _kbProdOrigensExtras!=='undefined') _kbProdOrigensExtras = [];
+  if (typeof kbProdRenderOrigensExtras==='function') kbProdRenderOrigensExtras();
   _kbProdAguardarDadosERenderizar(os, _epoch, 0);
 }
 
@@ -16048,7 +16119,7 @@ function _kbProdRenderSelects(os) {
   if (matSel && matSel.value) setTimeout(_kbProdEditMode ? kbProdCheckStock : kbProdOnMatChange, 50);
 }
 
-function kbCloseProd() { _kbProdOverlayEpoch++; document.getElementById('kbProdOverlay').classList.remove('open'); _kbProdSubmitting = false; }
+function kbCloseProd() { _kbProdOverlayEpoch++; document.getElementById('kbProdOverlay').classList.remove('open'); _kbProdSubmitting = false; _kbProdOrigensExtras = []; }
 
 function kbProdSetTipo(tipo) {
   _kbProdTipo = tipo;
@@ -16143,7 +16214,7 @@ function kbConfirmarProd() {
   var _editMode = _kbProdEditMode; // captura antes de qualquer mutação
   var _osIdLocal = _kbOsId;
 
-  function _finalizar(matProd, osStatus) {
+  function _finalizar(matProd, osStatus, matProdOrigens) {
     _kbProdSubmitting = false;
     var _submitBtn = document.querySelector('#kbProdOverlay .gen-submit'); if(_submitBtn) _submitBtn.disabled = false;
     if (!_editMode) {
@@ -16157,7 +16228,13 @@ function kbConfirmarProd() {
     var ml = document.getElementById('kbMatProdLabel');
     var mq = document.getElementById('kbMatProdQtyLabel');
     if (mb) mb.style.display = '';
-    if (ml) ml.textContent = matProd.label;
+    // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — com mais de uma
+    // origem, o rótulo mostra a 1ª + quantas outras existem (nunca esconde
+    // que há mais origens por trás de "matProd" legado, que só guarda uma).
+    if (ml) {
+      var _outrasN = (matProdOrigens && matProdOrigens.length>1) ? matProdOrigens.length-1 : 0;
+      ml.textContent = matProd.label + (_outrasN>0 ? ' (+' + _outrasN + (_outrasN===1?' outra origem)':' outras origens)') : '');
+    }
     if (mq) {
       if (matProd.isRetalho) {
         mq.textContent = '✂️ Usando retalho';
@@ -16201,6 +16278,28 @@ function kbConfirmarProd() {
     } else if (msg.indexOf('ESTOQUE_INSUFICIENTE') === 0) {
       showToast('⚠️ ' + msg.replace('ESTOQUE_INSUFICIENTE: ', ''), 'warn');
     } else if (msg.indexOf('JUSTIFICATIVA_OBRIGATORIA') === 0) {
+      // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — o fluxo
+      // multi-origem não faz a pré-checagem de exceção por origem (o
+      // servidor é a autoridade final); se ELE recusar por faltar
+      // justificativa, pede aqui e reenvia o MESMO payload/requestId
+      // (idempotente) uma única vez, em vez de só mostrar o erro.
+      if (payload.origens && payload.origens.length && !payload.justificativa) {
+        var _souMasterRetry = typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master';
+        if (_souMasterRetry) {
+          var _justRetry = prompt('⚠️ ' + msg.replace('JUSTIFICATIVA_OBRIGATORIA: ', '') + '\n\nDescreva o motivo (mínimo 10 caracteres) para autorizar, ou cancele:');
+          if (_justRetry !== null && _justRetry.trim().length >= 10) {
+            payload.justificativa = _justRetry.trim();
+            _kbProdSubmitting = true;
+            firebase.functions().httpsCallable('producaoIniciarOuEditar')(payload).then(function(res){
+              var r = res.data || {};
+              if (KB_OS[_osIdLocal]) { KB_OS[_osIdLocal].matProd = r.matProd; KB_OS[_osIdLocal].matProdOrigens = r.matProdOrigens; }
+              if (KB_OS[_osIdLocal] && r.osStatus) KB_OS[_osIdLocal].status = r.osStatus;
+              _finalizar(r.matProd, r.osStatus, r.matProdOrigens);
+            }).catch(_falhar);
+            return;
+          }
+        }
+      }
       showToast('⚠️ ' + msg.replace('JUSTIFICATIVA_OBRIGATORIA: ', ''), 'warn');
     } else if (code === 'unauthenticated' || code === 'permission-denied') {
       showToast('🔒 Sem permissão para esta operação — sessão pode ter expirado. Desbloqueie novamente.', 'err');
@@ -16214,7 +16313,22 @@ function kbConfirmarProd() {
   var requestId = 'kbprod:' + _osIdLocal + ':' + Date.now() + ':' + Math.random().toString(36).slice(2);
   var payload = { osId: _osIdLocal, editMode: _editMode, obs: obs, requestId: requestId };
 
-  if (_kbProdTipo === 'retalho') {
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 6 — multi-origem
+  // (MVP): só entra neste caminho se o operador usou "➕ Adicionar outra
+  // origem" pelo menos uma vez. Sem isso, o fluxo abaixo (origem única,
+  // com a pré-checagem completa de estoque/exceção) continua IDÊNTICO a
+  // antes desta rodada — nenhuma mudança de comportamento para o caso
+  // comum. A pré-checagem detalhada de exceção por origem fica a cargo do
+  // servidor aqui (ver _falhar acima — pede justificativa e reenvia se o
+  // servidor recusar por faltar).
+  if (_kbProdOrigensExtras.length > 0) {
+    var origemAtualFinal = _kbProdLerOrigemAtual();
+    var todasOrigens = _kbProdOrigensExtras.concat(origemAtualFinal ? [origemAtualFinal] : []);
+    if (!todasOrigens.length) { showToast('Adicione ao menos uma origem (chapa ou retalho)', 'warn'); return; }
+    payload.origens = todasOrigens.map(function(o){
+      return o.tipo==='retalho' ? { tipo:'retalho', retalhoCodigo:o.retalhoCodigo, obs:'' } : { tipo:'chapa', matKey:o.matKey, qty:o.qty, obs:'' };
+    });
+  } else if (_kbProdTipo === 'retalho') {
     var retIdx = parseInt((document.getElementById('kbProdRetalhoSel')||{}).value);
     var rListUi = (typeof RETALHOS !== 'undefined' ? RETALHOS : []).filter(function(r){ return r.qty > 0; });
     if (isNaN(retIdx) || !rListUi[retIdx]) { showToast('Selecione um retalho', 'warn'); return; }
@@ -16271,10 +16385,10 @@ function kbConfirmarProd() {
     // Reconciliação otimista imediata a partir da resposta confirmada do
     // servidor (o listener em tempo real de kb_os/stock também vai
     // convergir para o mesmo estado em seguida — sem conflito, é o mesmo dado).
-    if (KB_OS[_osIdLocal]) KB_OS[_osIdLocal].matProd = r.matProd;
+    if (KB_OS[_osIdLocal]) { KB_OS[_osIdLocal].matProd = r.matProd; KB_OS[_osIdLocal].matProdOrigens = r.matProdOrigens; }
     if (KB_OS[_osIdLocal] && r.osStatus) KB_OS[_osIdLocal].status = r.osStatus;
     if (typeof secAuditLog === 'function') secAuditLog('os_producao', 'OS #' + os.num + ' → Produção · ' + (r.matProd && r.matProd.label));
-    _finalizar(r.matProd, r.osStatus);
+    _finalizar(r.matProd, r.osStatus, r.matProdOrigens);
   }).catch(_falhar);
 }
 
