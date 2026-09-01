@@ -1554,6 +1554,19 @@ function _watchStock(){
   _CLOUD_UNSUBS.push(_stockUnsub);
 }
 _watchStock();
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de produção:
+// Kanban → Iniciar Produção em sessão nova (login fresco, sem cache
+// aquecido) mostrava "Não foi possível carregar Estoque/Retalhos", mesmo
+// com o ERP online. Causa raiz: ao contrário de _watchStock() (acima,
+// sempre ungated desde o boot), o listener de retalhos só era criado
+// dentro do corpo gated de _cloudLoadAll()/done() — só depois que as 42
+// leituras de boot terminassem e _cloudReady virasse true. Em sessão nova
+// isso facilmente ultrapassa os 5s de polling do modal de Iniciar
+// Produção — não é FORBIDDEN nem falta de internet, é o listener nascendo
+// tarde demais. _watchRetalhos() é hoisted (function declaration) e só
+// depende de _db (já pronto neste ponto, mesma pré-condição de
+// _watchStock() acima) — chamar aqui, ungated, elimina a corrida.
+_watchRetalhos();
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
 // não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza
@@ -1971,7 +1984,10 @@ function _cloudLoadAll() {
     // sido executada (ver Task 4 do relatório de homologação), este watch e
     // o array COMPRAS inteiro podem ser removidos sem perda de dado real.
     _cloudWatch("compras", function(d){ if(d&&Array.isArray(d)){ COMPRAS=d; try{comprasRender();syncSidebarBadges();}catch(e){} } });
-    _watchRetalhos();
+    // _watchRetalhos() removido daqui (2026-09-01) — chamado ungated logo
+    // após _watchStock(), fora deste corpo gated por _cloudReady. Manter
+    // aqui também duplicaria o listener (_cloudWatch nunca é idempotente
+    // por chave — cada chamada cria um onSnapshot novo).
     _cloudWatch("crm_site_leads", function(d){ if(d&&Array.isArray(d)){ SITE_LEADS=d; try{siteLeadRender();siteKpiRender();siteUpdateCount();}catch(e){} } });
     _watchCrmLeads();
     _cloudWatch("erp_stock_log", function(d){ if(d&&Array.isArray(d)){ STOCK_LOG=d; try{stockRenderHistorico();}catch(e){} } });
@@ -11539,6 +11555,23 @@ function orcRecalc() {
       if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
       var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
       item.tsRaw = tsFinal; // PASS 3 usa isto como peso da redistribuição — oi_unit_/oi_tot_ são escritos lá
+      // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de
+      // produção: qty 1 → unit R$26,61, qty 2 → unit R$26,38. Causa raiz:
+      // um ajuste comercial tipo 'fixo' (R$ fixo NA LINHA, não por unidade
+      // — ver preview "Preço da linha: X → Y" em orcItemExtraPreview) fica
+      // embutido em tsRaw (weight acima, mantido intacto de propósito —
+      // qualquer mudança aqui desalinha a simetria com finalPriceVR_
+      // qtySafe/_rawTotalVR mais abaixo e reintroduz o vazamento por outro
+      // caminho). O bug real está só no PASS 3: ele divide TODO tsRaw por
+      // item.qty para achar o unitário, e um valor fixo em R$ dividido por
+      // qty nunca é constante — mesma classe de bug que o Bloco D já
+      // eliminou para máquinas/montagem/deslocamento (custos do PEDIDO),
+      // só que agora pelo ajuste PRÓPRIO do item. Corrigido isolando aqui
+      // só a FATIA de tsRaw que corresponde ao ajuste 'fixo' (nunca a
+      // 'percentual' — essa já escala linear com qty, não é o bug) para o
+      // PASS 3 tirá-la do rateio-por-qty e somar direto no TOTAL da linha,
+      // igual aos extras "➕ deste Item".
+      item.ajusteFixoPortionRS = (_aj.tipo === 'percentual') ? 0 : (_ajRes.ajusteCents / 100);
     }
   });
 
@@ -11642,15 +11675,20 @@ function orcRecalc() {
   var _fatorPoolNaoUnitario = _rawTotalVR>0 ? _poolNaoUnitario/_rawTotalVR : 0;
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
+    // Fatia de tsRaw que genuinamente escala com qty (material + ajuste
+    // 'percentual', se houver) — a fatia 'fixo' (ver PASS 2) fica de fora
+    // do rateio-por-qty abaixo, exatamente como RODADA DE CORREÇÃO
+    // DEFINITIVA (2026-09-01) exige.
+    var _tsRawUnitario = item.tsRaw - (item.ajusteFixoPortionRS||0);
     var itemUnitFinal, itemShareNaoUnitario;
     if (item.conta===false) {
       // Opção NÃO selecionada (orçamento comparativo) — preço
       // INFORMATIVO na mesma escala de preço/peso dos itens reais do
       // pedido, nunca somado ao total — mesma regra de sempre.
-      itemUnitFinal = _fatorPoolQtySafe>0 ? (item.tsRaw*_fatorPoolQtySafe)/(item.qty||1) : (item.qty>0 ? item.tsRaw/item.qty : item.tsRaw);
+      itemUnitFinal = _fatorPoolQtySafe>0 ? (_tsRawUnitario*_fatorPoolQtySafe)/(item.qty||1) : (item.qty>0 ? _tsRawUnitario/item.qty : _tsRawUnitario);
       itemShareNaoUnitario = _fatorPoolNaoUnitario>0 ? item.tsRaw*_fatorPoolNaoUnitario : (itemRows.length ? _poolNaoUnitario/itemRows.length : 0);
     } else {
-      itemUnitFinal = item.qty>0 ? (item.tsRaw*_fatorPoolQtySafe)/item.qty : item.tsRaw*_fatorPoolQtySafe;
+      itemUnitFinal = item.qty>0 ? (_tsRawUnitario*_fatorPoolQtySafe)/item.qty : _tsRawUnitario*_fatorPoolQtySafe;
       var _shareNaoUnit = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
       itemShareNaoUnitario = _poolNaoUnitario*_shareNaoUnit;
     }
@@ -11658,7 +11696,12 @@ function orcRecalc() {
     // por linha, 100% atribuído a este item (nunca rateado com outros,
     // nunca dividido por qty).
     var itemExtrasProprio = (itemExtrasTotal>0) ? (item.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
-    var itemTotalFinal = itemUnitFinal * item.qty + itemShareNaoUnitario + itemExtrasProprio;
+    // Fatia do ajuste 'fixo' do próprio item (ver PASS 2) — escalada pelo
+    // MESMO fator qty-safe que tudo mais (preserva o efeito de desconto/
+    // acréscimo GLOBAL sobre ela, como já acontecia antes desta correção),
+    // mas NUNCA dividida por item.qty — mesmo padrão de itemExtrasProprio.
+    var itemAjusteFixoShare = (item.ajusteFixoPortionRS||0) * _fatorPoolQtySafe;
+    var itemTotalFinal = itemUnitFinal * item.qty + itemShareNaoUnitario + itemExtrasProprio + itemAjusteFixoShare;
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
     // RODADA 5 — badge/ação de grupo de opções na própria linha do item.
