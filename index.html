@@ -29924,6 +29924,19 @@ function cfgLoad() {
   }
   return JSON.parse(JSON.stringify(CFG_DEFAULT));
 }
+// RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de produção:
+// "material fantasma" na Planificação (Peça Adicional listava material já
+// "excluído" na Configuração). Causa raiz: cfgSave() nunca confirmava se a
+// gravação no Firestore de fato aconteceu — mutava _cfgData em memória e
+// retornava undefined, sem devolver a Promise de _cloudSave(). Chamadores
+// (cfgDelRow/cfgAddRow) tratavam a UI como concluída imediatamente; se o
+// guard de _cfgDataLoaded bloqueasse a gravação, ou a transação falhasse
+// (conflito/permissão/rede), o documento real no Firestore nunca mudava —
+// mas a tabela já mostrava "excluído". Reaberto do zero, o material nunca
+// removido de verdade reaparecia como se nada tivesse acontecido. Corrigido
+// devolvendo a Promise real (nunca undefined) para os chamadores poderem
+// confirmar e reverter em caso de falha — mesmo padrão de
+// _confirmarAposSalvar() já usado em outras gravações críticas do sistema.
 function cfgSave(d) {
   _cfgData=d;
   if(typeof _cloudSave==='function' && _cloudReady) {
@@ -29931,7 +29944,7 @@ function cfgSave(d) {
     if(!_cfgDataLoaded){
       console.warn('[CFG] cfgSave bloqueado: Firestore ainda não carregou. Tente novamente em instantes.');
       showToast('Aguarde o carregamento dos dados antes de salvar','warn');
-      return;
+      return Promise.resolve({ok:false, reason:'nao-carregado'});
     }
     // (2) nunca salvar materiais vazios no Firebase (evita perda de dados)
     var toSave = d;
@@ -29939,8 +29952,9 @@ function cfgSave(d) {
       toSave = Object.assign({}, d);
       toSave.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
     }
-    _cloudSave('erp_config', toSave);
+    return _cloudSave('erp_config', toSave);
   }
+  return Promise.resolve({ok:false, reason:'sem-conexao'});
 }
 
 // ── BACKUP ────────────────────────────────────────────────────────────────────
@@ -30356,19 +30370,39 @@ function cfgAddRow(tableId, tipo) {
   if(!Array.isArray(_cfgData.materiais)) _cfgData.materiais = JSON.parse(JSON.stringify(CFG_DEFAULT.materiais));
   if(!Array.isArray(_cfgData.maquinas))  _cfgData.maquinas  = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
   if(!Array.isArray(_cfgData.maodeobra)) _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
-  if(tipo==='mat'){ _cfgData.materiais.push({id:_cfgNewMaterialId(),nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
-  else if(tipo==='maq'){ _cfgData.maquinas.push({nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
-  else if(tipo==='mob'){ _cfgData.maodeobra.push({nome:'Novo serviço',unidade:'hora',valor:0,obs:''}); }
-  cfgSave(_cfgData);
+  var arr = tipo==='mat'?_cfgData.materiais : tipo==='maq'?_cfgData.maquinas : _cfgData.maodeobra;
+  if(tipo==='mat'){ arr.push({id:_cfgNewMaterialId(),nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
+  else if(tipo==='maq'){ arr.push({nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
+  else if(tipo==='mob'){ arr.push({nome:'Novo serviço',unidade:'hora',valor:0,obs:''}); }
+  var _idxAdicionado = arr.length - 1;
   cfgRenderTables();
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — simétrico a cfgDelRow()
+  // abaixo: nunca deixar a UI mostrar uma linha "adicionada" que não foi
+  // de fato persistida (mesmo bug do material fantasma, na direção
+  // oposta). Se a gravação falhar, remove a linha otimista e re-renderiza.
+  cfgSave(_cfgData).then(function(res){
+    if(!res || !res.ok){ arr.splice(_idxAdicionado, 1); cfgRenderTables(); }
+  });
 }
 
 function cfgDelRow(tipo, idx) {
   if(!_cfgData) _cfgData = cfgLoad();
   var arr = tipo==='mat'?_cfgData.materiais : tipo==='maq'?_cfgData.maquinas : _cfgData.maodeobra;
-  if(arr) arr.splice(idx,1);
-  cfgSave(_cfgData);
+  if(!arr || !arr[idx]) return;
+  // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real: "material
+  // fantasma" na Planificação vinha daqui — cfgSave() nunca confirmava a
+  // gravação (ver comentário lá), então uma exclusão bloqueada pelo guard
+  // de _cfgDataLoaded, ou rejeitada por conflito/permissão, deixava o
+  // material intacto no Firestore enquanto a tabela já mostrava "excluído".
+  // Corrigido: exclusão otimista (UI responde na hora), mas se cfgSave()
+  // não confirmar sucesso, devolve o item removido para o array na MESMA
+  // posição e re-renderiza — nunca finge que a exclusão aconteceu.
+  var _removido = arr[idx], _idxRemovido = idx;
+  arr.splice(idx,1);
   cfgRenderTables();
+  cfgSave(_cfgData).then(function(res){
+    if(!res || !res.ok){ arr.splice(_idxRemovido, 0, _removido); cfgRenderTables(); }
+  });
 }
 
 // ── VELOCIDADES DO LASER ──────────────────────────────────────────────────────
