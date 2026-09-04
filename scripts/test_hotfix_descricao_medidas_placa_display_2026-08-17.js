@@ -57,7 +57,8 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial', '_matGetRsm2', 'orcRecalc', 'orcColetarItensDistribuidos'];
+var FN_NAMES = [
+  'orcProdutoNomeResolvido','orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial', '_matGetRsm2', 'orcRecalc', 'orcColetarItensDistribuidos'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { orcItemDescricaoComercial: orcItemDescricaoComercial, _matGetRsm2: _matGetRsm2, orcRecalc: orcRecalc, orcColetarItensDistribuidos: orcColetarItensDistribuidos };'

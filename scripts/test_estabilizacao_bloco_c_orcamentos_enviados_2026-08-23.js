@@ -66,7 +66,8 @@ function extractFn(name) {
 
 console.log('\n=== RODADA DE ESTABILIZAÇÃO — Bloco C (Orçamentos Enviados vazio/busca quebrada) ===\n');
 
-var FN_NAMES = ['orcEnviadosRender', 'orcEnvNormalizar', 'vitreOrcNormalizarTexto', 'orcEnvParseDataSalvo'];
+var FN_NAMES = [
+  'orcProdutoNomeResolvido','orcEnviadosRender', 'orcEnvNormalizar', 'vitreOrcNormalizarTexto', 'orcEnvParseDataSalvo'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_estabilizacao_bloco_c.tmp.js');
 fs.writeFileSync(modPath, src);

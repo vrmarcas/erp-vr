@@ -52,7 +52,8 @@ function extractFn(name) {
 
 console.log('\n=== RODADA DE ESTABILIZAÇÃO — Bloco D (preço unitário mudando com a quantidade) ===\n');
 
-var FN_NAMES = ['orcFmt', 'orcRecalc', 'orcColetarItensDistribuidos'];
+var FN_NAMES = [
+  'orcProdutoNomeResolvido','orcFmt', 'orcRecalc', 'orcColetarItensDistribuidos'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_estabilizacao_bloco_d.tmp.js');
 fs.writeFileSync(modPath, src);

@@ -48,6 +48,7 @@ function extractFn(name) {
 console.log('\n=== GATE 4 — WhatsApp/PDF: fixture determinística Display Acrílico Cristal 4mm (R$42,60/3x R$14,20/PIX R$40,41) ===\n');
 
 var FN_NAMES = [
+  'orcProdutoNomeResolvido',
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
   'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',

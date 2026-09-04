@@ -9682,6 +9682,28 @@ function orcRefreshMatSelects() {
   }
 }
 
+// RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 6 — fonte única para resolver o
+// NOME real do produto de uma linha do orçamento. `__typed__` é o value
+// interno do <option> criado por orcOnProdChange() para um produto digitado
+// manualmente (o nome de verdade fica só no `.text` desse option) — value
+// é um SENTINEL DE UI, nunca pode vazar para fora dela. Antes desta rodada,
+// vários pontos (salvar item, PDF, WhatsApp, título do modal de
+// Planificação, etc.) liam `sel.value` diretamente para obter o nome do
+// produto: para um item digitado manualmente, isso persistia/exibia a
+// string literal "__typed__" em vez do nome digitado (ex. "Aparador") —
+// achado real desta rodada. Value '__custom__' (o próprio "✏️
+// Personalizado...", nunca confirmado com um nome) tratado como string
+// vazia — não há nome nenhum ainda.
+function orcProdutoNomeResolvido(idxOuEl) {
+  var el = (typeof idxOuEl === 'string' || typeof idxOuEl === 'number') ? document.getElementById('oi_prod_'+idxOuEl) : idxOuEl;
+  if (!el) return '';
+  if (el.value === '__typed__') {
+    var opt = el.options && el.options[el.selectedIndex];
+    return (opt && opt.text) ? opt.text : '';
+  }
+  if (el.value === '__custom__') return '';
+  return el.value || '';
+}
 // Atualiza os selects de produto em linhas já existentes quando ORC_PRODUTOS chega do Firebase
 function orcRefreshProdSelects() {
   var _prodCanon = orcProdutosCanonicos(planProdLoad(), ORC_PRODUTOS);
@@ -10582,7 +10604,7 @@ function planAbrir(idx) {
   var aEl     = document.getElementById('oi_alt_'+idx);
   var espEl   = document.getElementById('oi_esp_'+idx);
   var matEl   = document.getElementById('oi_mat_'+idx);
-  var produto = prodEl ? prodEl.value : 'Produto';
+  var produto = prodEl ? (orcProdutoNomeResolvido(prodEl) || 'Produto') : 'Produto';
   // pre-fill dims — restore saved values if item was already planified
   var row = document.getElementById('oir_'+idx);
   // RODADA 6, seção 8/9 — GAP CRÍTICO: se o item já tem recipeSnapshot
@@ -10915,7 +10937,7 @@ function _planResincronizarPecasHerdadas(idx) {
     if (!persisted.length) return;
 
     var prodEl = document.getElementById('oi_prod_'+idx);
-    var produto = prodEl ? prodEl.value : '';
+    var produto = prodEl ? orcProdutoNomeResolvido(prodEl) : '';
     var recipeSnapshot = null;
     try { recipeSnapshot = row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(_e1) {}
     var rec = (typeof planGetRecipe==='function') ? planGetRecipe(produto, recipeSnapshot) : null;
@@ -11076,7 +11098,7 @@ function planCalc() {
   var prodEl  = document.getElementById('oi_prod_'+_planIdx);
   var espEl   = document.getElementById('oi_esp_'+_planIdx);
   var matEl   = document.getElementById('oi_mat_'+_planIdx);
-  var produto = prodEl ? prodEl.value : 'Produto';
+  var produto = prodEl ? (orcProdutoNomeResolvido(prodEl) || 'Produto') : 'Produto';
   // RODADA 6, seção 8/9 — GAP CRÍTICO: qualquer recálculo dentro do modal
   // (mudar L/A/P, campos extras) tem que usar o recipeSnapshot congelado
   // quando o item já foi planificado antes — ver planGetRecipe().
@@ -11295,7 +11317,7 @@ function planAplicar() {
     // recipeSnapshot) no item. É este o único ponto em que um NOVO
     // snapshot é gravado — reabrir um item já salvo nunca passa por aqui
     // de novo (ver orcEnvEditar), garantindo a imutabilidade histórica.
-    var _prodNomeAtual = (document.getElementById('oi_prod_'+_planIdx)||{}).value||'';
+    var _prodNomeAtual = orcProdutoNomeResolvido(_planIdx);
     var _produtoReceita = (typeof planProdLoad==='function' ? planProdLoad() : []).find(function(p){ return p.nome===_prodNomeAtual; });
     if(_produtoReceita && typeof receitaSnapshotParaItem==='function'){
       var _snap = receitaSnapshotParaItem(_produtoReceita);
@@ -11936,7 +11958,7 @@ function orcRecalc() {
             // tabela (PASS 3, acima) — só aparece aqui, no resumo do
             // pedido — ver comentário do PASS 3 para a causa raiz.
             var _extrasPorItemTxt = itemRows.filter(function(it){ return (it.itemExtrasSoma||0)>0; }).map(function(it){
-              var _prodNomeExtra = (document.getElementById('oi_prod_'+it.idx)||{}).value || ('Item '+it.idx);
+              var _prodNomeExtra = orcProdutoNomeResolvido(it.idx) || ('Item '+it.idx);
               var _valorItemExtra = itemExtrasTotal>0 ? (it.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
               return cfgEsc(_prodNomeExtra)+': +'+orcFmt(_valorItemExtra);
             }).join(' · ');
@@ -12176,7 +12198,7 @@ function orcItemExtras(ri) {
   // RODADA 9 (2026-08-22, Bloco E) — mesmo snapshot para om_laser (Step 3,
   // global) — ver achado logo abaixo, próximo a orcExtrasAutoLaser().
   window._omLaserSnapshot = (document.getElementById('om_laser')||{}).value;
-  var prod = (document.getElementById('oi_prod_'+ri)||{}).value || 'Item '+ri;
+  var prod = orcProdutoNomeResolvido(ri) || 'Item '+ri;
   var row  = document.getElementById('oir_'+ri);
   // Pré-calcular contornos a partir das peças planificadas (para pré-popular m_contornos)
   var _planPecasModal = null;
@@ -26534,7 +26556,7 @@ function orcSalvarHistoricoCliente() {
   var itens = [];
   document.querySelectorAll('#orcItemBody tr').forEach(function(row){
     var idx = row.dataset.idx; if(!idx) return;
-    var prod = (document.getElementById('oi_prod_'+idx)||{}).value||'';
+    var prod = orcProdutoNomeResolvido(idx);
     var qty  = (document.getElementById('oi_qty_'+idx)||{}).value||'1';
     var larg = (document.getElementById('oi_larg_'+idx)||{}).value||'';
     var alt  = (document.getElementById('oi_alt_'+idx)||{}).value||'';
@@ -26793,7 +26815,7 @@ function orcColetarItensDistribuidos(baseEfetiva){
   var _matTotalRaw = 0;
   document.querySelectorAll('#orcItemBody tr').forEach(function(row){
     var idx = row.dataset.idx; if(!idx) return;
-    var prod  = (document.getElementById('oi_prod_'+idx)||{}).value||'—';
+    var prod  = orcProdutoNomeResolvido(idx) || '—';
     var qty   = parseFloat((document.getElementById('oi_qty_'+idx)||{}).value)||1;
     var larg  = (document.getElementById('oi_larg_'+idx)||{}).value||'';
     var alt   = (document.getElementById('oi_alt_'+idx)||{}).value||'';
@@ -28072,7 +28094,7 @@ async function _orcSalvarOrcamentoImpl() {
     try { _camposExtrasSalvos = row.dataset.planCamposExtras ? JSON.parse(row.dataset.planCamposExtras) : null; } catch(e){ _camposExtrasSalvos = null; }
     _itens.push({
       tipoItem: 'personalizado_vr',
-      prod:  (document.getElementById('oi_prod_'+ri)||{}).value||'',
+      prod:  orcProdutoNomeResolvido(ri),
       qty:   (document.getElementById('oi_qty_'+ri)||{}).value||'1',
       larg:  (document.getElementById('oi_larg_'+ri)||{}).value||'',
       alt:   (document.getElementById('oi_alt_'+ri)||{}).value||'',
@@ -28179,7 +28201,7 @@ async function _orcSalvarOrcamentoImpl() {
     email:     _email,
     vendedor:  _vendedor,
     produto:   (function(){
-      var _rows=[]; document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){ var ri=row.dataset.idx; var p=(document.getElementById('oi_prod_'+ri)||{}).value||''; if(p) _rows.push(p); });
+      var _rows=[]; document.querySelectorAll('#orcItemBody tr[data-idx]').forEach(function(row){ var ri=row.dataset.idx; var p=orcProdutoNomeResolvido(ri); if(p) _rows.push(p); });
       if(_rows.length===0) return c.prodDesc||c.prod||'Produto';
       if(_rows.length===1) return _rows[0];
       var _uniq=[...(new Set(_rows))];

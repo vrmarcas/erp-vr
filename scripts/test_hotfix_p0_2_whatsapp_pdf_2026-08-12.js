@@ -68,7 +68,8 @@ ok('4c. orcGetPrazoTexto() lê ao vivo de #orcPrazoDias/#orcPrazoDiasMax/#orcPra
 
 // ── 5. Execução real: reproduz o cenário do bug com os números exatos do usuário ──
 {
-  var FN_NAMES = ['orcColetarItensDistribuidos'];
+  var FN_NAMES = [
+  'orcProdutoNomeResolvido','orcColetarItensDistribuidos'];
   try {
     var fnsSrc = FN_NAMES.map(extractFn).join('\n\n');
     var src = [

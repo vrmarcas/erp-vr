@@ -73,6 +73,7 @@ function extractBetween(startMarker, endMarker) {
 }
 
 var FN_NAMES = [
+  'orcProdutoNomeResolvido',
   'planGetRecipe', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', '_planDeltaEspecificoPecas', '_planConsumiveisChip', '_planConsumiveisCelulaHtml', 'planAbrir', 'planFechar', 'planCalc',
   'planAplicar', 'planLimpar', '_planDeleteAuto', '_planEditField',
   '_planRecompute', 'planAddManual', 'planRemoveManual', 'planRenderManual',

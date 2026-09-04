@@ -201,6 +201,7 @@ console.log('='.repeat(72) + '\n');
 // ── 17-27. orcEnviarOrcamentoWA() — texto real, sem "acréscimo"/"taxa", PIX sempre ──
 {
   var FN_NAMES = [
+  'orcProdutoNomeResolvido',
     'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
     'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
     'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',

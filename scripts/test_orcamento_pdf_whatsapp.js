@@ -53,6 +53,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 var FN_NAMES = [
+  'orcProdutoNomeResolvido',
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
   'orcProximoNumeroAtomico', 'orcObterNumeroOficial', 'orcLimparNumeroOficial',

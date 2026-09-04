@@ -74,7 +74,8 @@ function extractVar(name) {
   return html.slice(start, i + 1) + ';';
 }
 
-var FN_NAMES = ['cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
+var FN_NAMES = [
+  'orcProdutoNomeResolvido','cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', '_planDeltaEspecificoPecas', 'orcGetItemExtrasTotal', 'orcRecalc',
   'orcColetarItensDistribuidos', '_planPieceSlug', '_planReconcilePieces', '_planSeedFromPersisted', '_planBuildAllPecas',
   'planGetRecipe', 'receitaCamposContexto', 'receitaCamposEfetivos', '_planResincronizarPecasHerdadas',

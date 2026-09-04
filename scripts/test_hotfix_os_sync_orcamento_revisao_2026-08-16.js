@@ -42,7 +42,8 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['osProjecaoOperacionalItem', 'osItemMateriaisResumo', '_orcSincronizarOSVinculada'];
+var FN_NAMES = [
+  'orcProdutoNomeResolvido','osProjecaoOperacionalItem', 'osItemMateriaisResumo', '_orcSincronizarOSVinculada'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + ', getKB_OS: function(){ return KB_OS; }};';
 var modPath = path.join(__dirname, '_hotfix_os_sync_extracted.tmp.js');
 
