@@ -6857,7 +6857,14 @@ function _authFirebaseError(code){
             </select>
           </div>
           <div class="fg" id="usrStatusWrap"><label>Status</label><select id="usrAtivo"><option value="1">✅ Ativo</option><option value="0">🚫 Inativo</option></select></div>
-          <div class="fg" id="usrSenhaWrap"><label>Senha de acesso</label><input type="password" id="usrSenha" placeholder="Mínimo 4 caracteres"></div>
+          <!-- RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 7 — o master não digita
+               mais uma senha temporária para o novo usuário (o campo antigo
+               alimentava um fluxo client-side sem transação nem rollback —
+               ver usrSalvar()). A conta agora nasce SEM senha via
+               adminCreateUser (Cloud Function, atômica, com rollback real) e
+               um e-mail de definição de senha é disparado na hora — mesmo
+               mecanismo já usado pelo botão "🔑 Senha" de reset. -->
+          <div class="fg" id="usrSenhaWrap"><div style="font-size:11.5px;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px">📧 Um e-mail para o usuário definir a própria senha será enviado automaticamente ao criar.</div></div>
           <div style="text-align:right;margin-top:4px">
             <button class="topbar-btn ghost" style="margin-right:8px" onclick="usrNovoClose()">Cancelar</button>
             <button class="topbar-btn" id="usrSalvarBtn" onclick="usrSalvar()">Criar Usuário</button>
@@ -33044,77 +33051,73 @@ function usrSalvar() {
     return;
   } else {
     // MODO CRIAÇÃO
-    var senha = (document.getElementById('usrSenha')||{}).value||'';
-    if(senha.length<4){ showToast('Senha deve ter no mínimo 4 caracteres','err'); return; }
+    // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 7 — causa raiz investigada e
+    // corrigida: este bloco criava a conta no Firebase Auth (com senha já
+    // válida) via SDK client-side e SÓ DEPOIS chamava adminUpdateUserRole
+    // para gravar o perfil canônico erp_vr_usuarios/{uid} — falha nessa
+    // segunda etapa (ou o vendedor tentando logar na janela entre as
+    // duas) deixava uma conta que AUTENTICA mas o ERP rejeita ("Conta sem
+    // perfil atribuído"), sem NENHUM rollback. adminCreateUser (Cloud
+    // Function) já existe com a transação correta (Auth + claim + perfil
+    // canônico, com rollback real se qualquer etapa falhar) mas nunca era
+    // chamada pela UI — corrigido usando-a como único caminho de criação.
     if(users.find(function(u){ return u.email&&u.email===email; })){ showToast('E-mail já cadastrado','err'); return; }
-    // funcao vem do select (master/comercial/producao/financeiro) — 'admin' não existe mais.
-    // Defensiva: normaliza e recusa valores fora da lista em vez de gravar lixo.
     var funcaoNorm = _normalizeRole(funcao);
     if(!funcaoNorm){ showToast('Função inválida','err'); return; }
-    var novoRec = { nome:nome.trim(), email:email, funcao:funcaoNorm, ativo:1, senha:secHash(senha), criado:new Date().toLocaleDateString('pt-BR') };
-    users.push(novoRec);
-    _USR_DATA=users;
-    if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcaoNorm+')');
+    var ativoElCriacao = document.getElementById('usrAtivo');
+    var ativoValCriacao = ativoElCriacao ? parseInt(ativoElCriacao.value) : 1;
 
-    // ── Criar conta Firebase Auth via secondary app (master não perde sessão) ──
-    // Após criar: registra o uid no perfil (associação inequívoca) e define a
-    // custom claim role via Cloud Function adminUpdateUserRole (Admin SDK).
-    // Falha em qualquer etapa é reportada — nunca informa sucesso parcial como total.
-    (function(nomeCriado, emailCriado, senhaCriada, recRef) {
+    showToast('Criando acesso para "' + nome.trim() + '"…', 'ok');
+    firebase.functions().httpsCallable('adminCreateUser')({
+      email: email, nome: nome.trim(), role: funcaoNorm, ativo: ativoValCriacao
+    }).then(function(res){
+      var novoRec = { nome:nome.trim(), email:email, funcao:funcaoNorm, ativo:ativoValCriacao, criado:new Date().toLocaleDateString('pt-BR') };
+      users.push(novoRec);
+      _USR_DATA=users;
+      if(typeof _cloudSave==='function' && _cloudReady){
+        _cloudSave('erp_usuarios', users.map(function(u){ return Object.assign({},u); }));
+      }
+      if(typeof secAuditLog==='function') secAuditLog('user_created','Usuário criado: '+nome+' ('+funcaoNorm+')');
+      usrNovoClose();
+      usrRender();
+      try{orcPopulateVendedores();}catch(e){}
+      try{vendedoresRender();}catch(e){}
+
+      // Dispara o e-mail de definição de senha AGORA (mesmo mecanismo já
+      // usado por usrRedefinirSenha()/fbResetSenha() — sendPasswordResetEmail
+      // via app Firebase secundária, para o master nunca perder a própria
+      // sessão). adminCreateUser cria a conta SEM senha (comentário próprio
+      // da função: "acesso via link de convite") — sem este disparo o
+      // usuário nunca receberia como definir a senha.
       try {
         var _fbCfg = firebase.app().options;
-        var _secAppName = 'usrCreate_' + Date.now();
+        var _secAppName = 'usrInvite_' + Date.now();
         var _secApp = firebase.initializeApp(_fbCfg, _secAppName);
-        showToast('Criando acesso para "' + nomeCriado + '"…', 'ok');
-        _secApp.auth().createUserWithEmailAndPassword(emailCriado, senhaCriada)
-          .then(function(cred) {
-            var novoUid = cred.user.uid;
-            return cred.user.updateProfile({ displayName: nomeCriado })
-              .then(function() { return _secApp.auth().signOut(); })
-              .then(function() { return novoUid; });
-          })
-          .then(function(novoUid) {
+        _secApp.auth().sendPasswordResetEmail(email)
+          .then(function(){
             _secApp.delete().catch(function(){});
-            // Registrar uid no perfil e persistir
-            recRef.uid = novoUid;
-            if(typeof _cloudSave==='function' && _cloudReady){
-              _cloudSave('erp_usuarios', _USR_DATA.map(function(u){ return Object.assign({},u); }));
-            }
-            // Definir custom claim role via backend (requer caller master com claim)
-            return firebase.functions().httpsCallable('adminUpdateUserRole')({
-              targetUid: novoUid, newRole: recRef.funcao
-            }).then(function() {
-              showToast('✅ "' + nomeCriado + '" criado com perfil e permissão completos!', 'ok');
-            }).catch(function(claimErr) {
-              console.warn('[usrSalvar] Claim não definida:', claimErr && claimErr.code, claimErr && claimErr.message);
-              showToast('⚠️ "' + nomeCriado + '" criado, mas a permissão (claim) não foi definida: ' + ((claimErr&&claimErr.message)||'erro') + '. Use "Reenviar permissão" ou contate o suporte.', 'warn');
-              if(typeof secAuditLog==='function') secAuditLog('user_claim_failed','Claim não definida para '+emailCriado+': '+((claimErr&&claimErr.code)||''));
-            });
+            showToast('✅ "' + nome.trim() + '" criado — e-mail de definição de senha enviado para ' + email + '.', 'ok');
           })
-          .catch(function(err) {
+          .catch(function(mailErr){
             _secApp.delete().catch(function(){});
-            if(err.code === 'auth/email-already-in-use') {
-              showToast('ℹ️ "' + nomeCriado + '" salvo — e-mail já tinha conta, acesso mantido.', 'warn');
-            } else {
-              showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas conta de acesso não criada: ' + (err.message || err.code), 'warn');
-              console.warn('[usrSalvar] Firebase Auth create error:', err);
-              if(typeof secAuditLog==='function') secAuditLog('user_auth_failed','Conta Auth não criada para '+emailCriado+': '+(err.code||''));
-            }
+            console.warn('[usrSalvar] Falha ao enviar e-mail de convite:', mailErr && mailErr.code, mailErr && mailErr.message);
+            showToast('⚠️ "' + nome.trim() + '" criado, mas o e-mail de convite falhou: ' + ((mailErr&&mailErr.message)||'erro') + '. Use "🔑 Senha" para tentar reenviar.', 'warn');
           });
-      } catch(initErr) {
-        showToast('⚠️ "' + nomeCriado + '" salvo no ERP, mas falha ao iniciar criação de acesso: ' + initErr.message, 'warn');
-        console.warn('[usrSalvar] secondary app init error:', initErr);
+      } catch(mailInitErr) {
+        console.warn('[usrSalvar] secondary app init error (invite email):', mailInitErr);
+        showToast('⚠️ "' + nome.trim() + '" criado, mas não foi possível iniciar o envio do e-mail de convite. Use "🔑 Senha" para reenviar.', 'warn');
       }
-    })(nome.trim(), email, senha, novoRec);
+    }).catch(function(err){
+      // adminCreateUser é atômico — falha aqui significa que NENHUMA conta
+      // ficou pela metade (a própria CF já reverte Auth+claim se o perfil
+      // canônico falhar). Nunca escreve nada localmente quando cai aqui.
+      console.error('[usrSalvar] adminCreateUser falhou:', err && err.code, err && err.message);
+      showToast('❌ Não foi possível criar o usuário: ' + ((err&&err.message)||'erro desconhecido'), 'err');
+    });
+    return;
   }
-
-  if(typeof _cloudSave==='function' && _cloudReady){
-    _cloudSave('erp_usuarios', users.map(function(u){ return Object.assign({},u); }));
-  }
-  usrNovoClose();
-  usrRender();
-  try{orcPopulateVendedores();}catch(e){}
-  try{vendedoresRender();}catch(e){}
+  // (Ambos os ramos acima — edição e criação — sempre retornam antes daqui;
+  // criação agora é assíncrona via adminCreateUser, ver .then() acima.)
 }
 
 function usrDel(idx) {
@@ -33340,6 +33343,23 @@ function fbVoltarLogin(){
   var f=document.getElementById('authLoginForm');  if(f) f.style.display='block';
 }
 
+// RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 7 — lê erp_vr_usuarios/{uid} com
+// pequenas retentativas antes de aceitar "documento não existe": cobre a
+// janela real de corrida entre a conta Auth já autenticar (usrSalvar()) e a
+// Cloud Function adminCreateUser terminar de gravar o perfil canônico —
+// nunca "esconde" um erro de permissão/rede (esses propagam via reject,
+// tratados no .catch() de quem chama), só evita declarar "perfil ausente"
+// prematuramente por causa de uma escrita ainda em voo.
+function _authLerPerfilComRetry(uid, tentativas) {
+  tentativas = tentativas || 1;
+  return _db.collection('erp_vr_usuarios').doc(uid).get().then(function(doc){
+    if(doc.exists || tentativas<=1) return doc;
+    return new Promise(function(resolve){ setTimeout(resolve, 400); }).then(function(){
+      return _authLerPerfilComRetry(uid, tentativas-1);
+    });
+  });
+}
+
 // ── Login — FASE 5: signInWithEmailAndPassword ────────────────────────────────
 function authLogin(){
   _homologGuardOrThrow();
@@ -33374,18 +33394,35 @@ function authLogin(){
       // janela em que o SDK do Firestore ainda não recebeu o novo estado de
       // autenticação, causando permission-denied intermitente logo após o
       // login (achado real: reproduzido contra o Firebase Emulator Suite).
+      // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 7 — investigação encontrou
+      // uma janela real de corrida: a conta Auth já autentica (passo 1)
+      // antes de a Cloud Function que grava erp_vr_usuarios/{uid} concluir
+      // (ver usrSalvar()/adminCreateUser). _authLerPerfilComRetry() dá 3
+      // tentativas com um pequeno intervalo antes de aceitar "documento
+      // não existe" — cobre exatamente essa janela sem esconder o erro se
+      // o documento genuinamente não existir.
       return cred.user.getIdTokenResult().then(function(){
-        return _db.collection('erp_vr_usuarios').doc(cred.user.uid).get();
+        return _authLerPerfilComRetry(cred.user.uid, 3);
       })
         .then(function(doc){
           var users = [];
-          if(doc.exists && doc.data()){
+          if(doc && doc.exists && doc.data()){
             users = [doc.data()];
           }
-          return { fbUser: cred.user, users: users };
+          return { fbUser: cred.user, users: users, perfilLeituraFalhou: false };
         })
-        .catch(function(){
-          return { fbUser: cred.user, users: [] };
+        .catch(function(err){
+          // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 7 — achado real: este
+          // catch mudo transformava QUALQUER falha (permission-denied,
+          // offline, timeout) em "users:[]", indistinguível de "perfil
+          // genuinamente não existe" — o operador via sempre a mesma
+          // mensagem ("Conta sem perfil atribuído — contate o
+          // administrador"), mesmo quando o problema era transitório
+          // (rede, propagação de claim) e um novo login resolveria.
+          // Loga o erro real e marca a distinção para a mensagem exibida
+          // mais abaixo.
+          console.error('[authLogin] falha ao ler erp_vr_usuarios/'+cred.user.uid, err && err.code, err && err.message);
+          return { fbUser: cred.user, users: [], perfilLeituraFalhou: true, erroLeituraCode: err && err.code };
         });
     })
     .then(function(ctx){
@@ -33410,9 +33447,18 @@ function authLogin(){
       // qualquer conta Auth alheia ao ERP entraria com acesso total.)
       if(!uRec){
         firebase.auth().signOut();
-        if(errEl) errEl.textContent = '⛔ Conta sem perfil atribuído — contate o administrador';
+        // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 7 — mensagem distinta
+        // quando a causa foi FALHA DE LEITURA (rede/permissão/timeout —
+        // tentar de novo pode resolver) vs. perfil genuinamente ausente
+        // (fala com o administrador) — antes as duas caíam na mesma frase
+        // e escondiam problemas transitórios reais.
+        if(errEl) errEl.textContent = ctx.perfilLeituraFalhou
+          ? '⚠️ Não foi possível verificar seu acesso agora. Tente novamente em instantes.'
+          : '⛔ Conta sem perfil atribuído — contate o administrador';
         if(btnEl) btnEl.disabled = false;
-        secAuditLog('login_denied','Conta autenticada sem perfil em erp_usuarios: '+email);
+        secAuditLog('login_denied', ctx.perfilLeituraFalhou
+          ? 'Falha ao ler perfil em erp_vr_usuarios ('+(ctx.erroLeituraCode||'?')+'): '+email
+          : 'Conta autenticada sem perfil em erp_usuarios: '+email);
         return;
       }
       // _normalizeRole converte 'admin' legado → 'master'; desconhecido → null.
