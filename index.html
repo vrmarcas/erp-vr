@@ -11340,8 +11340,38 @@ function orcRemItem(idx) {
   // novo ORC_ITEM_OPCOES).
   if (typeof ORC_ITEM_EXTRAS!=='undefined') delete ORC_ITEM_EXTRAS[idx];
   if (typeof ORC_ITEM_AJUSTES!=='undefined') delete ORC_ITEM_AJUSTES[idx];
-  if (typeof ORC_ITEM_OPCOES!=='undefined') delete ORC_ITEM_OPCOES[idx];
+  // RODADA ESTABILIZAÇÃO 2026-09-04 — se o item removido era a opção
+  // SELECIONADA de um grupo comparativo, o grupo inteiro ficava sem
+  // nenhuma opção com `selecionada:true`: em orcRecalc() nenhuma opção
+  // sobrevivente passa a contar (`_contaItem`), então matTotal/areaTotal/
+  // qtyTotal zeram e o preço de TODAS as opções restantes cai no ramo
+  // informativo/degradado — o bug relatado de "excluir opção altera o
+  // preço das que sobraram". Promove deterministicamente a opção
+  // remanescente de menor índice ANTES de excluir o mapa; se sobrar só
+  // uma opção no grupo, dissolve o grupo inteiro (ela volta a ser item
+  // cumulativo normal — não faz mais sentido ter "opção única").
+  if (typeof ORC_ITEM_OPCOES!=='undefined' && ORC_ITEM_OPCOES[idx]) {
+    var _opRemovida = ORC_ITEM_OPCOES[idx];
+    var _grupoId = _opRemovida.grupoId;
+    var _eraSelecionada = !!_opRemovida.selecionada;
+    delete ORC_ITEM_OPCOES[idx];
+    var _irmaos = Object.keys(ORC_ITEM_OPCOES).filter(function(k){
+      return ORC_ITEM_OPCOES[k].grupoId === _grupoId;
+    }).sort(function(a,b){ return parseInt(a,10)-parseInt(b,10); });
+    if (_irmaos.length === 1) {
+      delete ORC_ITEM_OPCOES[_irmaos[0]];
+    } else if (_irmaos.length > 1 && _eraSelecionada) {
+      _irmaos.forEach(function(k){ ORC_ITEM_OPCOES[k].selecionada = false; });
+      ORC_ITEM_OPCOES[_irmaos[0]].selecionada = true;
+    }
+  } else if (typeof ORC_ITEM_OPCOES!=='undefined') {
+    delete ORC_ITEM_OPCOES[idx];
+  }
   orcRecalc();
+  // Simetria com orcAddItem/orcDuplicarItemComoOpcao/orcOpcaoSelecionar —
+  // sem isso o tempo de laser ficava congelado com a composição de peças
+  // de ANTES da remoção (RODADA ESTABILIZAÇÃO 2026-09-04).
+  if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
 }
 
 function orcFmt(v) { return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
