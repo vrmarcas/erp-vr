@@ -11649,16 +11649,25 @@ function orcRecalc() {
   // alimentam também o delta de adesivo por peça dentro do próprio loop.)
   //
   // RODADA 5 — Adesivo por peça: o toggle global oc_adh/oc_adhb ('sim'/
-  // 'não') vira um FALLBACK LEGADO, nunca mais a única fonte. Se o
-  // vendedor marcar 'Sim' no Step 3 (ou a automação de receita de item
-  // único ligar), cobra a área TOTAL do pedido como sempre cobrou —
-  // preserva 100% o comportamento de orçamentos antigos (reabertos sem
-  // nenhuma peça com campo `adesivo`, onde adhPecasTotal=0). Só quando o
-  // global está 'não' é que a soma por peça (adhPecasTotal/adhbPecasTotal,
-  // acumulada no PASS1 a partir de `peca.adesivo`) passa a valer — nunca
-  // os dois somados (isso evitaria cobrança dupla).
-  const adh     = adhYes  ? areaTotal*adhPrecoCm2  : adhPecasTotal;
-  const adhb    = adhbYes ? areaTotal*adhbPrecoCm2 : adhbPecasTotal;
+  // 'não') é um FALLBACK LEGADO — preserva 100% o comportamento de
+  // orçamentos antigos (reabertos sem nenhuma peça com campo `adesivo`,
+  // onde adhPecasTotal=0: adh = área total × preço, exatamente como
+  // sempre foi).
+  // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 3 — antes, quando o legado
+  // estava 'sim' (default é 'nao'; só fica 'sim' em orçamento salvo antes
+  // da Rodada 5, ou se alguém mexer manualmente no Step 3 "⚙️ Custos"),
+  // o `? :` DESCARTAVA por completo qualquer adesivo marcado peça a peça
+  // — o checkbox aparecia marcado no modal, mas o preço nunca reagia,
+  // sem nenhum aviso visual do porquê (achado real desta rodada). Os dois
+  // agora SOMAM: legado (quando 'sim') + soma por peça (nunca zero
+  // simultaneamente na prática — legado 'sim' é sempre de orçamento
+  // salvo ANTES do adesivo por peça existir, então adhPecasTotal=0 nesse
+  // caso; some 0 sem efeito). Zero mudança de valor para o caso comum
+  // (legado 'nao', a esmagadora maioria) nem para orçamento antigo sem
+  // nenhuma peça marcada — só passa a refletir corretamente o caso em
+  // que os dois coexistem.
+  const adh     = (adhYes  ? areaTotal*adhPrecoCm2  : 0) + adhPecasTotal;
+  const adhb    = (adhbYes ? areaTotal*adhbPrecoCm2 : 0) + adhbPecasTotal;
   // RODADA 6 — Gravação/Spray/Extra por peça: peça é a fonte ATIVA;
   // fallback legado só quando NENHUMA peça do pedido tem o campo
   // configurado (soma por peça = 0) — mesmo padrão Rota B do Adesivo.
