@@ -55,6 +55,14 @@ Desktop.ini
 # reproduzível a cada execução, nunca deve ser commitado. Padrão específico
 # (não um *.js genérico) para não esconder arquivos reais de scripts/.
 scripts/_*_extracted.tmp.js
+# RODADA ESTABILIZAÇÃO 2026-09-04 — vários scripts/test_*.js mais antigos
+# (anteriores à convenção "_extracted.tmp.js" acima) usam modPath sem o
+# sufixo "_extracted" (ex.: scripts/_rodada_correcao_definitiva_*.tmp.js,
+# scripts/_hardening_*.tmp.js) — mesma natureza (artefato 100% reproduzível
+# a cada execução), só não cobertos pelo padrão específico acima. Cobre
+# TODO scripts/_*.tmp.js (nunca um *.js genérico) para não voltar a
+# aparecer como untracked/bloquear o gate de deploy a cada rodada de testes.
+scripts/_*.tmp.js
 
 # Dados financeiros privados do pacote histórico (Rodada 3) — nunca versionar,
 # só os scripts/schemas/testes do importador que os consomem.

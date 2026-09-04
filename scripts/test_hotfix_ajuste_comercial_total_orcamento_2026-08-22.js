@@ -60,7 +60,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'orcRecalc', 'orcItemExtras', 'orcItemExtrasFechar', 'orcItemExtrasSalvar', 'orcItemExtraPreview'];
+var FN_NAMES = ['orcProdutoNomeResolvido', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'orcRecalc', 'orcItemExtras', 'orcItemExtrasFechar', 'orcItemExtrasSalvar', 'orcItemExtraPreview'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_ajuste_comercial_total_extracted.tmp.js');
 fs.writeFileSync(modPath, src);

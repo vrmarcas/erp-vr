@@ -54,8 +54,15 @@ ok('3c. cfgRenderTables() preenche o form com o valor salvo', /adesivoPrecoCm2\s
 
 // ── 4. orcRecalc() não usa mais literal hardcoded — lê config/snapshot ──
 var orcRecalcSrc = extractFn('orcRecalc');
-ok('4a. orcRecalc() não contém mais o literal 0.0056 direto no cálculo (usa adhPrecoCm2 variável)', /const adh\s*=\s*adhYes\s*\?\s*areaTotal\*adhPrecoCm2/.test(orcRecalcSrc));
-ok('4b. orcRecalc() não contém mais o literal 0.0011 direto no cálculo (usa adhbPrecoCm2 variável)', /const adhb\s*=\s*adhbYes\s*\?\s*areaTotal\*adhbPrecoCm2/.test(orcRecalcSrc));
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 3 — fórmula passou de
+// `adhYes ? areaTotal*adhPrecoCm2 : adhPecasTotal` (um substituía o outro)
+// para `(adhYes?areaTotal*adhPrecoCm2:0) + adhPecasTotal` (os dois somam —
+// ver commit "adesivo legado e adesivo por peça somam"). Regex atualizada
+// para a nova estrutura; a intenção do teste (nunca mais literal 0.0056/
+// 0.0011 hardcoded, sempre a variável adhPrecoCm2/adhbPrecoCm2) continua
+// exatamente a mesma.
+ok('4a. orcRecalc() não contém mais o literal 0.0056 direto no cálculo (usa adhPrecoCm2 variável)', /adhYes\s*\?\s*areaTotal\*adhPrecoCm2/.test(orcRecalcSrc));
+ok('4b. orcRecalc() não contém mais o literal 0.0011 direto no cálculo (usa adhbPrecoCm2 variável)', /adhbYes\s*\?\s*areaTotal\*adhbPrecoCm2/.test(orcRecalcSrc));
 ok('4c. orcRecalc() prioriza window._orcAdhPrecoSnapshot quando presente (histórico)', /_orcAdhPrecoSnapshot/.test(orcRecalcSrc));
 ok('4d. orcRecalc() cai para cfgLoad().financeiro quando não há snapshot (config vigente)', /_cfgFinAdh\.adesivoPrecoCm2/.test(orcRecalcSrc));
 
