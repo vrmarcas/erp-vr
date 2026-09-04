@@ -6122,6 +6122,7 @@ function _authFirebaseError(code){
           <button class="cfg-tab" id="cfgTab7" onclick="cfgTab(7)">🏦 Dados Bancários</button>
           <button class="cfg-tab" id="cfgTab8" onclick="cfgTab(8)">🗂️ Produtos</button>
           <button class="cfg-tab" id="cfgTab9" onclick="cfgTab(9)">🔌 Integrações</button>
+          <button class="cfg-tab" id="cfgTab10" onclick="cfgTab(10)">💬 Mensagens Automáticas</button>
           <!-- Corrigido 2026-08-07 (Rodada 2, P3) — auditoria real do que
                erpBackupExportar() exporta (_BACKUP_KEYS): config, estoque,
                orçamentos, clientes, CRM, financeiro (CR/CP/transações),
@@ -6526,6 +6527,20 @@ function _authFirebaseError(code){
               <button onclick="(function(){ var r=window.calcularOrcamentoAPI({itens:[{larg:100,alt:100,qty:1}]}); document.getElementById('cfgIntegTestOut').textContent=JSON.stringify(r,null,2); })()" style="padding:5px 14px;background:none;border:1.5px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer">▶ Testar motor</button>
               <pre id="cfgIntegTestOut" style="font-size:10px;color:var(--muted);margin-top:8px;white-space:pre-wrap;word-break:break-all"></pre>
             </div>
+          </div>
+        </div>
+
+        <!-- RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — Mensagens Automáticas -->
+        <div id="cfgPg10" class="cfg-pg" style="display:none">
+          <div class="card" id="cfgMsgAutoSemPermissao" style="display:none">
+            <div style="font-size:13px;color:var(--muted);padding:20px;text-align:center">🔒 Somente Master pode editar as Mensagens Automáticas. Os templates salvos já estão em uso pelo sistema.</div>
+          </div>
+          <div id="cfgMsgAutoConteudo">
+            <div class="card" style="margin-bottom:14px">
+              <div class="card-h"><div class="card-h-left">💬 Mensagens Automáticas</div></div>
+              <p style="font-size:12px;color:var(--muted);margin:0">Edite o texto usado nos disparos automáticos ao cliente (WhatsApp). Todo envio real passa por este mesmo template — nunca um texto diferente escondido em outro lugar do sistema.</p>
+            </div>
+            <div id="cfgMsgAutoLista"></div>
           </div>
         </div>
 
@@ -16824,15 +16839,16 @@ function osPgtoSaldoConfirmar(id) {
 // compatibilidade em alguns dispositivos/leitores — pedido explícito para
 // usar texto simples. Função única, reaproveitada nos dois lugares que
 // antes duplicavam (e divergiam sutilmente) o mesmo texto.
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — texto passa por
+// msgResolverTemplate() (fonte canônica, editável em Configurações →
+// Mensagens Automáticas), nunca mais uma string fixa aqui.
 function kbMsgOsPronta(os) {
   var pNome = (os.cliente||'Cliente').split(' ')[0];
-  var linhas = [
-    'Olá, ' + pNome + '.',
-    'Seu pedido OS #' + (os.num||os.id) + ' está pronto para retirada.',
-    'Produto: ' + (os.titulo||os.material||'—') + '.',
-    'Caso necessário, podemos combinar a retirada.'
-  ];
-  return linhas.join('\n');
+  return msgResolverTemplate('osPronta', {
+    cliente: pNome,
+    numero_os: os.num||os.id,
+    produto: os.titulo||os.material||'—'
+  });
 }
 function kbMarcarPronto() {
   var os = KB_OS[_kbOsId]; if (!os) return;
@@ -19774,7 +19790,13 @@ function finCRRender() {
     if(r.status==='pendente'||r.status==='vencido'){
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCRBaixa(\''+r.id+'\')">✓ Baixar recebimento</button>';
       var tel=(r.tel||r.clienteTel||(linkedOS&&linkedOS.clientTel)||'').replace(/\D/g,'');
-      var msgWa=encodeURIComponent('Olá '+r.cliente.split(' ')[0]+'! Verificamos que sua conta '+finFmt(r.valor)+' (venc. '+r.vencimento+') está em aberto. Podemos regularizar? 😊');
+      // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — msgResolverTemplate()
+      // (fonte canônica, editável em Configurações → Mensagens Automáticas).
+      var msgWa=encodeURIComponent(msgResolverTemplate('cobranca', {
+        cliente: r.cliente.split(' ')[0],
+        valor: finFmt(r.valor),
+        vencimento: r.vencimento
+      }));
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');window.open(\'https://wa.me/'+(tel?'55'+tel:'')+'?text='+msgWa+'\',\'_blank\')">📱 Cobrar via WhatsApp</button>';
     } else if(r.status==='recebido'){
       menuItems+='<button onclick="_finDotToggle(\''+menuId+'\');finCREstornar(\''+r.id+'\')">↩ Estornar recebimento</button>';
@@ -26508,20 +26530,24 @@ async function orcEnviarOrcamentoWA() {
     extrasStr += '\n\n*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
   }
 
-  var saudacaoNome = primeiroNome ? (orcSaudacaoHorario()+', *'+primeiroNome+'*!') : 'Olá!';
-  var msg = saudacaoNome+'\n\n'
-    +'Conforme solicitado, segue o orçamento da *'+marca+'*:\n\n'
-    +'*ORÇAMENTO Nº '+numero+'*\n\n'
-    +(itensStr ? '*Itens do orçamento*\n\n'+itensStr+'\n\n' : '')
-    +'*VALOR TOTAL: '+totalExibido+'*'
-    +extrasStr+'\n\n'
-    +'*Prazo de produção:* '+orcGetPrazoTexto()+'\n\n'
-    +'*Validade do orçamento:* '+orcGetValidadeDias()+' dias\n\n'
-    +'*Condição de pagamento:* '+condicaoLabelWA+'\n\n'
-    +'Caso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\n'
-    +'Atenciosamente,\n\n'
-    +'*'+responsavel+'*\n'
-    +'*'+marca+'*';
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — msgResolverTemplate()
+  // (fonte canônica, editável em Configurações → Mensagens Automáticas).
+  // `itens`/`valor` continuam montados aqui (lista numerada com grupos de
+  // opções, e o bloco de parcelamento/desconto/PIX condicional acoplado
+  // ao total) — são blocos canônicos DERIVADOS de dados reais, não texto
+  // fixo; o template controla só o texto ao redor deles.
+  var msg = msgResolverTemplate('orcamentoEnviado', {
+    saudacao: orcSaudacaoHorario(),
+    cliente: primeiroNome || 'Cliente',
+    marca: marca,
+    numero_orcamento: numero,
+    itens: itensStr ? ('*Itens do orçamento*\n\n'+itensStr) : '',
+    valor: totalExibido+extrasStr,
+    prazo: orcGetPrazoTexto(),
+    validade: orcGetValidadeDias()+' dias',
+    forma_pagamento: condicaoLabelWA,
+    responsavel: responsavel
+  });
 
   var url = 'https://wa.me/'+telNorm+'?text='+encodeURIComponent(msg);
   if(win && !win.closed) win.location.href = url; else window.open(url,'_blank');
@@ -29513,7 +29539,12 @@ function orcPagtoSucessoWhatsApp(orcId){
   // ValerIA, o.tel é sempre undefined (campo real é telCliente) — o link
   // de WhatsApp abria sem destinatário. orcEnvNormalizar() reutilizado.
   var _nWa = orcEnvNormalizar(o);
-  var msg = 'Olá, *'+(_nWa.cliente!=='(sem nome)'?_nWa.cliente:'cliente')+'*! 👋\n\nSeu pagamento foi confirmado e a produção do seu pedido na *'+marca+'* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição! 😊\n— Equipe '+marca;
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — msgResolverTemplate()
+  // (fonte canônica, editável em Configurações → Mensagens Automáticas).
+  var msg = msgResolverTemplate('pagamentoConfirmado', {
+    cliente: _nWa.cliente!=='(sem nome)' ? _nWa.cliente : 'cliente',
+    marca: marca
+  });
   var telNum = (_nWa.tel||'').replace(/\D/g,'');
   window.open('https://wa.me/'+(telNum?'55'+telNum:'')+'?text='+encodeURIComponent(msg), '_blank');
 }
@@ -30151,6 +30182,76 @@ var CFG_DEFAULT = {
 };
 
 // ============================================================
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — MENSAGENS AUTOMÁTICAS
+// ============================================================
+// Fonte canônica única de templates de mensagem ao cliente. Antes desta
+// rodada, cada disparo (OS pronta, cobrança, pagamento confirmado, envio
+// de orçamento) tinha o texto hardcoded no próprio ponto de disparo —
+// mapeamento exaustivo desta rodada encontrou 13 pontos de disparo e
+// ~26 blocos de texto distintos, com duplicação e divergência real entre
+// eles (achado documentado, não repetido aqui). Esta rodada centraliza os
+// 4 disparos mais diretamente "mensagem automática operacional" (os que o
+// pedido original cita nominalmente: orçamento enviado, confirmação de
+// pagamento/produção, pedido pronto, cobrança) — os demais (CRM, PDV,
+// fornecedor) ficam fora do escopo desta rodada, registrados como
+// pendência.
+//
+// Placeholders são um WHITELIST FECHADO por template — nunca inventados:
+// cada nome aqui corresponde a um dado que já existe no código no momento
+// do disparo (ver cada chamador). msgResolverTemplate() nunca interpola
+// um placeholder fora da lista — deixa o texto literal `{nome}` visível
+// em vez de "inventar" ou apagar silenciosamente.
+var MSG_TEMPLATES_PLACEHOLDERS = {
+  osPronta:            ['cliente', 'numero_os', 'produto'],
+  cobranca:            ['cliente', 'valor', 'vencimento'],
+  pagamentoConfirmado: ['cliente', 'marca'],
+  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'prazo', 'validade', 'forma_pagamento', 'responsavel']
+};
+var MSG_TEMPLATES_NOMES = {
+  osPronta:            '📦 Pedido pronto para retirada',
+  cobranca:            '💰 Cobrança de conta em aberto',
+  pagamentoConfirmado: '✅ Pagamento confirmado / produção iniciada',
+  orcamentoEnviado:    '📤 Orçamento enviado ao cliente'
+};
+function msgTemplatesDefault() {
+  return {
+    osPronta: 'Olá, {cliente}.\nSeu pedido OS #{numero_os} está pronto para retirada.\nProduto: {produto}.\nCaso necessário, podemos combinar a retirada.',
+    cobranca: 'Olá {cliente}! Verificamos que sua conta {valor} (venc. {vencimento}) está em aberto. Podemos regularizar?',
+    pagamentoConfirmado: 'Olá, *{cliente}*!\n\nSeu pagamento foi confirmado e a produção do seu pedido na *{marca}* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição!\n— Equipe {marca}',
+    orcamentoEnviado: '{saudacao}, *{cliente}*!\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*'
+  };
+}
+// Varre o texto por `{qualquer_coisa}` e devolve os nomes que NÃO estão na
+// whitelist do template — usado pela UI de Configurações para bloquear o
+// "Salvar" com um placeholder inválido em vez de aceitar em silêncio um
+// texto que vai sair quebrado (`{nome}` literal) na hora do envio real.
+function msgValidarPlaceholders(chave, texto) {
+  var validos = MSG_TEMPLATES_PLACEHOLDERS[chave] || [];
+  var invalidos = [];
+  var re = /\{([a-zA-Z_]+)\}/g, m;
+  while ((m = re.exec(String(texto||'')))) {
+    if (validos.indexOf(m[1]) < 0 && invalidos.indexOf(m[1]) < 0) invalidos.push(m[1]);
+  }
+  return invalidos;
+}
+// Fonte única de resolução — todo disparo automático (ver chamadores)
+// passa por aqui. Usa o template customizado salvo em Configurações
+// (cfgLoad().mensagensAutomaticas[chave].texto) quando existir e não
+// estiver vazio; cai no default de msgTemplatesDefault() caso contrário
+// (nunca um "envio quebrado" por template ausente).
+function msgResolverTemplate(chave, dados) {
+  var cfg = (typeof cfgLoad === 'function') ? cfgLoad() : {};
+  var custom = cfg.mensagensAutomaticas && cfg.mensagensAutomaticas[chave];
+  var texto = (custom && custom.texto) ? custom.texto : msgTemplatesDefault()[chave];
+  if (!texto) return '';
+  var validos = MSG_TEMPLATES_PLACEHOLDERS[chave] || [];
+  return texto.replace(/\{([a-zA-Z_]+)\}/g, function (match, nome) {
+    if (validos.indexOf(nome) < 0) return match; // desconhecido: nunca inventa valor
+    return (dados && dados[nome] != null) ? String(dados[nome]) : '';
+  });
+}
+
+// ============================================================
 // RECEITA — MOTOR DE FÓRMULAS SEGURO (RODADA 5, seção 9)
 // ============================================================
 // Parser/avaliador restrito para fórmulas de peça de receita de produto
@@ -30596,7 +30697,7 @@ function cfgLimparBanco(marca) { bankRemover(marca, bankListFor(marca)[0]?.id||'
 
 function cfgTab(n) {
   if(n===5) { setTimeout(mkPopularFromConfig, 50); }
-  for(var i=1;i<=9;i++){
+  for(var i=1;i<=10;i++){
     var t=document.getElementById('cfgTab'+i), p=document.getElementById('cfgPg'+i);
     if(t) t.classList.toggle('on', i===n);
     if(p) p.style.display = i===n ? 'block' : 'none';
@@ -30605,6 +30706,103 @@ function cfgTab(n) {
   if(n===6) cfgRenderParc();
   if(n===7) cfgCarregarBanco();
   if(n===9) cfgIntegLoad();
+  if(n===10) cfgMsgAutoRender();
+}
+
+// ── Mensagens Automáticas (RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4) ─────────
+// Somente Master edita — outros perfis usam os templates já salvos (nunca
+// bloqueado de VER que a área existe, só de alterar; ver
+// MSG_TEMPLATES_PLACEHOLDERS/msgResolverTemplate() no motor de templates).
+function cfgMsgAutoRender() {
+  var souMaster = _normalizeRole((_currentSession&&_currentSession.funcao)||'')==='master';
+  var semPerm = document.getElementById('cfgMsgAutoSemPermissao');
+  var conteudo = document.getElementById('cfgMsgAutoConteudo');
+  if(semPerm) semPerm.style.display = souMaster ? 'none' : 'block';
+  if(conteudo) conteudo.style.display = souMaster ? 'block' : 'none';
+  if(!souMaster) return;
+
+  var cfg = cfgLoad();
+  var salvos = cfg.mensagensAutomaticas || {};
+  var defaults = msgTemplatesDefault();
+  var lista = document.getElementById('cfgMsgAutoLista');
+  if(!lista) return;
+  lista.innerHTML = Object.keys(MSG_TEMPLATES_NOMES).map(function(chave){
+    var atual = (salvos[chave] && salvos[chave].texto) ? salvos[chave].texto : defaults[chave];
+    var placeholdersTxt = MSG_TEMPLATES_PLACEHOLDERS[chave].map(function(p){ return '{'+p+'}'; }).join('  ');
+    return '<div class="card" style="margin-bottom:14px">'
+      + '<div class="card-h"><div class="card-h-left">'+MSG_TEMPLATES_NOMES[chave]+'</div></div>'
+      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Placeholders disponíveis</div>'
+      + '<div style="font-size:11px;font-family:monospace;color:var(--brand-mid);background:var(--surface);border-radius:6px;padding:6px 10px;margin-bottom:10px">'+placeholdersTxt+'</div>'
+      + '<textarea id="cfgMsgAutoTxt_'+chave+'" rows="8" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-family:monospace;background:var(--bg);color:var(--text)" oninput="cfgMsgAutoPreview(\''+chave+'\')">'+cfgEsc(atual)+'</textarea>'
+      + '<div id="cfgMsgAutoErro_'+chave+'" style="display:none;font-size:11px;color:#DC2626;margin-top:6px;font-weight:700"></div>'
+      + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 5px">Preview (dados de exemplo)</div>'
+      + '<div id="cfgMsgAutoPrev_'+chave+'" style="font-size:12px;white-space:pre-wrap;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text)"></div>'
+      + '<div style="display:flex;gap:8px;margin-top:12px">'
+      + '<button onclick="cfgMsgAutoSalvar(\''+chave+'\')" style="padding:7px 18px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>'
+      + '<button onclick="cfgMsgAutoRestaurar(\''+chave+'\')" style="padding:7px 14px;background:none;border:1.5px solid var(--border);border-radius:7px;font-size:12px;cursor:pointer;color:var(--muted)">↺ Restaurar padrão</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+  Object.keys(MSG_TEMPLATES_NOMES).forEach(cfgMsgAutoPreview);
+}
+// Dados de exemplo — mesmos NOMES de placeholder que os disparos reais
+// usam, valores fictícios só para o vendedor/master visualizar o
+// resultado antes de salvar.
+var CFG_MSG_AUTO_EXEMPLO = {
+  cliente: 'Maria Silva', numero_os: '1042', produto: 'Caixa Acrílica 20x20',
+  valor: 'R$ 350,00', vencimento: '10/09/2026', marca: 'VR Marcas',
+  saudacao: 'Boa tarde', numero_orcamento: '000123',
+  itens: '*Itens do orçamento*\n\n01. Caixa Acrílica\nQuantidade: 2\nValor unitário: R$ 175,00\nSubtotal: R$ 350,00',
+  prazo: '5 dias úteis · Entrega: 10/09/2026', validade: '10 dias',
+  forma_pagamento: '50% no pedido e 50% na retirada do material', responsavel: 'Ana Vendedora'
+};
+function cfgMsgAutoPreview(chave) {
+  var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
+  var prevEl = document.getElementById('cfgMsgAutoPrev_'+chave);
+  var erroEl = document.getElementById('cfgMsgAutoErro_'+chave);
+  if(!txtEl || !prevEl) return;
+  var texto = txtEl.value;
+  var invalidos = msgValidarPlaceholders(chave, texto);
+  if(invalidos.length){
+    if(erroEl){ erroEl.style.display='block'; erroEl.textContent = '⚠️ Placeholder inválido: '+invalidos.map(function(p){return '{'+p+'}';}).join(', ')+' — não existe para esta mensagem. Corrija antes de salvar.'; }
+    prevEl.textContent = '(corrija o placeholder inválido para ver o preview)';
+    return;
+  }
+  if(erroEl) erroEl.style.display='none';
+  var validos = MSG_TEMPLATES_PLACEHOLDERS[chave] || [];
+  prevEl.textContent = texto.replace(/\{([a-zA-Z_]+)\}/g, function(m, nome){
+    if(validos.indexOf(nome)<0) return m;
+    return CFG_MSG_AUTO_EXEMPLO[nome]!=null ? String(CFG_MSG_AUTO_EXEMPLO[nome]) : m;
+  });
+}
+function cfgMsgAutoSalvar(chave) {
+  var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
+  if(!txtEl) return;
+  var texto = txtEl.value;
+  var invalidos = msgValidarPlaceholders(chave, texto);
+  if(invalidos.length){
+    showToast('Placeholder inválido: '+invalidos.map(function(p){return '{'+p+'}';}).join(', ')+' — corrija antes de salvar.', 'err');
+    return;
+  }
+  var cfg = cfgLoad();
+  if(!cfg.mensagensAutomaticas) cfg.mensagensAutomaticas = {};
+  cfg.mensagensAutomaticas[chave] = { texto: texto, atualizadoEm: Date.now() };
+  cfgSave(cfg).then(function(r){
+    if(r && r.ok===false){ showToast('Não foi possível salvar — tente novamente.', 'err'); return; }
+    showToast('Template "'+MSG_TEMPLATES_NOMES[chave]+'" salvo!', 'ok');
+    if(typeof secAuditLog==='function') secAuditLog('msg_template_updated', 'Template atualizado: '+chave);
+  });
+}
+function cfgMsgAutoRestaurar(chave) {
+  var cfg = cfgLoad();
+  if(cfg.mensagensAutomaticas) delete cfg.mensagensAutomaticas[chave];
+  var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
+  if(txtEl) txtEl.value = msgTemplatesDefault()[chave];
+  cfgMsgAutoPreview(chave);
+  cfgSave(cfg).then(function(r){
+    if(r && r.ok===false){ showToast('Não foi possível restaurar — tente novamente.', 'err'); return; }
+    showToast('Template "'+MSG_TEMPLATES_NOMES[chave]+'" restaurado ao padrão.', 'ok');
+  });
 }
 
 // ── Integrações (Valéria / Chatvolt) ──────────────────────────────────────
