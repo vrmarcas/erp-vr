@@ -10711,7 +10711,14 @@ function planAbrir(idx) {
 
   document.getElementById('planModal').style.display = 'flex';
 
-  if(savedLarg && savedAlt) planCalc();
+  // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 2 — chama planCalc() também
+  // quando não há savedLarg/savedAlt mas HÁ planificação persistida
+  // (row.dataset.planPecas): sem isso o modal nunca tentava nada e ficava
+  // no estado inicial "Preencha as dimensões", mesmo com dado real para
+  // mostrar — planCalc() agora sabe hidratar direto do snapshot nesse
+  // caso (ver _planHidratarDireto).
+  var _temPlanPersistido = row && row.dataset.planPecas && row.dataset.planPecas !== '[]';
+  if((savedLarg && savedAlt) || _temPlanPersistido) planCalc();
 }
 
 function planFechar() {
@@ -11103,49 +11110,76 @@ function planCalc() {
   var btn = document.getElementById('planAplicarBtn');
   var sumBox = document.getElementById('planSumBox');
 
-  if(L<=0 || A<=0 || (rec.dim3d && P<=0)) {
+  var _camposAviso = document.getElementById('planCamposExtrasAviso');
+  var _dimsFaltando = (L<=0 || A<=0 || (rec.dim3d && P<=0));
+  // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 2 — "abrir a Planificação
+  // durante edição mostra 0 peças/0m²/R$0". Causa raiz: quando
+  // row.dataset.planLarg/planAlt não foi restaurado (orçamento salvo
+  // antes da persistência de L/A/P do modal existir, ou qualquer outro
+  // caminho que não gravou esses dois campos), o gate acima retornava
+  // direto — a receita nunca era regenerada, então o snapshot persistido
+  // (row.dataset.planPecas, que EXISTE e é exatamente o que o resumo da
+  // linha usa para mostrar "N peças · X m²") nunca era lido. Antes de
+  // desistir, tenta hidratar DIRETO do snapshot persistido — sem precisar
+  // regenerar a receita a partir de L/A, que não temos. Só cai no aviso
+  // "Preencha as dimensões" quando REALMENTE não há nada persistido para
+  // mostrar (item de fato nunca planificado).
+  var _hidratacaoDireta = null;
+  if(_dimsFaltando && !_planEditPieces.length && _planSeedPersistedJson) {
+    _hidratacaoDireta = _planHidratarDireto(_planSeedPersistedJson, espMm);
+  }
+
+  if(_dimsFaltando && !_hidratacaoDireta) {
     sumBox.style.display='none';
     if(btn) btn.disabled=true;
     tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px;font-size:12px">Preencha as dimensões acima para calcular as peças.</td></tr>';
     return;
   }
 
-  // RODADA 6, seção 1 — campos de entrada extras da receita: resolve o
-  // contexto (com defaults) e BLOQUEIA o cálculo se algum obrigatório
-  // ainda não foi informado — nunca calcula peças com dado faltando em
-  // silêncio.
-  var _camposAviso = document.getElementById('planCamposExtrasAviso');
   var extra = {};
-  if(rec.campos && rec.campos.length) {
-    var _camposRes = receitaCamposContexto({ dim3d: rec.dim3d, campos: rec.campos }, planLerCamposExtras());
-    extra = _camposRes.ctx;
-    if(_camposRes.faltando.length) {
-      sumBox.style.display='none';
-      if(btn) btn.disabled=true;
-      tbody.innerHTML='';
-      if(_camposAviso) { _camposAviso.textContent = '⚠️ Preencha os campos obrigatórios: '+_camposRes.faltando.join(', '); _camposAviso.style.display='block'; }
-      return;
-    }
-  }
-  if(_camposAviso) _camposAviso.style.display='none';
-  if(_descontoOpcional) extra.descontosMontagemAplicados = !!(_descCb && _descCb.checked);
-
-  var pieces = rec.pieces(L, A, P, e, extra);
   var totalArea = 0, totalQty = 0;
-
-  // HOTFIX 2026-08-16 (P0.1-P0.4) — fonte única de verdade: nunca substituir
-  // _planEditPieces cegamente. Na 1ª chamada após planAbrir() de um item já
-  // salvo, semeia do snapshot persistido (peça excluída não está lá — ver
-  // _planSeedFromPersisted); em qualquer outra chamada (mudança de
-  // dimensão/campo extra), reconcilia com o que já está em memória,
-  // preservando `_deleted` (ver _planReconcilePieces). Isso é o que garante
-  // que uma peça excluída NUNCA volta, em nenhum dos dois casos.
-  if(!_planEditPieces.length && _planSeedPersistedJson) {
-    _planEditPieces = _planSeedFromPersisted(pieces, _planSeedPersistedJson, espMm) || _planReconcilePieces(pieces, espMm);
+  if(_hidratacaoDireta) {
+    // Hidratação direta — pula regeneração de receita e reconciliação
+    // (não há L/A reais para gerar `pieces` frescas); o snapshot
+    // persistido já é a fonte de verdade completa desta renderização.
+    if(_camposAviso) _camposAviso.style.display='none';
+    _planEditPieces = _hidratacaoDireta;
+    _planSeedPersistedJson = null;
   } else {
-    _planEditPieces = _planReconcilePieces(pieces, espMm);
+    // RODADA 6, seção 1 — campos de entrada extras da receita: resolve o
+    // contexto (com defaults) e BLOQUEIA o cálculo se algum obrigatório
+    // ainda não foi informado — nunca calcula peças com dado faltando em
+    // silêncio.
+    if(rec.campos && rec.campos.length) {
+      var _camposRes = receitaCamposContexto({ dim3d: rec.dim3d, campos: rec.campos }, planLerCamposExtras());
+      extra = _camposRes.ctx;
+      if(_camposRes.faltando.length) {
+        sumBox.style.display='none';
+        if(btn) btn.disabled=true;
+        tbody.innerHTML='';
+        if(_camposAviso) { _camposAviso.textContent = '⚠️ Preencha os campos obrigatórios: '+_camposRes.faltando.join(', '); _camposAviso.style.display='block'; }
+        return;
+      }
+    }
+    if(_camposAviso) _camposAviso.style.display='none';
+    if(_descontoOpcional) extra.descontosMontagemAplicados = !!(_descCb && _descCb.checked);
+
+    var pieces = rec.pieces(L, A, P, e, extra);
+
+    // HOTFIX 2026-08-16 (P0.1-P0.4) — fonte única de verdade: nunca substituir
+    // _planEditPieces cegamente. Na 1ª chamada após planAbrir() de um item já
+    // salvo, semeia do snapshot persistido (peça excluída não está lá — ver
+    // _planSeedFromPersisted); em qualquer outra chamada (mudança de
+    // dimensão/campo extra), reconcilia com o que já está em memória,
+    // preservando `_deleted` (ver _planReconcilePieces). Isso é o que garante
+    // que uma peça excluída NUNCA volta, em nenhum dos dois casos.
+    if(!_planEditPieces.length && _planSeedPersistedJson) {
+      _planEditPieces = _planSeedFromPersisted(pieces, _planSeedPersistedJson, espMm) || _planReconcilePieces(pieces, espMm);
+    } else {
+      _planEditPieces = _planReconcilePieces(pieces, espMm);
+    }
+    _planSeedPersistedJson = null; // consumido — próximas chamadas reconciliam contra a memória
   }
-  _planSeedPersistedJson = null; // consumido — próximas chamadas reconciliam contra a memória
 
   _planEditPieces.forEach(function(pc, pci) {
     if(pc._deleted) return; // excluída pelo vendedor — nunca renderiza, nunca soma
@@ -36186,6 +36220,33 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
       spray: prev ? (prev.spray||0) : (pc.spray||0),
       extra: prev ? (prev.extra||0) : (pc.extra||0),
       _deleted: prev ? !!prev._deleted : false
+    };
+  });
+}
+// RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 2. Hidrata `_planEditPieces`
+// DIRETO do snapshot persistido (row.dataset.planPecas), sem depender de
+// regenerar a receita via rec.pieces(L,A,P,e,extra) — usada por planCalc()
+// quando o modal abre e L/A/P não foram restaurados (savedLarg/savedAlt
+// vazios), mas o item TEM planificação salva. Mesmo mapeamento de campos
+// já usado no ramo "saved" de _planSeedFromPersisted (mesma fonte,
+// consistente); só peças com origem AUTOMATICA (peças manuais entram via
+// planManualPieces/dataset.planPecasManual, restaurado em planAbrir()).
+function _planHidratarDireto(planPecasJson, defaultEspMm) {
+  var persisted;
+  try { persisted = JSON.parse(planPecasJson||'[]'); } catch(e) { return null; }
+  if(!persisted || !persisted.length) return null;
+  var autos = persisted.filter(function(p){ return p && p.origem==='AUTOMATICA'; });
+  if(!autos.length) return null;
+  return autos.map(function(saved){
+    var id = 'auto_' + _planPieceSlug(saved.nome);
+    var _espOverride = (saved.espOverride!=null && saved.espOverride!=='') ? String(saved.espOverride) : ((saved.esp!=null && saved.esp!=='') ? String(saved.esp) : '');
+    var _adesSaved = _planPecaAdesivos(saved);
+    return {
+      id: id, nome: saved.nome, qty: saved.qty, larg: saved.larg, alt: saved.alt,
+      esp: _espOverride || defaultEspMm || '', espOverride: _espOverride, tipo: saved.tipo||'',
+      adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
+      gravacao: saved.gravacao||0, spray: saved.spray||0, extra: saved.extra||0,
+      _deleted: false
     };
   });
 }
