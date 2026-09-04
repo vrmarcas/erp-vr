@@ -29197,6 +29197,27 @@ function orcEnvEditar(id) {
         orcAddItem();
         var ri = orcItemCount;
         setV('oi_prod_'+ri, it.prod);
+        // RODADA ESTABILIZAÇÃO 2026-09-04 — BLOCO 6 (gap adicional,
+        // achado no smoke em produção) — produto digitado manualmente
+        // ("Aparador") não tem <option> correspondente no catálogo;
+        // setV() acima falha silenciosamente (um <select> nativo ignora
+        // um value sem option igual) e o campo fica em BRANCO ao reabrir
+        // para editar — mesmo com it.prod já correto no dado salvo. Sem
+        // isto, um "Salvar" sem tocar nesse item reescreveria o produto
+        // como string vazia (orcProdutoNomeResolvido não acha texto
+        // nenhum no select em branco), apagando o nome real que já
+        // estava correto. Sintetiza a option __typed__ com o nome salvo
+        // — mesmo padrão já usado em orcRefreshProdSelects() para
+        // preservar produto personalizado ao atualizar a lista.
+        (function(){
+          var _selProd = document.getElementById('oi_prod_'+ri);
+          if (_selProd && it.prod && _selProd.value !== it.prod) {
+            var _optTyped = document.createElement('option');
+            _optTyped.value = '__typed__'; _optTyped.text = it.prod;
+            _selProd.add(_optTyped);
+            _selProd.value = '__typed__';
+          }
+        })();
         setV('oi_qty_'+ri,  it.qty||'1');
         setV('oi_larg_'+ri, it.larg);
         setV('oi_alt_'+ri,  it.alt);
