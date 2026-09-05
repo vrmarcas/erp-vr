@@ -102,6 +102,21 @@ test('4. Falha de adminCreateUser NUNCA grava nada localmente (nada de "sucesso 
   assertTrue(/showToast\(.*err/.test(catchBody), 'deve mostrar erro real ao master');
 });
 
+// RODADA DE ESTABILIZAÇÃO 2026-09-05 — achado real do smoke test do
+// adminDeleteUser: usrSalvar() (criação) nunca gravava o `uid` retornado
+// por adminCreateUser no registro local — TODO usuário criado por esta
+// tela ficava, para sempre, sem uid localmente. Consequência real:
+// usrSalvar() (edição de função/status) e o novo usrDel() (exclusão)
+// caem no fallback de "usuário sem acesso vinculado" incondicionalmente
+// para qualquer usuário criado depois do Bloco 7 — silenciosamente nunca
+// tocam Auth/erp_vr_usuarios, só o array local.
+test('9. usrSalvar() (modo criação) grava o uid retornado por adminCreateUser no registro local — sem isso, editar/excluir esse usuário depois nunca alcança Auth/erp_vr_usuarios', function () {
+  assertTrue(/res\s*&&\s*res\.data\s*&&\s*res\.data\.uid/.test(usrSalvarSrc), 'deve ler res.data.uid da resposta de adminCreateUser');
+  var idxUid = usrSalvarSrc.search(/res\s*&&\s*res\.data\s*&&\s*res\.data\.uid/);
+  var idxPush = usrSalvarSrc.indexOf('users.push(novoRec)');
+  assertTrue(idxUid >= 0 && idxPush > idxUid, 'a leitura do uid deve acontecer ANTES de users.push(novoRec)');
+});
+
 // ══════════════════════════════════════════════════════════════════════
 // PROVA ESTÁTICA — authLogin() usa a leitura com retentativa e distingue
 // falha de leitura de perfil ausente.

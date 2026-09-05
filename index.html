@@ -33510,7 +33510,15 @@ function usrSalvar() {
     firebase.functions().httpsCallable('adminCreateUser')({
       email: email, nome: nome.trim(), role: funcaoNorm, ativo: ativoValCriacao
     }).then(function(res){
+      // RODADA DE ESTABILIZAÇÃO 2026-09-05 — achado real do smoke test:
+      // sem gravar o uid retornado por adminCreateUser aqui, o registro
+      // local nunca tinha `uid`, e usrSalvar()/usrDel() caem no fallback
+      // de "usuário sem acesso vinculado" para SEMPRE — editar
+      // função/status ou excluir de verdade um usuário recém-criado
+      // silenciosamente nunca alcançava Auth/erp_vr_usuarios.
+      var uidCriado = (res && res.data && res.data.uid) || null;
       var novoRec = { nome:nome.trim(), email:email, funcao:funcaoNorm, ativo:ativoValCriacao, criado:new Date().toLocaleDateString('pt-BR') };
+      if(uidCriado) novoRec.uid = uidCriado;
       users.push(novoRec);
       _USR_DATA=users;
       if(typeof _cloudSave==='function' && _cloudReady){

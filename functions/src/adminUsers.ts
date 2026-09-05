@@ -279,6 +279,7 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
         ok: true,
         idempotent: true,
         message: "Usuário já existe.",
+        uid: existing.uid,
         uidMasked: maskUid(existing.uid),
       };
     } catch {
@@ -420,9 +421,18 @@ export const adminCreateUser = functions.https.onCall(async (data, context) => {
     success: true,
   });
 
-  // Resposta sanitizada — sem link completo, sem UID completo, sem claims raw
+  // Resposta sanitizada para logs/auditoria (uidMasked) — mas o UID real
+  // também vai no campo `uid`: quem chamou esta function É o master/admin
+  // dono da própria sessão, e precisa do UID de verdade para operar esse
+  // usuário depois (editar função/status, excluir) — sem ele, a UI ficava
+  // permanentemente incapaz de fazer qualquer uma dessas ações no usuário
+  // recém-criado (achado real do smoke test da rodada de estabilização
+  // 2026-09-05: "Excluir" de um usuário criado por adminCreateUser
+  // silenciosamente só removia da lista local, nunca da Auth/perfil,
+  // porque a UI nunca tinha o uid para chamar adminDeleteUser).
   return {
     ok: true,
+    uid: newUser.uid,
     uidMasked: maskUid(newUser.uid),
     nome,
     emailMasked: maskEmail(email),
