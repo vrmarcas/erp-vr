@@ -14974,17 +14974,20 @@ function _kbFornOsMsgText() {
   // sair daqui, muito menos para fora. Kanban/Produção é 100% operacional
   // — nunca expõe valor de venda/custo/margem, nem em tela nem em
   // mensagens geradas a partir dela.
-  var msg  = 'Ola! Segue o pedido de producao referente a OS #'+os.num;
-  if(os.titulo)   msg += ' - '+os.titulo;
-  msg += '.';
-  if(os.cliente)  msg += '\nCliente: '+os.cliente;
-  if(os.material) msg += '\nMaterial: '+os.material;
-  if(os.medidas)  msg += '\nMedidas: '+os.medidas;
-  if(os.qty)      msg += '\nQuantidade: '+os.qty+' un';
-  if(os.entrega)  msg += '\nPrazo de entrega: '+os.entrega;
-  if(link)        msg += '\n\nArquivo / Arte: '+link;
-  msg += '\n\nAgradecemos a parceria!';
-  return msg;
+  // RODADA DE ESTABILIZAÇÃO 2026-09-05 — migrado para a fonte única de
+  // mensagens (msgResolverTemplate/'fornecedorPedidoOs'); os campos
+  // condicionais continuam sendo montados aqui (o template canônico não
+  // tem como saber se cada campo existe) e entram como um único bloco
+  // {detalhes} já formatado.
+  var osRef = os.num + (os.titulo ? ' - '+os.titulo : '');
+  var detalhes = '';
+  if(os.cliente)  detalhes += '\nCliente: '+os.cliente;
+  if(os.material) detalhes += '\nMaterial: '+os.material;
+  if(os.medidas)  detalhes += '\nMedidas: '+os.medidas;
+  if(os.qty)      detalhes += '\nQuantidade: '+os.qty+' un';
+  if(os.entrega)  detalhes += '\nPrazo de entrega: '+os.entrega;
+  var arquivo = link ? '\n\nArquivo / Arte: '+link : '';
+  return msgResolverTemplate('fornecedorPedidoOs', { os_ref: osRef, detalhes: detalhes, arquivo: arquivo });
 }
 function kbEnviarFornWA() {
   var id = (document.getElementById('kbFornSel')||{}).value; if(!id) return;
@@ -25837,11 +25840,20 @@ function vitreOrcEnviarWhatsApp() {
   // aparecem na mensagem enviada ao cliente (mesma política do PDF).
   var condLinhasVitre = '';
   if (o.frete > 0) condLinhasVitre += 'Frete: R$ ' + o.frete.toFixed(2) + '\n';
-  var msg = saudacaoVitre + ', ' + o.clienteNome + '! Segue o orçamento *' + brand.nome + '*:\n\n'
-    + itensTxt + '\n\n'
-    + condLinhasVitre
-    + '*Total: R$ ' + o.total.toFixed(2) + '*\n\n'
-    + 'Válido por ' + o.prazoValidadeDias + ' dias.\n\n*' + responsavel + '*\n*' + brand.nome + '*';
+  // RODADA ESTABILIZAÇÃO 2026-09-05 (acompanhamento do Bloco 4) —
+  // msgResolverTemplate() (fonte canônica, editável em Configurações →
+  // Mensagens Automáticas), template próprio (estrutura diferente do
+  // orçamento VR — sem nº de orçamento/condição de pagamento).
+  var msg = msgResolverTemplate('vitreOrcamentoEnviado', {
+    saudacao: saudacaoVitre,
+    cliente: o.clienteNome,
+    marca: brand.nome,
+    itens: itensTxt,
+    ofertas: condLinhasVitre,
+    valor: 'R$ ' + o.total.toFixed(2),
+    validade: o.prazoValidadeDias,
+    responsavel: responsavel
+  });
   var telNorm = (o.clienteTel || '').replace(/\D/g, '');
   if (telNorm && telNorm.length <= 11) telNorm = '55' + telNorm;
   var url = 'https://wa.me/' + telNorm + '?text=' + encodeURIComponent(msg);
@@ -25953,7 +25965,13 @@ function crmAvançarEtapa(id) {
 function crmAbrirWhatsApp(id) {
   var d = CRM_LEADS[id]; if(!d) return;
   var tel = (d.tel||'').replace(/\D/g,'');
-  var msg = 'Olá, '+d.nome.split(' ')[0]+'! Passando para dar continuidade ao nosso contato sobre '+(d.intencao?d.intencao.produto:'nossos produtos')+'. Posso ajudar com alguma informação?';
+  // RODADA DE ESTABILIZAÇÃO 2026-09-05 — unificado com CRM_MSG_TEMPLATES.followup
+  // (mesma finalidade, dois textos distintos era duplicação real). Fonte
+  // única agora é o template canônico 'crmFollowup'.
+  var msg = msgResolverTemplate('crmFollowup', {
+    nome: d.nome.split(' ')[0],
+    produto: (d.intencao && d.intencao.produto) || 'nossos produtos'
+  });
   window.open('https://wa.me/'+(tel?'55'+tel:'')+'?text='+encodeURIComponent(msg),'_blank');
 }
 
@@ -30139,12 +30157,17 @@ function orcEnviarWhatsApp() {
     ? 'R$ '+os.valor.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (os.valor||'—')) : '—';
   var prod = os ? (os.prod||os.titulo||'Produto') : 'Produto';
-  var msg = 'Olá, '+nome+'! 👋\n\n'
-    +'Segue o orçamento *OS #0'+num+'* da *'+marca+'*.\n\n'
-    +'📦 *Produto:* '+prod+'\n'
-    +'💰 *Valor Total:* '+valFmt+'\n\n'
-    +'Para confirmar ou tirar dúvidas, é só responder aqui. 😊\n'
-    +'— Equipe '+marca;
+  // RODADA ESTABILIZAÇÃO 2026-09-05 (acompanhamento do Bloco 4) —
+  // msgResolverTemplate() (fonte canônica). Texto/formatação preservados
+  // byte a byte (inclusive o "OS #0"+num já existente) — só o mecanismo
+  // de origem do texto muda, nenhuma regra nova.
+  var msg = msgResolverTemplate('orcamentoPosOsEnviado', {
+    cliente: nome,
+    numero_os: num,
+    marca: marca,
+    produto: prod,
+    valor: valFmt
+  });
   var url = 'https://wa.me/'+(tel?'55'+tel:'')+'?text='+encodeURIComponent(msg);
   window.open(url,'_blank');
 }
@@ -30382,20 +30405,56 @@ var MSG_TEMPLATES_PLACEHOLDERS = {
   osPronta:            ['cliente', 'numero_os', 'produto'],
   cobranca:            ['cliente', 'valor', 'vencimento'],
   pagamentoConfirmado: ['cliente', 'marca'],
-  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'ofertas', 'prazo', 'validade', 'forma_pagamento', 'responsavel']
+  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'ofertas', 'prazo', 'validade', 'forma_pagamento', 'responsavel'],
+  // RODADA DE ESTABILIZAÇÃO 2026-09-05 — migração dos 9 pontos de disparo
+  // que ficaram fora do escopo do Bloco 4 original (ver memória
+  // estabilizacao-8blocos-2026-09-04) para a mesma fonte única.
+  vitreOrcamentoEnviado:   ['saudacao', 'cliente', 'marca', 'itens', 'ofertas', 'valor', 'validade', 'responsavel'],
+  orcamentoPosOsEnviado:   ['cliente', 'numero_os', 'marca', 'produto', 'valor'],
+  crmFollowup:             ['nome', 'produto'],
+  crmOrcamentoDisponivel:  ['nome', 'valor'],
+  crmFechamento:           ['nome'],
+  crmPosvenda:             ['nome'],
+  crmEntrega:              ['nome'],
+  crmReativSaudade:        ['nome', 'tempo'],
+  crmReativNovidade:       ['nome', 'produtos'],
+  crmReativOferta:         ['nome'],
+  fornecedorPedidoOs:      ['os_ref', 'detalhes', 'arquivo']
 };
 var MSG_TEMPLATES_NOMES = {
   osPronta:            '📦 Pedido pronto para retirada',
   cobranca:            '💰 Cobrança de conta em aberto',
   pagamentoConfirmado: '✅ Pagamento confirmado / produção iniciada',
-  orcamentoEnviado:    '📤 Orçamento enviado ao cliente'
+  orcamentoEnviado:    '📤 Orçamento enviado ao cliente',
+  vitreOrcamentoEnviado:  '📤 Orçamento Vitre enviado ao cliente',
+  orcamentoPosOsEnviado:  '📤 Orçamento (pós-OS) enviado ao cliente',
+  crmFollowup:            '🔄 CRM: Follow-up',
+  crmOrcamentoDisponivel: '💰 CRM: Orçamento disponível',
+  crmFechamento:          '🤝 CRM: Fechamento',
+  crmPosvenda:            '⭐ CRM: Pós-venda',
+  crmEntrega:             '📦 CRM: Entrega',
+  crmReativSaudade:       '🤖 CRM: Reativação — Saudade',
+  crmReativNovidade:      '🤖 CRM: Reativação — Novidade de produto',
+  crmReativOferta:        '🤖 CRM: Reativação — Oferta exclusiva',
+  fornecedorPedidoOs:     '🏭 Pedido de produção ao fornecedor'
 };
 function msgTemplatesDefault() {
   return {
     osPronta: 'Olá, {cliente}.\nSeu pedido OS #{numero_os} está pronto para retirada.\nProduto: {produto}.\nCaso necessário, podemos combinar a retirada.',
     cobranca: 'Olá {cliente}! Verificamos que sua conta {valor} (venc. {vencimento}) está em aberto. Podemos regularizar?',
     pagamentoConfirmado: 'Olá, *{cliente}*!\n\nSeu pagamento foi confirmado e a produção do seu pedido na *{marca}* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição!\n— Equipe {marca}',
-    orcamentoEnviado: '{saudacao}\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*{ofertas}\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*'
+    orcamentoEnviado: '{saudacao}\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*{ofertas}\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*',
+    vitreOrcamentoEnviado: '{saudacao}\n\nSegue o orçamento da *{marca}*:\n\n{itens}\n\n{ofertas}\n*VALOR TOTAL: {valor}*\n\n*Validade do orçamento:* {validade}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n*{responsavel}*',
+    orcamentoPosOsEnviado: 'Olá, {cliente}!\n\nSegue o orçamento referente à OS #0{numero_os} — {marca}.\nProduto: {produto}.\nValor: {valor}.\n\nCaso queira aprovar ou tirar alguma dúvida, é só responder a esta mensagem.',
+    crmFollowup:            'Olá {nome}! Tudo bem? Estou entrando em contato para dar continuidade ao seu interesse em {produto}. Podemos conversar?',
+    crmOrcamentoDisponivel: 'Olá {nome}! Seu orçamento de {valor} está disponível. Posso esclarecer alguma dúvida ou ajustar algo?',
+    crmFechamento:          'Olá {nome}! Verificando se conseguiu avaliar nossa proposta. Estamos prontos para iniciar sua produção assim que confirmar!',
+    crmPosvenda:            'Olá {nome}! Como foi sua experiência com nosso produto? Sua satisfação é muito importante para nós. 😊',
+    crmEntrega:             'Olá {nome}! Seu pedido está pronto e será entregue em breve. Qualquer dúvida estamos à disposição!',
+    crmReativSaudade:       'Oi {nome}! 😊 Tudo bem? Faz {tempo} que a gente não fala e você faz falta por aqui! Tem novidades no nosso catálogo que acho que você vai gostar. Posso te mostrar? 🎨',
+    crmReativNovidade:      'Olá {nome}! 👋 Passando para te contar que temos novidades em {produtos}. Se você precisar de algo personalizado ou quiser ver nossas opções, é só chamar — adoramos trabalhar com você! 🙌',
+    crmReativOferta:        'Oi {nome}! Como você é um cliente especial da VR, preparamos uma condição exclusiva para o seu próximo pedido. Quer saber mais? Me chama que eu te explico! 😄',
+    fornecedorPedidoOs:     'Ola! Segue o pedido de producao referente a OS #{os_ref}.\n{detalhes}{arquivo}\n\nAgradecemos a parceria!'
   };
 }
 // Varre o texto por `{qualquer_coisa}` e devolve os nomes que NÃO estão na
@@ -32416,17 +32475,17 @@ function crmBaseReativacaoIA(id) {
     {
       label:'😊 Saudade',
       desc:'Tom caloroso, foco no relacionamento',
-      texto:'Oi '+fn+'! 😊 Tudo bem? Faz '+diasStr+' que a gente não fala e você faz falta por aqui! Tem novidades no nosso catálogo que acho que você vai gostar. Posso te mostrar? 🎨'
+      texto: msgResolverTemplate('crmReativSaudade', { nome: fn, tempo: diasStr })
     },
     {
       label:'🆕 Novidade de produto',
       desc:'Foco nos produtos que o cliente já comprou',
-      texto:'Olá '+fn+'! 👋 Passando para te contar que temos novidades em '+prods+'. Se você precisar de algo personalizado ou quiser ver nossas opções, é só chamar — adoramos trabalhar com você! 🙌'
+      texto: msgResolverTemplate('crmReativNovidade', { nome: fn, produtos: prods })
     },
     {
       label:'🎁 Oferta exclusiva',
       desc:'Tom de exclusividade e urgência',
-      texto:'Oi '+fn+'! Como você é um cliente especial da VR, preparamos uma condição exclusiva para o seu próximo pedido. Quer saber mais? Me chama que eu te explico! 😄'
+      texto: msgResolverTemplate('crmReativOferta', { nome: fn })
     }
   ];
   var existMod = document.getElementById('crmReativIAModal');
@@ -36095,12 +36154,16 @@ function crmMoverFase(id, novaFase) {
 }
 
 // ── Mensagens ─────────────────────────────────────────────────────────────────
+// RODADA DE ESTABILIZAÇÃO 2026-09-05 — cada entrada agora só guarda o label
+// e a CHAVE do template canônico (msgResolverTemplate); o texto em si
+// (customizável em Configurações → Mensagens Automáticas) deixou de viver
+// hardcoded aqui, fechando um dos 9 pontos de disparo fora da fonte única.
 var CRM_MSG_TEMPLATES = {
-  followup:  { label:'🔄 Follow-up',    texto: 'Olá {nome}! Tudo bem? Estou entrando em contato para dar continuidade ao seu interesse em {produto}. Podemos conversar?' },
-  orcamento: { label:'💰 Orçamento',    texto: 'Olá {nome}! Seu orçamento de {valor} está disponível. Posso esclarecer alguma dúvida ou ajustar algo?' },
-  fechamento:{ label:'🤝 Fechamento',   texto: 'Olá {nome}! Verificando se conseguiu avaliar nossa proposta. Estamos prontos para iniciar sua produção assim que confirmar!' },
-  posvenda:  { label:'⭐ Pós-Venda',    texto: 'Olá {nome}! Como foi sua experiência com nosso produto? Sua satisfação é muito importante para nós. 😊' },
-  entrega:   { label:'📦 Entrega',      texto: 'Olá {nome}! Seu pedido está pronto e será entregue em breve. Qualquer dúvida estamos à disposição!' }
+  followup:  { label:'🔄 Follow-up',    chave: 'crmFollowup' },
+  orcamento: { label:'💰 Orçamento',    chave: 'crmOrcamentoDisponivel' },
+  fechamento:{ label:'🤝 Fechamento',   chave: 'crmFechamento' },
+  posvenda:  { label:'⭐ Pós-Venda',    chave: 'crmPosvenda' },
+  entrega:   { label:'📦 Entrega',      chave: 'crmEntrega' }
 };
 
 var _crmMsgId = null;
@@ -36120,10 +36183,11 @@ function crmMsgSelecionarTemplate(tipo) {
   var lead = CRM_LEADS[_crmMsgId]; if(!lead) return;
   var tpl = CRM_MSG_TEMPLATES[tipo];
   if(!tpl) return;
-  var txt = tpl.texto
-    .replace('{nome}', lead.nome)
-    .replace('{produto}', (lead.intencao&&lead.intencao.produto)||'nossos produtos')
-    .replace('{valor}', lead.valor_potencial||'o valor do orçamento');
+  var txt = msgResolverTemplate(tpl.chave, {
+    nome: lead.nome,
+    produto: (lead.intencao && lead.intencao.produto) || 'nossos produtos',
+    valor: lead.valor_potencial || 'o valor do orçamento'
+  });
   document.getElementById('crmMsgTexto').value = txt;
   // highlight selecionado
   document.querySelectorAll('.crm-msg-tpl-btn').forEach(function(b){ b.classList.remove('on'); });

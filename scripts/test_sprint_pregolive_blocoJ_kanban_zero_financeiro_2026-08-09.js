@@ -47,6 +47,15 @@ function extractFn(name) {
   for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
   return html.slice(start, i + 1);
 }
+function extractVar(name) {
+  var marker = 'var ' + name + ' = {';
+  var start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  var braceOpen = html.indexOf('{', start);
+  var depth = 0, i = braceOpen;
+  for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
+  return html.slice(start, i + 1) + ';';
+}
 
 console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco J — Kanban: zero dado financeiro ===\n');
 
@@ -68,11 +77,21 @@ console.log('\n=== SPRINT PRÉ-GO-LIVE, Bloco J — Kanban: zero dado financeiro
 
 // ── 4-6. Execução real: _kbFornOsMsgText() nunca mais inclui valor de venda ──
 {
-  var src = extractFn('_kbFornOsMsgText') + '\n\nmodule.exports = { _kbFornOsMsgText };';
+  // RODADA DE ESTABILIZAÇÃO 2026-09-05 — _kbFornOsMsgText() migrou para a
+  // fonte única de mensagens (msgResolverTemplate); a extração agora
+  // precisa trazer junto o motor de templates, não só a função isolada.
+  var src = [
+    extractVar('MSG_TEMPLATES_PLACEHOLDERS'),
+    extractFn('msgTemplatesDefault'),
+    extractFn('msgResolverTemplate'),
+    extractFn('_kbFornOsMsgText'),
+    'module.exports = { _kbFornOsMsgText };'
+  ].join('\n\n');
   var modPath = path.join(__dirname, '_blocoJ_kb_forn_msg_extracted.tmp.js');
   fs.writeFileSync(modPath, src);
   delete require.cache[require.resolve(modPath)];
 
+  global.cfgLoad = function () { return {}; };
   global._kbOsId = 'os1';
   global.KB_OS = { os1: {
     num: 42, titulo: 'Carrinho de Make', cliente: 'Cliente Teste',
