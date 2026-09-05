@@ -53,6 +53,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  '_planAtualizarLabelsDim',
   'orcProdutoNomeResolvido',
   'cfgEsc', '_matGetRsm2', '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', '_planDeltaEspecificoPecas', '_planConsumiveisChip', '_planConsumiveisCelulaHtml',
   '_planPieceSlug', '_planReconcilePieces', '_planSeedFromPersisted', '_planBuildAllPecas',

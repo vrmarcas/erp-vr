@@ -3459,6 +3459,16 @@ function _authFirebaseError(code){
                 <div id="orcVitreBuscaResult" style="max-height:120px;overflow-y:auto;display:none;border:1px solid var(--border);border-radius:7px"></div>
                 <div id="orcVitreItensLista" style="display:flex;flex-direction:column;gap:4px"></div>
                 <div id="orcVitreItensEmpty" style="font-size:11px;color:var(--muted)">Nenhum item Vitre neste pedido ainda.</div>
+                <!-- RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — override de
+                     desconto Pix específico deste orçamento (nunca altera o
+                     padrão global de Configurações → Catálogo Vitre). Em
+                     branco = usa o padrão configurado. -->
+                <div id="orcVitrePixWrap" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:2px">
+                  <span>Desconto PIX (Vitre):</span>
+                  <input type="number" id="orcVitrePixPct" min="0" max="100" step="0.1" style="width:60px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;font-size:11px" oninput="orcVitreRenderLista()">
+                  <span>%</span>
+                  <span id="orcVitrePixPadraoInfo"></span>
+                </div>
               </div>
             </div>
 
@@ -6706,6 +6716,21 @@ function _authFirebaseError(code){
             <input type="text" id="planProdDesc" placeholder="Ex: Frente, laterais, base e fundo" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
           </div>
 
+          <!-- RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — labels dos campos
+               dimensionais são configuráveis por produto (nunca hardcoded
+               por nome de produto): as fórmulas continuam usando L/A/P/e,
+               só o TEXTO exibido no modal de Planificação muda. Em branco
+               usa o padrão Comprimento/Largura/Altura. -->
+          <div class="fg">
+            <label>Nomes dos campos de dimensão no modal de Planificação (opcional)</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+              <input type="text" id="planProdLabelL" placeholder="Comprimento (padrão)" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <input type="text" id="planProdLabelA" placeholder="Largura (padrão)" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+              <input type="text" id="planProdLabelP" placeholder="Altura (padrão)" style="width:100%;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text)">
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:3px">Ex.: um produto redondo pode usar "Diâmetro" no lugar de "Largura" — a fórmula continua recebendo o mesmo valor como A.</div>
+          </div>
+
           <!-- Arquivos de Corte / Planificação por Espessura -->
           <div class="fg">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -7009,6 +7034,17 @@ function _authFirebaseError(code){
         <button class="topbar-btn ghost" onclick="vitreCatIncompletosToggle()" style="font-size:12px" id="vitreCatBtnIncompletos">📋 Cadastros incompletos</button>
         <button class="topbar-btn ghost" onclick="vitreCatalogoImportarModal()" style="font-size:12px" id="vitreCatBtnImportar">📥 Importar planilha</button>
         <button class="topbar-btn" onclick="vitreCatalogoNovoModal()" style="font-size:12px;background:var(--vt-teal,#1E7A86);border:none;color:#fff" id="vitreCatBtnNovo">＋ Novo Produto</button>
+      </div>
+      <!-- RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — Vitre Cartão + Pix.
+           O preço cadastrado em cada produto é sempre o de CARTÃO; o Pix é
+           sempre derivado dele por este percentual — configurável aqui,
+           nunca digitado item a item num orçamento. -->
+      <div class="card" style="margin-bottom:16px;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:700;color:var(--text)">💳⚡ Preço-base do catálogo = Cartão · Desconto PIX padrão:</span>
+        <input type="number" id="vitreCatPixDescontoPadrao" min="0" max="100" step="0.1" style="width:70px;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:12px">
+        <span style="font-size:12px;color:var(--muted)">%</span>
+        <button class="topbar-btn" onclick="vitreCatSalvarPixDescontoPadrao()" style="font-size:11px;padding:5px 12px">💾 Salvar</button>
+        <span style="font-size:10.5px;color:var(--muted)">Cada orçamento pode sobrescrever só para si, sem alterar este padrão.</span>
       </div>
       <div id="vitreCatIncompletosPanel" style="display:none;margin-bottom:16px">
         <div class="card" style="padding:14px">
@@ -9907,6 +9943,12 @@ function orcProdutosCanonicos(planProdList, orcProdutosLegado) {
   (planProdList || []).forEach(function (p) {
     var nome = String((p && p.nome) || '').trim();
     if (!nome) return;
+    // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — produto desativado
+    // (p.ativo===0) nunca aparece como opção para um item NOVO — nunca
+    // afeta orçamento já existente que já referencia esse produto (o
+    // recipeSnapshot congelado no item é a fonte usada ali, não esta
+    // lista de seleção).
+    if (p && p.ativo === 0) return;
     var chave = nome.toLowerCase();
     if (vistos[chave]) return;
     vistos[chave] = true;
@@ -9998,6 +10040,9 @@ function receitaSnapshotParaItem(produto) {
       pecas: JSON.parse(JSON.stringify(produto.pecas || [])),
       campos: JSON.parse(JSON.stringify(produto.campos || [])),
       planificacoes: JSON.parse(JSON.stringify(produto.planificacoes || [])),
+      labelL: produto.labelL || '',
+      labelA: produto.labelA || '',
+      labelP: produto.labelP || '',
     },
   };
 }
@@ -10223,6 +10268,12 @@ function receitaResolverParaCalculo(item, produtoAtual) {
       campos: item.recipeSnapshot.campos || [],
       recipeVersion: item.recipeVersion || 1,
       origem: 'snapshot',
+      // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — labels dimensionais
+      // fazem parte da receita congelada, mesmo motivo dos campos extras
+      // acima (reabrir item histórico nunca herda label vigente).
+      labelL: item.recipeSnapshot.labelL || '',
+      labelA: item.recipeSnapshot.labelA || '',
+      labelP: item.recipeSnapshot.labelP || '',
     };
   }
   if (produtoAtual) {
@@ -10234,6 +10285,9 @@ function receitaResolverParaCalculo(item, produtoAtual) {
       campos: produtoAtual.campos || [],
       recipeVersion: produtoAtual.recipeVersion || 1,
       origem: 'atual',
+      labelL: produtoAtual.labelL || '',
+      labelA: produtoAtual.labelA || '',
+      labelP: produtoAtual.labelP || '',
     };
   }
   return null;
@@ -10568,6 +10622,9 @@ function planGetRecipe(produto, recipeSnapshot) {
       dim3d: resolvido.dim3d,
       desc: resolvido.desc,
       campos: resolvido.campos || [],
+      labelL: resolvido.labelL || '',
+      labelA: resolvido.labelA || '',
+      labelP: resolvido.labelP || '',
       pieces: function(L, A, P, e, extra) {
         var ctx = Object.assign({L:L, A:A, P:P, e:e}, extra||{});
         return (resolvido.pecasFormulas||[]).map(function(peca) {
@@ -10591,6 +10648,9 @@ function planGetRecipe(produto, recipeSnapshot) {
       dim3d: !!custom.dim3d,
       desc: custom.desc || custom.nome,
       campos: custom.campos || [],
+      labelL: custom.labelL || '',
+      labelA: custom.labelA || '',
+      labelP: custom.labelP || '',
       // RODADA 6, seção 1 — `extra` (opcional) traz os valores dos campos
       // de entrada adicionais da receita (além de L/A/P/e), lidos pela UI
       // de planificação a partir de receitaCamposEfetivos(). Sem `extra`
@@ -10619,6 +10679,20 @@ function planGetRecipe(produto, recipeSnapshot) {
   };
 }
 
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — nomes dos campos
+// dimensionais (Comprimento/Largura/Altura) passam a vir da receita do
+// produto (rec.labelL/labelA/labelP, configuráveis em Produtos &
+// Receitas de Planificação — ver planProdSalvar), nunca mais um texto
+// fixo igual para todo produto. Sem label customizado, cai no padrão de
+// sempre — zero mudança visual para produtos que não configuraram nada.
+function _planAtualizarLabelsDim(rec) {
+  var lL = document.getElementById('planLargLabel');
+  var lA = document.getElementById('planAltLabel');
+  var lP = document.getElementById('planProfLabel');
+  if(lL) lL.textContent = (rec && rec.labelL ? rec.labelL : 'Comprimento') + ' (cm)';
+  if(lA) lA.textContent = (rec && rec.labelA ? rec.labelA : 'Largura') + ' (cm)';
+  if(lP) lP.textContent = (rec && rec.labelP ? rec.labelP : 'Altura') + ' (cm)';
+}
 function planAbrir(idx) {
   _planIdx = idx;
   var prodEl  = document.getElementById('oi_prod_'+idx);
@@ -10635,6 +10709,7 @@ function planAbrir(idx) {
   var _savedSnapshot = null;
   try { _savedSnapshot = row && row.dataset.recipeSnapshot ? JSON.parse(row.dataset.recipeSnapshot) : null; } catch(e){ _savedSnapshot = null; }
   var rec     = planGetRecipe(produto, _savedSnapshot);
+  _planAtualizarLabelsDim(rec);
 
   document.getElementById('planModalTitle').textContent = '📐 Planificação — ' + produto;
 
@@ -11128,6 +11203,7 @@ function planCalc() {
   var _savedSnapshotCalc = null;
   try { _savedSnapshotCalc = _rowCalc && _rowCalc.dataset.recipeSnapshot ? JSON.parse(_rowCalc.dataset.recipeSnapshot) : null; } catch(e){ _savedSnapshotCalc = null; }
   var rec     = planGetRecipe(produto, _savedSnapshotCalc);
+  _planAtualizarLabelsDim(rec);
 
   // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3 — mostra/esconde
   // o toggle "Aplicar descontos de montagem" só para receitas que o
@@ -12124,6 +12200,26 @@ window.calcularOrcamentoAPI = function(params) {
 // testadas em test_hibrido_vr_vitre_2026-08-08.js).
 var _orcVitreItensPedido = [];
 
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — Vitre Cartão + Pix.
+// Fonte única: o preço cadastrado no Catálogo Vitre (precoVenda) é
+// SEMPRE o preço de CARTÃO, nunca alterado automaticamente. O Pix é
+// SEMPRE derivado dele por um percentual — nunca digitado item a item.
+// `overridePct` (do orçamento atual, campo #orcVitrePixPct) tem
+// prioridade sobre o padrão global (Configurações → Catálogo Vitre,
+// cfgLoad().vitre.pixDescontoPct); nenhum dos dois nunca é negativo ou
+// maior que 100 (defesa contra dado corrompido/digitado errado).
+function vitreResolverDescontoPixPadrao() {
+  var cfgV = (typeof cfgLoad==='function' ? (cfgLoad().vitre||{}) : {});
+  var pct = (cfgV.pixDescontoPct!=null) ? cfgV.pixDescontoPct : (typeof CFG_DEFAULT!=='undefined' ? CFG_DEFAULT.vitre.pixDescontoPct : 5);
+  return Math.max(0, Math.min(100, parseFloat(pct)||0));
+}
+function vitreCalcularPrecoPix(precoCartao, overridePct) {
+  var pct = (overridePct!=null && overridePct!=='') ? Math.max(0, Math.min(100, parseFloat(overridePct)||0)) : vitreResolverDescontoPixPadrao();
+  var cartao = parseFloat(precoCartao)||0;
+  var pix = cartao * (1 - pct/100);
+  return { cartao: cartao, pix: pix, percentual: pct };
+}
+
 function orcVitreBuscar() {
   var termo = (document.getElementById('orcVitreBusca')||{}).value||'';
   var termoNorm = termo.trim().toLowerCase();
@@ -12172,16 +12268,41 @@ function orcVitreRenderLista() {
   var lista = document.getElementById('orcVitreItensLista');
   var empty = document.getElementById('orcVitreItensEmpty');
   if(!lista) return;
-  if(!_orcVitreItensPedido.length) { lista.innerHTML=''; if(empty) empty.style.display='block'; return; }
+  var pixWrap = document.getElementById('orcVitrePixWrap');
+  if(!_orcVitreItensPedido.length) {
+    lista.innerHTML='';
+    if(empty) empty.style.display='block';
+    if(pixWrap) pixWrap.style.display='none';
+    return;
+  }
   if(empty) empty.style.display='none';
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — mostra o campo de override
+  // de desconto Pix só quando há item Vitre no pedido; pré-preenche com o
+  // padrão global na primeira vez (nunca sobrescreve o que o vendedor já
+  // digitou nesta sessão).
+  if(pixWrap) {
+    pixWrap.style.display='flex';
+    var pixInput = document.getElementById('orcVitrePixPct');
+    var padrao = vitreResolverDescontoPixPadrao();
+    if(pixInput && pixInput.value==='') pixInput.value = padrao;
+    var info = document.getElementById('orcVitrePixPadraoInfo');
+    if(info) info.textContent = '(padrão configurado: '+padrao+'%)';
+  }
+  var overridePct = (document.getElementById('orcVitrePixPct')||{}).value;
   lista.innerHTML = _orcVitreItensPedido.map(function(it, i){
-    var subtotal = (parseInt(it.qty,10)||1) * (parseFloat(it.precoVenda)||0);
+    var qty = parseInt(it.qty,10)||1;
+    var precoUnitCartao = parseFloat(it.precoVenda)||0;
+    var subtotalCartao = qty * precoUnitCartao;
+    var _pix = vitreCalcularPrecoPix(subtotalCartao, overridePct);
     return '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg2);border-radius:7px;font-size:12px">'
       + '<span style="flex:1"><strong>'+cfgEsc(it.sku)+'</strong> — '+cfgEsc(it.prod)+'</span>'
       + '<button class="topbar-btn ghost" style="padding:2px 8px;font-size:11px" onclick="orcVitreAlterarQty('+i+',-1)">−</button>'
-      + '<span style="min-width:18px;text-align:center">'+(parseInt(it.qty,10)||1)+'</span>'
+      + '<span style="min-width:18px;text-align:center">'+qty+'</span>'
       + '<button class="topbar-btn ghost" style="padding:2px 8px;font-size:11px" onclick="orcVitreAlterarQty('+i+',1)">+</button>'
-      + '<span style="min-width:70px;text-align:right;font-weight:700;color:var(--brand-mid)">R$'+subtotal.toFixed(2)+'</span>'
+      + '<span style="min-width:150px;text-align:right;font-size:11px;line-height:1.4">'
+        + '💳 <strong style="color:var(--brand-mid)">R$'+subtotalCartao.toFixed(2)+'</strong><br>'
+        + '⚡ <strong style="color:#16A34A">R$'+_pix.pix.toFixed(2)+'</strong> <span style="color:var(--muted)">('+_pix.percentual+'% off)</span>'
+        + '</span>'
       + '<button style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:13px" onclick="orcVitreRemoverItem('+i+')" title="Remover">×</button>'
       + '</div>';
   }).join('');
@@ -24134,7 +24255,26 @@ var _VITRE_CAT_LOAD_ERROR = false;
 // terminal (nunca oferece retry); falha transitória ganha "Tentar
 // novamente" via vitreCatalogoInit() de novo (mesma leitura, sem reload).
 var _VITRE_CAT_FORBIDDEN = false;
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — carrega/salva o padrão global
+// de desconto Pix (cfgLoad().vitre.pixDescontoPct) na tela de Configurações
+// → Catálogo Vitre. Reaproveita cfgLoad()/cfgSave() — mesma fonte canônica
+// já usada por todo o resto de Configurações, nunca um doc/coleção à parte.
+function vitreCatPopularPixDescontoPadrao() {
+  var el = document.getElementById('vitreCatPixDescontoPadrao');
+  if(el) el.value = vitreResolverDescontoPixPadrao();
+}
+function vitreCatSalvarPixDescontoPadrao() {
+  var el = document.getElementById('vitreCatPixDescontoPadrao');
+  var pct = Math.max(0, Math.min(100, parseFloat(el && el.value)||0));
+  var cfg = cfgLoad();
+  cfg.vitre = Object.assign({}, cfg.vitre, { pixDescontoPct: pct });
+  cfgSave(cfg).then(function(r){
+    if(r && r.ok===false){ showToast('Não foi possível salvar — tente novamente.', 'err'); return; }
+    showToast('Desconto Pix padrão do Vitre salvo: '+pct+'%', 'ok');
+  });
+}
 function vitreCatalogoInit() {
+  vitreCatPopularPixDescontoPadrao();
   if (_vitreCatUnsub || typeof _db === 'undefined' || !_db) return;
   _vitreCatUnsub = _db.collection('vitre_produtos').onSnapshot(function (snap) {
     VITRE_CATALOGO_CACHE = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (a.sku || '').localeCompare(b.sku || ''); });
@@ -24754,6 +24894,9 @@ function orcResetFormularioVR(){
   // RODADA 6, seção 10 — Híbrido VR+Vitre: novo pedido nunca herda itens
   // Vitre do pedido anterior.
   _orcVitreItensPedido = [];
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — override de desconto Pix
+  // também é por-orçamento, nunca herdado do pedido anterior.
+  var _vitrePixEl = document.getElementById('orcVitrePixPct'); if(_vitrePixEl) _vitrePixEl.value = '';
   if(typeof orcVitreRenderLista==='function') orcVitreRenderLista();
   if(typeof vitreCatalogoInit==='function') vitreCatalogoInit(); // idempotente — só liga o listener 1x
   var setV=function(id,v){ var el=document.getElementById(id); if(el) el.value=v; };
@@ -26530,19 +26673,28 @@ async function orcEnviarOrcamentoWA() {
     extrasStr += '\n\n*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
   }
 
+  // Sem nome de cliente: saudação genérica "Olá!" sozinha — nunca uma
+  // vírgula/asterisco soltos por interpolar {cliente} vazio (comportamento
+  // preservado da versão anterior a esta rodada).
+  var saudacaoNome = primeiroNome ? (orcSaudacaoHorario()+', *'+primeiroNome+'*!') : 'Olá!';
+
   // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — msgResolverTemplate()
   // (fonte canônica, editável em Configurações → Mensagens Automáticas).
+  // `saudacao` já vem pronta (linha de saudação inteira, com o fallback
+  // acima) — nunca montada por concatenação de {saudacao}+{cliente} no
+  // template, que quebraria essa mesma degradação graciosa.
   // `itens`/`valor` continuam montados aqui (lista numerada com grupos de
   // opções, e o bloco de parcelamento/desconto/PIX condicional acoplado
   // ao total) — são blocos canônicos DERIVADOS de dados reais, não texto
   // fixo; o template controla só o texto ao redor deles.
   var msg = msgResolverTemplate('orcamentoEnviado', {
-    saudacao: orcSaudacaoHorario(),
+    saudacao: saudacaoNome,
     cliente: primeiroNome || 'Cliente',
     marca: marca,
     numero_orcamento: numero,
     itens: itensStr ? ('*Itens do orçamento*\n\n'+itensStr) : '',
-    valor: totalExibido+extrasStr,
+    valor: totalExibido,
+    ofertas: extrasStr,
     prazo: orcGetPrazoTexto(),
     validade: orcGetValidadeDias()+' dias',
     forma_pagamento: condicaoLabelWA,
@@ -28174,11 +28326,21 @@ async function _orcSalvarOrcamentoImpl() {
   // itens do catálogo Vitre adicionados ao MESMO pedido entram no mesmo
   // itens[] do orçamento VR (nunca um segundo orçamento/documento). O
   // preço já é final de catálogo — nada aqui é recalculado, só transportado.
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — congela precoPix/pixPct no
+  // momento da venda (mesmo princípio do recipeSnapshot/_orcAdhPrecoSnapshot
+  // já usados no motor VR): alterar o desconto Pix padrão global amanhã
+  // NUNCA muda o valor já apresentado neste orçamento.
+  var _vitrePixPctSalvo = (document.getElementById('orcVitrePixPct')||{}).value;
   (_orcVitreItensPedido||[]).forEach(function(it){
+    var _qty = parseInt(it.qty,10)||1;
+    var _precoCartao = parseFloat(it.precoVenda)||0;
+    var _pixCalc = vitreCalcularPrecoPix(_qty*_precoCartao, _vitrePixPctSalvo);
     _itens.push({
       tipoItem: 'vitre_catalogo',
-      sku: it.sku, prod: it.prod||'', qty: String(it.qty||1),
-      precoVenda: parseFloat(it.precoVenda)||0
+      sku: it.sku, prod: it.prod||'', qty: String(_qty),
+      precoVenda: _precoCartao,
+      precoPixUnit: _qty>0 ? (_pixCalc.pix/_qty) : 0,
+      pixPct: _pixCalc.percentual
     });
   });
   var _nome  = (document.getElementById('orcClientNome')||{}).value||'';
@@ -29225,6 +29387,14 @@ function orcEnvEditar(id) {
             tipoItem:'vitre_catalogo', sku: it.sku, prod: it.prod||'',
             qty: parseInt(it.qty,10)||1, precoVenda: parseFloat(it.precoVenda)||0
           });
+          // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — restaura o
+          // percentual de desconto Pix CONGELADO na venda (nunca o padrão
+          // global vigente agora) — pega do primeiro item Vitre encontrado,
+          // já que o override é um único campo por orçamento.
+          if(it.pixPct!=null){
+            var _vitrePixElRestaurar = document.getElementById('orcVitrePixPct');
+            if(_vitrePixElRestaurar && _vitrePixElRestaurar.value==='') _vitrePixElRestaurar.value = it.pixPct;
+          }
           return;
         }
         orcAddItem();
@@ -30145,6 +30315,13 @@ var CFG_DEFAULT = {
   // migrados dos literais hardcoded que orcRecalc() usava antes (0.0056 e
   // 0.0011 R$/cm²) — mesmos valores, agora editáveis em Config. Orçamento.
   financeiro: { overhead:15, vrml:30, impostos:0, comissao:0, cartao:3.49, pix:0.99, link:4.99, descMax:10, adesivoPrecoCm2:0.0056, adesivoBrancoPrecoCm2:0.0011 },
+  // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — o preço cadastrado no
+  // Catálogo Vitre é sempre o preço de CARTÃO (nunca alterado
+  // automaticamente); o Pix é sempre DERIVADO dele por este percentual —
+  // nunca digitado item a item. Editável em Configurações → Catálogo
+  // Vitre; cada orçamento pode sobrescrever só para si (ver
+  // orcVitrePixPct no wizard), sem nunca tocar neste padrão global.
+  vitre: { pixDescontoPct: 5 },
   markup: { geral:100, adesivo:120, placa:90, instalacao:150, arte:200, mob:100 },
   parcelamento: [
     {parcelas:1,  taxa:0,    obs:'À vista'},
@@ -30205,7 +30382,7 @@ var MSG_TEMPLATES_PLACEHOLDERS = {
   osPronta:            ['cliente', 'numero_os', 'produto'],
   cobranca:            ['cliente', 'valor', 'vencimento'],
   pagamentoConfirmado: ['cliente', 'marca'],
-  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'prazo', 'validade', 'forma_pagamento', 'responsavel']
+  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'ofertas', 'prazo', 'validade', 'forma_pagamento', 'responsavel']
 };
 var MSG_TEMPLATES_NOMES = {
   osPronta:            '📦 Pedido pronto para retirada',
@@ -30218,7 +30395,7 @@ function msgTemplatesDefault() {
     osPronta: 'Olá, {cliente}.\nSeu pedido OS #{numero_os} está pronto para retirada.\nProduto: {produto}.\nCaso necessário, podemos combinar a retirada.',
     cobranca: 'Olá {cliente}! Verificamos que sua conta {valor} (venc. {vencimento}) está em aberto. Podemos regularizar?',
     pagamentoConfirmado: 'Olá, *{cliente}*!\n\nSeu pagamento foi confirmado e a produção do seu pedido na *{marca}* já foi iniciada. Assim que estiver pronto, avisaremos por aqui.\n\nQualquer dúvida estamos à disposição!\n— Equipe {marca}',
-    orcamentoEnviado: '{saudacao}, *{cliente}*!\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*'
+    orcamentoEnviado: '{saudacao}\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*{ofertas}\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*'
   };
 }
 // Varre o texto por `{qualquer_coisa}` e devolve os nomes que NÃO estão na
@@ -35189,15 +35366,15 @@ document.addEventListener('DOMContentLoaded', function() {
     <div id="planInfoBox" style="background:var(--bg2);border-radius:8px;padding:9px 13px;font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6"></div>
     <div class="plan-dim-row" id="planDimRow">
       <div class="fg-s">
-        <label>Comprimento (cm)</label>
+        <label id="planLargLabel">Comprimento (cm)</label>
         <input type="number" id="planLarg" placeholder="ex: 50" oninput="planCalc()" min="0" step="0.1">
       </div>
       <div class="fg-s">
-        <label>Largura (cm)</label>
+        <label id="planAltLabel">Largura (cm)</label>
         <input type="number" id="planAlt" placeholder="ex: 80" oninput="planCalc()" min="0" step="0.1">
       </div>
       <div class="fg-s" id="planProfWrap">
-        <label>Altura (cm)</label>
+        <label id="planProfLabel">Altura (cm)</label>
         <input type="number" id="planProf" placeholder="ex: 30" oninput="planCalc()" min="0" step="0.1">
       </div>
     </div>
@@ -37310,9 +37487,10 @@ function planProdRender() {
     } else {
       lista.innerHTML = prods.map(function(p) {
         var pecasTxt = (p.pecas||[]).map(function(pc){ return (pc.qty>1?pc.qty+'× ':'')+pc.nome; }).join(', ');
-        return '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px">'
+        var _inativo = p.ativo===0;
+        return '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px'+(_inativo?';opacity:.55':'')+'">'
           +'<div style="flex:1">'
-          +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+'</div>'
+          +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+(_inativo?' <span style="font-size:9px;font-weight:800;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:1px 6px;vertical-align:middle">INATIVO</span>':'')+'</div>'
           +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
           +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
           +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){
@@ -37328,6 +37506,7 @@ function planProdRender() {
           +'</div>'
           +'<div style="display:flex;gap:6px">'
           +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
+          +'<button data-pid="'+p.id+'" onclick="planProdToggleAtivo(this.dataset.pid)" style="background:none;border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;color:var(--muted)">'+(_inativo?'✅ Reativar':'🚫 Desativar')+'</button>'
           +'<button data-pid="'+p.id+'" onclick="planProdDel(this.dataset.pid)" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer">🗑</button>'
           +'</div>'
           +'</div>';
@@ -37727,6 +37906,9 @@ function planProdNovoOpen() {
   document.getElementById('planProdNome').value  = '';
   document.getElementById('planProdDesc').value  = '';
   document.getElementById('planProdDim3d').checked = true;
+  document.getElementById('planProdLabelL').value = '';
+  document.getElementById('planProdLabelA').value = '';
+  document.getElementById('planProdLabelP').value = '';
   _planEspReset(null, null);
   planProdRenderPecas();
   planProdRenderCampos();
@@ -37749,6 +37931,9 @@ function planProdEditar(id) {
   document.getElementById('planProdNome').value  = p.nome||'';
   document.getElementById('planProdDesc').value  = p.desc||'';
   document.getElementById('planProdDim3d').checked = !!p.dim3d;
+  document.getElementById('planProdLabelL').value = p.labelL||'';
+  document.getElementById('planProdLabelA').value = p.labelA||'';
+  document.getElementById('planProdLabelP').value = p.labelP||'';
   _planEspReset(p.planificacoes||null, p.svg||null);
   planProdRenderPecas();
   planProdRenderCampos();
@@ -38096,6 +38281,9 @@ function planProdSalvar() {
     nome:  nome.trim(),
     desc:  ((document.getElementById('planProdDesc')||{}).value||'').trim(),
     dim3d: !!(document.getElementById('planProdDim3d')||{}).checked,
+    labelL: ((document.getElementById('planProdLabelL')||{}).value||'').trim(),
+    labelA: ((document.getElementById('planProdLabelA')||{}).value||'').trim(),
+    labelP: ((document.getElementById('planProdLabelP')||{}).value||'').trim(),
     pecas: _planProdPecas.map(function(p){ return {qty:p.qty,nome:p.nome,larg:p.larg,alt:p.alt,esp:p.esp||'',tipo:p.tipo||'',__src:p.__src||null}; }),
     campos: _planProdCampos.map(function(c){ return {chave:c.chave,label:c.label,tipo:c.tipo||'numero',unidade:c.unidade||'',obrigatorio:!!c.obrigatorio,min:c.min!==''?c.min:undefined,max:c.max!==''?c.max:undefined,default:c.default!==''?c.default:undefined}; }),
     materialPadrao: _material.materialPadrao,
@@ -38120,7 +38308,7 @@ function planProdSalvar() {
       : Object.assign({}, existente, _mudancas);
     prods[idx] = prod;
   } else {
-    prod = Object.assign({ id: _planProdEditId || 'pp_'+Date.now(), recipeVersion: 1, recipeHistory: [] }, _mudancas);
+    prod = Object.assign({ id: _planProdEditId || 'pp_'+Date.now(), recipeVersion: 1, recipeHistory: [], ativo: 1 }, _mudancas);
     prods.push(prod);
   }
   planProdSaveList(prods);
@@ -38137,6 +38325,21 @@ function planProdSalvar() {
   showToast('Produto "'+nome.trim()+'" salvo! Já disponível nos orçamentos.','ok');
 }
 
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — desativar/reativar um produto
+// personalizado: nunca remove a configuração (diferente de planProdDel,
+// que apaga de vez) — só some da lista de seleção de itens NOVOS
+// (orcProdutosCanonicos filtra ativo===0). Orçamento já existente com
+// esse produto (recipeSnapshot congelado no item) nunca é afetado.
+function planProdToggleAtivo(id) {
+  var prods = planProdLoad();
+  var p = prods.find(function(x){ return x.id===id; });
+  if(!p) return;
+  p.ativo = (p.ativo===0) ? 1 : 0;
+  planProdSaveList(prods);
+  planProdRender();
+  try { orcRefreshProdSelects(); } catch(e){}
+  showToast('Produto "'+p.nome+'" '+(p.ativo===0?'desativado':'reativado')+'.', 'ok');
+}
 function planProdDel(id) {
   var prods = planProdLoad();
   var p = prods.find(function(x){ return x.id===id; });

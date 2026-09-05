@@ -48,6 +48,7 @@ function extractFn(name) {
 console.log('\n=== GATE 4 — WhatsApp/PDF: fixture determinística Display Acrílico Cristal 4mm (R$42,60/3x R$14,20/PIX R$40,41) ===\n');
 
 var FN_NAMES = [
+  'msgResolverTemplate', 'msgTemplatesDefault',
   'orcProdutoNomeResolvido',
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
@@ -56,7 +57,15 @@ var FN_NAMES = [
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
   'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF'
 ];
-var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+var _msgPlaceholdersSrc = (function(){
+  var marker = 'var MSG_TEMPLATES_PLACEHOLDERS = {';
+  var start = html.indexOf(marker);
+  var braceOpen = html.indexOf('{', start);
+  var depth = 0, i = braceOpen;
+  for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
+  return html.slice(start, i + 1) + ';';
+})();
+var src = _msgPlaceholdersSrc + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_gate4_wa_pdf_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 delete require.cache[require.resolve(modPath)];

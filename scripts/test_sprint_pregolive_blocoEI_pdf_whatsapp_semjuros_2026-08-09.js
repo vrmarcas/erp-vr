@@ -201,6 +201,7 @@ console.log('='.repeat(72) + '\n');
 // ── 17-27. orcEnviarOrcamentoWA() — texto real, sem "acréscimo"/"taxa", PIX sempre ──
 {
   var FN_NAMES = [
+  'msgResolverTemplate', 'msgTemplatesDefault',
   'orcProdutoNomeResolvido',
     'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
     'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
@@ -211,7 +212,15 @@ console.log('='.repeat(72) + '\n');
     'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
     'orcEnviarOrcamentoWA'
   ];
-  var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+  var _msgPlaceholdersSrc = (function(){
+  var marker = 'var MSG_TEMPLATES_PLACEHOLDERS = {';
+  var start = html.indexOf(marker);
+  var braceOpen = html.indexOf('{', start);
+  var depth = 0, i = braceOpen;
+  for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
+  return html.slice(start, i + 1) + ';';
+})();
+var src = _msgPlaceholdersSrc + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
   var modPath = path.join(__dirname, '_blocoEI_wa_extracted.tmp.js');
   fs.writeFileSync(modPath, src);
   delete require.cache[require.resolve(modPath)];

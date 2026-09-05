@@ -53,6 +53,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 var FN_NAMES = [
+  'msgResolverTemplate', 'msgTemplatesDefault',
   'orcProdutoNomeResolvido',
   'orcSaudacaoPorHora', 'orcSaudacaoHorario', 'orcNormalizarTelefoneBR',
   'orcGetPrazoTexto', 'orcGetResponsavel', 'orcItemDescricaoComercial', 'orcColetarItensDistribuidos',
@@ -71,7 +72,15 @@ var FN_NAMES = [
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
   'orcEnviarOrcamentoWA'
 ];
-var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+var _msgPlaceholdersSrc = (function(){
+  var marker = 'var MSG_TEMPLATES_PLACEHOLDERS = {';
+  var start = html.indexOf(marker);
+  var braceOpen = html.indexOf('{', start);
+  var depth = 0, i = braceOpen;
+  for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
+  return html.slice(start, i + 1) + ';';
+})();
+var src = _msgPlaceholdersSrc + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_orcamento_pdf_whatsapp_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 

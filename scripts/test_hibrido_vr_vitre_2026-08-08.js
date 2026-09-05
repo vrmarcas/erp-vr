@@ -83,7 +83,10 @@ console.log('\n=== RODADA 6 — Híbrido VR+Vitre: carrinho único (seção 10) 
   var srcGerarOS = extractFn('orcEnvGerarOS');
 
   test('12. _orcSalvarOrcamentoImpl() transporta _orcVitreItensPedido para itens[] (tipoItem vitre_catalogo)',
-    /_orcVitreItensPedido[\s\S]{0,80}forEach[\s\S]{0,120}tipoItem:\s*'vitre_catalogo'/.test(srcSalvar), true);
+    // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 8 — janela ampliada: agora há
+    // cálculo de precoPixUnit/pixPct (vitreCalcularPrecoPix) entre o
+    // forEach e o push, mesmo bloco/mesma função, só mais linhas.
+    /_orcVitreItensPedido[\s\S]{0,80}forEach[\s\S]{0,400}tipoItem:\s*'vitre_catalogo'/.test(srcSalvar), true);
 
   test('13. orcEnvEditar() desvia itens tipoItem=vitre_catalogo de orcAddItem() de volta para _orcVitreItensPedido',
     /it\.tipoItem\s*===\s*'vitre_catalogo'[\s\S]{0,200}_orcVitreItensPedido\.push/.test(srcEditar), true);

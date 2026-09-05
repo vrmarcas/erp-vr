@@ -43,6 +43,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  'msgResolverTemplate',
   'orcProdutoNomeResolvido','cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   '_matResolverPrecoFamiliaEspessura', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos', 'osProjecaoOperacionalItem'];
 var src = [

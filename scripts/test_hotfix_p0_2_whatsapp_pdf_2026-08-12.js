@@ -53,7 +53,16 @@ ok('2a. PDF chama orcColetarItensDistribuidos(totalCartaoPDF) — total já com 
 ok('2b. WhatsApp chama orcColetarItensDistribuidos(totalCartaoWA) — mesma regra, nunca um cálculo próprio divergente', /orcColetarItensDistribuidos\(totalCartaoWA/.test(waSrc));
 ok('2c. totalCartaoPDF do PDF vem de _condPDF (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoPDF\s*=\s*\(\(_condPDF\.parcela/.test(pdfSrc));
 ok('2d. totalCartaoWA do WhatsApp vem de _condWA2 (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoWA\s*=\s*\(\(_condWA2\.parcela/.test(waSrc));
-ok('2e. PIX no WhatsApp é sempre uma linha SEPARADA ("Desconto PIX"), nunca substitui o "VALOR TOTAL"', /\*Desconto PIX:\*/.test(waSrc) && /VALOR TOTAL:\s*'\s*\+\s*totalExibido/.test(waSrc));
+// RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — orcEnviarOrcamentoWA() não
+// monta mais a mensagem por concatenação de string direto (a asserção
+// antiga checava esse literal); o texto passa a vir de
+// msgResolverTemplate('orcamentoEnviado', {valor, ofertas, ...}) — o
+// template default (ver msgTemplatesDefault() em index.html) continua
+// com a MESMA estrutura ("*VALOR TOTAL: {valor}*{ofertas}"): {valor} é
+// exatamente totalExibido (nunca a base PIX), e {ofertas} (que carrega
+// "*Desconto PIX:*" quando ativo) vem DEPOIS, nunca substituindo.
+ok('2e. PIX no WhatsApp é sempre uma linha SEPARADA ("Desconto PIX"), nunca substitui o "VALOR TOTAL"',
+  /valor:\s*totalExibido/.test(waSrc) && /ofertas:\s*extrasStr/.test(waSrc) && /Desconto PIX/.test(html) && /VALOR TOTAL:\s*\{valor\}\*\{ofertas\}/.test(html));
 
 // ── 3. window._orcCalc.finalPrice (usado por ambos) é sempre o preço Cartão — nunca recebe valor PIX em nenhuma atribuição do arquivo ──
 // (a atribuição "= {}" de orcResetFormularioVR é um reset legítimo, não um payload concorrente — só as atribuições COM CONTEÚDO contam.)
@@ -69,6 +78,7 @@ ok('4c. orcGetPrazoTexto() lê ao vivo de #orcPrazoDias/#orcPrazoDiasMax/#orcPra
 // ── 5. Execução real: reproduz o cenário do bug com os números exatos do usuário ──
 {
   var FN_NAMES = [
+  'msgResolverTemplate',
   'orcProdutoNomeResolvido','orcColetarItensDistribuidos'];
   try {
     var fnsSrc = FN_NAMES.map(extractFn).join('\n\n');

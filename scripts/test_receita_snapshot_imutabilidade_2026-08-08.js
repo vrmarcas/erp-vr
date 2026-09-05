@@ -46,6 +46,7 @@ function extractFn(name) {
 
 // ── 1. Contrato puro de planGetRecipe/receitaResolverParaCalculo ───────
 var FN_NAMES = [
+  '_planAtualizarLabelsDim',
   'orcProdutoNomeResolvido',
   'receitaFormulaTokenizar', 'receitaFormulaParsear', 'receitaFormulaAvaliar', 'receitaFormulaValidar',
   'receitaResolverParaCalculo', 'planEvalFormulaCtx', 'planGetRecipe',
