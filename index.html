@@ -33495,17 +33495,57 @@ function usrSalvar() {
   // criação agora é assíncrona via adminCreateUser, ver .then() acima.)
 }
 
+// RODADA DE ESTABILIZAÇÃO 2026-09-05 (acompanhamento do Bloco 7) —
+// ACHADO REAL: esta função nunca excluía nada de verdade — só removia a
+// entrada do array legado erp_usuarios (histórico/tela administrativa,
+// nunca usado para login/autorização — ver comentário em
+// writeErpVrUsuariosDoc). Um usuário com conta Auth + perfil canônico já
+// criados continuava existindo e conseguindo logar normalmente mesmo
+// "excluído" aqui — o botão "Excluir" mentia. Também não pedia nenhuma
+// confirmação antes de agir. Corrigido: quando o registro tem `uid` (já
+// teve acesso real criado), chama a Cloud Function adminDeleteUser
+// (Auth + perfil canônico + legado, atômico, com proteção contra
+// auto-exclusão e contra apagar o último master) — só remove do array
+// local DEPOIS de confirmado o sucesso real. Sem `uid` (nunca teve
+// acesso criado), não há nada em Auth/Firestore para excluir — mantém a
+// remoção local simples de sempre.
 function usrDel(idx) {
   var users = usrLoadUsuarios();
-  var nome = users[idx]?users[idx].nome:'';
-  users.splice(idx,1);
-  _USR_DATA=users;
-  if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
-  showToast('Usuário "'+nome+'" removido','warn');
-  if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário removido: '+nome);
-  usrRender();
-  try{orcPopulateVendedores();}catch(e){}
-  try{vendedoresRender();}catch(e){}
+  var u = users[idx];
+  if(!u) return;
+  var nome = u.nome||'';
+  if(!confirm('Excluir definitivamente "'+nome+'"?\n\nIsso remove o acesso ao ERP para sempre — não pode ser desfeito. Se quiser só bloquear temporariamente, use "Desativar" em vez de excluir.')) return;
+
+  if(!u.uid){
+    // Nunca teve conta Auth/perfil canônico criados — nada a excluir lá.
+    users.splice(idx,1);
+    _USR_DATA=users;
+    if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
+    showToast('Usuário "'+nome+'" removido','warn');
+    if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário removido (sem acesso vinculado): '+nome);
+    usrRender();
+    try{orcPopulateVendedores();}catch(e){}
+    try{vendedoresRender();}catch(e){}
+    return;
+  }
+
+  var myEmail=(_currentSession&&(_currentSession.email||_currentSession.user))||'';
+  if(u.email===myEmail){ showToast('Você não pode excluir a própria conta','err'); return; }
+
+  showToast('Excluindo "'+nome+'"…','ok');
+  firebase.functions().httpsCallable('adminDeleteUser')({ targetUid: u.uid }).then(function(){
+    users.splice(idx,1);
+    _USR_DATA=users;
+    if(typeof _cloudSave==='function' && _cloudReady) _cloudSave('erp_usuarios', users);
+    showToast('✅ Usuário "'+nome+'" excluído definitivamente (Auth + perfil de acesso).','ok');
+    if(typeof secAuditLog==='function') secAuditLog('user_deleted','Usuário excluído definitivamente: '+nome);
+    usrRender();
+    try{orcPopulateVendedores();}catch(e){}
+    try{vendedoresRender();}catch(e){}
+  }).catch(function(err){
+    console.error('[usrDel] adminDeleteUser falhou:', err && err.code, err && err.message);
+    showToast('❌ Não foi possível excluir: '+((err&&err.message)||'erro desconhecido'), 'err');
+  });
 }
 
 

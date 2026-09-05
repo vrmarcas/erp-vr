@@ -30,6 +30,7 @@ export {
   adminResendInvite,
   adminRevokeSessions,
   adminListUsers,
+  adminDeleteUser,
 } from "./adminUsers";
 
 // ── Compras (documento-por-registro, transições críticas mediadas) ───────────

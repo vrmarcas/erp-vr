@@ -13,6 +13,9 @@
  *   adminResendInvite   — regera link de definição de senha
  *   adminRevokeSessions — revoga todos os tokens do usuário
  *   adminListUsers      — lista usuários para a tela administrativa
+ *   adminDeleteUser     — exclui definitivamente (Auth + perfil canônico +
+ *                         legado), só master, protegido contra
+ *                         auto-exclusão e contra apagar o último master
  */
 
 import * as functions from "firebase-functions";
@@ -830,4 +833,170 @@ export const adminListUsers = functions.https.onCall(async (data, context) => {
   }));
 
   return { ok: true, count: users.length, users };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FUNÇÃO 7 — adminDeleteUser
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Conta o número de contas MASTER ativas (não desativadas) no Firebase
+ * Auth — usado para nunca deixar o sistema sem nenhum master. Pagina até
+ * esgotar (listUsers devolve no máx. 1000 por página).
+ */
+async function countActiveMasters(excludeUid?: string): Promise<number> {
+  let count = 0;
+  let pageToken: string | undefined;
+  do {
+    const page: admin.auth.ListUsersResult = await admin.auth().listUsers(1000, pageToken);
+    for (const u of page.users) {
+      if (u.uid === excludeUid) continue;
+      if (!u.disabled && (u.customClaims?.role as string) === "master") count++;
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+  return count;
+}
+
+/**
+ * Exclui DEFINITIVAMENTE um usuário — Auth + perfil canônico
+ * (erp_vr_usuarios/{uid}) + registro legado (erp_usuarios), de forma
+ * consistente (nunca um dos três sobrevive sozinho, órfão).
+ *
+ * Campo: { targetUid }
+ *
+ * Proteção forte (irreversível — mais restritiva que as demais funções
+ * desta API):
+ * - Somente MASTER pode chamar (nunca admin, ainda que "admin" seja uma
+ *   role tecnicamente válida no restante da API — exclusão definitiva de
+ *   conta exige a barra mais alta).
+ * - Ninguém pode excluir a própria conta.
+ * - Nunca é permitido excluir o ÚLTIMO master ativo restante — o sistema
+ *   nunca pode ficar sem nenhuma conta master (ficaria sem ninguém capaz
+ *   de administrar usuários dali em diante).
+ * - Idempotente: se o alvo já não existe no Auth, retorna sucesso
+ *   idempotente (limpa qualquer resíduo de erp_vr_usuarios/erp_usuarios
+ *   que porventura tenha sobrado) em vez de erro.
+ *
+ * Ordem de exclusão (nunca um estado órfão perigoso pelo meio):
+ *   1) erp_vr_usuarios/{uid} (fonte canônica de autorização) — apagado
+ *      PRIMEIRO: se falhar aqui, nada foi tocado ainda.
+ *   2) Firebase Auth — se falhar aqui, o passo 1 é REVERTIDO (o perfil
+ *      canônico é recriado com os dados originais), nunca deixando uma
+ *      conta Auth funcional sem perfil (o que a deixaria "sem acesso" de
+ *      forma inesperada, não intencional).
+ *   3) Registro legado em erp_usuarios — best-effort, não bloqueante
+ *      (histórico/tela administrativa, nunca usado para autorização).
+ */
+export const adminDeleteUser = functions.https.onCall(async (data, context) => {
+  const caller = getCallerInfo(context);
+  if (caller.callerRole !== "master") {
+    throw new functions.https.HttpsError("permission-denied", "Somente master pode excluir um usuário definitivamente.");
+  }
+  checkRateLimit(caller.callerUid);
+
+  const targetUid = String(data?.targetUid || "").trim();
+  if (!targetUid) {
+    throw new functions.https.HttpsError("invalid-argument", "targetUid obrigatório.");
+  }
+
+  if (targetUid === caller.callerUid) {
+    throw new functions.https.HttpsError("permission-denied", "Você não pode excluir a própria conta.");
+  }
+
+  let target: admin.auth.UserRecord | null = null;
+  try {
+    target = await admin.auth().getUser(targetUid);
+  } catch {
+    // Idempotência: alvo já não existe no Auth — só garante que não
+    // sobrou nenhum resíduo nos outros dois lugares, e retorna sucesso.
+    const db = admin.firestore();
+    await db.collection("erp_vr_usuarios").doc(targetUid).delete().catch(() => { /* ignore */ });
+    try {
+      const users = await readUsersDoc();
+      const filtrados = users.filter((u) => u.uid !== targetUid);
+      if (filtrados.length !== users.length) await writeUsersDoc(filtrados);
+    } catch { /* não bloqueante */ }
+    return { ok: true, idempotent: true, message: "Usuário já não existia — nenhum resíduo restante." };
+  }
+
+  const targetRole = (target.customClaims?.role as string) || null;
+
+  // Nunca deixar o sistema sem NENHUM master ativo.
+  if (targetRole === "master" && !target.disabled) {
+    const outrosMastersAtivos = await countActiveMasters(targetUid);
+    if (outrosMastersAtivos < 1) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Não é possível excluir o último master ativo — o sistema ficaria sem nenhum administrador."
+      );
+    }
+  }
+
+  const db = admin.firestore();
+
+  // 1) Apagar o perfil CANÔNICO primeiro — guarda os dados originais para
+  // rollback se o passo 2 (Auth) falhar.
+  const perfilAnteriorSnap = await db.collection("erp_vr_usuarios").doc(targetUid).get();
+  const perfilAnteriorData = perfilAnteriorSnap.exists ? perfilAnteriorSnap.data() : null;
+  try {
+    await db.collection("erp_vr_usuarios").doc(targetUid).delete();
+  } catch (e: any) {
+    functions.logger.error("[adminDeleteUser] Falha ao apagar erp_vr_usuarios/{uid} — nada foi excluído:", e.message);
+    throw new functions.https.HttpsError("internal", "Erro ao excluir o perfil de acesso. Nada foi excluído — tente novamente.");
+  }
+
+  // 2) Apagar do Firebase Auth — falha aqui reverte o passo 1.
+  try {
+    await admin.auth().deleteUser(targetUid);
+  } catch (e: any) {
+    try {
+      await db.collection("erp_vr_usuarios").doc(targetUid).set(
+        perfilAnteriorData ?? {
+          nome: target.displayName || "",
+          email: target.email || "",
+          funcao: (targetRole as Role) || "comercial",
+          ativo: target.disabled ? 0 : 1,
+          _ts: Date.now(),
+        }
+      );
+    } catch { /* melhor esforço — o erro principal já será propagado abaixo */ }
+    functions.logger.error("[adminDeleteUser] Falha ao excluir do Auth — perfil canônico revertido:", e.message);
+    await writeAudit({
+      action: "deleteUser:authFailed",
+      performedByMasked: maskUid(caller.callerUid),
+      performedByRole: caller.callerRole,
+      targetEmailMasked: maskEmail(target.email ?? ""),
+      targetUidMasked: maskUid(targetUid),
+      roleFrom: targetRole,
+      roleTo: null,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      success: false,
+      errorCode: "auth-delete-failed",
+    });
+    throw new functions.https.HttpsError("internal", "Erro ao excluir a conta de acesso. Nada foi excluído — tente novamente.");
+  }
+
+  // 3) Registro legado — best-effort, não bloqueante.
+  try {
+    const users = await readUsersDoc();
+    const filtrados = users.filter((u) => u.uid !== targetUid);
+    if (filtrados.length !== users.length) await writeUsersDoc(filtrados);
+  } catch (e: any) {
+    functions.logger.warn("[adminDeleteUser] Falha ao remover de erp_usuarios legado (não bloqueante):", e.message);
+  }
+
+  await writeAudit({
+    action: "deleteUser",
+    performedByMasked: maskUid(caller.callerUid),
+    performedByRole: caller.callerRole,
+    targetEmailMasked: maskEmail(target.email ?? ""),
+    targetUidMasked: maskUid(targetUid),
+    roleFrom: targetRole,
+    roleTo: null,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    success: true,
+  });
+
+  return { ok: true, uidMasked: maskUid(targetUid) };
 });

@@ -98,6 +98,19 @@ var toggleFn = extraiFuncao('adminToggleStatus');
 assertTrue(toggleFn.indexOf('writeErpVrUsuariosDoc(targetUid') >= 0, '10. adminToggleStatus escreve erp_vr_usuarios/{uid}.ativo');
 assertTrue(/updateUser\(targetUid, \{ disabled: disabledAntes \}\)/.test(toggleFn), '11. ACHADO REAL: se a escrita do documento canônico falhar, adminToggleStatus REVERTE o disabled do Auth ao estado anterior (nunca deixa Auth e Firestore divergindo sobre se a conta está ativa)');
 
+// RODADA 2026-09-05 (acompanhamento do Bloco 7) — adminDeleteUser: única
+// forma de excluir DEFINITIVAMENTE um usuário (antes não existia
+// nenhuma — usrDel() só mexia no array legado). Verificação estrutural
+// aqui; comportamento real (Auth+Firestore) coberto por
+// scripts/test_admin_delete_user_server_2026-09-05.js contra o emulador.
+var deleteFn = extraiFuncao('adminDeleteUser');
+assertTrue(/callerRole !== "master"/.test(deleteFn), '24. adminDeleteUser exige EXATAMENTE master (nunca "admin", barra mais alta por ser irreversível)');
+assertTrue(/targetUid === caller\.callerUid/.test(deleteFn), '25. adminDeleteUser bloqueia auto-exclusão');
+assertTrue(/countActiveMasters/.test(deleteFn), '26. adminDeleteUser nunca permite excluir o último master ativo (countActiveMasters)');
+assertTrue(/collection\("erp_vr_usuarios"\)\.doc\(targetUid\)\.delete\(\)/.test(deleteFn), '27. adminDeleteUser apaga o perfil canônico erp_vr_usuarios/{uid}');
+assertTrue(/admin\.auth\(\)\.deleteUser\(targetUid\)/.test(deleteFn), '28. adminDeleteUser apaga a conta do Firebase Auth');
+assertTrue(/db\.collection\("erp_vr_usuarios"\)\.doc\(targetUid\)\.set\(/.test(deleteFn.split('admin.auth().deleteUser(targetUid)')[1] || ''), '29. ACHADO estrutural: se a exclusão do Auth falhar DEPOIS do perfil canônico já ter sido apagado, o perfil é RECRIADO (rollback) — nunca deixa uma conta Auth funcional sem perfil por acidente');
+
 // ── Parte 2: index.html — usrSalvar() (edição) e usrRecriarAcesso() ─────
 var html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 function extractFn(name) {
@@ -110,12 +123,12 @@ function extractFn(name) {
   if (depth !== 0) throw new Error('Chaves desbalanceadas extraindo ' + name);
   return html.slice(start, i + 1);
 }
-var FN_NAMES = ['usrSalvar', '_normalizeRole', 'usrLoadUsuarios'];
+var FN_NAMES = ['usrSalvar', '_normalizeRole', 'usrLoadUsuarios', 'usrDel'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_hardening_p0b_usuarios.tmp.js');
 fs.writeFileSync(modPath, src);
 
-var _els, _toasts, _callableCalls, _callableFail, _cloudSaved, _auditLogs;
+var _els, _toasts, _callableCalls, _callableFail, _cloudSaved, _auditLogs, _confirmResposta;
 function makeEl(props) { return Object.assign({ value: '' }, props || {}); }
 function reset() {
   _els = {
@@ -130,6 +143,7 @@ function reset() {
   global.window = global;
   global._USR_DATA = [{ nome: 'Fulano', email: 'fulano@teste.com', funcao: 'comercial', ativo: 1, uid: 'uid_fulano_123' }];
   global._currentSession = { funcao: 'master', email: 'master@teste.com' };
+  global.confirm = function () { return _confirmResposta; }; // usrDel() pede confirmação — default: usuário confirma
   _toasts = [];
   global.showToast = function (msg, tipo) { _toasts.push({ msg: msg, tipo: tipo }); };
   _cloudSaved = null;
@@ -137,6 +151,7 @@ function reset() {
   global._cloudReady = true;
   _auditLogs = [];
   global.secAuditLog = function (action, detail) { _auditLogs.push({ action: action, detail: detail }); };
+  _confirmResposta = true;
   global.usrNovoClose = function () {};
   global.usrRender = function () {};
   global.orcPopulateVendedores = function () {};
@@ -212,6 +227,45 @@ async function rodarTestes() {
   assertTrue(_callableCalls.length === 0, '21. ACHADO REAL: usuário sem uid vinculado — NUNCA tenta chamar a Cloud Function (não há targetUid válido)');
   assertTrue(_toasts.some(function (t) { return t.tipo === 'err' && t.msg.indexOf('Recriar Acesso') >= 0; }), '22. Aviso claro instruindo a usar "Recriar Acesso" antes — nunca um "atualizado" enganoso');
   assertTrue(global._USR_DATA[0].funcao === 'comercial', '23. Função permanece intocada localmente quando o uid está ausente');
+
+  // ── usrDel() — RODADA 2026-09-05, acompanhamento do Bloco 7 ────────────
+  // ACHADO REAL fechado: antes, "Excluir" só tirava a entrada do array
+  // legado (nunca tocava Auth/perfil canônico — usuário "excluído"
+  // continuava logando normalmente) e não pedia nenhuma confirmação.
+  reset();
+  mod.usrDel(0);
+  await esperar();
+  assertTrue(_callableCalls.some(function (c) { return c.fn === 'adminDeleteUser' && c.payload.targetUid === 'uid_fulano_123'; }), '30. ACHADO REAL: excluir um usuário COM uid vinculado agora chama adminDeleteUser de verdade (antes: nunca chamava nenhuma Cloud Function)');
+  assertTrue(global._USR_DATA.length === 0, '31. Removido do array local só DEPOIS da Cloud Function confirmar sucesso');
+  assertTrue(_toasts.some(function (t) { return t.tipo === 'ok' && t.msg.indexOf('excluído definitivamente') >= 0; }), '32. Toast confirma exclusão definitiva (Auth + perfil), não uma remoção local qualquer');
+
+  reset();
+  _confirmResposta = false; // usuário cancela a confirmação
+  mod.usrDel(0);
+  await esperar();
+  assertTrue(_callableCalls.length === 0, '33. Cancelar a confirmação NUNCA chama a Cloud Function nem mexe no array local');
+  assertTrue(global._USR_DATA.length === 1, '34. Usuário permanece na lista quando a exclusão é cancelada');
+
+  reset();
+  global._currentSession = { funcao: 'master', email: 'fulano@teste.com' }; // é o PRÓPRIO usuário logado
+  mod.usrDel(0);
+  await esperar();
+  assertTrue(_callableCalls.length === 0, '35. ACHADO REAL: front-end bloqueia auto-exclusão ANTES de chamar a Cloud Function (mensagem imediata, sem round-trip desnecessário)');
+  assertTrue(_toasts.some(function (t) { return t.tipo === 'err'; }), '36. Toast de erro explícito ao tentar excluir a própria conta');
+
+  reset();
+  _callableFail = 'adminDeleteUser';
+  mod.usrDel(0);
+  await esperar();
+  assertTrue(global._USR_DATA.length === 1, '37. ACHADO REAL: falha real da Cloud Function (ex.: "último master") — usuário NUNCA some da lista local (nunca finge exclusão que não aconteceu)');
+  assertTrue(_toasts.some(function (t) { return t.tipo === 'err'; }), '38. Toast de erro explícito quando a exclusão real falha');
+
+  reset();
+  global._USR_DATA[0].uid = undefined; // nunca teve acesso real criado
+  mod.usrDel(0);
+  await esperar();
+  assertTrue(_callableCalls.length === 0, '39. Usuário sem uid vinculado (nunca teve acesso criado): remoção local direta, sem chamar Cloud Function (não há nada em Auth/Firestore para excluir)');
+  assertTrue(global._USR_DATA.length === 0, '40. Removido do array local normalmente nesse caso');
 
   console.log('\n======================================================================');
   console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');
