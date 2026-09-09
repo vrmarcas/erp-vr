@@ -1084,7 +1084,19 @@ export const atdVincularCliente = functions.https.onCall(async (data, context) =
     const lista = parseDoc<ClienteRegistro[]>(snap, []);
 
     const dup = encontrarClienteDuplicado(lista, nome, tel, email);
-    if (dup) return { id: dup.id, criado: false };
+    if (dup) {
+      // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 6 — cliente encontrado
+      // por nome (duplicata) mas sem telefone cadastrado nunca ganhava o
+      // telefone JÁ CONFIRMADO da conversa que originou este vínculo —
+      // mesmo padrão de enriquecimento já aplicado no client
+      // (orcAutoSalvarCliente/_crmVincularCliente). Nunca sobrescreve um
+      // telefone já válido, só preenche quando o cadastro está vazio.
+      if (!dup.tel && tel) {
+        dup.tel = tel;
+        tx.set(ref, { data: JSON.stringify(lista), ts: Date.now() });
+      }
+      return { id: dup.id, criado: false };
+    }
 
     const novoId = "atd_cli_" + atdSnap.ref.id.slice(0, 8) + "_" + Date.now().toString(36);
     const hoje = new Date();

@@ -9616,9 +9616,18 @@ function orcDuplicarItemComoOpcao(idxOrig) {
   // Item de origem ainda cumulativo (1ª vez que ganha uma alternativa) —
   // vira o grupo, e continua sendo a opção selecionada por padrão: criar
   // uma alternativa nunca pode zerar/alterar o total do orçamento sozinho.
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 8 — `selecionada` é estado
+  // interno de CÁLCULO (qual opção conta no total exibido/orçado enquanto
+  // não há decisão do cliente — precisa de exatamente uma por grupo desde
+  // a criação, senão não há total a mostrar). `escolhaConfirmada` é
+  // estado COMERCIAL — só vira true quando o vendedor explicitamente
+  // marca a escolha real do cliente via orcOpcaoSelecionar() (botão
+  // "Marcar escolhida"), nunca por default. WhatsApp/PDF devem usar
+  // escolhaConfirmada (nunca `selecionada`) para decidir se mostram uma
+  // opção como "(selecionada)" ao cliente.
   var opOrig = ORC_ITEM_OPCOES[idxOrig];
   if (!opOrig) {
-    opOrig = { grupoId: 'grp_'+idxOrig+'_'+Date.now().toString(36), selecionada: true };
+    opOrig = { grupoId: 'grp_'+idxOrig+'_'+Date.now().toString(36), selecionada: true, escolhaConfirmada: false };
     ORC_ITEM_OPCOES[idxOrig] = opOrig;
   }
   var getV = function(id){ var el=document.getElementById(id); return el ? el.value : ''; };
@@ -9676,7 +9685,7 @@ function orcDuplicarItemComoOpcao(idxOrig) {
   }
   // Nova opção entra no MESMO grupo, NÃO selecionada por padrão (o
   // vendedor troca com orcOpcaoSelecionar() quando o cliente decidir).
-  ORC_ITEM_OPCOES[novoIdx] = { grupoId: opOrig.grupoId, selecionada: false };
+  ORC_ITEM_OPCOES[novoIdx] = { grupoId: opOrig.grupoId, selecionada: false, escolhaConfirmada: false };
   orcRecalc();
   if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
   if (typeof showToast==='function') showToast('Opção duplicada — ajuste material/espessura da nova linha e marque qual o cliente escolheu.', 'ok');
@@ -9689,9 +9698,13 @@ function orcOpcaoSelecionar(idx) {
   var op = ORC_ITEM_OPCOES[idx];
   if (!op) return;
   Object.keys(ORC_ITEM_OPCOES).forEach(function(k){
-    if (ORC_ITEM_OPCOES[k].grupoId === op.grupoId) ORC_ITEM_OPCOES[k].selecionada = false;
+    if (ORC_ITEM_OPCOES[k].grupoId === op.grupoId) { ORC_ITEM_OPCOES[k].selecionada = false; ORC_ITEM_OPCOES[k].escolhaConfirmada = false; }
   });
   op.selecionada = true;
+  // Bloco 8 — esta é a ÚNICA ação que representa uma escolha real do
+  // cliente (o vendedor clicou "Marcar escolhida" depois de o cliente
+  // responder) — nunca um default automático de criação de grupo.
+  op.escolhaConfirmada = true;
   orcRecalc();
   if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
 }
@@ -11863,23 +11876,55 @@ function orcRecalc() {
   // ANTES do desconto/acréscimo GLOBAL — ordem canônica do Bloco D: preço
   // original do item → ajuste do item → soma dos itens → ajuste global.
   var itemAjusteDeltaCents = 0;
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — ajuste comercial com
+  // escopo "Total do orçamento": nunca mexe no preço da linha nem entra no
+  // rateio por qty — soma direto ao PEDIDO inteiro, como um único valor
+  // flat (mesmo espírito de acresRS/descRS, ver _calcularFinalPriceVR
+  // abaixo, onde este acumulador é somado simetricamente nas 3 chamadas —
+  // por isso nunca vaza pra nenhuma linha nas diferenças usadas no PASS 3).
+  var orcamentoAjusteDeltaCents = 0;
   itemRows.forEach(function(item) {
     if(item.matCost > 0 && factor > 0) {
       var uc = item.matCost / item.qty;          // custo unitário só de material
       var ts = item.matCost / factor;             // total de venda da linha, ANTES do ajuste do item (markup s/ material)
       var precoOriginalItemCents = Math.round(ts * 100);
       var _aj = (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[item.idx]) || {};
+      // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — escopo explícito,
+      // nunca inferido (default 'linha' preserva 100% o comportamento já
+      // estabilizado para orçamentos salvos antes desta rodada, que não
+      // têm o campo). 'unidade': um R$ fixo por unidade vira, para fins de
+      // cálculo do delta da LINHA, valor×qty — nunca dividido (ver PASS 3
+      // abaixo: por não ser isolado em ajusteFixoPortionRS, esse valor
+      // volta a ser dividido por qty no rateio normal, fechando de volta
+      // em exatamente `valor` por unidade, de forma consistente com o
+      // resto do rateio qty-safe). 'percentual' não muda com o escopo —
+      // já é proporcional à linha inteira em qualquer um dos dois casos.
+      var _ajEscopo = _aj.escopo || 'linha';
+      var _ajValorEfetivo = _aj.valor;
+      if (_ajEscopo === 'unidade' && _aj.tipo !== 'percentual') {
+        _ajValorEfetivo = (parseFloat(_aj.valor)||0) * (item.qty||1);
+      }
       var _ajRes = (typeof orcItemAplicarAjuste==='function')
-        ? orcItemAplicarAjuste(precoOriginalItemCents, _aj.operacao, _aj.tipo, _aj.valor)
+        ? orcItemAplicarAjuste(precoOriginalItemCents, _aj.operacao, _aj.tipo, _ajEscopo==='orcamento' ? _aj.valor : _ajValorEfetivo)
         : { ajusteCents: 0, precoFinalItemCents: precoOriginalItemCents };
-      // RODADA 5 — o ajuste comercial (Bloco D) de uma opção NÃO
-      // selecionada nunca pode deslocar o TOTAL REAL do pedido (mesma
-      // regra do matCost acima) — só entra no acumulador global quando o
-      // item conta. O peso `tsFinal` da linha (poucas linhas abaixo)
-      // continua usando o ajuste PRÓPRIO do item, sempre — é o que faz o
-      // preço informativo da opção refletir o ajuste dela mesma.
-      if (item.conta !== false) itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
-      var tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item (peso do PASS 3)
+      var tsFinal;
+      if (_ajEscopo === 'orcamento') {
+        // Escopo "orçamento": a linha NUNCA reflete este ajuste (nem no
+        // unitário, nem no total da linha) — só o total geral do pedido.
+        // Mesma regra de opção não-selecionada (RODADA 5, comentário
+        // abaixo): nunca desloca o total real quando item.conta===false.
+        if (item.conta !== false) orcamentoAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
+        tsFinal = precoOriginalItemCents / 100;
+      } else {
+        // RODADA 5 — o ajuste comercial (Bloco D) de uma opção NÃO
+        // selecionada nunca pode deslocar o TOTAL REAL do pedido (mesma
+        // regra do matCost acima) — só entra no acumulador global quando o
+        // item conta. O peso `tsFinal` da linha (poucas linhas abaixo)
+        // continua usando o ajuste PRÓPRIO do item, sempre — é o que faz o
+        // preço informativo da opção refletir o ajuste dela mesma.
+        if (item.conta !== false) itemAjusteDeltaCents += (_ajRes.precoFinalItemCents - precoOriginalItemCents);
+        tsFinal = _ajRes.precoFinalItemCents / 100;   // total de venda da linha, JÁ com o ajuste do item (peso do PASS 3)
+      }
       var row = document.getElementById('oir_'+item.idx);
       if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
       var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
@@ -11896,11 +11941,14 @@ function orcRecalc() {
       // qty nunca é constante — mesma classe de bug que o Bloco D já
       // eliminou para máquinas/montagem/deslocamento (custos do PEDIDO),
       // só que agora pelo ajuste PRÓPRIO do item. Corrigido isolando aqui
-      // só a FATIA de tsRaw que corresponde ao ajuste 'fixo' (nunca a
-      // 'percentual' — essa já escala linear com qty, não é o bug) para o
-      // PASS 3 tirá-la do rateio-por-qty e somar direto no TOTAL da linha,
-      // igual aos extras "➕ deste Item".
-      item.ajusteFixoPortionRS = (_aj.tipo === 'percentual') ? 0 : (_ajRes.ajusteCents / 100);
+      // só a FATIA de tsRaw que corresponde ao ajuste 'fixo' de escopo
+      // 'linha' (nunca 'percentual', que já escala linear com qty; nunca
+      // 'unidade', que precisa exatamente do rateio-por-qty normal para
+      // fechar em `valor` por unidade; nunca 'orcamento', que não entra
+      // nesta linha de jeito nenhum — ver acima) para o PASS 3 tirá-la do
+      // rateio-por-qty e somar direto no TOTAL da linha, igual aos extras
+      // "➕ deste Item".
+      item.ajusteFixoPortionRS = (_ajEscopo !== 'linha' || _aj.tipo === 'percentual') ? 0 : (_ajRes.ajusteCents / 100);
     }
   });
 
@@ -11960,7 +12008,14 @@ function orcRecalc() {
   // Gravação/Spray/Extra somam ao preço final DEPOIS de markup/desconto/
   // acréscimo/Vitre — adicional fixo (custo×2 cada), nunca marcado up nem
   // descontado (RODADA 6 — Spray/Extra seguem a mesma regra da Gravação).
-  finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — ajuste(s) de escopo
+  // "orçamento" somam aqui, no MESMO ponto que Vitre/Gravação/Spray/Extra:
+  // adicional fixo ao total geral, DEPOIS de toda a redistribuição por
+  // linha do PASS 3 já ter sido decidida (baseada só em finalPriceVR/
+  // finalPriceVR_semItemExtras/finalPriceVR_qtySafe, nenhum dos quais
+  // inclui este termo) — nunca vaza pra nenhuma linha, exatamente como
+  // esses outros adicionais de pedido já não vazam.
+  finalPrice = finalPriceVR + vitreItensPedidoTotal + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda + (orcamentoAjusteDeltaCents/100);
 
   // PASS 3 — preço final unitário efetivo do item (fonte canônica única).
   //
@@ -12448,6 +12503,22 @@ function orcItemExtras(ri) {
   +'</select>'
   +'<input type="number" id="exAjusteValor" value="'+(aj.valor||'')+'" min="0" step="0.01" oninput="orcItemExtraPreview('+ri+')" style="'+INP+';width:64px" placeholder="0,00">'
   +'</div>'
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — escopo explícito do
+  // ajuste, nunca inferido: "linha" (default — comportamento já existente
+  // e estabilizado, ver orcRecalc PASS 2/3) nunca multiplica por qty;
+  // "unidade" multiplica o valor R$ por item.qty ANTES de aplicar (nunca
+  // divide, evitando reintroduzir o bug já corrigido de unitário instável
+  // — ver orcRecalc); "orcamento" desvia o ajuste para os campos GLOBAIS
+  // já existentes (#orcDesc/#orcAcres — Bloco D), nunca cria uma segunda
+  // fórmula: ao salvar com este escopo, o item some de ORC_ITEM_AJUSTES.
+  +'<div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">'
+  +'<span style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap">Aplicar em:</span>'
+  +'<select id="exAjusteEscopo" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';flex:1">'
+  +'<option value="linha"'+((aj.escopo||'linha')==='linha'?' selected':'')+'>Total da linha</option>'
+  +'<option value="unidade"'+(aj.escopo==='unidade'?' selected':'')+'>Por unidade</option>'
+  +'<option value="orcamento"'+(aj.escopo==='orcamento'?' selected':'')+'>Total do orçamento</option>'
+  +'</select>'
+  +'</div>'
   +'<div id="exAjustePreview" style="font-size:11px;color:var(--brand-mid);font-weight:700;min-height:14px"></div>'
   +'</div>'
 
@@ -12776,14 +12847,26 @@ function orcItemExtraPreview(ri){
   var ajOp  = (document.getElementById('exAjusteOp')||{}).value||'';
   var ajTipo= (document.getElementById('exAjusteTipo')||{}).value||'fixo';
   var ajVal = parseFloat((document.getElementById('exAjusteValor')||{}).value)||0;
-  if(ajOp) ORC_ITEM_AJUSTES[ri] = { operacao: ajOp, tipo: ajTipo, valor: ajVal };
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — escopo explícito
+  // ("linha"/"unidade"/"orcamento"), sempre gravado junto — nunca inferido
+  // depois pelo motor de cálculo (ver orcRecalc PASS 2).
+  var ajEscopo = (document.getElementById('exAjusteEscopo')||{}).value||'linha';
+  if(ajOp) ORC_ITEM_AJUSTES[ri] = { operacao: ajOp, tipo: ajTipo, valor: ajVal, escopo: ajEscopo };
   else delete ORC_ITEM_AJUSTES[ri];
   var ajPrevEl = document.getElementById('exAjustePreview');
   if(ajPrevEl){
     var precoOrigCents = parseFloat(row && row.dataset.precoOriginalItemCents)||0;
     if(ajOp && precoOrigCents>0 && typeof orcItemAplicarAjuste==='function'){
-      var _r = orcItemAplicarAjuste(precoOrigCents, ajOp, ajTipo, ajVal);
-      ajPrevEl.textContent = 'Preço da linha: '+orcFmt(precoOrigCents/100)+' → '+orcFmt(_r.precoFinalItemCents/100);
+      if(ajEscopo==='unidade' && ajTipo!=='percentual'){
+        var _rUnit = orcItemAplicarAjuste(precoOrigCents/qty, ajOp, ajTipo, ajVal);
+        ajPrevEl.textContent = 'Por unidade: '+orcFmt(precoOrigCents/100/qty)+' → '+orcFmt(_rUnit.precoFinalItemCents/100)+' (total da linha: '+orcFmt((_rUnit.precoFinalItemCents*qty)/100)+')';
+      } else if(ajEscopo==='orcamento'){
+        var _rOrc = orcItemAplicarAjuste(precoOrigCents, ajOp, ajTipo, ajVal);
+        ajPrevEl.textContent = 'Total do orçamento: '+(ajOp==='acrescimo'?'+':'-')+orcFmt(Math.abs(_rOrc.ajusteCents)/100)+' (esta linha não muda)';
+      } else {
+        var _r = orcItemAplicarAjuste(precoOrigCents, ajOp, ajTipo, ajVal);
+        ajPrevEl.textContent = 'Preço da linha: '+orcFmt(precoOrigCents/100)+' → '+orcFmt(_r.precoFinalItemCents/100);
+      }
     } else ajPrevEl.textContent = '';
   }
   if(typeof orcRecalc==='function') orcRecalc();
@@ -12803,7 +12886,8 @@ function orcItemExtrasSalvar(ri){
     ORC_ITEM_AJUSTES[ri] = {
       operacao: _ajOp,
       tipo: (document.getElementById('exAjusteTipo')||{}).value||'fixo',
-      valor: parseFloat((document.getElementById('exAjusteValor')||{}).value)||0
+      valor: parseFloat((document.getElementById('exAjusteValor')||{}).value)||0,
+      escopo: (document.getElementById('exAjusteEscopo')||{}).value||'linha'
     };
   } else delete ORC_ITEM_AJUSTES[ri];
   // Escrever valores de máquinas + consumíveis de volta nos inputs do
@@ -13746,7 +13830,11 @@ function crmUpsertLeadPorOrcamento(orc, num) {
   CRM_LEADS[lid] = {
     nome: nome, tipo: orc.marca==='vr'?'B2B':'B2C', marca: orc.marca,
     sub: 'ORC-'+num+' · '+(orc.produto||''),
-    contato: nome, tel: orc.tel||'—', email: orc.email||'—',
+    // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 6 — mesmo padrão de
+    // preservação já usado acima para temp/score/cor: um orc.tel vazio
+    // (reabertura antes de completar carga do DOM, por exemplo) nunca pode
+    // apagar um telefone já registrado no card do CRM.
+    contato: nome, tel: orc.tel || (existente && existente.tel) || '—', email: orc.email||'—',
     temp: (existente && existente.temp) || 'quente',
     score: (existente && existente.score) || 65,
     resumo_ia: 'Orçamento #'+num+' — '+(existente?'atualizado':'emitido')+' pelo ERP.',
@@ -26670,11 +26758,17 @@ async function orcEnviarOrcamentoWA() {
       var _opcoesWA = itensLista.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
       _nItemWA++;
       var nGrp = String(_nItemWA).padStart(2,'0');
-      var _blocoWA = nGrp+'. Escolha uma das opções abaixo (você pode escolher apenas uma):\n';
-      _blocoWA += _opcoesWA.map(function(op, oi){
+      // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 7 — texto "Escolha uma
+      // das opções..." agora vem de um template próprio e editável em
+      // Configurações → Mensagens Automáticas (orcamentoComparativo), em
+      // vez de hardcoded aqui. O bloco de alternativas em si continua
+      // gerado dinamicamente a partir dos dados reais das opções (nunca
+      // hardcode paralelo) e injetado como único placeholder {opcoes}.
+      var _opcoesTextoWA = _opcoesWA.map(function(op, oi){
         var letra = String.fromCharCode(97+oi); // a, b, c...
-        return '   '+letra+') '+op.desc+(op.opcaoSelecionada?' (selecionada)':'')+'\n      Quantidade: '+op.qty+' | Valor unitário: '+fmtBRLWA(op.unit)+' | Subtotal: '+fmtBRLWA(op.total);
+        return '   '+letra+') '+op.desc+(op.opcaoConfirmadaCliente?' (selecionada)':'')+'\n      Quantidade: '+op.qty+' | Valor unitário: '+fmtBRLWA(op.unit)+' | Subtotal: '+fmtBRLWA(op.total);
       }).join('\n   ── OU ──\n');
+      var _blocoWA = nGrp+'. '+msgResolverTemplate('orcamentoComparativo', { opcoes: _opcoesTextoWA });
       return _blocoWA;
     }
     _nItemWA++;
@@ -27089,7 +27183,14 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var _opColeta = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[idx];
     var _contaColeta = !_opColeta || _opColeta.selecionada;
     if (_contaColeta) _matTotalRaw += totRaw;
-    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw, conta:_contaColeta, grupoOpcaoId: _opColeta ? _opColeta.grupoId : null, opcaoSelecionada: _contaColeta});
+    // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 8 — `opcaoSelecionada`
+    // (=_contaColeta) é estado de CÁLCULO (qual opção conta no total),
+    // nunca a escolha real do cliente — ver comentário em
+    // orcDuplicarItemComoOpcao(). `opcaoConfirmadaCliente` é o novo campo
+    // que reflete só a ação explícita do vendedor em orcOpcaoSelecionar()
+    // ("Marcar escolhida"); é ELE que WhatsApp/PDF devem usar para exibir
+    // "(selecionada)" — nunca opcaoSelecionada.
+    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw, conta:_contaColeta, grupoOpcaoId: _opColeta ? _opColeta.grupoId : null, opcaoSelecionada: _contaColeta, opcaoConfirmadaCliente: _opColeta ? !!_opColeta.escolhaConfirmada : false});
   });
   // RODADA 6, seção 10/3 — Híbrido VR+Vitre: achado real da auditoria de
   // paridade PDF/WhatsApp — itens do catálogo Vitre vivem em
@@ -27129,7 +27230,7 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var itemTotal = item.totRaw * _escalaEfetiva;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
     var desc = orcItemDescricaoComercial(item);
-    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false };
+    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false, opcaoConfirmadaCliente: !!item.opcaoConfirmadaCliente };
   });
 }
 
@@ -27211,7 +27312,7 @@ async function orcImprimirOrcamentoPDF() {
       var _opcoesPDF = _itensPDF.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
       itensRows += '<tr><td colspan="4" style="padding:12px 14px 2px;font-size:10px;font-weight:800;color:#5B21B6;text-transform:uppercase;letter-spacing:.4px">Escolha uma das opções abaixo</td></tr>';
       _opcoesPDF.forEach(function(op, oi){
-        itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoSelecionada?'<strong>✓ ':'')+op.desc+(op.opcaoSelecionada?'</strong>':'')+'</td>'
+        itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoConfirmadaCliente?'<strong>✓ ':'')+op.desc+(op.opcaoConfirmadaCliente?'</strong>':'')+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(op.unit)+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+op.qty+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(op.total)+'</td>'
@@ -28393,7 +28494,18 @@ async function _orcSalvarOrcamentoImpl() {
     });
   });
   var _nome  = (document.getElementById('orcClientNome')||{}).value||'';
-  var _tel   = (document.getElementById('orcClientTel')||{}).value||'';
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 6 — telefone do cliente
+  // sumindo: mesmo bug já corrigido abaixo para `vendedor` (HOTFIX
+  // 2026-08-10, P0.4/P0.23), nunca fechado para telefone. Reabrir/reenviar
+  // um orçamento numa tela que não reidrata 100% o DOM do wizard antes do
+  // autosave (ex.: atdRevisarCriarOrcamento, corrida de setTimeout) fazia
+  // este save gravar tel='' por cima de um telefone já correto — e essa
+  // substituição é INTEGRAL (lista[orcExistenteIdx]=orc), então o
+  // telefone válido era perdido de vez. Uma leitura vazia do DOM NUNCA
+  // apaga um telefone já persistido — só um valor novo de fato digitado
+  // troca.
+  var _telDom = (document.getElementById('orcClientTel')||{}).value||'';
+  var _tel   = _telDom || (orcExistente && orcExistente.tel) || '';
   var _email = (document.getElementById('orcClientEmail')||{}).value||'';
   // HOTFIX pós-homologação (2026-08-10), P0.4/P0.23 — regressão real:
   // reabrir/reenviar um orçamento em telas que não recarregam o DOM do
@@ -30442,6 +30554,13 @@ var MSG_TEMPLATES_PLACEHOLDERS = {
   // estabilizacao-8blocos-2026-09-04) para a mesma fonte única.
   vitreOrcamentoEnviado:   ['saudacao', 'cliente', 'marca', 'itens', 'ofertas', 'valor', 'validade', 'responsavel'],
   orcamentoPosOsEnviado:   ['cliente', 'numero_os', 'marca', 'produto', 'valor'],
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 7 — bloco "escolha uma das
+  // opções abaixo" do orçamento comparativo (WhatsApp) ganha template
+  // próprio/editável em vez de ficar hardcoded dentro de orcEnviarOrcamentoWA.
+  // {opcoes} é o único placeholder — bloco de alternativas MONTADO fora do
+  // template (mesmo padrão já usado por {itens} em orcamentoEnviado: lista
+  // dinâmica gerada a partir de dados reais, nunca hardcode paralelo aqui).
+  orcamentoComparativo:    ['opcoes'],
   crmFollowup:             ['nome', 'produto'],
   crmOrcamentoDisponivel:  ['nome', 'valor'],
   crmFechamento:           ['nome'],
@@ -30459,6 +30578,7 @@ var MSG_TEMPLATES_NOMES = {
   orcamentoEnviado:    '📤 Orçamento enviado ao cliente',
   vitreOrcamentoEnviado:  '📤 Orçamento Vitre enviado ao cliente',
   orcamentoPosOsEnviado:  '📤 Orçamento (pós-OS) enviado ao cliente',
+  orcamentoComparativo:   '🔀 Orçamento comparativo — opções para o cliente escolher',
   crmFollowup:            '🔄 CRM: Follow-up',
   crmOrcamentoDisponivel: '💰 CRM: Orçamento disponível',
   crmFechamento:          '🤝 CRM: Fechamento',
@@ -30477,6 +30597,7 @@ function msgTemplatesDefault() {
     orcamentoEnviado: '{saudacao}\n\nConforme solicitado, segue o orçamento da *{marca}*:\n\n*ORÇAMENTO Nº {numero_orcamento}*\n\n{itens}\n\n*VALOR TOTAL: {valor}*{ofertas}\n\n*Prazo de produção:* {prazo}\n\n*Validade do orçamento:* {validade}\n\n*Condição de pagamento:* {forma_pagamento}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n\n*{responsavel}*\n*{marca}*',
     vitreOrcamentoEnviado: '{saudacao}\n\nSegue o orçamento da *{marca}*:\n\n{itens}\n\n{ofertas}\n*VALOR TOTAL: {valor}*\n\n*Validade do orçamento:* {validade}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n*{responsavel}*',
     orcamentoPosOsEnviado: 'Olá, {cliente}!\n\nSegue o orçamento referente à OS #0{numero_os} — {marca}.\nProduto: {produto}.\nValor: {valor}.\n\nCaso queira aprovar ou tirar alguma dúvida, é só responder a esta mensagem.',
+    orcamentoComparativo: 'Escolha uma das opções abaixo (você pode escolher apenas uma):\n\n{opcoes}',
     crmFollowup:            'Olá {nome}! Tudo bem? Estou entrando em contato para dar continuidade ao seu interesse em {produto}. Podemos conversar?',
     crmOrcamentoDisponivel: 'Olá {nome}! Seu orçamento de {valor} está disponível. Posso esclarecer alguma dúvida ou ajustar algo?',
     crmFechamento:          'Olá {nome}! Verificando se conseguiu avaliar nossa proposta. Estamos prontos para iniciar sua produção assim que confirmar!',
@@ -31026,7 +31147,10 @@ var CFG_MSG_AUTO_EXEMPLO = {
   // migrados (CRM, reativação e fornecedor); sem isso a preview deixava o
   // placeholder literal mesmo sendo válido, por falta de dado de exemplo.
   nome: 'Maria Silva', tempo: '6 meses', produtos: 'Acrílico personalizado',
-  os_ref: '1042', detalhes: '\nCliente: Maria Silva\nMaterial: Acrílico 4mm', arquivo: ''
+  os_ref: '1042', detalhes: '\nCliente: Maria Silva\nMaterial: Acrílico 4mm', arquivo: '',
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 7 — amostra para o novo
+  // template orcamentoComparativo.
+  opcoes: '   a) Caixa Acrílica Cristal 2mm\n      Quantidade: 1 | Valor unitário: R$ 180,00 | Subtotal: R$ 180,00\n   ── OU ──\n   b) Caixa Acrílica Cristal 3mm\n      Quantidade: 1 | Valor unitário: R$ 220,00 | Subtotal: R$ 220,00'
 };
 function cfgMsgAutoPreview(chave) {
   var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
@@ -38543,6 +38667,13 @@ function _crmBuscarClienteDuplicado(nome, tel, email) {
 function _crmVincularCliente(leadId, nome, tel, email, marca) {
   var dup = _crmBuscarClienteDuplicado(nome, tel, email);
   if(dup) {
+    // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 6 — cliente "reconhecido"
+    // por nome (duplicata encontrada) nunca ganhava o telefone do lead/
+    // atendimento que originou o vínculo, mesmo quando o cadastro existente
+    // ainda não tinha telefone nenhum — igual ao enriquecimento que
+    // orcAutoSalvarCliente() já faz (index.html ~28699). Nunca sobrescreve
+    // um telefone já válido, só preenche quando o cadastro está vazio/'—'.
+    if((!dup.tel || dup.tel==='—') && tel) { dup.tel = tel; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('clientes', CLIENTES_DATA); }
     // Vincular lead ao cliente existente
     if(CRM_LEADS[leadId]) CRM_LEADS[leadId].clienteId = dup.id;
     _crmAdicionarBadgeCliente(leadId, dup.id, false);
