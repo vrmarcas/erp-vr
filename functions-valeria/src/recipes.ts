@@ -75,8 +75,12 @@ export const PLAN_RECIPES: Record<string, Recipe> = {
       return [
         { qty: 2, nome: "Lateral", larg: P - 2 * d, alt: A - d },
         { qty: 2, nome: "Frente/Fundo", larg: L - 2 * d, alt: A - d },
-        { qty: 1, nome: "Base", larg: L, alt: P },
-        { qty: 1, nome: "Tampa", larg: L, alt: P },
+        // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 4 — paridade com
+        // index.html: Base/Tampa usavam L×P (Comprimento×Altura) em vez de
+        // L×A (Comprimento×Largura) — mesmo bug e mesma correção do lado
+        // humano (PLAN_RECIPES.Caixa em index.html).
+        { qty: 1, nome: "Base", larg: L, alt: A },
+        { qty: 1, nome: "Tampa", larg: L, alt: A },
       ];
     },
   },
