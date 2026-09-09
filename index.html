@@ -38382,9 +38382,14 @@ function planProdSalvar() {
   planProdReadCampos();
   var nome = (document.getElementById('planProdNome')||{}).value||'';
   if(!nome.trim()) { showToast('Informe o nome do produto','err'); return; }
-  if(!_planProdPecas.length) { showToast('Adicione pelo menos uma peça','err'); return; }
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 5 — "produto padrão simples":
+  // peças/fórmulas de planificação passam a ser OPCIONAIS. Um produto pode
+  // existir só com nome+ativo+descrição (cadastro comercial, sem receita)
+  // e já fica disponível no orçamento (orcProdutosCanonicos()); planCalc()/
+  // planGetRecipe() já toleram pecas:[] (nenhuma peça a planificar) — só
+  // valida as fórmulas das peças que o usuário efetivamente adicionou.
   var hasBlankFormula = _planProdPecas.some(function(p){ return !p.larg.trim()||!p.alt.trim(); });
-  if(hasBlankFormula) { showToast('Preencha as fórmulas de largura e altura em todas as peças','err'); return; }
+  if(hasBlankFormula) { showToast('Preencha as fórmulas de largura e altura em todas as peças (ou remova as peças incompletas para cadastrar um produto sem planificação)','err'); return; }
   // RODADA 6, seção 1 — bloqueia o save se algum campo extra for inválido
   // (chave vazia/reservada/duplicada, mín>máx) — nunca salva silenciosamente.
   var _camposCheck = receitaCamposValidar(_planProdCampos);
