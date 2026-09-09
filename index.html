@@ -9736,7 +9736,20 @@ function orcRefreshMatSelects() {
         if(_nomeNovo===selectedNome){ sel.selectedIndex=j; break; }
       }
     }
-    orcMatChanged(idx);
+    // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 9 — preço instável: esta
+    // função é chamada passivamente pelo listener de erp_config (Firestore
+    // em tempo real), inclusive com um orçamento já salvo/aberto e SEM
+    // qualquer ação do vendedor. Antes, chamava orcMatChanged(idx)
+    // incondicionalmente, que resincroniza esp/rsm2 pelo valor ATUAL do
+    // catálogo e força orcRecalc() — se o preço/m² de um material mudou em
+    // Config enquanto o orçamento estava aberto, o total do item mudava
+    // sozinho, sem input do usuário (mesmo input devia = mesmo output).
+    // Só é seguro/necessário recalcular quando o select estava "pending"
+    // (linha nova, nunca teve opções reais — não há preço prévio para
+    // preservar). Quando só cresceu o catálogo (hasFewerOpts) a seleção já
+    // tinha um preço válido: atualiza apenas a lista de opções (para novos
+    // materiais aparecerem ao usuário trocar manualmente), sem repricing.
+    if (isPending) orcMatChanged(idx);
   }
 }
 
@@ -9819,8 +9832,8 @@ var PLAN_RECIPES = {
       return[
       {qty:2,nome:'Lateral',     larg:P-(2*d),       alt:A-(d)        },
       {qty:2,nome:'Frente/Fundo',larg:L-(2*d),       alt:A-(d)        },
-      {qty:1,nome:'Base',        larg:L,             alt:P            },
-      {qty:1,nome:'Tampa',       larg:L,             alt:P            },
+      {qty:1,nome:'Base',        larg:L,             alt:A            },
+      {qty:1,nome:'Tampa',       larg:L,             alt:A            },
     ];}
   },
   'Expositor': {
@@ -11220,7 +11233,16 @@ function planCalc() {
   var A = parseFloat(document.getElementById('planAlt')?.value)||0;
   var P = parseFloat(document.getElementById('planProf')?.value)||0;
   var mObjPlan = ORC_MATS.find(function(m){ return m.key===(matEl?matEl.value:'ac3'); });
-  var espMm = (mObjPlan && mObjPlan.esp) ? mObjPlan.esp : (parseFloat(espEl ? espEl.value : 3)||3);
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 2 — layout mostrando espessura
+  // divergente da efetiva do item (ex: "Chapa 3mm" com item em 2mm). Causa:
+  // esta função priorizava o lookup em ORC_MATS (catálogo legado, só cobre
+  // materiais antigos por key fixa tipo 'ac3'), e só caía para o campo
+  // oi_esp_ (fonte já usada por orcRecalc()/orcMatChanged() para o cálculo
+  // real) quando ORC_MATS não tinha aquela key. Se matEl.value coincidisse
+  // com uma key legada (ou estivesse vazio, caindo no default 'ac3') o
+  // layout usava a espessura legada em vez da efetivamente aplicada ao
+  // item. oi_esp_ agora tem prioridade — mesma fonte de verdade do preço.
+  var espMm = (espEl && espEl.value) ? (parseFloat(espEl.value)||3) : ((mObjPlan && mObjPlan.esp) ? mObjPlan.esp : 3);
   var e = espMm / 10; // convert mm → cm
 
   var tbody = document.getElementById('planPiecesBody');
@@ -27031,7 +27053,16 @@ function orcColetarItensDistribuidos(baseEfetiva){
     // descrição voltada ao cliente.
     var matOptSel = matEl ? matEl.options[matEl.selectedIndex] : null;
     var matLbl= matOptSel ? (matOptSel.dataset && matOptSel.dataset.nome ? matOptSel.dataset.nome : matOptSel.text) : '';
-    var matEsp = matOptSel && matOptSel.dataset ? matOptSel.dataset.esp : '';
+    // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 1 — a espessura mostrada ao
+    // cliente (WhatsApp/PDF) tinha fonte diferente da espessura efetivamente
+    // usada no cálculo/custo: aqui lia-se matOptSel.dataset.esp (atributo da
+    // <option> do catálogo, que pode ter espessura diferente da realmente
+    // aplicada ao item se o campo oi_esp_ foi resincronizado por troca de
+    // material/planificação). oi_esp_idx é a mesma fonte que orcRecalc() usa
+    // para o custo (ver _itemEspMm) — lendo daqui, texto ao cliente sempre
+    // bate com o valor usado no preço.
+    var espElResumo = document.getElementById('oi_esp_'+idx);
+    var matEsp = (espElResumo && espElResumo.value) ? espElResumo.value : (matOptSel && matOptSel.dataset ? matOptSel.dataset.esp : '');
     // Medidas efetivamente planificadas (fonte de verdade técnica já usada
     // pelo motor de precificação) — não as colunas legadas oi_larg_/oi_alt_.
     var planLarg = row.dataset.planLarg || '';
@@ -36634,7 +36665,7 @@ function planDrawCanvas() {
         ctx.textAlign='center';
         var lbl=p.nome.length>14?p.nome.slice(0,13)+'…':p.nome;
         ctx.fillText(lbl, px+pw/2, py+ph/2-(ph>28?4:0));
-        if(ph>24){ ctx.font='7px sans-serif'; ctx.fillStyle='#333'; ctx.fillText(p.larg.toFixed(0)+'\xd7'+p.alt.toFixed(0)+' cm', px+pw/2, py+ph/2+8); }
+        if(ph>24){ ctx.font='7px sans-serif'; ctx.fillStyle='#333'; ctx.fillText(p.larg.toFixed(1)+'\xd7'+p.alt.toFixed(1)+' cm', px+pw/2, py+ph/2+8); }
         ctx.textAlign='left';
       }
     });
