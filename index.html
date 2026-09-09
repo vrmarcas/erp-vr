@@ -9599,6 +9599,18 @@ function orcAddItem() {
   planRow.id = 'oip_'+orcItemCount;
   planRow.innerHTML = `<td colspan="12" style="padding:0"><div class="plan-tag" id="oi_planTag_${orcItemCount}">📐 Planificado · <span id="oi_planInfo_${orcItemCount}"></span> · <button onclick="planAbrir(${orcItemCount})" style="background:none;border:none;color:var(--brand-mid);cursor:pointer;font-size:10px;text-decoration:underline;padding:0;font-weight:700">✏️ Editar</button> · <button onclick="planLimpar(${orcItemCount})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;text-decoration:underline;padding:0">✕ Limpar</button></div></td>`;
   tbody.appendChild(planRow);
+  // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 1/2 (achado no smoke em
+  // produção) — oi_esp_<idx> nascia sempre hardcoded em "3" (linha acima),
+  // mas oi_mat_<idx> nasce com o PRIMEIRO material do catálogo
+  // (orcConstruirMatOpts(null)), que pode ter qualquer espessura (ex.:
+  // "Acrílico Cristal 2mm"). Um item novo, sem o vendedor tocar no
+  // dropdown de material, ficava com esp=3 mesmo com material=2mm — a
+  // mesmíssima divergência dos Blocos 1/2 (WhatsApp/PDF/layout mostrando
+  // 3mm com o cálculo em 2mm), só que na origem do dado, não no consumo.
+  // orcMatChanged() já faz exatamente essa sincronização (mesmo caminho
+  // do usuário trocando o material manualmente) — chamado aqui uma vez,
+  // na criação da linha, fecha o gap na fonte.
+  orcMatChanged(orcItemCount);
   orcRecalc();
   orcAutoLaserSeNecessario();
 }
