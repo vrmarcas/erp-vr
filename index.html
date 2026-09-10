@@ -6582,23 +6582,15 @@ function _authFirebaseError(code){
           </div>
         </div>
 
-        <!-- Meus Produtos (customizados) -->
-        <div class="card" style="margin-bottom:14px">
-          <div class="card-h"><div class="card-h-left">📦 Meus Produtos Cadastrados</div><span id="planProdCount" style="font-size:11px;color:var(--muted)"></span></div>
-          <div id="planProdLista" style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-            <div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Nenhum produto cadastrado ainda. Clique em "+ Novo Produto" para começar.</div>
-          </div>
-        </div>
-
-        <!-- Produtos padrão (referência) -->
+        <!-- RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — fonte única: uma lista só,
+             mesclando produtos customizados e os "Produtos Padrão" do sistema
+             (badge PADRÃO na linha). Editar/desativar/reativar funciona para
+             qualquer um; planProdRender() monta a lista mesclada. -->
         <div class="card">
-          <div class="card-h" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            <div class="card-h-left">📋 Produtos Padrão (somente leitura)</div>
-            <span style="font-size:11px;color:var(--muted)">▾ Ver todos</span>
-          </div>
-          <div style="display:none">
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Estes produtos já vêm programados no sistema. Você pode criar um produto com o mesmo nome para sobrescrever a receita.</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px" id="planProdBuiltin"></div>
+          <div class="card-h"><div class="card-h-left">📦 Produtos</div><span id="planProdCount" style="font-size:11px;color:var(--muted)"></span></div>
+          <div style="font-size:11px;color:var(--muted);margin:2px 0 10px">Cadastro básico (nome + descrição) é suficiente para usar no orçamento — planificação/receita é opcional e pode ser adicionada depois. Linhas com o selo <strong>PADRÃO</strong> vêm programadas no sistema; editar/desativar não afeta orçamentos já enviados.</div>
+          <div id="planProdLista" style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+            <div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Carregando produtos…</div>
           </div>
         </div>
 
@@ -9234,6 +9226,45 @@ const ORC_MATS = [
   { key:'mt2',  label:'Metal/Inox 2mm',         field:'op_mt2',  esp:2  },
 ];
 let orcItemCount = 0;
+// RODADA DE CORREÇÃO 2026-09-10, Bloco 6 — seed de cliente pendente para
+// hidratar o Novo Orçamento quando ele é aberto a partir de um contexto
+// que já identificou o cliente (hoje: CRM/Lead → "Criar Orçamento", ver
+// crmAbrirOrcamentoDoLead()). Consumido uma única vez por
+// _orcAplicarClienteSeedPendente() e zerado em seguida — nunca vaza para
+// o orçamento seguinte.
+var _orcPendingClienteSeed = null;
+function _orcAplicarClienteSeedPendente(){
+  var seed = _orcPendingClienteSeed;
+  if(!seed) return;
+  _orcPendingClienteSeed = null; // consumido uma única vez
+  var setV=function(id,v){ var el=document.getElementById(id); if(el && v) el.value=v; };
+  setV('orcClientNome',   seed.nome);
+  setV('orcClientTel',    seed.tel);
+  setV('orcClientEmail',  seed.email);
+  setV('orcClientDoc',    seed.doc);
+  setV('orcClientCidade', seed.cidade);
+  var emp = document.getElementById('orcEmpresaSel');
+  if(emp && seed.marca){ emp.value = seed.marca; if(typeof orcEmpresaChange==='function') orcEmpresaChange(); }
+  var tipo = document.getElementById('orcTipoClienteSel');
+  if(tipo && seed.tipo){ tipo.value = seed.tipo; if(typeof orcEmpresaChange==='function') orcEmpresaChange(); }
+  if(typeof orcAtualizarResumo==='function') orcAtualizarResumo();
+  if(seed.nome) showToast('Dados de ' + seed.nome + ' preenchidos a partir do ' + (seed.origemLabel||'CRM') + '!', 'ok');
+}
+// Mesma seed, campos do wizard Vitre (ids diferentes) — só um dos dois
+// fluxos é escolhido por vez, então consumir em qualquer um dos dois é
+// seguro (o outro simplesmente encontra a seed já nula).
+function _vitreOrcAplicarClienteSeedPendente(){
+  var seed = _orcPendingClienteSeed;
+  if(!seed) return;
+  _orcPendingClienteSeed = null;
+  var setV=function(id,v){ var el=document.getElementById(id); if(el && v) el.value=v; };
+  setV('vitreOrcClienteNome',   seed.nome);
+  setV('vitreOrcClienteTel',    seed.tel);
+  setV('vitreOrcClienteEmail',  seed.email);
+  setV('vitreOrcClienteDoc',    seed.doc);
+  setV('vitreOrcClienteCidade', seed.cidade);
+  if(seed.nome) showToast('Dados de ' + seed.nome + ' preenchidos a partir do ' + (seed.origemLabel||'CRM') + '!', 'ok');
+}
 
 function orcStep(n) {
   // HOTFIX orcamento-vitre-wizard (2026-08-06): orcStep() é o fluxo VR —
@@ -9856,7 +9887,11 @@ var PLAN_RECIPES = {
       var d = (extra && extra.descontosMontagemAplicados) ? e : 0;
       return[
       {qty:2,nome:'Lateral',     larg:P-(2*d),       alt:A-(d)        },
-      {qty:2,nome:'Frente/Fundo',larg:L-(2*d),       alt:A-(d)        },
+      // RODADA DE CORREÇÃO 2026-09-10, Bloco 4 — Frente/Fundo usava o
+      // eixo Largura (A) em vez de Altura (P): com C=8,L=8,A=20 a peça
+      // saía 8×8 em vez de 8×20. Base/Tampa (L×A = Comprimento×Largura)
+      // já estavam corretas — não tocadas.
+      {qty:2,nome:'Frente/Fundo',larg:L-(2*d),       alt:P-(d)        },
       {qty:1,nome:'Base',        larg:L,             alt:A            },
       {qty:1,nome:'Tampa',       larg:L,             alt:A            },
     ];}
@@ -9986,10 +10021,19 @@ function orcProdutosCanonicos(planProdList, orcProdutosLegado) {
     // afeta orçamento já existente que já referencia esse produto (o
     // recipeSnapshot congelado no item é a fonte usada ali, não esta
     // lista de seleção).
-    if (p && p.ativo === 0) return;
+    // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — achado durante a correção:
+    // `vistos[chave]` só era marcado quando o produto ERA listado; um
+    // custom desativado (ex: "Caixa" com ativo=0, criado pra desativar um
+    // Produto Padrão) não marcava o nome como visto, então o laço do
+    // legado (orcProdutosLegado, que inclui todos os built-ins) inseria o
+    // mesmo nome de novo — desativar um Produto Padrão nunca funcionava de
+    // ponta a ponta. Agora o nome é marcado como visto ANTES do early
+    // return por ativo=0, então o legado nunca ressuscita um nome já
+    // desativado explicitamente.
     var chave = nome.toLowerCase();
     if (vistos[chave]) return;
     vistos[chave] = true;
+    if (p && p.ativo === 0) return;
     lista.push(nome);
   });
   (orcProdutosLegado || []).forEach(function (nome) {
@@ -10682,6 +10726,28 @@ function planGetRecipe(produto, recipeSnapshot) {
   var customs = planProdLoad();
   var custom = customs.find(function(p){ return p.nome === produto; });
   if(custom) {
+    // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — "Produtos Padrão" agora
+    // editáveis (nome/desc/ativo) sem precisar reimplementar a receita:
+    // quando este custom veio de um built-in (custom.builtinKey) e o
+    // usuário nunca adicionou peças próprias (custom.pecas vazio), a
+    // geometria continua vindo do PLAN_RECIPES original — só metadados
+    // (nome exibido/desc/ativo) são realmente do registro custom. No
+    // instante em que o usuário adiciona uma peça própria, custom.pecas
+    // deixa de estar vazio e passa a ser a fonte (comportamento normal).
+    var _builtinBase = custom.builtinKey ? PLAN_RECIPES[custom.builtinKey] : null;
+    var _herdaGeometria = !!(_builtinBase && (!custom.pecas || !custom.pecas.length));
+    if(_herdaGeometria) {
+      return {
+        dim3d: _builtinBase.dim3d,
+        desc: custom.desc || _builtinBase.desc,
+        campos: custom.campos || [],
+        labelL: custom.labelL || _builtinBase.labelL || '',
+        labelA: custom.labelA || _builtinBase.labelA || '',
+        labelP: custom.labelP || _builtinBase.labelP || '',
+        descontoMontagemOpcional: _builtinBase.descontoMontagemOpcional,
+        pieces: _builtinBase.pieces
+      };
+    }
     return {
       dim3d: !!custom.dim3d,
       desc: custom.desc || custom.nome,
@@ -13990,7 +14056,7 @@ function crmOpenCard(id) {
   html += `
   <div style="display:flex;gap:7px;flex-wrap:wrap">
     <button class="topbar-btn" style="font-size:11px;background:#1E3A5F" onclick="crmMoverCongelado('${id}')">❄️ Congelar</button>
-    <button class="topbar-btn" style="font-size:11px" onclick="crmCloseModal();nav('orcamento',null)">💰 Criar Orçamento</button>
+    <button class="topbar-btn" style="font-size:11px" onclick="crmAbrirOrcamentoDoLead('${id}')">💰 Criar Orçamento</button>
     <button class="topbar-btn ghost" style="font-size:11px" onclick="crmAvançarEtapa('${id}')">➡️ Avançar Etapa</button>
     <button class="topbar-btn ghost" style="font-size:11px" onclick="crmAbrirWhatsApp('${id}')">📱 WhatsApp</button>
     <button class="topbar-btn" style="font-size:11px;background:#1EB8D8" onclick="crmAbrirPosVenda('${id}')">📬 Pós-Venda</button>
@@ -14001,6 +14067,37 @@ function crmOpenCard(id) {
   document.getElementById('crmOverlay').classList.add('open');
 }
 function crmCloseModal() { document.getElementById('crmOverlay').classList.remove('open'); }
+
+// RODADA DE CORREÇÃO 2026-09-10, Bloco 6 — causa raiz do telefone
+// perdido: este botão só fazia crmCloseModal();nav('orcamento',null),
+// sem passar nenhum dado do lead. Agora monta uma seed (ver
+// _orcPendingClienteSeed / _orcAplicarClienteSeedPendente em orcStep) com
+// os dados já capturados pela Valéria e deixa o próprio reset do
+// formulário (orcResetFormularioVR / vitreOrcResetEstado) aplicá-la —
+// nunca duplica cliente, pois orcAutoSalvarCliente() já faz dedup por
+// nome/telefone/email ao avançar para Itens.
+function crmAbrirOrcamentoDoLead(id) {
+  var d = CRM_LEADS[id];
+  if (d) {
+    var telBruto = (d.tel || '').trim();
+    var telValido = telBruto && /\d{4,}/.test(telBruto.replace(/\D/g, '')) ? telBruto : '';
+    var emailBruto = (d.email || '').trim();
+    var emailValido = emailBruto && emailBruto !== '—' && emailBruto.indexOf('@') > 0 ? emailBruto : '';
+    var cidadeBruta = (d.cidade || '').trim();
+    _orcPendingClienteSeed = {
+      nome: d.contato || d.nome || '',
+      tel: telValido,
+      email: emailValido,
+      cidade: cidadeBruta && cidadeBruta !== '—' ? cidadeBruta : '',
+      marca: d.marca === 'vitre' ? 'vitre' : 'vr',
+      tipo: d.tipo === 'B2C' ? 'pf' : 'pj',
+      leadId: id,
+      origemLabel: 'CRM'
+    };
+  }
+  crmCloseModal();
+  nav('orcamento', null);
+}
 
 function crmDispararFollowup(id) {
   const d = CRM_LEADS[id];
@@ -25059,6 +25156,14 @@ function orcResetFormularioVR(){
   _orcClienteAprovado = false;
   if(typeof orcRecalc==='function') orcRecalc();
   if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 6 — hook único: qualquer caminho
+  // que reseta o formulário (novo direto, salvar-e-iniciar-novo,
+  // descartar-e-iniciar-novo) também tenta hidratar um cliente pendente
+  // (ver _orcPendingClienteSeed) — nunca sobrescrito pelo loop de reset
+  // acima, pois roda depois dele. Guard typeof: harnesses de teste que
+  // extraem orcResetFormularioVR isoladamente (sem esta função nova) não
+  // devem quebrar — mesmo padrão defensivo já usado nas linhas acima.
+  if(typeof _orcAplicarClienteSeedPendente==='function') _orcAplicarClienteSeedPendente();
 }
 function orcIniciarFluxoVR() {
   // GO-LIVE 2026-08-11, seção 4 — modal real com opção de salvar antes de
@@ -25137,6 +25242,11 @@ function vitreOrcResetEstado() {
   var badge = document.getElementById('vitreOrcStatusBadge'); if (badge) badge.style.display = 'none';
   var apc = document.getElementById('vitreOrcAprovacaoCard'); if (apc) apc.style.display = 'none';
   vitreOrcRenderItens();
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 6 — mesmo hook do fluxo VR (ver
+  // orcResetFormularioVR): hidrata um cliente pendente vindo do CRM,
+  // depois do reset dos campos acima. Guard typeof: mesmo motivo do
+  // fluxo VR (harnesses de teste que extraem só esta função isolada).
+  if(typeof _vitreOrcAplicarClienteSeedPendente==='function') _vitreOrcAplicarClienteSeedPendente();
 }
 function vitreOrcDocLabelUpdate() {
   var tipo = document.getElementById('vitreOrcClienteTipo').value;
@@ -37671,6 +37781,15 @@ function cfgResetProdutos() {
 // PRODUTOS & PLANIFICAÇÃO — CRUD de receitas custom
 // ════════════════════════════════════════════════════════════
 var _planProdEditId = null;
+// RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — quando o produto em edição foi
+// sintetizado a partir de um built-in (PLAN_RECIPES) nunca antes
+// customizado, guarda o nome do built-in de origem. planProdSalvar() usa
+// isto pra gravar `builtinKey` no novo registro custom, e planGetRecipe()
+// usa `builtinKey` pra herdar a geometria (pieces/dim3d/desc) do built-in
+// sempre que o usuário não adicionou peças próprias — editar nome/
+// descrição/ativo de um "Produto Padrão" nunca precisa reimplementar a
+// fórmula.
+var _planProdEditBuiltinKey = null;
 var _planProdPecas  = [];
 var _planProdCampos = []; // RODADA 6, seção 1 — campos de entrada além de L/A/P
 // Sanitização de SVG (seção 15 — requisito de segurança explícito): remove
@@ -37759,25 +37878,56 @@ var _planPlanificacoes = []; // Array de {espessuraMm, descricao, svgs:[{svgData
 
 var PLAN_BUILTIN_NAMES = Object.keys(PLAN_RECIPES);
 
+// RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — fonte única: antes existiam
+// duas listas visuais (customs editáveis vs. "Produtos Padrão (somente
+// leitura)"). Agora planProdRender() monta UMA lista mesclada — cada
+// built-in (PLAN_RECIPES) sem customização vira uma entrada "virtual"
+// (id="builtin:<nome>", nunca persistida até o usuário realmente editar/
+// desativar) com os MESMOS botões de ação dos produtos custom. Editar um
+// virtual cria um registro custom com builtinKey (ver planProdEditar/
+// planProdSalvar); a geometria continua vindo do PLAN_RECIPES original
+// via planGetRecipe() até o usuário adicionar peças próprias.
+function _planProdListaUnificada() {
+  var customs = planProdLoad();
+  var nomesCustom = {};
+  var builtinsJaAdotados = {};
+  customs.forEach(function(p){
+    nomesCustom[(p.nome||'').trim().toLowerCase()] = true;
+    // Renomear um Produto Padrão ("Caixa" → "Caixa Acrílica") não pode
+    // deixar "Caixa" reaparecer como uma segunda linha virtual — o
+    // builtinKey já diz qual built-in este custom substitui.
+    if(p.builtinKey) builtinsJaAdotados[p.builtinKey.trim().toLowerCase()] = true;
+  });
+  var virtuais = PLAN_BUILTIN_NAMES.filter(function(nome){
+    var chave = nome.trim().toLowerCase();
+    return !nomesCustom[chave] && !builtinsJaAdotados[chave];
+  }).map(function(nome){
+    var rec = PLAN_RECIPES[nome];
+    return { id: 'builtin:'+nome, nome: nome, desc: rec.desc, dim3d: rec.dim3d, pecas: [], ativo: 1, _virtual: true };
+  });
+  return customs.concat(virtuais);
+}
 function planProdRender() {
-  var prods = planProdLoad();
+  var prods = _planProdListaUnificada();
   var lista = document.getElementById('planProdLista');
   var cnt   = document.getElementById('planProdCount');
-  if(cnt) cnt.textContent = prods.length ? prods.length+' produto'+(prods.length>1?'s cadastrados':'cadastrado') : '';
+  if(cnt) cnt.textContent = prods.length ? prods.length+' produto'+(prods.length>1?'s':'') : '';
 
   if(lista) {
-    if(!prods.length) {
-      lista.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:20px">Nenhum produto cadastrado ainda. Clique em "+ Novo Produto" para começar.</div>';
-    } else {
-      lista.innerHTML = prods.map(function(p) {
-        var pecasTxt = (p.pecas||[]).map(function(pc){ return (pc.qty>1?pc.qty+'× ':'')+pc.nome; }).join(', ');
-        var _inativo = p.ativo===0;
-        return '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px'+(_inativo?';opacity:.55':'')+'">'
-          +'<div style="flex:1">'
-          +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)+(_inativo?' <span style="font-size:9px;font-weight:800;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:1px 6px;vertical-align:middle">INATIVO</span>':'')+'</div>'
-          +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
-          +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+'</div>'
-          +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){
+    lista.innerHTML = prods.map(function(p) {
+      var pecasTxt = (p.pecas||[]).map(function(pc){ return (pc.qty>1?pc.qty+'× ':'')+pc.nome; }).join(', ');
+      var _inativo = p.ativo===0;
+      var _origemBuiltin = !!(p._virtual || p.builtinKey);
+      var _pid = cfgEsc(p.id);
+      return '<div style="display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px'+(_inativo?';opacity:.55':'')+'">'
+        +'<div style="flex:1">'
+        +'<div style="font-size:13px;font-weight:800;color:var(--text)">'+cfgEsc(p.nome)
+          +(_origemBuiltin?' <span style="font-size:9px;font-weight:800;color:var(--brand-mid);border:1px solid var(--border);border-radius:8px;padding:1px 6px;vertical-align:middle">PADRÃO</span>':'')
+          +(_inativo?' <span style="font-size:9px;font-weight:800;color:#DC2626;border:1px solid #FECACA;border-radius:8px;padding:1px 6px;vertical-align:middle">INATIVO</span>':'')
+          +'</div>'
+        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">'+cfgEsc(p.desc||'')+'</div>'
+        +'<div style="font-size:10px;color:var(--brand-mid);margin-top:4px">'+cfgEsc(pecasTxt)+(_origemBuiltin && !pecasTxt ? '<span style="color:var(--muted)">planificação padrão do sistema (edite peças aqui pra sobrescrever)</span>':'')+'</div>'
+        +'<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(p.dim3d?'L × A × P':'L × A')+'</span>'+(function(){
   var n=0;
   if(p.planificacoes&&p.planificacoes.length){
     p.planificacoes.forEach(function(x){
@@ -37787,26 +37937,12 @@ function planProdRender() {
   } else if(p.svg) { n=1; }
   return n?'<span style="font-size:10px;background:#E3F7FB;border:1px solid #7DD3E8;border-radius:10px;padding:2px 8px;color:#983C8F">📐 '+(n>1?n+'× SVG':'SVG')+'</span>':'';
 })()+'</div>'
-          +'</div>'
-          +'<div style="display:flex;gap:6px">'
-          +'<button data-pid="'+p.id+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
-          +'<button data-pid="'+p.id+'" onclick="planProdToggleAtivo(this.dataset.pid)" style="background:none;border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;color:var(--muted)">'+(_inativo?'✅ Reativar':'🚫 Desativar')+'</button>'
-          +'<button data-pid="'+p.id+'" onclick="planProdDel(this.dataset.pid)" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer">🗑</button>'
-          +'</div>'
-          +'</div>';
-      }).join('');
-    }
-  }
-
-  // Produtos padrão
-  var builtin = document.getElementById('planProdBuiltin');
-  if(builtin) {
-    builtin.innerHTML = PLAN_BUILTIN_NAMES.map(function(nome) {
-      var rec = PLAN_RECIPES[nome];
-      return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
-        +'<div style="font-size:12px;font-weight:700;color:var(--text)">'+nome+'</div>'
-        +'<div style="font-size:10px;color:var(--muted);margin-top:3px">'+rec.desc+'</div>'
-        +'<div style="margin-top:5px"><span style="font-size:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 8px;color:var(--muted)">'+(rec.dim3d?'L × A × P':'L × A')+'</span></div>'
+        +'</div>'
+        +'<div style="display:flex;gap:6px">'
+        +'<button data-pid="'+_pid+'" onclick="planProdEditar(this.dataset.pid)" class="topbar-btn ghost" style="font-size:11px;padding:5px 10px">✏️ Editar</button>'
+        +'<button data-pid="'+_pid+'" onclick="planProdToggleAtivo(this.dataset.pid)" style="background:none;border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;color:var(--muted)">'+(_inativo?'✅ Reativar':'🚫 Desativar')+'</button>'
+        +(_origemBuiltin ? '' : '<button data-pid="'+_pid+'" onclick="planProdDel(this.dataset.pid)" style="background:none;border:1px solid #FECACA;color:#DC2626;border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer">🗑</button>')
+        +'</div>'
         +'</div>';
     }).join('');
   }
@@ -38184,6 +38320,7 @@ function planSvgParsePecas(svgText, sourceKey) {
 
 function planProdNovoOpen() {
   _planProdEditId = null;
+  _planProdEditBuiltinKey = null;
   _planProdPecas  = [];
   _planProdCampos = [];
   document.getElementById('planProdModalTitle').textContent = '📐 Novo Produto';
@@ -38207,8 +38344,19 @@ function planProdNovoOpen() {
 function planProdEditar(id) {
   var prods = planProdLoad();
   var p = prods.find(function(x){ return x.id===id; });
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — id="builtin:<nome>" é uma
+  // linha "Produto Padrão" ainda nunca customizada (ver
+  // _planProdListaUnificada). Não existe registro custom ainda — sintetiza
+  // um a partir do PLAN_RECIPES pra pré-preencher o modal; só vira um
+  // registro real de fato quando planProdSalvar() rodar (ver builtinKey).
+  var _builtinNome = (!p && typeof id === 'string' && id.indexOf('builtin:') === 0) ? id.slice('builtin:'.length) : null;
+  if(!p && _builtinNome && PLAN_RECIPES[_builtinNome]) {
+    var _rec = PLAN_RECIPES[_builtinNome];
+    p = { nome: _builtinNome, desc: _rec.desc, dim3d: _rec.dim3d, pecas: [], campos: [], ativo: 1 };
+  }
   if(!p) return;
-  _planProdEditId = id;
+  _planProdEditId = p.id || null;
+  _planProdEditBuiltinKey = _builtinNome || p.builtinKey || null;
   _planProdPecas  = JSON.parse(JSON.stringify(p.pecas||[]));
   _planProdCampos = JSON.parse(JSON.stringify(p.campos||[]));
   document.getElementById('planProdModalTitle').textContent = '✏️ Editar: '+p.nome;
@@ -38231,7 +38379,7 @@ function planProdEditar(id) {
 
 function planProdFechar() {
   document.getElementById('planProdOverlay').classList.remove('open');
-  _planProdEditId = null; _planProdPecas = []; _planProdCampos = []; _planPlanificacoes = [];
+  _planProdEditId = null; _planProdEditBuiltinKey = null; _planProdPecas = []; _planProdCampos = []; _planPlanificacoes = [];
 }
 
 function planProdAddPeca() {
@@ -38597,7 +38745,11 @@ function planProdSalvar() {
       : Object.assign({}, existente, _mudancas);
     prods[idx] = prod;
   } else {
-    prod = Object.assign({ id: _planProdEditId || 'pp_'+Date.now(), recipeVersion: 1, recipeHistory: [], ativo: 1 }, _mudancas);
+    // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — se esta edição partiu de um
+    // "Produto Padrão" virtual (ver planProdEditar), grava builtinKey: sem
+    // isso planGetRecipe() não saberia de onde herdar a geometria quando
+    // o usuário não mexeu nas peças.
+    prod = Object.assign({ id: _planProdEditId || 'pp_'+Date.now(), recipeVersion: 1, recipeHistory: [], ativo: 1, builtinKey: _planProdEditBuiltinKey || undefined }, _mudancas);
     prods.push(prod);
   }
   planProdSaveList(prods);
@@ -38614,6 +38766,19 @@ function planProdSalvar() {
   showToast('Produto "'+nome.trim()+'" salvo! Já disponível nos orçamentos.','ok');
 }
 
+// RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — um produto (custom ou vindo de
+// um "Produto Padrão") só pode ser excluído de vez quando nunca apareceu
+// em nenhum orçamento já enviado — orc.itens[].prod é o nome efetivamente
+// usado no momento do envio (nunca muda depois, é snapshot). Produto com
+// histórico é sempre desativado, nunca apagado — protege o snapshot
+// antigo de qualquer efeito colateral de limpeza de cadastro.
+function _planProdTemHistorico(nome) {
+  if(!nome) return false;
+  var lista = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
+  return lista.some(function(o){
+    return (o.itens||[]).some(function(it){ return it && it.prod === nome; });
+  });
+}
 // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 5 — desativar/reativar um produto
 // personalizado: nunca remove a configuração (diferente de planProdDel,
 // que apaga de vez) — só some da lista de seleção de itens NOVOS
@@ -38622,6 +38787,17 @@ function planProdSalvar() {
 function planProdToggleAtivo(id) {
   var prods = planProdLoad();
   var p = prods.find(function(x){ return x.id===id; });
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — desativar um "Produto Padrão"
+  // (id="builtin:<nome>") nunca teve registro custom ainda — cria um stub
+  // mínimo só pra guardar ativo=0 (geometria continua herdada via
+  // builtinKey, ver planGetRecipe).
+  if(!p && typeof id === 'string' && id.indexOf('builtin:') === 0) {
+    var _nome = id.slice('builtin:'.length);
+    var _rec = PLAN_RECIPES[_nome];
+    if(!_rec) return;
+    p = { id: 'pp_builtin_'+Date.now(), nome: _nome, desc: _rec.desc, dim3d: _rec.dim3d, pecas: [], campos: [], builtinKey: _nome, ativo: 1, recipeVersion: 1, recipeHistory: [] };
+    prods.push(p);
+  }
   if(!p) return;
   p.ativo = (p.ativo===0) ? 1 : 0;
   planProdSaveList(prods);
@@ -38633,6 +38809,23 @@ function planProdDel(id) {
   var prods = planProdLoad();
   var p = prods.find(function(x){ return x.id===id; });
   if(!p) return;
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — um produto vindo de um
+  // "Produto Padrão" (builtinKey) nunca pode ser excluído de verdade — a
+  // receita continua existindo em PLAN_RECIPES independente deste
+  // registro custom; a ação correta é desativar (some da seleção sem
+  // fingir que o produto do sistema deixou de existir).
+  if(p.builtinKey) {
+    showToast('"'+p.nome+'" vem de um Produto Padrão do sistema — use Desativar em vez de excluir.', 'warn');
+    return;
+  }
+  // Produto genuinamente custom, mas já usado em algum orçamento enviado:
+  // exclusão definitiva quebraria a leitura desse histórico em qualquer
+  // tela que resolva o produto pelo nome fora do recipeSnapshot. Soft-
+  // delete (desativar) é sempre seguro; exclusão só quando não há uso.
+  if(_planProdTemHistorico(p.nome)) {
+    showToast('"'+p.nome+'" já foi usado em orçamento(s) enviados — use Desativar em vez de excluir, para não afetar o histórico.', 'warn');
+    return;
+  }
   prods = prods.filter(function(x){ return x.id!==id; });
   planProdSaveList(prods);
   planProdRender();

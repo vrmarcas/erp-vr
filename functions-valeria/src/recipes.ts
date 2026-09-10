@@ -74,7 +74,9 @@ export const PLAN_RECIPES: Record<string, Recipe> = {
       const d = extra?.descontosMontagemAplicados ? e : 0;
       return [
         { qty: 2, nome: "Lateral", larg: P - 2 * d, alt: A - d },
-        { qty: 2, nome: "Frente/Fundo", larg: L - 2 * d, alt: A - d },
+        // RODADA DE CORREÇÃO 2026-09-10, Bloco 4 — paridade com index.html:
+        // Frente/Fundo usava o eixo Largura (A) em vez de Altura (P).
+        { qty: 2, nome: "Frente/Fundo", larg: L - 2 * d, alt: P - d },
         // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 4 — paridade com
         // index.html: Base/Tampa usavam L×P (Comprimento×Altura) em vez de
         // L×A (Comprimento×Largura) — mesmo bug e mesma correção do lado
