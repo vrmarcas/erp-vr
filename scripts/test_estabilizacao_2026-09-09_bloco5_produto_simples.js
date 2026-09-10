@@ -54,6 +54,10 @@ var src = [
   'var _planProdCampos = global.__planProdCampos__;',
   'var _planPlanificacoes = [];',
   'var _planProdEditId = global.__planProdEditId__;',
+  // RODADA DE CORREÇÃO 2026-09-10, Bloco 5 — planProdSalvar() passou a ler
+  // _planProdEditBuiltinKey (ver planGetRecipe/builtinKey); harness precisa
+  // declarar a mesma global usada pelo código real.
+  'var _planProdEditBuiltinKey = null;',
   'var ORC_PRODUTOS = global.ORC_PRODUTOS;',
   'var OPERACOES_PADRAO = [];',
   'var CONSUMIVEIS_PADRAO = [];',
