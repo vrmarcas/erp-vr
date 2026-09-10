@@ -28696,6 +28696,15 @@ async function _orcSalvarOrcamentoImpl() {
     status:    orcExistente ? orcExistente.status : 'aguardando',
     dataSalvo: new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
     obs: orcExistente ? (orcExistente.obs||'') : '',
+    // RODADA CIRÚRGICA 2026-09-10, Bug 1 — sem isto, cada reabertura+save
+    // de um orçamento já vinculado a um lead do CRM reconstruía este
+    // objeto do zero sem `crmLeadId`; crmUpsertLeadPorOrcamento() então
+    // achava o campo vazio e criava um card NOVO a cada save (4 cards
+    // duplicados observados para o mesmo orçamento em auditoria real).
+    // Preservar o vínculo aqui é o que falta pro comentário de
+    // crmUpsertLeadPorOrcamento ("SEMPRE atualiza o MESMO card") ser
+    // verdade de fato.
+    crmLeadId: orcExistente ? orcExistente.crmLeadId : undefined,
     itens: _itens,
     snapshotCompleto: { itens: _itens, parametros: parametros, breakdown: breakdown, versaoSnapshot: 2 },
     // Auditoria interna do ajuste comercial (Parte 3.3) — preço técnico,
