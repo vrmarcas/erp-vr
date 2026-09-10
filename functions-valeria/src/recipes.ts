@@ -151,13 +151,17 @@ export const PLAN_RECIPES: Record<string, Recipe> = {
       { qty: 1, nome: "Frente", larg: L - 2 * e, alt: A - 2 * e },
     ],
   },
+  // RODADA CIRÚRGICA 2026-09-10 — paridade com index.html: Frente/Fundo
+  // usava o eixo Largura (A) em vez de Altura (P), e Base/Tampa usavam
+  // Altura (P) em vez de Largura (A) — mesmo padrão de bug já corrigido
+  // na Caixa.
   "Urna": {
     dim3d: true, desc: "Laterais, frente/fundo, base e tampa",
     pieces: (L, A, P, e) => [
       { qty: 2, nome: "Lateral", larg: P - 2 * e, alt: A - e },
-      { qty: 2, nome: "Frente/Fundo", larg: L - 2 * e, alt: A - e },
-      { qty: 1, nome: "Base", larg: L, alt: P },
-      { qty: 1, nome: "Tampa", larg: L, alt: P },
+      { qty: 2, nome: "Frente/Fundo", larg: L - 2 * e, alt: P - e },
+      { qty: 1, nome: "Base", larg: L, alt: A },
+      { qty: 1, nome: "Tampa", larg: L, alt: A },
     ],
   },
   "Bandeja": {
