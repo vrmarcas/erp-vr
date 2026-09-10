@@ -14036,8 +14036,11 @@ function crmOpenCard(id) {
     <button class="topbar-btn" style="font-size:11px" onclick="crmSalvarAgenda('${id}')">💾 Salvar Agenda & Tarefa</button>
   </div>`;
 
-  // Histórico de compras (se disponível)
-  var histHtml = clientHistExibir(d.tel, d.email);
+  // Histórico de compras (se disponível) — RODADA CIRÚRGICA 2026-09-10,
+  // Bug 2: passa clienteId (vínculo canônico, quando já existir) e o nome
+  // deste lead, para que um telefone reciclado/reutilizado não mostre o
+  // histórico de outra pessoa (ver clientHistExibir).
+  var histHtml = clientHistExibir(d.tel, d.email, d.clienteId, d.nome||d.contato);
   if(histHtml) html += histHtml;
 
   // ── Converter em OS (1 clique) — aparece quando etapa = orc_emitido ou aprv_layout ──
@@ -23466,7 +23469,11 @@ function cliOpenDetalhe(id) {
         +'</div>';
     }
   }
-  var histCompras = (typeof clientHistExibir==='function') ? (clientHistExibir(c.tel, c.email)||'') : '';
+  // RODADA CIRÚRGICA 2026-09-10, Bug 2 — c.id É o vínculo canônico deste
+  // cliente (estamos na própria página de detalhe dele); passa junto com
+  // o nome pra evitar herdar histórico de outro cadastro por telefone
+  // reciclado (ver clientHistExibir).
+  var histCompras = (typeof clientHistExibir==='function') ? (clientHistExibir(c.tel, c.email, c.id, c.nome)||'') : '';
 
   // Histórico de compras importado do CRM Base (Firestore crm_base)
   var crmHistHtml = '';
@@ -26970,11 +26977,24 @@ var CLIENT_HIST_KEY = 'erp_client_history';
 
 function clientHistLoad() { return Object.assign({},_CLIENT_HIST); }
 function clientHistSave(db) { _CLIENT_HIST=db; if(typeof _cloudSave==='function'&&_cloudReady) _cloudSave('erp_client_history', db); }
-function clientHistGetKey(tel, email) {
+// RODADA CIRÚRGICA 2026-09-10, Bug 2 — `clienteId` (opcional, 3º
+// argumento) é o vínculo canônico: quando informado, sempre tem
+// prioridade sobre telefone/e-mail (campos mutáveis/recicláveis).
+// Retrocompatível — chamadores antigos sem clienteId continuam com a
+// mesma chave de sempre.
+function clientHistGetKey(tel, email, clienteId) {
+  var cid = (clienteId||'').toString().trim();
+  if(cid) return 'cid:'+cid;
   // identify client by phone or email (normalized)
   var t = (tel||'').replace(/\D/g,'');
   var e = (email||'').toLowerCase().trim();
   return t || e || null;
+}
+// RODADA CIRÚRGICA 2026-09-10, Bug 2 — normalização leve de nome, só para
+// a checagem de segurança em clientHistExibir() (nunca usada como chave
+// de identidade por si só — é só um sinal adicional de plausibilidade).
+function _clientHistNormNome(s){
+  return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
 }
 
 function orcSalvarHistoricoCliente() {
@@ -27017,11 +27037,44 @@ function orcSalvarHistoricoCliente() {
   clientHistSave(db);
 }
 
-function clientHistExibir(tel, email) {
-  var key = clientHistGetKey(tel, email);
-  if(!key) return '';
+// RODADA CIRÚRGICA 2026-09-10, Bug 2 — assinatura estendida (retrocompat):
+// clienteId (3º arg, opcional) é o vínculo canônico, sempre prioritário.
+// nomeAtual (4º arg, opcional) é usada SÓ como sinal de segurança quando
+// a busca cai no fallback legado por telefone/e-mail (campo mutável/
+// reciclável): se o nome de quem está pedindo o histórico não bate com o
+// nome gravado no registro encontrado, tratamos como correspondência
+// ambígua e NÃO mostramos — evita vazar histórico de terceiro só porque
+// um número de telefone foi reutilizado (achado real desta auditoria).
+// Chamadores antigos (sem clienteId/nomeAtual) mantêm o comportamento de
+// sempre — nenhuma migração de dados foi feita, é tudo lido on-the-fly.
+function clientHistExibir(tel, email, clienteId, nomeAtual) {
   var db = clientHistLoad();
-  var rec = db[key]; if(!rec||!rec.historico||!rec.historico.length) return '';
+  var rec = null;
+  // 1. Tenta a chave canônica primeiro (vínculo explícito, nunca ambíguo).
+  // Nenhuma migração de dados foi feita nesta rodada — orcSalvarHistoricoCliente()
+  // continua gravando por telefone/e-mail como sempre — então hoje isto
+  // normalmente não encontra nada ainda, mas já deixa o caminho certo
+  // pronto pra quando o histórico passar a ser gravado por clienteId.
+  var cid = (clienteId||'').toString().trim();
+  if(cid){
+    rec = db['cid:'+cid];
+  }
+  // 2. Fallback legado por telefone/e-mail — com checagem de nome quando
+  // disponível, pra nunca mostrar o histórico de outra pessoa só porque o
+  // número foi reciclado/reutilizado (achado real desta auditoria).
+  if(!rec || !rec.historico || !rec.historico.length){
+    var keyLegado = clientHistGetKey(tel, email, null);
+    if(!keyLegado) return '';
+    var recLegado = db[keyLegado];
+    if(!recLegado || !recLegado.historico || !recLegado.historico.length) return '';
+    if(nomeAtual!==undefined){
+      var _nA = _clientHistNormNome(nomeAtual);
+      var _nR = _clientHistNormNome(recLegado.nome);
+      var _bateNome = _nA && _nR && (_nA===_nR || _nA.indexOf(_nR)>=0 || _nR.indexOf(_nA)>=0);
+      if(!_bateNome) return ''; // correspondência ambígua — não exibe
+    }
+    rec = recLegado;
+  }
   var tresM = new Date(); tresM.setMonth(tresM.getMonth()-3);
   var rows = rec.historico.slice().reverse().map(function(h){
     var d = new Date(h.data);
