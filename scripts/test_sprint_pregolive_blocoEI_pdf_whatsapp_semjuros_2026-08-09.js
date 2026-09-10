@@ -210,6 +210,8 @@ console.log('='.repeat(72) + '\n');
     // HOTFIX pós-homologação (2026-08-10) — orcEnviarOrcamentoWA() usa
     // orcCondicaoPagamentoAtual() em vez do texto morto de orcFormaPgto.
     'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
+    // MICRO-RODADA 2026-09-10 — fonte canônica compartilhada com o PDF.
+    'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
     'orcEnviarOrcamentoWA'
   ];
   var _msgPlaceholdersSrc = (function(){

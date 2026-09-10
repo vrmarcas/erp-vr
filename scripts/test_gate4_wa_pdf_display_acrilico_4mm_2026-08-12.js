@@ -55,6 +55,9 @@ var FN_NAMES = [
   'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',
   'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
+  // MICRO-RODADA 2026-09-10 — fonte canônica compartilhada entre WhatsApp
+  // e PDF (ver test_micro_rodada_2026-09-10_pdf_alinhado_mensagens.js).
+  'cfgEsc', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
   'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF'
 ];
 var _msgPlaceholdersSrc = (function(){
@@ -170,8 +173,13 @@ function resetFixture() {
   ok('PDF 2. nenhum "R$/m²" ou "/m²" interno vazando', !/\/m[²2]/i.test(pdfText));
   ok('PDF 3. Total Geral = R$ 42,60 (preço principal/cartão)', /Total Geral\s*R\$\s*42,60/.test(pdfText));
   ok('PDF 4. preço unitário do item = R$42,60 e total do item = R$42,60', (pdfText.match(/R\$42,60/g) || []).length >= 2);
-  ok('PDF 5. parcelamento fecha exatamente com o total: 3x de R$ 14,20 sem juros', /Parcelável em até 3x de R\$ 14,20 sem juros/.test(pdfText));
-  ok('PDF 6. PIX aparece como alternativa separada, R$ 40,41', /desconto pagando via PIX \(R\$ 40,41\)/.test(pdfText));
+  // MICRO-RODADA 2026-09-10 — PDF passou a usar a MESMA fonte canônica de
+  // texto (orcMontarBlocosPagamento) que o WhatsApp, em vez de uma
+  // formatação própria — a redação exata mudou pra ficar idêntica ao
+  // WhatsApp ("Parcelamento:"/"Desconto PIX:" em vez de "Parcelável em
+  // até"/"desconto pagando via PIX"), mas os VALORES continuam os mesmos.
+  ok('PDF 5. parcelamento fecha exatamente com o total: 3x de R$ 14,20 sem juros', /Parcelamento:\s*em até 3x de R\$ 14,20 sem juros/.test(pdfText));
+  ok('PDF 6. PIX aparece como alternativa separada, R$ 40,41', /Desconto PIX:.*valor com PIX: R\$ 40,41/.test(pdfText));
   ok('PDF 7. prazo = "De 5 a 6 dias úteis"', pdfText.indexOf('De 5 a 6 dias úteis') >= 0);
   ok('PDF 8. nenhum "custo"/"margem"/"markup" exposto ao cliente', !/custo|margem|markup/i.test(pdfText));
   ok('PDF 9. nenhum "undefined"/"null"/"NaN" no HTML', !/\bundefined\b|\bnull\b|\bNaN\b/.test(pdfText));

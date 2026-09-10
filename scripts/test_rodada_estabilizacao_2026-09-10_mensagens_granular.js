@@ -65,6 +65,10 @@ var FN_NAMES = [
   'orcGetValidadeDias', 'orcDistribuirParcelas', 'orcMotorComercial',
   'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
+  // MICRO-RODADA 2026-09-10 — orcEnviarOrcamentoWA() passou a consumir a
+  // fonte canônica compartilhada com o PDF (ver
+  // test_micro_rodada_2026-09-10_pdf_alinhado_mensagens.js).
+  'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
   'orcEnviarOrcamentoWA'
 ];
 var src = [

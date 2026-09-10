@@ -26957,36 +26957,23 @@ async function orcEnviarOrcamentoWA() {
   // 50/50 enquanto o orçamento ainda não foi pago.
   var condicaoLabelWA = orcCondicaoPagamentoAtual(_orcSalvoWA);
 
-  // RODADA DE ESTABILIZAÇÃO — MENSAGENS 2026-09-10 — cada bloco de
-  // condição de pagamento (parcelamento/cartão, oferta especial, PIX)
-  // agora é uma string PRÓPRIA (cartaoStr/ofertaStr/pixStr), disponível
-  // como placeholder granular ({cartao}/{oferta_especial}/{pix}) — o
-  // admin controla a ORDEM e pode omitir qualquer um só editando o
-  // template em Config → Mensagens Automáticas, sem precisar mexer em
-  // código. `extrasStr` (placeholder legado {ofertas}) continua existindo
-  // com a MESMA ordem/conteúdo de sempre (Parcelamento → Oferta especial
-  // → PIX) — 100% retrocompatível pra quem não editou o template ainda.
-  var cartaoStr = '', ofertaStr = '', pixStr = '';
-  if(_condWA2.parcela && _condWA2.parcela.nParc>1){
-    // SPRINT PRÉ-GO-LIVE, Bloco I — o termo antigo, que citava um
-    // percentual extra cobrado do cliente, nunca mais aparece: com a nova
-    // regra comercial, cartão em até 3x é SEMPRE sem juros (orcMotorComercial
-    // garante isso), então o cliente nunca vê nenhuma menção a custo extra
-    // de processamento embutido na parcela.
-    cartaoStr = '*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+' sem juros';
-  }
-  if(dcOnWA && dcPctWA>0){
-    var condData = document.getElementById('orcDescCondData')?.value||'';
-    var dataFmt  = condData ? condData.split('-').reverse().join('/') : '';
-    ofertaStr = '*Oferta especial:* '+dcPctWA+'% de desconto já aplicado no valor acima'+(dataFmt?' — válido para fechamento até '+dataFmt+'. Após essa data, o valor retorna ao normal.':'.');
-  }
-  // SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE mostrado como alternativa
-  // (nunca mais atrás do toggle orcPixDiscToggle, removido da UI) — nunca
-  // "escondido" mesmo quando a oferta condicional (dcOn) está ativa.
-  if(_condWA2.pxPct>0){
-    pixStr = '*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
-  }
-  var extrasStr = [cartaoStr, ofertaStr, pixStr].filter(Boolean).map(function(s){ return '\n\n'+s; }).join('');
+  // MICRO-RODADA — PDF ALINHADO ÀS MENSAGENS 2026-09-10 — os blocos de
+  // condição de pagamento (parcelamento/cartão, oferta especial, PIX) vêm
+  // agora da fonte canônica única orcMontarBlocosPagamento() (mesma usada
+  // por orcImprimirOrcamentoPDF) — decide quais blocos existem e em que
+  // ORDEM (conforme o template salvo em Config → Mensagens Automáticas),
+  // este trecho só formata cada bloco em markdown do WhatsApp.
+  var condData = document.getElementById('orcDescCondData')?.value||'';
+  var _blocosPagamentoWA = orcMontarBlocosPagamento(_condWA2, dcOnWA, dcPctWA, condData, fmtBRLWA);
+  var _porTipoWA = {};
+  _blocosPagamentoWA.forEach(function(b){ _porTipoWA[b.tipo] = '*'+b.label+':* '+b.texto; });
+  var cartaoStr = _porTipoWA.cartao || '', ofertaStr = _porTipoWA.oferta_especial || '', pixStr = _porTipoWA.pix || '';
+  // `extrasStr` (placeholder legado {ofertas}) continua existindo — mesma
+  // ordem/conteúdo que os blocos granulares acima (retrocompatível: quem
+  // não editou o template pro formato granular continua vendo a ordem
+  // histórica Parcelamento → Oferta especial → PIX, já que sem {pix}/
+  // {cartao} no template orcOrdemBlocosPagamento() cai no fallback legado).
+  var extrasStr = _blocosPagamentoWA.map(function(b){ return '\n\n*'+b.label+':* '+b.texto; }).join('');
 
   // Sem nome de cliente: saudação genérica "Olá!" sozinha — nunca uma
   // vírgula/asterisco soltos por interpolar {cliente} vazio (comportamento
@@ -27597,12 +27584,22 @@ async function orcImprimirOrcamentoPDF() {
   // simples de sempre.
   var _gruposRenderizadosPDF = {};
   var _itensPDF = orcColetarItensDistribuidos(totalCartaoPDF);
+  // MICRO-RODADA — PDF ALINHADO ÀS MENSAGENS 2026-09-10 — cabeçalho do
+  // bloco comparativo vem do MESMO template editável (orcamentoComparativo)
+  // usado pelo WhatsApp, nunca mais hardcoded aqui. Sentinela única (nunca
+  // digitável por um admin real) isola só o texto ANTES de {opcoes} no
+  // template resolvido — funciona qualquer que seja a posição/texto ao
+  // redor configurado, sem precisar reimplementar a extração.
+  var _comparativoSentinela = '␁OPCOES␁';
+  var _comparativoHeaderPDF = (typeof msgResolverTemplate === 'function'
+    ? msgResolverTemplate('orcamentoComparativo', { opcoes: _comparativoSentinela }).split(_comparativoSentinela)[0]
+    : 'Escolha uma das opções abaixo (você pode escolher apenas uma):\n\n').trim();
   _itensPDF.forEach(function(item){
     if (item.grupoOpcaoId) {
       if (_gruposRenderizadosPDF[item.grupoOpcaoId]) return; // já virou bloco
       _gruposRenderizadosPDF[item.grupoOpcaoId] = true;
       var _opcoesPDF = _itensPDF.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
-      itensRows += '<tr><td colspan="4" style="padding:12px 14px 2px;font-size:10px;font-weight:800;color:#5B21B6;text-transform:uppercase;letter-spacing:.4px">Escolha uma das opções abaixo</td></tr>';
+      itensRows += '<tr><td colspan="4" style="padding:12px 14px 2px;font-size:10px;font-weight:800;color:#5B21B6;text-transform:uppercase;letter-spacing:.4px">'+cfgEsc(_comparativoHeaderPDF)+'</td></tr>';
       _opcoesPDF.forEach(function(op, oi){
         itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoConfirmadaCliente?'<strong>✓ ':'')+op.desc+(op.opcaoConfirmadaCliente?'</strong>':'')+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(op.unit)+'</td>'
@@ -27625,24 +27622,22 @@ async function orcImprimirOrcamentoPDF() {
     ? 'R$ '+totalCartaoPDF.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (c2.finalPrice ? 'R$ '+c2.finalPrice.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
 
-  // SPRINT PRÉ-GO-LIVE, Bloco I — Condições de pagamento (parcelamento no
-  // cartão, PIX) — mesma fonte usada no WhatsApp (orcCalcCondicoesPagamento
-  // → orcMotorComercial), para PDF e WhatsApp nunca divergirem. Cartão em
-  // até 3x é SEMPRE sem juros e o PIX é SEMPRE mostrado como alternativa
-  // (nunca mais atrás de um toggle) — nunca mais o texto "(parcelas com
-  // acréscimo)" nem qualquer menção a taxa/juros/acréscimo pro cliente.
-  // _condPDF já foi calculado acima (Gate 4) — reaproveitado aqui, nunca
-  // recalculado, para nunca divergir do total já exibido.
+  // MICRO-RODADA — PDF ALINHADO ÀS MENSAGENS 2026-09-10 — mesma fonte
+  // canônica usada pelo WhatsApp (orcMontarBlocosPagamento): decide quais
+  // blocos existem e em que ORDEM (conforme o template configurado em
+  // Config → Mensagens Automáticas — {pix}/{cartao}/{oferta_especial}),
+  // este trecho só formata cada bloco em HTML (nunca reimplementa a
+  // regra). Corrige também um gap real: o bloco "Oferta especial" existia
+  // no WhatsApp mas nunca aparecia no PDF (o desconto condicional entrava
+  // silenciosamente na base do Total, sem nenhum texto explicando por
+  // quê) — agora aparece igual nos dois canais.
+  var _iconesBlocoPagamentoPDF = { cartao: '💳', pix: '⚡', oferta_especial: '🏷️' };
+  var _blocosPagamentoPDF = orcMontarBlocosPagamento(_condPDF, condAtivo, condPct, condData, function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); });
   var condPagamentoHtml = '';
-  if((_condPDF.parcela && _condPDF.parcela.nParc>1) || _condPDF.pxPct>0){
-    var _linhas = '';
-    if(_condPDF.parcela && _condPDF.parcela.nParc>1){
-      var _p = _condPDF.parcela;
-      _linhas += '<div>💳 Parcelável em até <strong>'+_p.nParc+'x de R$ '+_p.valorParcela.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' sem juros</strong></div>';
-    }
-    if(_condPDF.pxPct>0){
-      _linhas += '<div>⚡ '+_condPDF.pxPct+'% de desconto pagando via PIX (R$ '+_condPDF.pixTotal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+')</div>';
-    }
+  if(_blocosPagamentoPDF.length){
+    var _linhas = _blocosPagamentoPDF.map(function(b){
+      return '<div>'+(_iconesBlocoPagamentoPDF[b.tipo]||'•')+' <strong>'+b.label+':</strong> '+b.texto+'</div>';
+    }).join('');
     condPagamentoHtml = '<div style="margin-top:8px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;font-size:12px;color:#334155;line-height:1.6">'+_linhas+'</div>';
   }
 
@@ -30944,6 +30939,59 @@ function msgResolverTemplate(chave, dados) {
     if (validos.indexOf(nome) < 0) return match; // desconhecido: nunca inventa valor
     return (dados && dados[nome] != null) ? String(dados[nome]) : '';
   });
+}
+
+// ============================================================
+// MICRO-RODADA — PDF ALINHADO ÀS MENSAGENS 2026-09-10
+// ============================================================
+// Fonte CANÔNICA ÚNICA da lógica comercial de Pix/Cartão/Oferta especial
+// — decide QUAIS blocos existem, em que ORDEM, e com que VALORES —
+// consumida por orcEnviarOrcamentoWA() (WhatsApp), orcImprimirOrcamentoPDF()
+// (PDF) e pela Preview em Config → Mensagens Automáticas (via
+// CFG_MSG_AUTO_EXEMPLO, que já usa os mesmos placeholders {pix}/{cartao}/
+// {oferta_especial}). Nenhum dos consumidores reimplementa a regra — só
+// formata visualmente o que esta função decide (markdown no WhatsApp,
+// HTML no PDF).
+//
+// orcOrdemBlocosPagamento() — lê o MESMO template salvo/padrão que
+// msgResolverTemplate('orcamentoEnviado', ...) usa, e devolve a ORDEM (e
+// presença) dos blocos {pix}/{cartao}/{oferta_especial} conforme a
+// posição literal desses placeholders no texto configurado pelo admin.
+// Template sem NENHUM dos 3 placeholders granulares (ainda usando só o
+// {ofertas} legado, ou nenhum dos dois) cai no fallback histórico
+// (Cartão → Oferta especial → PIX — mesma ordem que sempre existiu dentro
+// de {ofertas}), preservando 100% o comportamento de quem não migrou.
+function orcOrdemBlocosPagamento() {
+  var cfg = (typeof cfgLoad === 'function') ? cfgLoad() : {};
+  var custom = cfg.mensagensAutomaticas && cfg.mensagensAutomaticas.orcamentoEnviado;
+  var texto = (custom && custom.texto) ? custom.texto : (typeof msgTemplatesDefault === 'function' ? msgTemplatesDefault().orcamentoEnviado : '');
+  texto = texto || '';
+  var tipos = ['pix', 'cartao', 'oferta_especial'];
+  var presentes = tipos.filter(function (t) { return texto.indexOf('{' + t + '}') >= 0; });
+  if (presentes.length === 0) return ['cartao', 'oferta_especial', 'pix'];
+  return presentes.sort(function (a, b) { return texto.indexOf('{' + a + '}') - texto.indexOf('{' + b + '}'); });
+}
+// orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL) — decide
+// QUAIS blocos existem (mesmo gating de sempre: parcela>1x, desconto
+// condicional ativo, pxPct>0) e seus VALORES reais, já na ORDEM definida
+// por orcOrdemBlocosPagamento(). Devolve uma lista de objetos
+// {tipo, label, texto} — cada CONSUMIDOR formata `label`+`texto` com a
+// própria marcação visual (WhatsApp: markdown `*label:*`; PDF: HTML com
+// ícone), mas o CONTEÚDO (o que é dito, os números, a ordem, a presença)
+// é decidido aqui, uma única vez.
+function orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL) {
+  var porTipo = {};
+  if (cond && cond.parcela && cond.parcela.nParc > 1) {
+    porTipo.cartao = { tipo: 'cartao', label: 'Parcelamento', texto: 'em até ' + cond.parcela.nParc + 'x de ' + fmtBRL(cond.parcela.valorParcela) + ' sem juros' };
+  }
+  if (dcOn && dcPct > 0) {
+    var dataFmt = condData ? condData.split('-').reverse().join('/') : '';
+    porTipo.oferta_especial = { tipo: 'oferta_especial', label: 'Oferta especial', texto: dcPct + '% de desconto já aplicado no valor acima' + (dataFmt ? ' — válido para fechamento até ' + dataFmt + '. Após essa data, o valor retorna ao normal.' : '.') };
+  }
+  if (cond && cond.pxPct > 0) {
+    porTipo.pix = { tipo: 'pix', label: 'Desconto PIX', texto: cond.pxPct + '% de desconto pagando à vista via PIX (valor com PIX: ' + fmtBRL(cond.pixTotal) + ').' };
+  }
+  return orcOrdemBlocosPagamento().map(function (t) { return porTipo[t]; }).filter(Boolean);
 }
 
 // ============================================================

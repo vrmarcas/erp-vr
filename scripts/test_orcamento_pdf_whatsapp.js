@@ -70,6 +70,8 @@ var FN_NAMES = [
   // mais o texto morto de orcFormaPgto; usa orcCondicaoPagamentoAtual()
   // (que por sua vez chama orcCondicaoLabelPorTipo()).
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
+  // MICRO-RODADA 2026-09-10 — fonte canônica compartilhada com o PDF.
+  'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
   'orcEnviarOrcamentoWA'
 ];
 var _msgPlaceholdersSrc = (function(){
