@@ -196,8 +196,15 @@ assertTrue(unitarios[1] > 0, '5. (sanity) unitário calculado é um valor real p
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-// 10-12 — desconto/acréscimo explícito É a única exceção permitida: unitário
-// muda com ajuste comercial, e volta ao base quando o ajuste é removido.
+// 10-12 — RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 (decisão de
+// negócio explícita do usuário, substitui a regra do Bloco D 2026-08-23
+// abaixo): desconto/acréscimo GLOBAL (orcDesc/orcAcres — um único campo
+// para o pedido inteiro, nunca por linha) deixou de ser exceção — agora é
+// tratado como QUALQUER outro custo/ajuste do ORÇAMENTO como um todo: não
+// é mais rateado de volta pra nenhuma linha, aparece só no fechamento do
+// pedido ("Ajuste comercial do orçamento", ver orcRecalc). O ajuste
+// comercial POR ITEM (ORC_ITEM_AJUSTES, testado em outro arquivo) continua
+// sendo a única forma de mudar o preço de uma linha especificamente.
 // ══════════════════════════════════════════════════════════════════════════
 (function () {
   reset(4);
@@ -205,22 +212,22 @@ assertTrue(unitarios[1] > 0, '5. (sanity) unitário calculado é um valor real p
   var unitBase = parseReais(_els.oi_unit_1.textContent);
 
   reset(4);
-  _els.orcDesc.value = '10'; // 10% de desconto GLOBAL — ação comercial explícita
+  _els.orcDesc.value = '10'; // 10% de desconto GLOBAL — afeta só o Total Geral agora
   mod.orcRecalc();
   var unitComDesconto = parseReais(_els.oi_unit_1.textContent);
-  assertTrue(unitComDesconto < unitBase, '10. desconto explícito (única exceção permitida pela regra) reduz o unitário');
+  assertCloseTo(unitComDesconto, unitBase, '10. desconto GLOBAL não move mais o unitário da linha (fica só no Total Geral, regra 2026-09-10)');
 
   reset(4);
-  _els.orcAcres.value = '15'; // 15% de acréscimo comercial GLOBAL — ação explícita
+  _els.orcAcres.value = '15'; // 15% de acréscimo comercial GLOBAL — afeta só o Total Geral agora
   mod.orcRecalc();
   var unitComAcrescimo = parseReais(_els.oi_unit_1.textContent);
-  assertTrue(unitComAcrescimo > unitBase, '11. acréscimo explícito (única exceção permitida) aumenta o unitário');
+  assertCloseTo(unitComAcrescimo, unitBase, '11. acréscimo GLOBAL não move mais o unitário da linha (fica só no Total Geral, regra 2026-09-10)');
 
   reset(4);
   _els.orcDesc.value = '0'; _els.orcAcres.value = '0'; // remove o ajuste
   mod.orcRecalc();
   var unitSemAjuste = parseReais(_els.oi_unit_1.textContent);
-  assertCloseTo(unitSemAjuste, unitBase, '12. removendo o ajuste comercial, o unitário volta EXATAMENTE ao valor base');
+  assertCloseTo(unitSemAjuste, unitBase, '12. sem desconto/acréscimo global, o unitário continua igual ao base (nunca mudou)');
 })();
 
 // ══════════════════════════════════════════════════════════════════════════

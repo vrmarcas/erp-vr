@@ -227,21 +227,36 @@ var mod = require(modPath);
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// TESTE E — extras em Item A e Item B: breakdown visual não atribui ao
-// item errado (NÃO altera o total nem a regra de isolamento já corrigida
-// — só confere que o texto de decomposição aponta para o item certo)
+// TESTE E — extras em Item A e Item B não vazam para o item errado.
+//
+// RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — a decomposição
+// textual "Extras por item" no resumo do pedido (orcBreak) foi REMOVIDA:
+// ela só existia porque, antes desta rodada, o "➕ deste Item" de cada
+// linha era calculado via um RATEIO (item.itemExtrasSoma/itemExtrasTotal
+// × somaExtrasTransformada) sobre um pool do pedido inteiro — e por isso
+// precisava de um texto à parte pra deixar claro a qual item cada
+// parcela pertencia. Agora cada item carrega o PRÓPRIO extra direto em
+// oi_tot_ (item.extrasProprioMarkup, sem nenhum rateio) — a garantia
+// "extra não vaza pro item errado" fica ainda mais forte (não há mais
+// pool nenhum pra confundir), e é verificada direto na coluna Total de
+// cada linha, não mais num texto de decomposição à parte.
 // ══════════════════════════════════════════════════════════════════════
 {
-  var rE = rodarOrcRecalcComExtras();
-  ok('E1. breakdown "Extras por item" existe quando há extras', /Extras por item/.test(rE.orcBreak.innerHTML));
-  ok('E2. decomposição cita o produto do Item A (dono do extra R$30)', rE.orcBreak.innerHTML.indexOf('Produto A') > -1);
-  ok('E3. decomposição cita o produto do Item B (dono do extra R$80)', rE.orcBreak.innerHTML.indexOf('Produto B') > -1);
-  // Extrai os dois valores decompostos (mesma ordem dos itens) e confirma
-  // que cada um bate com o que o item realmente recebeu em oi_tot_ (delta
-  // vs. um cenário sem nenhum extra) — nunca invertidos entre si.
-  var matches = rE.orcBreak.innerHTML.match(/Produto [AB]: \+R\$\s?[\d.,]+/g) || [];
-  test('E4. exatamente 2 entradas na decomposição (uma por item com extra)', matches.length, 2);
-  ok('E5. a entrada do Produto A não é igual à do Produto B (valores realmente distintos, não confundidos)', matches[0] !== matches[1]);
+  var rComExtras = rodarOrcRecalcComExtras();
+  var totalA_com = parseBRL(rComExtras.oi_tot_1.textContent);
+  var totalB_com = parseBRL(rComExtras.oi_tot_2.textContent);
+
+  var rSemExtras = rodarOrcRecalcComExtras({ semExtras: true });
+  var totalA_sem = parseBRL(rSemExtras.oi_tot_1.textContent);
+  var totalB_sem = parseBRL(rSemExtras.oi_tot_2.textContent);
+
+  var deltaA = totalA_com - totalA_sem;
+  var deltaB = totalB_com - totalB_sem;
+  testePerto('E1. Item A (dono do extra R$30 — instalação) recebe exatamente +R$30,00 no próprio Total', deltaA, 30, 0.02);
+  testePerto('E2. Item B (dono do extra R$80 — outros) recebe exatamente +R$80,00 no próprio Total', deltaB, 80, 0.02);
+  ok('E3. o extra do Item A não vazou pro Item B (Item B não recebeu +30)', Math.abs(deltaB - 30) > 0.02);
+  ok('E4. o extra do Item B não vazou pro Item A (Item A não recebeu +80)', Math.abs(deltaA - 80) > 0.02);
+  ok('E5. os dois deltas são distintos (não confundidos entre si)', Math.abs(deltaA - deltaB) > 0.02);
 }
 
 // ── Helpers que rodam orcRecalc() de verdade para os cross-checks acima ──
@@ -281,7 +296,8 @@ function rodarOrcRecalcComPecas(pecas, planArea, matKey, espItem) {
   return _els;
 }
 
-function rodarOrcRecalcComExtras() {
+function rodarOrcRecalcComExtras(opts) {
+  opts = opts || {};
   var _els = {
     cfgOverhead: makeEl({ value: '0' }), cfgVrml: makeEl({ value: '0' }), cfgImpostos: makeEl({ value: '0' }),
     orcOverheadInfo: makeEl(), orcVrmlInfo: makeEl(),
@@ -322,7 +338,7 @@ function rodarOrcRecalcComExtras() {
   };
   global._cfgData = { financeiro: { overhead: 0, vrml: 0, impostos: 0 } };
   global.cfgLoad = function () { return { materiais: MATERIAIS }; };
-  global.ORC_ITEM_EXTRAS = { '1': { instalacao: 30, acabamento: 0, outros: 0 }, '2': { instalacao: 0, acabamento: 0, outros: 80 } };
+  global.ORC_ITEM_EXTRAS = opts.semExtras ? {} : { '1': { instalacao: 30, acabamento: 0, outros: 0 }, '2': { instalacao: 0, acabamento: 0, outros: 80 } };
   global.ORC_ITEM_AJUSTES = {};
   global._orcVitreItensPedido = [];
   global.orcVitreItensPedidoTotal = function () { return 0; };

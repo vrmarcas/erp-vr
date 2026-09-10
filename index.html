@@ -11790,6 +11790,13 @@ function orcRecalc() {
     // planManualMatCost.
     var _itemEspMm = parseFloat(document.getElementById('oi_esp_'+idx)?.value) || 0;
     var _deltaEspecificoPecas = 0;
+    // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — acumuladores
+    // LOCAIS (por item), em paralelo aos globais (*PecasTotal) já
+    // existentes logo abaixo — os globais continuam alimentando o Total
+    // Geral/breakdown do pedido (sem nenhuma mudança), mas agora cada item
+    // também carrega o PRÓPRIO consumível de peça, para o PASS 2/3
+    // precificarem a linha sem depender do que as outras linhas têm.
+    var _adhItemLocal=0, _adhbItemLocal=0, _gravacaoItemLocal=0, _sprayItemLocal=0, _extraItemLocal=0;
     if (planArea > 0) {
       var _pecasPlanRaw = [];
       try { _pecasPlanRaw = JSON.parse(row.dataset.planPecas || '[]'); } catch(_e) {}
@@ -11822,17 +11829,17 @@ function orcRecalc() {
         // mutuamente exclusivos: os dois `if` independentes (nunca
         // else-if) permitem que a mesma peça some as DUAS parcelas.
         var _adesPeca = _planPecaAdesivos(p);
-        if (_adesPeca.normal) adhPecasTotal += _areaPecaCm2*adhPrecoCm2;
-        if (_adesPeca.branco) adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2;
+        if (_adesPeca.normal) { adhPecasTotal += _areaPecaCm2*adhPrecoCm2; _adhItemLocal += _areaPecaCm2*adhPrecoCm2; }
+        if (_adesPeca.branco) { adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2; _adhbItemLocal += _areaPecaCm2*adhbPrecoCm2; }
         // RODADA 6 — valor em R$ direto (não é área), sem multiplicar por
         // qty da peça nem do item: o campo representa o custo TOTAL desta
         // ocorrência peça×consumível, não um valor por unidade (não há
         // evidência no código anterior de multiplicação por quantidade
         // para Gravação/Spray/Extra — ver investigação desta rodada; a
         // leitura literal preservada é "valor informado = custo total").
-        gravacaoPecasTotal += parseFloat(p.gravacao)||0;
-        sprayPecasTotal    += parseFloat(p.spray)||0;
-        extraPecasTotal    += parseFloat(p.extra)||0;
+        gravacaoPecasTotal += parseFloat(p.gravacao)||0; _gravacaoItemLocal += parseFloat(p.gravacao)||0;
+        sprayPecasTotal    += parseFloat(p.spray)||0;    _sprayItemLocal    += parseFloat(p.spray)||0;
+        extraPecasTotal    += parseFloat(p.extra)||0;    _extraItemLocal    += parseFloat(p.extra)||0;
       });
     }
     const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
@@ -11858,7 +11865,13 @@ function orcRecalc() {
     // para nunca deixar o extra de um item vazar no preço de outro.
     var _exItem = (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[idx]) || {};
     var itemExtrasSoma = (_exItem.acabamento||0)+(_exItem.instalacao||0)+(_exItem.outros||0);
-    itemRows.push({idx:idx, qty:qty, matCost:matCost, itemExtrasSoma: _contaItem?itemExtrasSoma:0, conta:_contaItem});
+    itemRows.push({
+      idx:idx, qty:qty, matCost:matCost, itemExtrasSoma: _contaItem?itemExtrasSoma:0, conta:_contaItem,
+      // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — consumíveis
+      // de peça PRÓPRIOS deste item (nunca dependem do que outras linhas
+      // têm) — usados pelo PASS 2/3 para precificar a linha isoladamente.
+      adhOwn:_adhItemLocal, adhbOwn:_adhbItemLocal, gravacaoOwn:_gravacaoItemLocal, sprayOwn:_sprayItemLocal, extraOwn:_extraItemLocal
+    });
   });
 
   // consumíveis
@@ -11946,6 +11959,28 @@ function orcRecalc() {
   const totalCost = matTotal + extras + itemExtrasTotal + gravacaoCusto + sprayCusto + extraCusto;
   const totalCostParaMarkup = matTotal + extras + itemExtrasTotal; // base do markup — SEM Gravação/Spray/Extra
 
+  // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — consumíveis
+  // configurados pelos campos GLOBAIS do pedido (toggle "🩹 Adesivo"
+  // Sim/Não do Step 3 "⚙️ Custos", ainda ativo na UI, e o fallback legado
+  // de Gravação/Spray/Extra de orçamentos salvos antes do consumível-por-
+  // peça) não têm, por natureza, um dono — são um valor ÚNICO para o
+  // pedido inteiro. Quando existe EXATAMENTE 1 item real (_contaItem) no
+  // pedido, a atribuição a essa linha é inequívoca (não há outra linha
+  // pra confundir) — soma-se ao próprio item, preservando 100% do valor
+  // exibido em orçamentos de item único (o caso mais comum) sem
+  // reintroduzir rateio nenhum. Com 2+ itens reais, a atribuição seria
+  // ambígua (a qual pertence?) — nesse caso o valor fica só no resumo do
+  // pedido (bloco "Consumíveis (legado do pedido)", ver mais abaixo).
+  var _itensReaisParaLegado = itemRows.filter(function(it){ return it.conta!==false; });
+  if (_itensReaisParaLegado.length === 1) {
+    var _unicoItem = _itensReaisParaLegado[0];
+    if (adhPecasTotal<=0 && adhYes) _unicoItem.adhOwn = (_unicoItem.adhOwn||0) + areaTotal*adhPrecoCm2;
+    if (adhbPecasTotal<=0 && adhbYes) _unicoItem.adhbOwn = (_unicoItem.adhbOwn||0) + areaTotal*adhbPrecoCm2;
+    if (gravacaoPecasTotal<=0 && impLegado>0) _unicoItem.gravacaoOwn = (_unicoItem.gravacaoOwn||0) + impLegado;
+    if (sprayPecasTotal<=0 && sprayLegadoUnid>0) _unicoItem.sprayOwn = (_unicoItem.sprayOwn||0) + (sprayLegadoUnid*16);
+    if (extraPecasTotal<=0 && extraLegado>0) _unicoItem.extraOwn = (_unicoItem.extraOwn||0) + extraLegado;
+  }
+
   // PASS 2: calcula o valor "cru" (material + ajuste do item) de cada
   // item — usado como PESO na redistribuição do PASS 3, não mais escrito
   // direto em oi_unit_/oi_tot_ (ver PASS 3, mais abaixo: essas colunas
@@ -11969,7 +12004,22 @@ function orcRecalc() {
   itemRows.forEach(function(item) {
     if(item.matCost > 0 && factor > 0) {
       var uc = item.matCost / item.qty;          // custo unitário só de material
-      var ts = item.matCost / factor;             // total de venda da linha, ANTES do ajuste do item (markup s/ material)
+      // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — regra
+      // inviolável: item não alterado nunca pode mudar de preço por causa
+      // de outra linha. A base de venda da linha agora inclui SÓ o que é
+      // PRÓPRIO deste item — material + Adesivo/Adh.Branco por peça deste
+      // item + extras "➕ deste Item" — nunca uma fatia de custos do
+      // PEDIDO (máquinas/montagem/deslocamento/desconto global), que saem
+      // daqui e passam a aparecer só no resumo do pedido (Custos gerais),
+      // nunca mais rateados de volta pra linha.
+      // itemExtrasSoma ("➕ deste Item" — Acabamento/Instalação/Outros) fica
+      // DE FORA daqui de propósito: é um valor FLAT por linha (nunca por
+      // unidade) — RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D já exigia
+      // que nunca fosse dividido por qty; entra marcado (própria linha, já
+      // calculado abaixo em item.extrasProprioMarkup) só no TOTAL da linha
+      // (PASS 3), nunca no "ts" que alimenta o unitário.
+      var _costBaseOwn = item.matCost + (item.adhOwn||0) + (item.adhbOwn||0);
+      var ts = _costBaseOwn / factor;             // total de venda da linha, ANTES do ajuste do item (markup s/ material+adesivo próprio)
       var precoOriginalItemCents = Math.round(ts * 100);
       var _aj = (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[item.idx]) || {};
       // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 10 — escopo explícito,
@@ -12011,7 +12061,17 @@ function orcRecalc() {
       var row = document.getElementById('oir_'+item.idx);
       if(row) row.dataset.precoOriginalItemCents = precoOriginalItemCents; // lido pelo modal de ajuste para o preview
       var ec=document.getElementById('oi_custo_'+item.idx); if(ec) ec.textContent='R$'+uc.toFixed(2).replace('.',',');
-      item.tsRaw = tsFinal; // PASS 3 usa isto como peso da redistribuição — oi_unit_/oi_tot_ são escritos lá
+      item.tsRaw = tsFinal; // PASS 3 usa isto como valor PRÓPRIO da linha — oi_unit_/oi_tot_ são escritos lá
+      // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — Gravação/
+      // Spray/Extra por peça, só os PRÓPRIOS deste item (mesma regra
+      // comercial de sempre: custo×2, fora do markup geral) — nunca soma
+      // as peças de outra linha.
+      item.gravSprayExtraOwn = (item.gravacaoOwn||0)*2 + (item.sprayOwn||0)*2 + (item.extraOwn||0)*2;
+      // Extras "➕ deste Item" (Acabamento/Instalação/Outros) — marcados
+      // pelo mesmo markup do material (fazem parte do custo real do item),
+      // mas SEM entrar no "ts"/ajuste acima — valor FLAT por linha, nunca
+      // dividido por qty (mesma regra do Bloco D 2026-08-23, preservada).
+      item.extrasProprioMarkup = factor>0 ? (item.itemExtrasSoma||0)/factor : 0;
       // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de
       // produção: qty 1 → unit R$26,61, qty 2 → unit R$26,38. Causa raiz:
       // um ajuste comercial tipo 'fixo' (R$ fixo NA LINHA, não por unidade
@@ -12058,23 +12118,14 @@ function orcRecalc() {
     return fp;
   }
   var finalPriceVR = _calcularFinalPriceVR(totalCostParaMarkup);
-  var finalPriceVR_semItemExtras = _calcularFinalPriceVR(totalCostParaMarkup - itemExtrasTotal);
-  var somaExtrasTransformada = finalPriceVR - finalPriceVR_semItemExtras;
-  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — mesma técnica de
-  // "calcular com e sem uma parcela" já usada acima para isolar os extras
-  // por item, agora para isolar do preço UNITÁRIO comercial só o que
-  // GENUINAMENTE escala com a quantidade: material (matTotal) e Adesivo/
-  // Adh. Branco por área (consTotal = adh+adhb, RODADA 5 — `adh` já
-  // multiplica `areaTotal`, que já inclui `*qty` desde o PASS 1, exatamente
-  // como matCost). Máquinas/Montagem/Deslocamento (`maqTotal+mont+desl`)
-  // são valores ÚNICOS por pedido (um input manual, nunca multiplicado por
-  // qty em lugar nenhum) — são esses, e SÓ esses, que causavam o bug real
-  // de produção (unitário caindo conforme a quantidade sobe, porque um
-  // custo fixo estava sendo dividido por ela). `finalPriceVR_qtySafe` usa
-  // a MESMA transformação de desconto/acréscimo, só com base de custo
-  // filtrada (material+consumíveis por área, nunca máquinas/montagem/
-  // deslocamento).
-  var finalPriceVR_qtySafe = _calcularFinalPriceVR(matTotal + consTotal);
+  // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — os auxiliares
+  // "calcular com e sem uma parcela" (finalPriceVR_semItemExtras/
+  // finalPriceVR_qtySafe/somaExtrasTransformada) que existiam aqui só
+  // alimentavam o rateio por pool do PASS 3, removido nesta rodada (cada
+  // item agora é precificado 100% a partir dos próprios dados — ver PASS
+  // 2/3 abaixo). finalPriceVR/finalPrice continuam calculados exatamente
+  // como antes — o TOTAL GERAL do pedido não muda, só deixou de ser
+  // redistribuído de volta pra cada linha.
   if(_soCorte) {
     var scEl = document.getElementById('soCorteValor');
     if(scEl) scEl.textContent = 'R$ '+finalPriceVR.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -12102,73 +12153,48 @@ function orcRecalc() {
 
   // PASS 3 — preço final unitário efetivo do item (fonte canônica única).
   //
-  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — achado real de
-  // produção: mesmo item/config, só mudando a quantidade, o "Unit."
-  // exibido variava (qty 1 ≈R$45,46 → qty 2 ≈R$45,24 → qty 6 ≈R$45,16).
-  // Causa raiz: a versão anterior deste PASS 3 dava a cada item uma fatia
-  // proporcional do POOL INTEIRO do pedido — incluindo máquinas/montagem/
-  // deslocamento (custos FIXOS do pedido, um único input manual, nunca
-  // multiplicado por qty em lugar nenhum) — e então dividia essa fatia por
-  // item.qty para achar o "unitário". Custo fixo dividido por quantidade
-  // NUNCA é constante (some conforme qty sobe) — regra comercial violada.
+  // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — achado real de
+  // produção: uma linha NÃO ALTERADA mudava de preço (às vezes
+  // significativamente) só porque outra linha do mesmo orçamento era
+  // editada, adicionada, removida, ou uma opção comparativa era
+  // marcada/desmarcada. Causa raiz: a versão anterior deste PASS 3 (ver
+  // histórico — Bloco D 2026-08-23) já tinha corrigido a divisão de custo
+  // fixo por quantidade, mas continuava dando a cada linha uma FATIA
+  // PROPORCIONAL de um "pool" calculado a partir da SOMA de todas as
+  // linhas (`_rawTotalVR`, `_fatorPoolQtySafe`, `_fatorPoolNaoUnitario`) —
+  // então qualquer mudança em QUALQUER linha alterava esses fatores
+  // globais, e portanto o preço de TODAS as linhas, inclusive as
+  // intocadas. Regra inviolável (autorizada pelo usuário nesta rodada,
+  // decisão de negócio explícita): "cada linha representa exclusivamente
+  // o preço daquele item; custos/ajustes do ORÇAMENTO inteiro não são
+  // rateados de volta às linhas — aparecem só no fechamento do pedido."
   //
-  // Corrigido separando dois conceitos que a versão anterior misturava:
-  //   (a) preço UNITÁRIO comercial — só a parte que genuinamente escala
-  //       com a quantidade (material + Adesivo/Adh.Branco por área, ambos
-  //       já lineares em qty desde o PASS 1/2) — nunca mais custo fixo.
-  //   (b) TOTAL da linha — unitário×qty (a), MAIS a fatia proporcional
-  //       (por peso de material, mesmo rateio de sempre) dos custos que
-  //       são do PEDIDO inteiro, não desta peça especificamente: máquinas/
-  //       montagem/deslocamento, e Gravação/Spray/Extra por peça (RODADA
-  //       6 — "valor TOTAL desta ocorrência, nunca multiplicado por qty",
-  //       ou seja, também não é um custo por unidade) — MAIS os extras
-  //       "➕ deste Item" (Acabamento/Instalação/Outros), que já eram, e
-  //       continuam sendo, atribuídos 100% a este item (nunca rateados).
-  // Isso preserva TODAS as regras já estabilizadas (Gravação/Spray/Extra/
-  // Extra por item continuam aparecendo no preço da linha exatamente como
-  // sempre apareceram — nenhuma delas é "removida", só deixaram de ser
-  // DIVIDIDAS por quantidade) e fecha exatamente o bug relatado (o
-  // UNITÁRIO nunca mais cai conforme a quantidade sobe).
-  var _rawTotalVR = 0;
-  itemRows.forEach(function(item){ if(item.conta!==false) _rawTotalVR += (item.tsRaw||0); });
-  var _fatorPoolQtySafe = _rawTotalVR>0 ? finalPriceVR_qtySafe/_rawTotalVR : 0;
-  // Custos do PEDIDO (não desta peça) que nunca escalam com qty — mesma
-  // técnica de "calcular com e sem" já usada para isolar item extras:
-  // a diferença entre o pool completo (sem item extras) e o pool
-  // qty-safe é exatamente a contribuição, já transformada por desconto/
-  // acréscimo, de máquinas+montagem+deslocamento.
-  var _custoFixoTransformado = finalPriceVR_semItemExtras - finalPriceVR_qtySafe;
-  var _poolNaoUnitario = _custoFixoTransformado + gravacaoAdicionalVenda + sprayAdicionalVenda + extraAdicionalVenda;
-  var _fatorPoolNaoUnitario = _rawTotalVR>0 ? _poolNaoUnitario/_rawTotalVR : 0;
+  // Corrigido eliminando por completo o rateio por pool: cada linha agora
+  // é precificada 100% a partir dos SEUS PRÓPRIOS dados (PASS 1/2 já
+  // isolam matCost/adhOwn/adhbOwn/itemExtrasSoma/gravSprayExtraOwn por
+  // item) — sem nenhum fator derivado da soma de outras linhas. Máquinas/
+  // montagem/deslocamento e o efeito de desconto/acréscimo GLOBAL saem
+  // daqui por completo e passam a aparecer só no resumo do pedido (bloco
+  // "Custos gerais do pedido" / "Ajuste do orçamento", logo abaixo) — a
+  // soma continua batendo exatamente com o Total Geral, só que de forma
+  // transparente em vez de escondida dentro de cada linha.
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
-    // Fatia de tsRaw que genuinamente escala com qty (material + ajuste
-    // 'percentual', se houver) — a fatia 'fixo' (ver PASS 2) fica de fora
-    // do rateio-por-qty abaixo, exatamente como RODADA DE CORREÇÃO
-    // DEFINITIVA (2026-09-01) exige.
+    // Fatia de tsRaw que genuinamente escala com qty (material+adesivo
+    // próprio+extras próprios, ou ajuste 'percentual', se houver) — a
+    // fatia 'fixo' (ver PASS 2) fica de fora da divisão por qty abaixo,
+    // exatamente como RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) exige.
     var _tsRawUnitario = item.tsRaw - (item.ajusteFixoPortionRS||0);
-    var itemUnitFinal, itemShareNaoUnitario;
-    if (item.conta===false) {
-      // Opção NÃO selecionada (orçamento comparativo) — preço
-      // INFORMATIVO na mesma escala de preço/peso dos itens reais do
-      // pedido, nunca somado ao total — mesma regra de sempre.
-      itemUnitFinal = _fatorPoolQtySafe>0 ? (_tsRawUnitario*_fatorPoolQtySafe)/(item.qty||1) : (item.qty>0 ? _tsRawUnitario/item.qty : _tsRawUnitario);
-      itemShareNaoUnitario = _fatorPoolNaoUnitario>0 ? item.tsRaw*_fatorPoolNaoUnitario : (itemRows.length ? _poolNaoUnitario/itemRows.length : 0);
-    } else {
-      itemUnitFinal = item.qty>0 ? (_tsRawUnitario*_fatorPoolQtySafe)/item.qty : _tsRawUnitario*_fatorPoolQtySafe;
-      var _shareNaoUnit = _rawTotalVR>0 ? item.tsRaw/_rawTotalVR : (itemRows.length ? 1/itemRows.length : 0);
-      itemShareNaoUnitario = _poolNaoUnitario*_shareNaoUnit;
-    }
-    // Extras "➕ deste Item" (Acabamento/Instalação/Outros) — valor FLAT
-    // por linha, 100% atribuído a este item (nunca rateado com outros,
-    // nunca dividido por qty).
-    var itemExtrasProprio = (itemExtrasTotal>0) ? (item.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
-    // Fatia do ajuste 'fixo' do próprio item (ver PASS 2) — escalada pelo
-    // MESMO fator qty-safe que tudo mais (preserva o efeito de desconto/
-    // acréscimo GLOBAL sobre ela, como já acontecia antes desta correção),
-    // mas NUNCA dividida por item.qty — mesmo padrão de itemExtrasProprio.
-    var itemAjusteFixoShare = (item.ajusteFixoPortionRS||0) * _fatorPoolQtySafe;
-    var itemTotalFinal = itemUnitFinal * item.qty + itemShareNaoUnitario + itemExtrasProprio + itemAjusteFixoShare;
+    // Opção NÃO selecionada (orçamento comparativo) usa exatamente a
+    // MESMA fórmula — desde que a precificação não dependa mais de um
+    // pool do pedido, não há mais necessidade de um cálculo "informativo"
+    // separado (RODADA 5): o preço próprio da opção já é sempre
+    // representativo, selecionada ou não.
+    var itemUnitFinal = item.qty>0 ? (_tsRawUnitario/item.qty) : _tsRawUnitario;
+    // Extras "➕ deste Item" (Acabamento/Instalação/Outros) já estão
+    // dentro de item.tsRaw (ver PASS 2 — costBaseOwn inclui
+    // itemExtrasSoma) — não precisam mais de uma parcela separada aqui.
+    var itemTotalFinal = itemUnitFinal * item.qty + (item.ajusteFixoPortionRS||0) + (item.gravSprayExtraOwn||0) + (item.extrasProprioMarkup||0);
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
     // RODADA 5 — badge/ação de grupo de opções na própria linha do item.
@@ -12182,6 +12208,41 @@ function orcRecalc() {
       else { _opBadgeEl.innerHTML = '<button onclick="orcOpcaoSelecionar(\''+item.idx+'\')" style="font-size:9px;padding:1px 6px;border:1px solid var(--brand-mid);border-radius:8px;background:none;color:var(--brand-mid);cursor:pointer;white-space:nowrap">Marcar escolhida</button>'; }
     }
   });
+
+  // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — fechamento
+  // transparente do pedido: "Subtotal dos itens" é a SOMA EXATA do que já
+  // está escrito na coluna "Total" de cada linha real (conta!==false) —
+  // nunca uma conta paralela. Custos do PEDIDO (máquinas/montagem/
+  // deslocamento) e consumíveis LEGADOS (fallback global de orçamentos
+  // salvos antes do consumível-por-peça — ver PASS 1, raríssimo em dados
+  // atuais) não pertencem a nenhuma linha específica, então aparecem aqui,
+  // nunca escondidos dentro do preço de um item. "Ajuste do orçamento" é
+  // definido como o QUE SOBRA (Total Geral − itens − custos gerais −
+  // legados − Vitre) — nunca uma fórmula paralela recalculada, então a
+  // soma bate exatamente com o Total Geral sempre, por construção (inclui
+  // desconto/acréscimo global, ajustes com escopo "orçamento", e qualquer
+  // arredondamento de centavos — nada fica sem explicação).
+  var subtotalItensVenda = 0;
+  itemRows.forEach(function(item){
+    if (item.conta===false || item.tsRaw==null) return;
+    subtotalItensVenda += item.tsRaw + (item.gravSprayExtraOwn||0) + (item.extrasProprioMarkup||0);
+  });
+  var custosGeraisPedido = factor>0 ? (maqTotal+mont+desl)/factor : 0;
+  // Consumíveis LEGADOS: só existem quando o fallback global (pré-peça)
+  // foi usado porque NENHUMA peça do pedido tem o campo — nesse caso não
+  // há como atribuir a uma linha específica (dado histórico, nunca
+  // migrado). Ver PASS 1 — gravacaoCusto/sprayCusto/extraCusto/adh/adhb
+  // só caem no fallback quando a soma por peça é 0. Quando há exatamente 1
+  // item real no pedido, esse valor já foi atribuído a ele (ver
+  // _itensReaisParaLegado acima) — não soma aqui de novo (evitaria contar
+  // em dobro).
+  var consumiveisLegadoPedido = _itensReaisParaLegado.length === 1 ? 0 :
+    (adhPecasTotal<=0 && adhYes ? areaTotal*adhPrecoCm2/factor : 0) +
+    (adhbPecasTotal<=0 && adhbYes ? areaTotal*adhbPrecoCm2/factor : 0) +
+    (gravacaoPecasTotal<=0 ? impLegado*2 : 0) +
+    (sprayPecasTotal<=0 ? (sprayLegadoUnid*16)*2 : 0) +
+    (extraPecasTotal<=0 ? extraLegado*2 : 0);
+  var ajusteOrcamentoTotal = finalPrice - subtotalItensVenda - custosGeraisPedido - consumiveisLegadoPedido - vitreItensPedidoTotal;
 
   // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
@@ -12197,38 +12258,18 @@ function orcRecalc() {
     if(brk) {
       if(finalPrice<=0){ brk.innerHTML=''; }
       else {
+        // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — fechamento
+        // transparente: Subtotal dos itens (soma exata da coluna "Total"
+        // de cada linha) + Custos gerais do pedido + Consumíveis legados
+        // (raro) + Vitre + Ajuste do orçamento = TOTAL, sempre, por
+        // construção (ver cálculo de subtotalItensVenda/custosGeraisPedido/
+        // consumiveisLegadoPedido/ajusteOrcamentoTotal logo acima).
         var lines='';
-        if(extras>0){
-          lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal/factor*(1-descPct))+'</span></div>';
-          if(maqTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Máquinas</span><span>'+orcFmt(maqTotal/factor*(1-descPct))+'</span></div>';
-          if(consTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal/factor*(1-descPct))+'</span></div>';
-          if(mont>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Montagem</span><span>'+orcFmt(mont/factor*(1-descPct))+'</span></div>';
-          if(desl>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Deslocamento</span><span>'+orcFmt(desl/factor*(1-descPct))+'</span></div>';
-          if(itemExtrasTotal>0) {
-            lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#1EB8D8;font-weight:600">Extras por item</span><span style="color:#1EB8D8;font-weight:600">+'+orcFmt(itemExtrasTotal/factor*(1-descPct))+'</span></div>';
-            // RODADA CIRÚRGICA (consistência visual) — decompõe a linha
-            // acima por item (itemExtrasSoma/itemExtrasTotal ×
-            // somaExtrasTransformada) — não é uma conta nova nem muda o
-            // total desta linha; só deixa explícito a qual item cada
-            // extra pertence, resolvendo a ambiguidade do agregado.
-            // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — este valor
-            // NÃO é mais somado ao "Unit."/"Total" da linha do item na
-            // tabela (PASS 3, acima) — só aparece aqui, no resumo do
-            // pedido — ver comentário do PASS 3 para a causa raiz.
-            var _extrasPorItemTxt = itemRows.filter(function(it){ return (it.itemExtrasSoma||0)>0; }).map(function(it){
-              var _prodNomeExtra = orcProdutoNomeResolvido(it.idx) || ('Item '+it.idx);
-              var _valorItemExtra = itemExtrasTotal>0 ? (it.itemExtrasSoma/itemExtrasTotal)*somaExtrasTransformada : 0;
-              return cfgEsc(_prodNomeExtra)+': +'+orcFmt(_valorItemExtra);
-            }).join(' · ');
-            if(_extrasPorItemTxt) lines += '<div style="padding:0 0 3px 10px;font-size:9.5px;color:var(--muted)">'+_extrasPorItemTxt+'</div>';
-          }
-        }
-        if(descPct>0||descRS>0){ var _descLbl=descRS>0?(function(){ var _preDisc=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct=_preDisc>0?descRS/_preDisc*100:0; return '-'+orcFmt(descRS)+(_pct>0?' (≈'+_pct.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl+'</span></div>'; }
-        if(acresPct>0||acresRS>0){ var _acresLbl=acresRS>0?('+'+orcFmt(acresRS)):('+'+(_acresPct_pct_lbl=(acresPct*100).toFixed(0))+'%'); lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl+'</span></div>'; }
-        if(gravacaoAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
-        if(sprayAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">💨 Spray</span><span>+'+orcFmt(sprayAdicionalVenda)+'</span></div>';
-        if(extraAdicionalVenda>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">➕ Extra</span><span>+'+orcFmt(extraAdicionalVenda)+'</span></div>';
+        lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Subtotal dos itens</span><span>'+orcFmt(subtotalItensVenda)+'</span></div>';
+        if(custosGeraisPedido>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Custos gerais (máquinas/montagem/deslocamento)</span><span>+'+orcFmt(custosGeraisPedido)+'</span></div>';
+        if(consumiveisLegadoPedido>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis (legado do pedido)</span><span>+'+orcFmt(consumiveisLegadoPedido)+'</span></div>';
         if(vitreItensPedidoTotal>0) lines += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
+        if(Math.abs(ajusteOrcamentoTotal)>=0.005) lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Ajuste comercial do orçamento (desconto/acréscimo/etc.)</span><span style="color:'+(ajusteOrcamentoTotal<0?'#059669':'#1EB8D8')+';font-weight:700">'+(ajusteOrcamentoTotal<0?'-':'+')+orcFmt(Math.abs(ajusteOrcamentoTotal))+'</span></div>';
         var _margin=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
         lines += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada (só VR)</span><span style="color:var(--muted);font-weight:600">'+_margin.toFixed(1)+'%</span></div>';
         lines += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid)"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';
@@ -12244,18 +12285,17 @@ function orcRecalc() {
   // HOTFIX 2026-08-16 (P0.11) — mesmo motivo do card principal (ver acima).
   if(ul3) ul3.textContent = '';
   if(b3) {
+    // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — mesmo
+    // fechamento transparente do card principal (ver orcBreak acima):
+    // Subtotal dos itens + Custos gerais + Consumíveis legados + Vitre +
+    // Ajuste do orçamento = TOTAL, exatamente, sempre.
     var lines3 = '';
-    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Materiais</span><span>'+orcFmt(matTotal)+'</span></div>';
-    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Máquinas</span><span>'+orcFmt(maqTotal)+'</span></div>';
-    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis</span><span>'+orcFmt(consTotal)+'</span></div>';
-    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Mont+Des</span><span>'+orcFmt(mont+desl)+'</span></div>';
+    lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Subtotal dos itens</span><span>'+orcFmt(subtotalItensVenda)+'</span></div>';
+    if(custosGeraisPedido>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Custos gerais (máquinas/montagem/deslocamento)</span><span>+'+orcFmt(custosGeraisPedido)+'</span></div>';
+    if(consumiveisLegadoPedido>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Consumíveis (legado do pedido)</span><span>+'+orcFmt(consumiveisLegadoPedido)+'</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-top:1px solid var(--border);margin-top:2px"><span style="color:var(--muted)">Custo Total</span><span style="font-weight:700">'+orcFmt(totalCost)+'</span></div>';
-    if(descPct>0||descRS>0){ var _descLbl3=descRS>0?(function(){ var _preDisc3=(factor>0&&totalCostParaMarkup>0)?totalCostParaMarkup/factor:0; var _pct3=_preDisc3>0?descRS/_preDisc3*100:0; return '-'+orcFmt(descRS)+(_pct3>0?' (≈'+_pct3.toFixed(1)+'%)':''); })():('-'+(descPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Desconto</span><span style="color:#059669;font-weight:700">'+_descLbl3+'</span></div>'; }
-    if(acresPct>0||acresRS>0){ var _acresLbl3=acresRS>0?('+'+orcFmt(acresRS)):('+'+( acresPct*100).toFixed(0)+'%'); lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Acréscimo</span><span style="color:#1EB8D8;font-weight:700">'+_acresLbl3+'</span></div>'; }
-    if(gravacaoAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">🖨️ Gravação (venda)</span><span>+'+orcFmt(gravacaoAdicionalVenda)+'</span></div>';
-    if(sprayAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">💨 Spray (venda)</span><span>+'+orcFmt(sprayAdicionalVenda)+'</span></div>';
-    if(extraAdicionalVenda>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:var(--muted)">➕ Extra (venda)</span><span>+'+orcFmt(extraAdicionalVenda)+'</span></div>';
     if(vitreItensPedidoTotal>0) lines3 += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px"><span style="color:#983C8F;font-weight:600">🌸 Itens Vitre (mesmo pedido)</span><span style="color:#983C8F;font-weight:600">+'+orcFmt(vitreItensPedidoTotal)+'</span></div>';
+    if(Math.abs(ajusteOrcamentoTotal)>=0.005) lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px"><span style="color:var(--muted)">Ajuste comercial do orçamento (desconto/acréscimo/etc.)</span><span style="color:'+(ajusteOrcamentoTotal<0?'#059669':'#1EB8D8')+';font-weight:700">'+(ajusteOrcamentoTotal<0?'-':'+')+orcFmt(Math.abs(ajusteOrcamentoTotal))+'</span></div>';
     var _margin3=finalPriceVR>0?((finalPriceVR-totalCostParaMarkup)/finalPriceVR*100):0;
     lines3 += '<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:10px"><span style="color:var(--muted)">Margem aplicada</span><span style="color:var(--muted);font-weight:600">'+_margin3.toFixed(1)+'%</span></div>';
     lines3 += '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1.5px solid var(--brand-mid);margin-top:4px"><span style="font-size:11px;font-weight:700;color:var(--muted)">TOTAL</span><span style="font-size:18px;font-weight:900;color:var(--brand-mid)">'+orcFmt(finalPrice)+'</span></div>';

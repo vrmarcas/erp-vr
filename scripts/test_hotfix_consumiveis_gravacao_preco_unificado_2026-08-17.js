@@ -307,25 +307,19 @@ function rodarCenario(opts) {
     var _tcpmFormula = _mTcpm ? _mTcpm[1] : '';
     ok('G4. base do markup exclui o custo da Gravação (fórmula de totalCostParaMarkup nunca cita gravacaoCusto)', _tcpmFormula==='matTotal + extras + itemExtrasTotal');
   }
-  ok('G5. finalPrice usa totalCostParaMarkup (não totalCost) na fórmula de markup', /totalCostParaMarkup\/factor/.test(orcRecalcSrc));
+  ok('G5. finalPrice usa totalCostParaMarkup (não totalCost) na fórmula de markup', /_calcularFinalPriceVR\(totalCostParaMarkup\)/.test(orcRecalcSrc));
   ok('G6. Gravação é somada ao preço final DEPOIS do markup/desconto/acréscimo/Vitre', /finalPrice\s*=\s*finalPriceVR\s*\+\s*vitreItensPedidoTotal\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc));
-  // RODADA CIRÚRGICA 2026-08-17 (3/3) — _totalVRParaRepartir passou a usar
-  // finalPriceVR_semItemExtras (não finalPriceVR puro) para isolar extras
-  // por item (ver test_hotfix_espessura_extras_2026-08-17.js) — a
-  // asserção original checava o texto exato da fórmula antiga; o que
-  // importa (PASS 3 escreve oi_unit_/oi_tot_ com o preço final
-  // redistribuído a partir de finalPriceVR) continua verdadeiro.
-  //
-  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — _totalVRParaRepartir
-  // foi substituído por finalPriceVR_soMaterial/_fatorPoolMaterial (isola
-  // o preço UNITÁRIO comercial de custos fixos do pedido — máquinas/
-  // montagem/deslocamento — que antes eram diluídos por item.qty, bug real
-  // de produção). Extras "➕ deste Item" continuam somados no TOTAL da
-  // linha (nunca no unitário) via itemExtrasProprio, exatamente como
-  // antes — a asserção abaixo troca só o nome da variável do achado desta
-  // rodada, a garantia comportamental (oi_unit_/oi_tot_ escritos a partir
-  // de um preço final único, nunca duas fórmulas) continua a mesma.
-  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final redistribuído (fonte canônica única, agora com extras isolados por item)', /finalPriceVR_qtySafe\s*=\s*_calcularFinalPriceVR\(matTotal\s*\+\s*consTotal\)/.test(orcRecalcSrc) && /eu=document\.getElementById\('oi_unit_'\+item\.idx\)/.test(orcRecalcSrc) && /itemExtrasProprio/.test(orcRecalcSrc));
+  // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — o PASS 3 deixou
+  // de redistribuir um "pool" do pedido inteiro entre as linhas (decisão
+  // de negócio explícita do usuário: preço de item intocado não pode mais
+  // mudar por causa de outra linha — ver RODADA na função). Cada item
+  // agora carrega o PRÓPRIO valor (item.tsRaw, já com adesivo/adh.branco/
+  // ajuste próprios) e os PRÓPRIOS extras "➕ deste Item" (marcados via
+  // item.extrasProprioMarkup, nunca mais um rateio de itemExtrasTotal
+  // global) — mas a garantia comportamental de sempre continua: oi_unit_/
+  // oi_tot_ vêm de uma ÚNICA fonte canônica (nunca duas fórmulas
+  // divergentes), e Gravação continua fora do markup, somada ×2.
+  ok('G7. PASS 3 escreve oi_unit_/oi_tot_ com o preço final do próprio item (fonte canônica única, extras isolados por item)', /item\.tsRaw\s*=\s*tsFinal/.test(orcRecalcSrc) && /eu=document\.getElementById\('oi_unit_'\+item\.idx\)/.test(orcRecalcSrc) && /extrasProprioMarkup/.test(orcRecalcSrc));
 
   var cfgRenderSrc = extractFn('cfgRenderTables');
   ok('G8. cfgRenderTables() nunca deixa os campos de preço do adesivo em branco/0 (evita reintroduzir o bug ao salvar Config de novo)', /cfgAdesivoPrecoCm2/.test(cfgRenderSrc) && /parseFloat\(elAdhCm2\.value\)>0/.test(cfgRenderSrc));
