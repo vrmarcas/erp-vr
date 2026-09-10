@@ -27002,6 +27002,40 @@ function _clientHistNormNome(s){
   return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
 }
 
+// RODADA CIR\u00daRGICA 2026-09-10, Bug 2 (write-path) \u2014 resolve o clienteId
+// can\u00f4nico (CLIENTES_DATA) a partir do nome/telefone/e-mail digitados no
+// or\u00e7amento, mas s\u00f3 quando a identifica\u00e7\u00e3o \u00e9 INEQU\u00cdVOCA:
+//   1. nome (normalizado) casa com EXATAMENTE 1 cliente cadastrado -> usa o
+//      id dele. Nome sozinho \u00e9 o sinal mais est\u00e1vel (telefone \u00e9 mut\u00e1vel/
+//      recicl\u00e1vel, e-mail tamb\u00e9m) \u2014 mesma l\u00f3gica j\u00e1 usada em outras partes
+//      do sistema para dedup de cliente (orcAutoSalvarCliente).
+//   2. se o nome casar com MAIS de um cliente (nomes duplicados), desempata
+//      exigindo tamb\u00e9m telefone OU e-mail batendo \u2014 s\u00f3 resolve se sobrar
+//      exatamente 1 candidato.
+//   3. qualquer outro caso (nome vazio/gen\u00e9rico, nenhum match, amb\u00edguo sem
+//      desempate) retorna '' \u2014 o chamador cai no fallback legado por
+//      telefone/e-mail, exatamente como sempre funcionou.
+// Isto garante que dois clientes diferentes com o MESMO telefone nunca
+// resolvem para o mesmo clienteId (cada um s\u00f3 casa pelo pr\u00f3prio nome).
+function _histResolveClienteIdSeguro(nome, tel, email) {
+  if (typeof CLIENTES_DATA === 'undefined' || !CLIENTES_DATA || !CLIENTES_DATA.length) return '';
+  var n = _clientHistNormNome(nome);
+  if (!n || n === 'cliente') return '';
+  var porNome = CLIENTES_DATA.filter(function(c){ return _clientHistNormNome(c.nome) === n; });
+  if (porNome.length === 1) return porNome[0].id;
+  if (porNome.length > 1) {
+    var t = String(tel||'').replace(/\D/g,'');
+    var e = String(email||'').toLowerCase().trim();
+    var desemp = porNome.filter(function(c){
+      var ct = String(c.tel||'').replace(/\D/g,'');
+      var ce = String(c.email||'').toLowerCase().trim();
+      return (t && t.length >= 8 && ct === t) || (e && e.indexOf('@') > 0 && ce === e);
+    });
+    if (desemp.length === 1) return desemp[0].id;
+  }
+  return '';
+}
+
 function orcSalvarHistoricoCliente() {
   var c2 = window._orcCalc || {};
   var nome   = (document.getElementById('orcClientNome')||{}).value  || '—';
@@ -27016,7 +27050,12 @@ function orcSalvarHistoricoCliente() {
   // aqui por padrão (é uma alternativa oferecida ao cliente, só vira
   // desconto real se ele de fato pagar via PIX).
   var valor = c2.finalPrice ? c2.finalPrice*(1-condPct/100) : 0;
-  var key = clientHistGetKey(tel, email);
+  // RODADA CIRÚRGICA 2026-09-10, Bug 2 (write-path) — clienteId canônico
+  // tem prioridade sobre telefone/e-mail; só cai no fallback legado quando
+  // não há cliente vinculado de forma inequívoca (ver
+  // _histResolveClienteIdSeguro).
+  var clienteId = _histResolveClienteIdSeguro(nome, tel, email);
+  var key = clientHistGetKey(tel, email, clienteId);
   if(!key || valor <= 0) return;
 
   var itens = [];
@@ -27030,6 +27069,25 @@ function orcSalvarHistoricoCliente() {
   });
 
   var db = clientHistLoad();
+  // RODADA CIRÚRGICA 2026-09-10, Bug 2 (write-path) — backfill lazy e
+  // idempotente: na PRIMEIRA vez que este cliente ganha uma chave canônica
+  // nova, se já existir um registro legado (por telefone/e-mail) cujo nome
+  // gravado bate com o nome atual (mesma checagem de segurança usada em
+  // clientHistExibir), herda esse histórico para a chave canônica — sem
+  // apagar/mover o registro legado (continua lá, legível por chamadores
+  // antigos). Se o nome não bater (telefone reciclado de outra pessoa),
+  // NÃO herda nada — evita migrar histórico de terceiro por engano. Só
+  // roda uma vez: nas próximas gravações db[key] já existe.
+  if (clienteId && !db[key]) {
+    var keyLegado = clientHistGetKey(tel, email, null);
+    var recLegado = keyLegado ? db[keyLegado] : null;
+    if (recLegado && recLegado.historico && recLegado.historico.length) {
+      var _nAtual = _clientHistNormNome(nome);
+      var _nLegado = _clientHistNormNome(recLegado.nome);
+      var _bateNome = _nAtual && _nLegado && (_nAtual===_nLegado || _nAtual.indexOf(_nLegado)>=0 || _nLegado.indexOf(_nAtual)>=0);
+      if (_bateNome) db[key] = { nome:nome, tel:tel, email:email, marca:marca, historico: recLegado.historico.slice() };
+    }
+  }
   if(!db[key]) db[key] = { nome:nome, tel:tel, email:email, marca:marca, historico:[] };
   db[key].historico.push({
     data: new Date().toISOString(),
