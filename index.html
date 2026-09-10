@@ -26957,29 +26957,36 @@ async function orcEnviarOrcamentoWA() {
   // 50/50 enquanto o orçamento ainda não foi pago.
   var condicaoLabelWA = orcCondicaoPagamentoAtual(_orcSalvoWA);
 
-  // Ofertas condicionais (desconto por fechamento até uma data, desconto
-  // Pix, parcelamento) são funcionalidade real e configurável do orçamento
-  // — preservadas aqui, só sem emoji (o modelo padrão não usa emoji).
-  var extrasStr = '';
+  // RODADA DE ESTABILIZAÇÃO — MENSAGENS 2026-09-10 — cada bloco de
+  // condição de pagamento (parcelamento/cartão, oferta especial, PIX)
+  // agora é uma string PRÓPRIA (cartaoStr/ofertaStr/pixStr), disponível
+  // como placeholder granular ({cartao}/{oferta_especial}/{pix}) — o
+  // admin controla a ORDEM e pode omitir qualquer um só editando o
+  // template em Config → Mensagens Automáticas, sem precisar mexer em
+  // código. `extrasStr` (placeholder legado {ofertas}) continua existindo
+  // com a MESMA ordem/conteúdo de sempre (Parcelamento → Oferta especial
+  // → PIX) — 100% retrocompatível pra quem não editou o template ainda.
+  var cartaoStr = '', ofertaStr = '', pixStr = '';
   if(_condWA2.parcela && _condWA2.parcela.nParc>1){
     // SPRINT PRÉ-GO-LIVE, Bloco I — o termo antigo, que citava um
     // percentual extra cobrado do cliente, nunca mais aparece: com a nova
     // regra comercial, cartão em até 3x é SEMPRE sem juros (orcMotorComercial
     // garante isso), então o cliente nunca vê nenhuma menção a custo extra
     // de processamento embutido na parcela.
-    extrasStr += '\n\n*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+' sem juros';
+    cartaoStr = '*Parcelamento:* em até '+_condWA2.parcela.nParc+'x de '+fmtBRLWA(_condWA2.parcela.valorParcela)+' sem juros';
   }
   if(dcOnWA && dcPctWA>0){
     var condData = document.getElementById('orcDescCondData')?.value||'';
     var dataFmt  = condData ? condData.split('-').reverse().join('/') : '';
-    extrasStr += '\n\n*Oferta especial:* '+dcPctWA+'% de desconto já aplicado no valor acima'+(dataFmt?' — válido para fechamento até '+dataFmt+'. Após essa data, o valor retorna ao normal.':'.');
+    ofertaStr = '*Oferta especial:* '+dcPctWA+'% de desconto já aplicado no valor acima'+(dataFmt?' — válido para fechamento até '+dataFmt+'. Após essa data, o valor retorna ao normal.':'.');
   }
   // SPRINT PRÉ-GO-LIVE, Bloco E — PIX é SEMPRE mostrado como alternativa
   // (nunca mais atrás do toggle orcPixDiscToggle, removido da UI) — nunca
   // "escondido" mesmo quando a oferta condicional (dcOn) está ativa.
   if(_condWA2.pxPct>0){
-    extrasStr += '\n\n*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
+    pixStr = '*Desconto PIX:* '+_condWA2.pxPct+'% de desconto pagando à vista via PIX (valor com PIX: '+fmtBRLWA(_condWA2.pixTotal)+').';
   }
+  var extrasStr = [cartaoStr, ofertaStr, pixStr].filter(Boolean).map(function(s){ return '\n\n'+s; }).join('');
 
   // Sem nome de cliente: saudação genérica "Olá!" sozinha — nunca uma
   // vírgula/asterisco soltos por interpolar {cliente} vazio (comportamento
@@ -27003,6 +27010,13 @@ async function orcEnviarOrcamentoWA() {
     itens: itensStr ? ('*Itens do orçamento*\n\n'+itensStr) : '',
     valor: totalExibido,
     ofertas: extrasStr,
+    // RODADA DE ESTABILIZAÇÃO — MENSAGENS 2026-09-10 — placeholders
+    // granulares (posicionáveis/omitíveis independentemente no template,
+    // ver MSG_TEMPLATES_PLACEHOLDERS). Mesmos textos exatos que compõem
+    // {ofertas} — nenhum valor novo, só controle de posição/presença.
+    pix: pixStr,
+    cartao: cartaoStr,
+    oferta_especial: ofertaStr,
     prazo: orcGetPrazoTexto(),
     validade: orcGetValidadeDias()+' dias',
     forma_pagamento: condicaoLabelWA,
@@ -30835,7 +30849,13 @@ var MSG_TEMPLATES_PLACEHOLDERS = {
   osPronta:            ['cliente', 'numero_os', 'produto'],
   cobranca:            ['cliente', 'valor', 'vencimento'],
   pagamentoConfirmado: ['cliente', 'marca'],
-  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'ofertas', 'prazo', 'validade', 'forma_pagamento', 'responsavel'],
+  // RODADA DE ESTABILIZAÇÃO — MENSAGENS 2026-09-10 — {ofertas} continua
+  // existindo (retrocompat, mesmo texto de sempre) mas deixa de ser a
+  // ÚNICA forma de controlar Parcelamento/PIX/Oferta especial: {pix},
+  // {cartao} e {oferta_especial} são os MESMOS 3 blocos que compõem
+  // {ofertas}, agora disponíveis separadamente — o admin escolhe a ordem
+  // (ou omite algum) editando o template, sem precisar mexer em código.
+  orcamentoEnviado:    ['saudacao', 'cliente', 'marca', 'numero_orcamento', 'itens', 'valor', 'ofertas', 'pix', 'cartao', 'oferta_especial', 'prazo', 'validade', 'forma_pagamento', 'responsavel'],
   // RODADA DE ESTABILIZAÇÃO 2026-09-05 — migração dos 9 pontos de disparo
   // que ficaram fora do escopo do Bloco 4 original (ver memória
   // estabilizacao-8blocos-2026-09-04) para a mesma fonte única.
@@ -31437,7 +31457,16 @@ var CFG_MSG_AUTO_EXEMPLO = {
   os_ref: '1042', detalhes: '\nCliente: Maria Silva\nMaterial: Acrílico 4mm', arquivo: '',
   // RODADA DE ESTABILIZAÇÃO 2026-09-09, Bloco 7 — amostra para o novo
   // template orcamentoComparativo.
-  opcoes: '   a) Caixa Acrílica Cristal 2mm\n      Quantidade: 1 | Valor unitário: R$ 180,00 | Subtotal: R$ 180,00\n   ── OU ──\n   b) Caixa Acrílica Cristal 3mm\n      Quantidade: 1 | Valor unitário: R$ 220,00 | Subtotal: R$ 220,00'
+  opcoes: '   a) Caixa Acrílica Cristal 2mm\n      Quantidade: 1 | Valor unitário: R$ 180,00 | Subtotal: R$ 180,00\n   ── OU ──\n   b) Caixa Acrílica Cristal 3mm\n      Quantidade: 1 | Valor unitário: R$ 220,00 | Subtotal: R$ 220,00',
+  // RODADA DE ESTABILIZAÇÃO — MENSAGENS 2026-09-10 — amostras para os
+  // blocos granulares de pagamento (mesmo texto real que orcEnviarOrcamentoWA
+  // produz, só com valores de exemplo) — sem isso a preview nunca mostrava
+  // {ofertas}/{pix}/{cartao}/{oferta_especial} (placeholder ficava literal
+  // na tela mesmo sendo válido, por falta de amostra).
+  pix: '*Desconto PIX:* 5% de desconto pagando à vista via PIX (valor com PIX: R$ 332,50).',
+  cartao: '*Parcelamento:* em até 3x de R$ 116,67 sem juros',
+  oferta_especial: '*Oferta especial:* 10% de desconto já aplicado no valor acima — válido para fechamento até 15/09/2026. Após essa data, o valor retorna ao normal.',
+  get ofertas() { return '\n\n'+this.cartao+'\n\n'+this.oferta_especial+'\n\n'+this.pix; }
 };
 function cfgMsgAutoPreview(chave) {
   var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
