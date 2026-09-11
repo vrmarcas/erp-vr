@@ -3374,7 +3374,7 @@ function _authFirebaseError(code){
             </div>
             <div class="fg-row">
               <div class="fg"><label>E-mail</label><input type="email" id="orcClientEmail" placeholder="contato@empresa.com"></div>
-              <div class="fg"><label>WhatsApp / Telefone</label><input type="text" id="orcClientTel" placeholder="(62) 99999-9999"></div>
+              <div class="fg"><label>WhatsApp / Telefone</label><input type="text" id="orcClientTel" placeholder="(62) 99999-9999" oninput="orcMascararTelefoneInput(this)"></div>
             </div>
             <div class="fg-row">
               <div class="fg"><label>Cidade</label><input type="text" id="orcClientCidade" placeholder="São Carlos"></div>
@@ -3979,7 +3979,7 @@ function _authFirebaseError(code){
                     autocomplete="off">
                   <div id="vitreOrcCliDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:999;background:var(--surface);border:1.5px solid #1E7A86;border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:220px;overflow-y:auto"></div>
                 </div>
-                <div class="fg"><label>WhatsApp / Telefone</label><input type="text" id="vitreOrcClienteTel" placeholder="(62) 99999-9999"></div>
+                <div class="fg"><label>WhatsApp / Telefone</label><input type="text" id="vitreOrcClienteTel" placeholder="(62) 99999-9999" oninput="orcMascararTelefoneInput(this)"></div>
               </div>
               <div class="fg-row">
                 <div class="fg"><label>E-mail</label><input type="email" id="vitreOrcClienteEmail" placeholder="contato@empresa.com"></div>
@@ -8173,7 +8173,7 @@ function _authFirebaseError(code){
       <div class="fg2">
         <div class="fg">
           <label>Telefone / WhatsApp</label>
-          <input type="tel" id="cliNovoTel" placeholder="(00) 00000-0000">
+          <input type="tel" id="cliNovoTel" placeholder="(00) 00000-0000" oninput="orcMascararTelefoneInput(this)">
         </div>
         <div class="fg">
           <label>E-mail</label>
@@ -26927,6 +26927,44 @@ function orcNormalizarTelefoneBR(tel){
   return null; // não bate com nenhum formato BR plausível — não arrisca abrir errado
 }
 
+// RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F1 — ACHADO REAL DE
+// AUDITORIA: o campo "WhatsApp / Telefone" aceitava e salvava o valor
+// cru digitado (ex.: "62999990001"), sem nenhuma máscara visual, mesmo
+// com o placeholder sugerindo "(62) 99999-9999" — o operador não tinha
+// como conferir visualmente se o número está correto, e o valor cru
+// (sem formatação) é o que fica salvo no cliente/orçamento/CRM.
+//
+// Máscara PURAMENTE VISUAL/de digitação — nunca a fonte de verdade para
+// comparação/dedupe: orcAutoSalvarCliente()/orcLinkClienteOrcamento()/
+// _crmBuscarClienteDuplicado() já normalizam com `.replace(/\D/g,'')`
+// antes de comparar (achado desta investigação: o dedupe por telefone já
+// era digit-safe, independente de máscara — só faltava a formatação
+// exibida ao operador). orcMascararTelefoneInput() formata o valor do
+// próprio campo em tempo real (10 dígitos → "(XX) XXXX-XXXX", 11 dígitos
+// → "(XX) XXXXX-XXXX"), aceitando o usuário colar/digitar com ou sem
+// máscara, com ou sem +55 — nunca trava a digitação (excesso de dígitos
+// além de DDI+DDD+número é preservado sem formatar, nunca trunca dado
+// que o usuário digitou).
+function orcMascararTelefoneInput(el){
+  if(!el) return;
+  var d = (el.value||'').replace(/\D/g,'');
+  // +55 opcional na frente — não é exibido na máscara (mesmo padrão do
+  // placeholder "(62) 99999-9999"), só o DDD+número são formatados.
+  if(d.length>=12 && d.slice(0,2)==='55') d = d.slice(2);
+  if(d.length>11){ return; } // dígitos demais para um telefone BR — não arrisca formatar errado, mantém o que foi digitado
+  var out = d;
+  if(d.length>10){ // celular: (XX) XXXXX-XXXX
+    out = '('+d.slice(0,2)+') '+d.slice(2,7)+(d.length>7?'-'+d.slice(7,11):'');
+  } else if(d.length>6){ // fixo: (XX) XXXX-XXXX
+    out = '('+d.slice(0,2)+') '+d.slice(2,6)+(d.length>6?'-'+d.slice(6,10):'');
+  } else if(d.length>2){
+    out = '('+d.slice(0,2)+') '+d.slice(2);
+  } else if(d.length>0){
+    out = '('+d;
+  }
+  el.value = out;
+}
+
 async function orcEnviarOrcamentoWA() {
   // Telefone é validado ANTES de abrir qualquer janela ou reservar número —
   // não faz sentido gastar uma reserva atômica para um envio que não vai
@@ -36003,7 +36041,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <div class="crm-imp-row">
           <div class="crm-imp-field">
             <label class="crm-imp-lbl">WhatsApp / Telefone</label>
-            <input type="tel" id="nlTel" placeholder="(62) 99999-0000">
+            <input type="tel" id="nlTel" placeholder="(62) 99999-0000" oninput="orcMascararTelefoneInput(this)">
           </div>
           <div class="crm-imp-field">
             <label class="crm-imp-lbl">E-mail</label>
