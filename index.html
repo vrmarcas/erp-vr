@@ -11371,6 +11371,21 @@ function planCalc() {
     sumBox.style.display='none';
     if(btn) btn.disabled=true;
     tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px;font-size:12px">Preencha as dimensões acima para calcular as peças.</td></tr>';
+    // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F4 — planSumBox é um único
+    // elemento DOM reaproveitado entre TODOS os itens do orçamento (mesmo
+    // problema já documentado para planManualMatCost/planManualAreaM2 em
+    // _planCalcAndMerge(), homologação Fase F 2026-08-05). Sem este reset,
+    // dataset.totalArea/totalQty/pcs ficavam com o valor do ÚLTIMO item que
+    // calculou com sucesso; como planAplicar() e _planSincronizarComItem()
+    // só checam `totalArea<=0` para decidir se há algo pronto para aplicar,
+    // uma linha nova com dimensões incompletas herdava silenciosamente
+    // preço/peças/área de OUTRA linha (achado real de auditoria: Placa sem
+    // Largura preenchida aplicou os 0,1266 m²/R$56,59 da Urna calculada
+    // antes dela). Zerar aqui garante que os dois guards `totalArea<=0`
+    // barrem corretamente enquanto ESTA linha não tiver um cálculo próprio.
+    sumBox.dataset.totalArea = '0';
+    sumBox.dataset.totalQty  = '0';
+    delete sumBox.dataset.pcs;
     return;
   }
 
@@ -11396,6 +11411,13 @@ function planCalc() {
         if(btn) btn.disabled=true;
         tbody.innerHTML='';
         if(_camposAviso) { _camposAviso.textContent = '⚠️ Preencha os campos obrigatórios: '+_camposRes.faltando.join(', '); _camposAviso.style.display='block'; }
+        // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F4 — mesmo motivo do
+        // reset acima (dims faltando): sem zerar aqui, um item com campo
+        // extra obrigatório pendente também podia herdar totalArea/totalQty
+        // do último item calculado com sucesso.
+        sumBox.dataset.totalArea = '0';
+        sumBox.dataset.totalQty  = '0';
+        delete sumBox.dataset.pcs;
         return;
       }
     }
