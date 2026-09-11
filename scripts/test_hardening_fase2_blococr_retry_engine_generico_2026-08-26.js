@@ -58,7 +58,14 @@ function extractVar(name) {
 console.log('\n=== HARDENING FASE 2, FECHAMENTO BLOCO C — motor de retry genérico (11 telas) ===\n');
 
 var FN_NAMES = ['_homologGuardOrThrow', '_cloudWatch', '_cloudLoad', '_retryEstado', '_retryComBackoff', '_retryResetar', '_watchTentarNovamente'];
-var src = extractVar('_CLOUD_WATCH_ERROR') + '\n\n'
+// RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F8 — _cloudWatch() passou a
+// chamar _cloudLogPermissionDenied() (distingue negado antes/depois do
+// login confirmar, só no LOG — nunca muda _CLOUD_WATCH_FORBIDDEN/ERROR
+// nem qualquer comportamento que este teste verifica). Stub simples: só
+// precisa existir para _cloudWatch() rodar, o teste não depende do que
+// ela loga.
+var src = 'function _cloudLogPermissionDenied(){}' + '\n\n'
+  + extractVar('_CLOUD_WATCH_ERROR') + '\n\n'
   + extractVar('_CLOUD_WATCH_CONFIRMED') + '\n\n'
   + extractVar('_CLOUD_WATCH_FORBIDDEN') + '\n\n'
   + extractVar('_CLOUD_LOAD_CONFIRMED') + '\n\n'

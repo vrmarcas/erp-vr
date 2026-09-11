@@ -95,7 +95,12 @@ fs.writeFileSync(modPath, src);
 // existe" — nunca em erro), sem alterar nenhum comportamento existente
 // (mesmo payload, mesmo callback, mesma assinatura). ──────────────────────
 var FN_NAMES_WATCH = ['_homologGuardOrThrow', '_cloudWatch'];
-var srcWatch = extractVar('_CLOUD_WATCH_ERROR') + '\n\n'
+// RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F8 — _cloudWatch() passou a
+// chamar _cloudLogPermissionDenied() só para decidir console.warn vs
+// console.debug (nunca muda _CLOUD_WATCH_FORBIDDEN/ERROR, que continuam
+// exatamente como este teste espera). Stub simples: só precisa existir.
+var srcWatch = 'function _cloudLogPermissionDenied(){}' + '\n\n'
+  + extractVar('_CLOUD_WATCH_ERROR') + '\n\n'
   + extractVar('_CLOUD_WATCH_CONFIRMED') + '\n\n'
   + extractVar('_CLOUD_WATCH_FORBIDDEN') + '\n\n'
   + FN_NAMES_WATCH.map(extractFn).join('\n\n')

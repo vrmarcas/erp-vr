@@ -1477,6 +1477,40 @@ function _stockApplyTomb() {
   // functions/src/estoque.ts), não um write automático do client.
   return removed;
 }
+// RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F8 — ACHADO REAL DE
+// AUDITORIA: console mostrava `permission-denied` recorrente em
+// [Stock]/[Cloud] mesmo para a conta Master. Investigação (antes de
+// corrigir): os listeners de boot (_watchStock()/_watchStockTomb(), logo
+// abaixo, e o uso genérico de _cloudWatch()) são registrados de forma
+// SÍNCRONA no carregamento da página — antes de `onAuthStateChanged`
+// confirmar a sessão (única entrada de _cloudIniciar(), ver comentário
+// próximo à linha 2350). Nesse instante inicial, sem usuário autenticado
+// ainda, a regra do Firestore nega de propósito (comportamento CORRETO
+// da Rule) — e o erro seta `_stockUnsub=null`/`_CLOUD_WATCH_FORBIDDEN`,
+// o que faz `_cloudIniciar()` RECONECTAR o mesmo listener assim que o
+// auth confirma, poucos milissegundos depois (confirmado ao vivo nesta
+// investigação: `_STOCK_FORBIDDEN`/`_STOCK_LOAD_ERROR` voltam a `false`
+// e `_cloudReady`/`_cloudIniciou` ficam `true` — nada fica quebrado de
+// fato). Ou seja: é uma negação ESPERADA e transitória do boot, que já
+// se autocorrige — mas o `console.warn` incondicional fazia parecer um
+// erro real e recorrente toda vez que alguém abria o Console, mesmo
+// sendo Master e mesmo com tudo funcionando.
+//
+// NÃO altera Firestore Rules (instrução explícita desta rodada: "não
+// afrouxar Rules globalmente") nem a lógica de retry/reconexão (já
+// correta) — só distingue no LOG: nega sem usuário logado ainda
+// (esperado, silencioso) de nega COM usuário logado (real, alerta).
+function _cloudLogPermissionDenied(prefixo, e){
+  var negado = e && e.code==='permission-denied';
+  var semAuthAinda = negado && (typeof firebase==='undefined' || !firebase.auth().currentUser);
+  if(negado && semAuthAinda){
+    // Esperado: listener registrado antes do auth confirmar — _cloudIniciar()
+    // reconecta assim que onAuthStateChanged disparar (ver comentário acima).
+    console.debug(prefixo, '(negado antes do login confirmar — reconexão automática esperada)', e);
+    return;
+  }
+  console.warn(prefixo, e);
+}
 function _stockTombSave() {
   // Expirar lápides com mais de 30 dias (evita crescimento infinito)
   // Formatos aceitos: timestamp puro (versões anteriores) ou { ts, item } (com dados p/ lixeira)
@@ -1505,7 +1539,7 @@ function _watchStockTomb(){
     }
     _stockTombLoaded = true;
     if(_stockApplyTomb()){ try{ stockRenderItems(); }catch(e){} }
-  },function(e){ console.warn('[Stock] tombstones erro:',e); _stockTombLoaded = true; _stockTombUnsub = null; });
+  },function(e){ _cloudLogPermissionDenied('[Stock] tombstones erro:',e); _stockTombLoaded = true; _stockTombUnsub = null; });
   _CLOUD_UNSUBS.push(_stockTombUnsub);
 }
 _watchStockTomb();
@@ -1558,7 +1592,7 @@ function _watchStock(){
       try{ _stockAplicarSnapshot(doc); }catch(e){ console.warn('[Stock] snapshot erro:',e); }
     },
     function(e){
-      console.warn('[Stock] onSnapshot erro:',e);
+      _cloudLogPermissionDenied('[Stock] onSnapshot erro:',e);
       if(e && e.code==='permission-denied'){ _STOCK_FORBIDDEN = true; } else { _STOCK_LOAD_ERROR = true; }
       _stockUnsub = null; // listener morto — solta a referência p/ retry poder recriar
       try{ stockRenderItems(); }catch(err){}
@@ -1877,7 +1911,7 @@ function _cloudWatch(key, callback) {
       _CLOUD_WATCH_CONFIRMED[key] = true;
     }
   }, function(e){
-    console.warn("[Cloud] onSnapshot erro:", e);
+    _cloudLogPermissionDenied("[Cloud] onSnapshot erro ("+key+"):", e);
     if(e && e.code==='permission-denied'){ _CLOUD_WATCH_FORBIDDEN[key] = true; } else { _CLOUD_WATCH_ERROR[key] = true; }
   });
   _CLOUD_UNSUBS.push(unsub); // [S4] acumular para cleanup no pagehide
