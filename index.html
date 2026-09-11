@@ -1422,6 +1422,45 @@ function _homologGuardOrThrow() {
     _homologFatal('Operação de autenticação/Firestore bloqueada — modo homologação ativo sem confirmação de conexão aos emuladores.');
   }
 }
+// MICRO-RODADA DE HARDENING (2026-09-11), F8 — CAUSA RAIZ (não só o log):
+// os listeners de boot protegidos (_watchStock/_watchStockTomb/_watchRetalhos,
+// logo abaixo) disparavam de forma síncrona no carregamento do script, antes
+// de QUALQUER sinal de auth — nem currentUser, nem token. A rodada anterior
+// só reclassificou o log (permission-denied esperado vs real) usando
+// `firebase.auth().currentUser != null` como proxy de "auth pronta" — mas
+// currentUser fica populado (sessão restaurada do IndexedDB) ANTES do SDK do
+// Firestore realmente ter um ID token anexado ao canal, então o
+// permission-denied de boot continuava disparando como warn real mesmo com
+// currentUser já presente (comportamento documentado do Firebase JS SDK, não
+// bug deste código). `onIdTokenChanged` é o sinal correto: dispara
+// exatamente quando o token que o Firestore usa está pronto (é a mesma fonte
+// que o próprio SDK do Firestore escuta internamente para autenticar
+// requisições) — mais preciso que esperar `getIdTokenResult()` dentro do
+// `onAuthStateChanged` abaixo, que só cobre o caminho de RECONEXÃO
+// (_cloudIniciar()), não o boot síncrono inicial.
+// Fix real (não é só log): os 3 listeners de boot passam a AGUARDAR este
+// sinal antes do primeiro `.onSnapshot(...)`, em vez de disparar às cegas.
+// Não altera Rules nem a lógica de retry/reconexão existente — _cloudIniciar()
+// continua chamando _watchStock()/_watchStockTomb() normalmente no
+// caminho de reconexão pós-bloqueio; ambas já são idempotentes (guard
+// _stockUnsub/_stockTombUnsub), então não há dupla inscrição.
+var _authTokenReady = false;
+var _authTokenReadyQueue = [];
+function _onAuthTokenReady(fn){
+  if(_authTokenReady){ fn(); return; }
+  _authTokenReadyQueue.push(fn);
+}
+firebase.auth().onIdTokenChanged(function(user){
+  var valido = !!(user && user.providerData && user.providerData.length && user.providerData[0].providerId !== 'anonymous');
+  if(valido){
+    _authTokenReady = true;
+    var fila = _authTokenReadyQueue;
+    _authTokenReadyQueue = [];
+    fila.forEach(function(fn){ try{ fn(); }catch(e){} });
+  } else {
+    _authTokenReady = false;
+  }
+});
 var _COL = "erp_vr"; // coleção Firestore
 var _cloudReady = false;
 // [S4] Array de funções unsubscribe — cancelar todos os onSnapshot ao sair da página
@@ -1542,7 +1581,7 @@ function _watchStockTomb(){
   },function(e){ _cloudLogPermissionDenied('[Stock] tombstones erro:',e); _stockTombLoaded = true; _stockTombUnsub = null; });
   _CLOUD_UNSUBS.push(_stockTombUnsub);
 }
-_watchStockTomb();
+_onAuthTokenReady(_watchStockTomb);
 
 // Listener de estoque em tempo real — registrado imediatamente, sem esperar _cloudReady
 // Isso garante que todos os usuários vejam mudanças em tempo real
@@ -1600,7 +1639,7 @@ function _watchStock(){
   );
   _CLOUD_UNSUBS.push(_stockUnsub);
 }
-_watchStock();
+_onAuthTokenReady(_watchStock);
 // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01) — achado real de produção:
 // Kanban → Iniciar Produção em sessão nova (login fresco, sem cache
 // aquecido) mostrava "Não foi possível carregar Estoque/Retalhos", mesmo
@@ -1613,7 +1652,7 @@ _watchStock();
 // tarde demais. _watchRetalhos() é hoisted (function declaration) e só
 // depende de _db (já pronto neste ponto, mesma pré-condição de
 // _watchStock() acima) — chamar aqui, ungated, elimina a corrida.
-_watchRetalhos();
+_onAuthTokenReady(_watchRetalhos);
 
 // ── Anti-eco: memoriza o último payload por chave. Se o dado não mudou,
 // não grava de novo. Isso quebra qualquer loop watch→save→watch e economiza

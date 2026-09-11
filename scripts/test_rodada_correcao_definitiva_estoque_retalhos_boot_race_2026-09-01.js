@@ -30,6 +30,17 @@
  *   3. A chamada ungated vem logo após _watchStock(), preservando a mesma
  *      pré-condição (_db já pronto) que já provou ser segura em produção.
  *
+ * ATUALIZAÇÃO (MICRO-RODADA DE HARDENING, 2026-09-11, F8 causa raiz) — o
+ * boot deixou de chamar `_watchStock()`/`_watchRetalhos()` diretamente e
+ * passou a enfileirar via `_onAuthTokenReady(...)`, que só executa a
+ * função quando o token de auth está de fato pronto para o Firestore (ver
+ * comentário perto de `var _authTokenReady` em index.html). A ORDEM e a
+ * UNICIDADE da inscrição continuam exatamente as mesmas provadas aqui —
+ * só o texto literal do wiring mudou (`_watchRetalhos();` virou
+ * `_onAuthTokenReady(_watchRetalhos);`), então os padrões de busca abaixo
+ * foram ajustados para o novo texto. As asserções em si (unicidade, ordem
+ * relativa a `_cloudLoadAll`/`_watchStock`, proximidade) não mudaram.
+ *
  * Uso: node scripts/test_rodada_correcao_definitiva_estoque_retalhos_boot_race_2026-09-01.js
  */
 'use strict';
@@ -43,11 +54,11 @@ var html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 console.log('\n=== RODADA DE CORREÇÃO DEFINITIVA — Boot race Estoque/Retalhos (Iniciar Produção) ===\n');
 
-var idxWatchStockCall = html.indexOf('_watchStock();');
+var idxWatchStockCall = html.indexOf('_onAuthTokenReady(_watchStock);');
 var idxCloudLoadAllDef = html.indexOf('function _cloudLoadAll()');
 var idxCloudLoadAllDone = html.indexOf('function done()');
 var chamadas = [];
-var re = /(?<!function )_watchRetalhos\(\);/g;
+var re = /(?<!function )_onAuthTokenReady\(_watchRetalhos\);/g;
 var m;
 while ((m = re.exec(html))) chamadas.push(m.index);
 
