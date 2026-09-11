@@ -12291,6 +12291,28 @@ function orcRecalc() {
     (sprayPecasTotal<=0 ? (sprayLegadoUnid*16)*2 : 0) +
     (extraPecasTotal<=0 ? extraLegado*2 : 0);
   var ajusteOrcamentoTotal = finalPrice - subtotalItensVenda - custosGeraisPedido - consumiveisLegadoPedido - vitreItensPedidoTotal;
+  // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F3 — ACHADO REAL DE
+  // AUDITORIA: mesmo com ajusteOrcamentoTotal definido "por construção"
+  // como o resíduo exato (garantindo que a soma em ponto flutuante bate
+  // com finalPrice), o rodapé podia MOSTRAR uma diferença de R$0,01: cada
+  // linha (Subtotal/Custos gerais/Legados/Vitre/Ajuste/TOTAL) é arredondada
+  // INDEPENDENTEMENTE para 2 casas por orcFmt() na hora de exibir — quando
+  // o resíduo real é pequeno (< meio centavo, ex.: R$0,003), a linha
+  // "Ajuste" ficava ESCONDIDA (limiar antigo era >=0.005) mas o TOTAL
+  // exibido (arredondado) podia não bater com a soma das linhas exibidas
+  // (também arredondadas) — exatamente o ±R$0,01 relatado na auditoria.
+  // Fix: arredonda cada parcela a CENTAVOS INTEIROS primeiro, e define o
+  // Ajuste como o resíduo em centavos inteiros — garante que a SOMA DAS
+  // LINHAS EXIBIDAS bate exatamente com o TOTAL EXIBIDO, sempre, em vez de
+  // confiar que o resíduo em ponto flutuante seja pequeno o bastante para
+  // nunca aparecer depois do arredondamento independente de cada linha.
+  var _finalPriceCents      = Math.round(finalPrice*100);
+  var _subtotalItensCents   = Math.round(subtotalItensVenda*100);
+  var _custosGeraisCents    = Math.round(custosGeraisPedido*100);
+  var _legadoCents          = Math.round(consumiveisLegadoPedido*100);
+  var _vitreCents           = Math.round(vitreItensPedidoTotal*100);
+  var _ajusteOrcamentoCents = _finalPriceCents - _subtotalItensCents - _custosGeraisCents - _legadoCents - _vitreCents;
+  ajusteOrcamentoTotal = _ajusteOrcamentoCents/100;
 
   // atualiza sidebar
   const tv = document.getElementById('orcTotalVal');
