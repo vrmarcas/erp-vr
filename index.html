@@ -11853,15 +11853,23 @@ function orcRecalc() {
         var _adesPeca = _planPecaAdesivos(p);
         if (_adesPeca.normal) { adhPecasTotal += _areaPecaCm2*adhPrecoCm2; _adhItemLocal += _areaPecaCm2*adhPrecoCm2; }
         if (_adesPeca.branco) { adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2; _adhbItemLocal += _areaPecaCm2*adhbPrecoCm2; }
-        // RODADA 6 — valor em R$ direto (não é área), sem multiplicar por
-        // qty da peça nem do item: o campo representa o custo TOTAL desta
-        // ocorrência peça×consumível, não um valor por unidade (não há
-        // evidência no código anterior de multiplicação por quantidade
-        // para Gravação/Spray/Extra — ver investigação desta rodada; a
-        // leitura literal preservada é "valor informado = custo total").
-        gravacaoPecasTotal += parseFloat(p.gravacao)||0; _gravacaoItemLocal += parseFloat(p.gravacao)||0;
-        sprayPecasTotal    += parseFloat(p.spray)||0;    _sprayItemLocal    += parseFloat(p.spray)||0;
-        extraPecasTotal    += parseFloat(p.extra)||0;    _extraItemLocal    += parseFloat(p.extra)||0;
+        // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F5 — valor em R$
+        // informado na peça é o custo POR UNIDADE do item (mesma semântica
+        // de material/Adesivo/Adh.Branco logo acima, todos multiplicados
+        // por `qty` do item); precisa escalar com a quantidade da linha,
+        // senão "Gravação R$5" custa o mesmo produzindo 1 ou 50 unidades.
+        // ACHADO REAL DE AUDITORIA (2026-09-10/11): a versão anterior
+        // (RODADA 6) tratava o valor como "custo total da ocorrência,
+        // nunca multiplicado por qty" — decisão tomada sem evidência
+        // (comentário da própria rodada já admitia isso) e que o vendedor
+        // reportou como incorreta: aumentar a QTD do item não mudava o
+        // custo de Gravação/Spray/Extra. Corrigido para a mesma regra do
+        // resto do motor: valor por unidade × qty do item. A regra
+        // comercial "custo × 2 (venda)" (ver oc_imp/UI "custo × 2 (venda)")
+        // continua intacta — só a escala por quantidade estava faltando.
+        gravacaoPecasTotal += (parseFloat(p.gravacao)||0)*qty; _gravacaoItemLocal += (parseFloat(p.gravacao)||0)*qty;
+        sprayPecasTotal    += (parseFloat(p.spray)||0)*qty;    _sprayItemLocal    += (parseFloat(p.spray)||0)*qty;
+        extraPecasTotal    += (parseFloat(p.extra)||0)*qty;    _extraItemLocal    += (parseFloat(p.extra)||0)*qty;
       });
     }
     const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
@@ -12212,11 +12220,29 @@ function orcRecalc() {
     // pool do pedido, não há mais necessidade de um cálculo "informativo"
     // separado (RODADA 5): o preço próprio da opção já é sempre
     // representativo, selecionada ou não.
-    var itemUnitFinal = item.qty>0 ? (_tsRawUnitario/item.qty) : _tsRawUnitario;
-    // Extras "➕ deste Item" (Acabamento/Instalação/Outros) já estão
-    // dentro de item.tsRaw (ver PASS 2 — costBaseOwn inclui
-    // itemExtrasSoma) — não precisam mais de uma parcela separada aqui.
-    var itemTotalFinal = itemUnitFinal * item.qty + (item.ajusteFixoPortionRS||0) + (item.gravSprayExtraOwn||0) + (item.extrasProprioMarkup||0);
+    // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F5 — ACHADO REAL DE
+    // AUDITORIA: o TOTAL da linha somava item.gravSprayExtraOwn (Gravação/
+    // Spray/Extra×2, por peça) direto, mas o UNITÁRIO exibido nunca
+    // refletia essa parcela — resultado: TOTAL ≠ UNITÁRIO × QTD sempre
+    // que a linha tinha algum desses consumíveis (bug real observado:
+    // custo R$0,38 / unit R$2,38 / total R$12,38 — 2,38×1≠12,38). Regra
+    // do usuário nesta rodada: "TOTAL_LINHA = UNITÁRIO_FINAL × QTD,
+    // centavo-idêntico". gravSprayExtraOwn agora entra no UNITÁRIO (dividido
+    // por qty, já que RODADA DE CORREÇÃO PRIORIZADA também passou a
+    // escalar Gravação/Spray/Extra por qty do item — ver o forEach de
+    // _pecasPlanRaw acima) — igual ao que material/adesivo já faziam.
+    //
+    // ajusteFixoPortionRS (ajuste comercial de escopo 'linha'/'orçamento',
+    // Bloco 7 da auditoria) e extrasProprioMarkup (➕ Extras deste Item —
+    // Acabamento/Instalação/Outros) continuam DE FORA do unitário,
+    // somados só no total — exatamente o comportamento já auditado e
+    // aprovado (RODADA DE CORREÇÃO DEFINITIVA 2026-09-01 / RODADA CIRÚRGICA):
+    // são valores FLAT por linha, por definição não dependem de qty, e a
+    // auditoria desta rodada não encontrou nenhum bug nesse comportamento
+    // — não reabrir módulo que passou sem evidência.
+    var _gravSprayExtraOwn = item.gravSprayExtraOwn||0;
+    var itemUnitFinal = item.qty>0 ? (_tsRawUnitario + _gravSprayExtraOwn)/item.qty : (_tsRawUnitario + _gravSprayExtraOwn);
+    var itemTotalFinal = itemUnitFinal * item.qty + (item.ajusteFixoPortionRS||0) + (item.extrasProprioMarkup||0);
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
     // RODADA 5 — badge/ação de grupo de opções na própria linha do item.

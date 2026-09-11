@@ -229,16 +229,20 @@ function rodarCenario(opts) {
   var unit = parseBRL(r.els.oi_unit_1.textContent);
   var tot = parseBRL(r.els.oi_tot_1.textContent);
   var resumo = parseBRL(r.els.orcTotalVal.textContent);
-  // RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D — "Unit.=Total quando
-  // qty=1" deixou de valer por CONSTRUÇÃO quando há Gravação/Spray/Extra
-  // no item: a causa raiz do bloco é justamente que o preço UNITÁRIO
-  // comercial nunca pode incluir um custo que não escala com a
-  // quantidade (Gravação é "valor TOTAL da ocorrência", RODADA 6 — nunca
-  // um valor por peça) — mesmo em qty=1. Total continua correto (D3,
-  // abaixo, R$332,00) — só passou a ser Unit (material+adesivo, R$312,00,
-  // a parte que de fato escalaria com qty) + a fatia de Gravação (R$20,00
-  // = 10×2, flat) que este item sozinho absorve por inteiro.
-  testePerto('D1. Total = Unitário + a fatia de Gravação/custo-fixo do pedido (nunca mais confundidos em qty=1)', tot - unit, 20, 0.02);
+  // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F5 — REVERSÃO EXPLÍCITA
+  // da regra desta rodada (RODADA DE ESTABILIZAÇÃO 2026-08-23, Bloco D):
+  // achado real de auditoria de produção mostrou TOTAL ≠ UNIT×QTD como um
+  // bug P0 (cliente via um total que não batia com unitário×quantidade
+  // nem em qty=1), e o usuário desta rodada determinou explicitamente que
+  // "TOTAL_LINHA = UNITÁRIO_FINAL × QTD, centavo-idêntico" é regra
+  // inviolável para QUALQUER linha — sem exceção para Gravação/Spray/
+  // Extra. O UNITÁRIO agora é DERIVADO do TOTAL (que continua sendo
+  // calculado do mesmo jeito, incluindo a parcela de Gravação) em vez de
+  // computado à parte — Unit×Qty=Total volta a valer sempre, inclusive
+  // com Gravação presente. D3 abaixo (TOTAL=R$332,00) continua idêntico —
+  // só o UNITÁRIO exibido mudou, de R$312,00 (só material+adesivo) para
+  // R$332,00 (reflete o preço final real da linha, por unidade).
+  testePerto('D1. Unit × Qty = Total mesmo com Gravação presente (qty=1) — regra revertida nesta rodada (2026-09-11)', tot - unit, 0, 0.02);
   testePerto('D2. TOTAL da linha bate com o Resumo lateral (mesma fonte canônica)', tot, resumo);
   ok('D3. o preço da linha agora inclui adesivo+Gravação+markup, não só material (R$332,00, não R$100,00 nem R$156,00)', Math.abs(tot - 332) < 0.02);
 }
