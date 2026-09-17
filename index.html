@@ -6623,6 +6623,11 @@ function _authFirebaseError(code){
               <div class="card-h"><div class="card-h-left">💬 Mensagens Automáticas</div></div>
               <p style="font-size:12px;color:var(--muted);margin:0">Edite o texto usado nos disparos automáticos ao cliente (WhatsApp). Todo envio real passa por este mesmo template — nunca um texto diferente escondido em outro lugar do sistema.</p>
             </div>
+            <div id="cfgMsgAutoOrcamento"></div>
+            <div class="card" style="margin:24px 0 14px">
+              <div class="card-h"><div class="card-h-left">📋 Outros disparos automáticos</div></div>
+              <p style="font-size:12px;color:var(--muted);margin:0">OS pronta, cobrança, CRM, fornecedor, orçamento Vitre/pós-OS — cada um dispara sozinho, fora da estrutura de blocos do orçamento acima.</p>
+            </div>
             <div id="cfgMsgAutoLista"></div>
           </div>
         </div>
@@ -31809,6 +31814,11 @@ function cfgTab(n) {
 // Somente Master edita — outros perfis usam os templates já salvos (nunca
 // bloqueado de VER que a área existe, só de alterar; ver
 // MSG_TEMPLATES_PLACEHOLDERS/msgResolverTemplate() no motor de templates).
+// RODADA FUNCIONAL 2026-09-17 — chaves com editor DEDICADO no painel
+// "Estrutura da Mensagem de Orçamento" (cfgMsgAutoOrcamentoRender, logo
+// abaixo). Excluídas da lista genérica para não duplicar o mesmo id de
+// textarea/preview em dois lugares da tela ao mesmo tempo.
+var CFG_MSG_AUTO_CHAVES_ORCAMENTO = ['orcamentoEnviado', 'orcamentoItemLinha', 'orcamentoOpcaoItem', 'orcamentoComparativo', 'orcamentoSeparadorOpcoes', 'orcamentoPecaAdicionalLinha'];
 function cfgMsgAutoRender() {
   var souMaster = _normalizeRole((_currentSession&&_currentSession.funcao)||'')==='master';
   var semPerm = document.getElementById('cfgMsgAutoSemPermissao');
@@ -31817,12 +31827,14 @@ function cfgMsgAutoRender() {
   if(conteudo) conteudo.style.display = souMaster ? 'block' : 'none';
   if(!souMaster) return;
 
+  cfgMsgAutoOrcamentoRender();
+
   var cfg = cfgLoad();
   var salvos = cfg.mensagensAutomaticas || {};
   var defaults = msgTemplatesDefault();
   var lista = document.getElementById('cfgMsgAutoLista');
   if(!lista) return;
-  lista.innerHTML = Object.keys(MSG_TEMPLATES_NOMES).map(function(chave){
+  lista.innerHTML = Object.keys(MSG_TEMPLATES_NOMES).filter(function(k){ return CFG_MSG_AUTO_CHAVES_ORCAMENTO.indexOf(k) < 0; }).map(function(chave){
     var atual = (salvos[chave] && salvos[chave].texto) ? salvos[chave].texto : defaults[chave];
     var placeholdersTxt = MSG_TEMPLATES_PLACEHOLDERS[chave].map(function(p){ return '{'+p+'}'; }).join('  ');
     return '<div class="card" style="margin-bottom:14px">'
@@ -31839,7 +31851,7 @@ function cfgMsgAutoRender() {
       + '</div>'
       + '</div>';
   }).join('');
-  Object.keys(MSG_TEMPLATES_NOMES).forEach(cfgMsgAutoPreview);
+  Object.keys(MSG_TEMPLATES_NOMES).filter(function(k){ return CFG_MSG_AUTO_CHAVES_ORCAMENTO.indexOf(k) < 0; }).forEach(cfgMsgAutoPreview);
 }
 // Dados de exemplo — mesmos NOMES de placeholder que os disparos reais
 // usam, valores fictícios só para o vendedor/master visualizar o
@@ -31925,6 +31937,196 @@ function cfgMsgAutoRestaurar(chave) {
     if(r && r.ok===false){ showToast('Não foi possível restaurar — tente novamente.', 'err'); return; }
     showToast('Template "'+MSG_TEMPLATES_NOMES[chave]+'" restaurado ao padrão.', 'ok');
   });
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// RODADA FUNCIONAL 2026-09-17 — "Estrutura da Mensagem de Orçamento"
+// ════════════════════════════════════════════════════════════════════════
+// Achado do feedback do usuário: a lista genérica de templates (acima)
+// tecnicamente já cobria os placeholders granulares dos Blocos 1+2 desta
+// rodada, mas ficava tudo misturado numa lista plana com 15+ outros
+// templates (CRM, fornecedor, OS pronta...) — quem não é técnico não
+// conseguia enxergar a ESTRUTURA da mensagem de orçamento (item → opção
+// → separador → pagamento → prazo → assinatura), nem a ORDEM em que os
+// pedaços se encaixam. Este painel é um segundo modo de edição, dedicado,
+// só para o fluxo de orçamento — os MESMOS templates/chaves de sempre
+// (cfgMsgAutoSalvar/cfgMsgAutoRestaurar/cfgMsgAutoPreview são reaproveitados
+// tal qual, nenhuma lógica de salvamento nova), só organizados em 10
+// blocos numerados + preview final montado.
+//
+// Blocos 5/6/7 (Pix/Cartão/Oferta especial) e 8/9/10 (Prazo/Validade/
+// Assinatura) NÃO são templates de texto livre — são VALORES calculados
+// pela regra comercial (ver orcMontarBlocosPagamento/orcGetPrazoTexto/
+// orcGetValidadeDias). Editar o CONTEÚDO deles aqui seria deixá-los
+// dessincronizados do cálculo real (ex.: admin digita "5% de desconto"
+// só que a regra comercial calcula 8%) — por isso esses blocos mostram o
+// valor de exemplo (read-only) e controlam apenas ONDE/EM QUE ORDEM esse
+// placeholder aparece dentro do Bloco 1, nunca o texto interno.
+function _cfgMsgAutoBlocoCardHtml(numero, titulo, chave, descricaoBloco) {
+  var cfg = cfgLoad();
+  var salvos = cfg.mensagensAutomaticas || {};
+  var atual = (salvos[chave] && salvos[chave].texto) ? salvos[chave].texto : msgTemplatesDefault()[chave];
+  var placeholders = MSG_TEMPLATES_PLACEHOLDERS[chave] || [];
+  var placeholdersTxt = placeholders.map(function(p){ return '{'+p+'}'; }).join('  ');
+  return '<div class="card" style="margin-bottom:14px;border-left:4px solid var(--brand-mid)">'
+    + '<div class="card-h"><div class="card-h-left">Bloco '+numero+' — '+titulo+'</div></div>'
+    + (descricaoBloco ? '<p style="font-size:11px;color:var(--muted);margin:0 0 10px">'+descricaoBloco+'</p>' : '')
+    + (placeholdersTxt
+        ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Placeholders deste bloco</div>'
+          + '<div style="font-size:11px;font-family:monospace;color:var(--brand-mid);background:var(--surface);border-radius:6px;padding:6px 10px;margin-bottom:10px">'+placeholdersTxt+'</div>'
+        : '<div style="font-size:11px;color:var(--muted);font-style:italic;margin-bottom:10px">Sem placeholders — só texto livre.</div>')
+    + '<textarea id="cfgMsgAutoTxt_'+chave+'" rows="5" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-family:monospace;background:var(--bg);color:var(--text)" oninput="cfgMsgAutoPreview(\''+chave+'\');cfgMsgAutoOrcamentoPreviewFinal()">'+cfgEsc(atual)+'</textarea>'
+    + '<div id="cfgMsgAutoErro_'+chave+'" style="display:none;font-size:11px;color:#DC2626;margin-top:6px;font-weight:700"></div>'
+    + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 5px">Preview deste bloco (dados de exemplo)</div>'
+    + '<div id="cfgMsgAutoPrev_'+chave+'" style="font-size:12px;white-space:pre-wrap;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text)"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:12px">'
+    + '<button onclick="cfgMsgAutoSalvar(\''+chave+'\');cfgMsgAutoOrcamentoPreviewFinal()" style="padding:7px 18px;background:var(--brand-mid);color:#fff;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700">💾 Salvar</button>'
+    + '<button onclick="cfgMsgAutoRestaurar(\''+chave+'\');cfgMsgAutoOrcamentoPreviewFinal()" style="padding:7px 14px;background:none;border:1.5px solid var(--border);border-radius:7px;font-size:12px;cursor:pointer;color:var(--muted)">↺ Restaurar padrão</button>'
+    + '</div>'
+    + '</div>';
+}
+// Blocos 5/6/7 — Pix/Cartão/Oferta especial: valor calculado (read-only) +
+// controle de ORDEM (troca a posição do placeholder {token} dentro do
+// texto do Bloco 1 via cfgMsgAutoOrdemMover — nunca edita o valor em si).
+function _cfgMsgAutoBlocoPagamentoHtml(numero, token, titulo, emoji) {
+  var ordem = (typeof orcOrdemBlocosPagamento === 'function') ? orcOrdemBlocosPagamento() : ['cartao', 'oferta_especial', 'pix'];
+  var idx = ordem.indexOf(token);
+  var posicaoTxt = idx >= 0 ? ('Posição atual na mensagem: <strong>'+(idx+1)+'ª de '+ordem.length+'</strong>') : 'Este placeholder não está no texto do Bloco 1 agora — adicione <code>{'+token+'}</code> lá para ele aparecer.';
+  return '<div class="card" style="margin-bottom:14px;border-left:4px solid #9CA3AF">'
+    + '<div class="card-h"><div class="card-h-left">Bloco '+numero+' — '+emoji+' '+titulo+'</div></div>'
+    + '<p style="font-size:11px;color:var(--muted);margin:0 0 10px">Este bloco NÃO é texto livre — o valor (percentual, parcelas, validade da oferta) vem calculado automaticamente da Configuração comercial. Aqui você só controla ONDE ele aparece na mensagem, usando <code>{'+token+'}</code> no Bloco 1.</p>'
+    + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Exemplo do que este bloco gera (não editável aqui)</div>'
+    + '<div style="font-size:12px;white-space:pre-wrap;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);margin-bottom:10px">'+cfgEsc(CFG_MSG_AUTO_EXEMPLO[token]||'')+'</div>'
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    + '<span style="font-size:11px;color:var(--muted)">'+posicaoTxt+'</span>'
+    + '<button onclick="cfgMsgAutoOrdemMover(\''+token+'\',-1)" '+(idx<=0?'disabled':'')+' style="padding:5px 10px;border:1.5px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:12px;opacity:'+(idx<=0?'.4':'1')+'">▲ Mover para cima</button>'
+    + '<button onclick="cfgMsgAutoOrdemMover(\''+token+'\',1)" '+(idx<0||idx>=ordem.length-1?'disabled':'')+' style="padding:5px 10px;border:1.5px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:12px;opacity:'+(idx<0||idx>=ordem.length-1?'.4':'1')+'">▼ Mover para baixo</button>'
+    + '</div>'
+    + '</div>';
+}
+// Blocos 8/9/10 — Prazo/Validade/Assinatura: valor calculado (read-only),
+// sem controle de ordem próprio (são placeholders únicos — a posição é
+// editada direto no texto do Bloco 1).
+function _cfgMsgAutoBlocoInfoHtml(numero, titulo, emoji, token, explicacao) {
+  return '<div class="card" style="margin-bottom:14px;border-left:4px solid #9CA3AF">'
+    + '<div class="card-h"><div class="card-h-left">Bloco '+numero+' — '+emoji+' '+titulo+'</div></div>'
+    + '<p style="font-size:11px;color:var(--muted);margin:0 0 10px">'+explicacao+' Placeholder: <code>{'+token+'}</code> — a posição dele é editada direto no texto do Bloco 1.</p>'
+    + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">Valor de exemplo (não editável aqui)</div>'
+    + '<div style="font-size:12px;white-space:pre-wrap;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text)">'+cfgEsc(CFG_MSG_AUTO_EXEMPLO[token]||'')+'</div>'
+    + '</div>';
+}
+// Troca a ORDEM de {pix}/{cartao}/{oferta_especial} no texto salvo do
+// Bloco 1 (orcamentoEnviado), sem tocar em mais nada do template. Se o
+// template ainda usa só o {ofertas} legado (nenhum dos 3 granulares
+// presente), expande pro formato granular ANTES de trocar — do contrário
+// não haveria o que reordenar. Troca por SUBSTITUIÇÃO POSICIONAL (nunca
+// reescreve o template do zero): os dois placeholders envolvidos trocam
+// de lugar, todo o resto do texto (saudação, títulos, texto livre ao
+// redor) fica exatamente onde estava.
+function cfgMsgAutoOrdemMover(token, direcao) {
+  var ordem = (typeof orcOrdemBlocosPagamento === 'function') ? orcOrdemBlocosPagamento() : ['cartao', 'oferta_especial', 'pix'];
+  var idx = ordem.indexOf(token);
+  var alvoIdx = idx + direcao;
+  if (idx < 0 || alvoIdx < 0 || alvoIdx >= ordem.length) return;
+  var outroToken = ordem[alvoIdx];
+  var chave = 'orcamentoEnviado';
+  var cfg = cfgLoad();
+  var atual = (cfg.mensagensAutomaticas && cfg.mensagensAutomaticas[chave] && cfg.mensagensAutomaticas[chave].texto) || msgTemplatesDefault()[chave];
+  if (atual.indexOf('{pix}') < 0 && atual.indexOf('{cartao}') < 0 && atual.indexOf('{oferta_especial}') < 0 && atual.indexOf('{ofertas}') >= 0) {
+    atual = atual.replace('{ofertas}', '\n\n{cartao}\n\n{oferta_especial}\n\n{pix}');
+  }
+  var sentinela = '␀SWAP␀';
+  var novo = atual.split('{'+token+'}').join(sentinela).split('{'+outroToken+'}').join('{'+token+'}').split(sentinela).join('{'+outroToken+'}');
+  if (!cfg.mensagensAutomaticas) cfg.mensagensAutomaticas = {};
+  cfg.mensagensAutomaticas[chave] = { texto: novo, atualizadoEm: Date.now() };
+  // cfgSave() seta _cfgData SINCRONAMENTE antes de qualquer round-trip de
+  // rede (ver comentário em cfgSave, achado da correção 2026-09-01) — por
+  // isso re-renderiza JÁ, sem esperar a Promise: senão o clique mostrava a
+  // ordem antiga por um instante (achado do smoke desta rodada) até o
+  // round-trip de rede terminar e o .then() disparar o re-render.
+  var salvamento = cfgSave(cfg);
+  cfgMsgAutoOrcamentoRender();
+  salvamento.then(function(r){
+    if (r && r.ok === false) { showToast('Não foi possível reordenar — tente novamente.', 'err'); return; }
+    showToast('Ordem de pagamento atualizada!', 'ok');
+    if (typeof secAuditLog === 'function') secAuditLog('msg_template_updated', 'Ordem de pagamento reordenada: '+token+' <-> '+outroToken);
+  });
+}
+// Resolve um template usando um texto CANDIDATO explícito (o que está no
+// textarea AGORA, ainda não salvo) em vez do salvo em cfgLoad() — mesma
+// regra de substituição de msgResolverTemplate (whitelist fechada, nunca
+// inventa valor), só com a fonte do texto injetável. Usado exclusivamente
+// pelo Preview Final para refletir edições em tempo real, antes de Salvar.
+function _cfgMsgAutoResolverComTexto(chave, dados, texto) {
+  var validos = MSG_TEMPLATES_PLACEHOLDERS[chave] || [];
+  return String(texto||'').replace(/\{([a-zA-Z_]+)\}/g, function(m, nome){
+    if (validos.indexOf(nome) < 0) return m;
+    return (dados && dados[nome] != null) ? String(dados[nome]) : '';
+  });
+}
+// PREVIEW FINAL — monta os Blocos 1-4 juntos (com dados de exemplo, 1 item
+// normal + 1 grupo comparativo de 2 opções, igual orcEnviarOrcamentoWA
+// monta de verdade), refletindo o texto ATUAL dos textareas (mesmo sem
+// salvar ainda) — resposta direta ao pedido de "preview completo da
+// mensagem final, montando todos os blocos juntos na ordem configurada".
+function cfgMsgAutoOrcamentoPreviewFinal() {
+  var out = document.getElementById('cfgMsgAutoPreviewFinal');
+  if (!out) return;
+  function textoAtual(chave) {
+    var el = document.getElementById('cfgMsgAutoTxt_'+chave);
+    return el ? el.value : msgTemplatesDefault()[chave];
+  }
+  var txtItem = textoAtual('orcamentoItemLinha');
+  var txtOpcao = textoAtual('orcamentoOpcaoItem');
+  var txtSeparador = textoAtual('orcamentoSeparadorOpcoes');
+  var txtComparativoIntro = textoAtual('orcamentoComparativo');
+  var txtPrincipal = textoAtual('orcamentoEnviado');
+
+  var exItem = _cfgMsgAutoResolverComTexto('orcamentoItemLinha', CFG_MSG_AUTO_EXEMPLO, txtItem);
+  var opA = _cfgMsgAutoResolverComTexto('orcamentoOpcaoItem', Object.assign({}, CFG_MSG_AUTO_EXEMPLO, { letra: 'a' }), txtOpcao);
+  var opB = _cfgMsgAutoResolverComTexto('orcamentoOpcaoItem', Object.assign({}, CFG_MSG_AUTO_EXEMPLO, { letra: 'b', descricao: 'Caixa Acrílica Cristal 3mm', valor_unitario: 'R$ 220,00', subtotal: 'R$ 220,00' }), txtOpcao);
+  var separador = _cfgMsgAutoResolverComTexto('orcamentoSeparadorOpcoes', {}, txtSeparador);
+  var opcoesMontadas = opA + '\n' + separador + '\n' + opB;
+  var blocoComparativo = '02. ' + _cfgMsgAutoResolverComTexto('orcamentoComparativo', { opcoes: opcoesMontadas }, txtComparativoIntro);
+  var itensMontados = '*Itens do orçamento*\n\n' + exItem + '\n\n' + blocoComparativo;
+
+  var dadosFinal = Object.assign({}, CFG_MSG_AUTO_EXEMPLO, { itens: itensMontados });
+  var msgFinal = _cfgMsgAutoResolverComTexto('orcamentoEnviado', dadosFinal, txtPrincipal);
+  out.textContent = msgFinal;
+}
+function cfgMsgAutoOrcamentoRender() {
+  var host = document.getElementById('cfgMsgAutoOrcamento');
+  if (!host) return;
+  var html = '<div class="card" style="margin-bottom:16px;border:1.5px solid var(--brand-mid)">'
+    + '<div class="card-h"><div class="card-h-left">🧾 Estrutura da Mensagem de Orçamento (WhatsApp/PDF)</div></div>'
+    + '<p style="font-size:12px;color:var(--muted);margin:0">10 blocos, na ordem em que aparecem na mensagem ao cliente. Edite cada um separadamente — o <strong>Preview Final</strong> no fim desta seção mostra tudo montado junto, exatamente como o cliente recebe.</p>'
+    + '</div>';
+  html += _cfgMsgAutoBlocoCardHtml(1, 'Mensagem principal do orçamento', 'orcamentoEnviado',
+    'O "envelope" da mensagem inteira — saudação, número do orçamento, <code>{itens}</code> (Blocos 2+3+4 montados automaticamente aqui dentro), valor total, <code>{pix}</code>/<code>{cartao}</code>/<code>{oferta_especial}</code> (Blocos 5/6/7 — a ORDEM deles neste texto é o que você controla lá embaixo), <code>{prazo}</code>/<code>{validade}</code> (Blocos 8/9) e assinatura (Bloco 10).');
+  html += _cfgMsgAutoBlocoCardHtml(2, 'Estrutura de cada item', 'orcamentoItemLinha',
+    'Como CADA item numerado do orçamento aparece dentro de <code>{itens}</code> no Bloco 1. Exemplo: troque para <code>Qtd: {quantidade} | Unitário: {valor_unitario} | Total: {subtotal}</code> se preferir tudo numa linha só.');
+  html += _cfgMsgAutoBlocoCardHtml(3, 'Estrutura de cada opção comparativa', 'orcamentoOpcaoItem',
+    'Como CADA alternativa (a, b, c...) aparece quando o orçamento tem opções para o cliente escolher.');
+  html += _cfgMsgAutoBlocoCardHtml('3.1', 'Texto de introdução do comparativo', 'orcamentoComparativo',
+    'O texto ANTES da lista de opções do Bloco 3 (ex. "Escolha uma das opções abaixo").');
+  html += _cfgMsgAutoBlocoCardHtml(4, 'Separador entre opções', 'orcamentoSeparadorOpcoes',
+    'O texto entre uma opção e outra (ex. "— OU —"). Sem placeholder — é só o texto do separador em si.');
+  html += _cfgMsgAutoBlocoPagamentoHtml(5, 'pix', 'Pix', '💸');
+  html += _cfgMsgAutoBlocoPagamentoHtml(6, 'cartao', 'Cartão de crédito', '💳');
+  html += _cfgMsgAutoBlocoPagamentoHtml(7, 'oferta_especial', 'Oferta especial', '🎁');
+  html += _cfgMsgAutoBlocoInfoHtml(8, 'Prazo', '⏱️', 'prazo', 'Prazo de produção, calculado pela Configuração comercial.');
+  html += _cfgMsgAutoBlocoInfoHtml(9, 'Validade', '📅', 'validade', 'Validade do orçamento, calculada pela Configuração comercial.');
+  html += _cfgMsgAutoBlocoInfoHtml(10, 'Assinatura', '✍️', 'responsavel', 'Nome de quem está enviando o orçamento (vendedor responsável).');
+  html += _cfgMsgAutoBlocoCardHtml('2.1 (extra)', 'Peça adicional (dentro de um item com mais de uma peça)', 'orcamentoPecaAdicionalLinha',
+    'Quando um item tem mais de uma peça planificada nomeada (ex. "Base Caixa", "Peça interna"), cada linha desta lista usa este formato — injetado dentro do Bloco 2 via <code>{pecas_adicionais}</code>.');
+  html += '<div class="card" style="margin-top:20px;border:2px solid var(--brand-mid)">'
+    + '<div class="card-h"><div class="card-h-left">🔍 PREVIEW FINAL — exatamente como o cliente recebe</div></div>'
+    + '<p style="font-size:11px;color:var(--muted);margin:0 0 10px">Montagem ao vivo dos Blocos 1 a 4 acima, na ordem configurada, com dados de exemplo (1 item normal + 1 comparativo de 2 opções). O PDF usa a MESMA fonte de dados (item, material, medidas, peças adicionais) — a apresentação é uma tabela, não texto corrido, mas o conteúdo comercial é idêntico a este preview.</p>'
+    + '<div id="cfgMsgAutoPreviewFinal" style="font-size:12px;white-space:pre-wrap;background:var(--surface);border:1.5px solid var(--brand-mid);border-radius:8px;padding:14px 16px;color:var(--text)"></div>'
+    + '</div>';
+  host.innerHTML = html;
+  CFG_MSG_AUTO_CHAVES_ORCAMENTO.forEach(cfgMsgAutoPreview);
+  cfgMsgAutoOrcamentoPreviewFinal();
 }
 
 // ── Integrações (Valéria / Chatvolt) ──────────────────────────────────────
