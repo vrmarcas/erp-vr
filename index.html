@@ -27136,16 +27136,37 @@ async function orcEnviarOrcamentoWA() {
       // vez de hardcoded aqui. O bloco de alternativas em si continua
       // gerado dinamicamente a partir dos dados reais das opções (nunca
       // hardcode paralelo) e injetado como único placeholder {opcoes}.
+      // RODADA FUNCIONAL 2026-09-17, Bloco 1 — cada opção usa o template
+      // editável orcamentoOpcaoItem (Configurações → Mensagens Automáticas)
+      // em vez da string fixa "letra) desc\nQuantidade: X | ...". Default
+      // reproduz exatamente o texto de sempre; "(selecionada)" continua
+      // lógica de dado (concatenado em {descricao}), nunca texto de
+      // template — evita reimplementar essa regra dentro do template.
       var _opcoesTextoWA = _opcoesWA.map(function(op, oi){
         var letra = String.fromCharCode(97+oi); // a, b, c...
-        return '   '+letra+') '+op.desc+(op.opcaoConfirmadaCliente?' (selecionada)':'')+'\n      Quantidade: '+op.qty+' | Valor unitário: '+fmtBRLWA(op.unit)+' | Subtotal: '+fmtBRLWA(op.total);
-      }).join('\n   ── OU ──\n');
+        var _descOp = op.desc + (op.opcaoConfirmadaCliente ? ' (selecionada)' : '');
+        return msgResolverTemplate('orcamentoOpcaoItem', {
+          letra: letra, produto: op.prod, descricao: _descOp,
+          quantidade: op.qty, valor_unitario: fmtBRLWA(op.unit), subtotal: fmtBRLWA(op.total),
+          material: op.material, medidas: op.medidas
+        });
+      }).join('\n' + msgResolverTemplate('orcamentoSeparadorOpcoes', {}) + '\n');
       var _blocoWA = nGrp+'. '+msgResolverTemplate('orcamentoComparativo', { opcoes: _opcoesTextoWA });
       return _blocoWA;
     }
     _nItemWA++;
     var n = String(_nItemWA).padStart(2,'0');
-    return n+'. '+item.desc+'\nQuantidade: '+item.qty+'\nValor unitário: '+fmtBRLWA(item.unit)+'\nSubtotal: '+fmtBRLWA(item.total);
+    // RODADA FUNCIONAL 2026-09-17, Bloco 1+2 — template editável
+    // orcamentoItemLinha substitui a string fixa de sempre. Default
+    // reproduz byte a byte o texto anterior (mesmo {descricao}=item.desc
+    // completo) e acrescenta {pecas_adicionais} (Bloco 2 — vazio quando o
+    // item não tem mais de uma peça planificada nomeada, sem mudar a
+    // aparência de nenhuma mensagem existente).
+    return msgResolverTemplate('orcamentoItemLinha', {
+      numero: n, produto: item.prod, descricao: item.desc,
+      quantidade: item.qty, valor_unitario: fmtBRLWA(item.unit), subtotal: fmtBRLWA(item.total),
+      material: item.material, medidas: item.medidas, pecas_adicionais: item.pecasAdicionais
+    });
   }).filter(function(s){ return s!==null; }).join('\n\n');
 
   // HOTFIX pós-homologação (2026-08-10), P0.1/P0.3 — nunca mais lido do
@@ -27600,6 +27621,36 @@ function orcItemDescricaoComercial(d) {
   return desc;
 }
 
+// RODADA FUNCIONAL 2026-09-17, Bloco 2 — peças adicionais nomeadas na
+// mensagem. Achado: osItemMateriaisResumo() (usada em orcColetarItens-
+// Distribuidos) itera as peças planificadas (row.dataset.planPecas) mas só
+// lê p.esp para deduplicar — o nome de cada peça (ex. "Base Caixa", "Peça
+// interna", ver _planBuildAllPecas()) nunca chegava à mensagem/PDF, só a
+// telas internas de produção (kbRenderItensDetalhe). Só monta o bloco
+// quando há MAIS DE UMA peça nomeada — item de peça única já mostra
+// material/medidas no {descricao}/{material}/{medidas} normais, listar de
+// novo seria redundante. Cada linha usa o template editável
+// orcamentoPecaAdicionalLinha (Configurações → Mensagens Automáticas);
+// material_peca reaproveita o mesmo material do item (matLbl) + espessura
+// própria da peça — este código não inventa um material por peça que o
+// cadastro não tem.
+function orcPecasAdicionaisTexto(pecasPlan, matLbl) {
+  if (!pecasPlan || pecasPlan.length <= 1) return '';
+  var linhas = pecasPlan.map(function(p) {
+    var larg = parseFloat(p.larg) || 0, alt = parseFloat(p.alt) || 0;
+    var esp = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : '');
+    return (typeof msgResolverTemplate === 'function') ? msgResolverTemplate('orcamentoPecaAdicionalLinha', {
+      nome_peca: p.nome || 'Peça',
+      material_peca: (matLbl || '') + (esp ? (' ' + esp + 'mm') : ''),
+      espessura_peca: esp ? String(esp) : '',
+      largura_peca: larg ? String(larg) : '',
+      altura_peca: alt ? String(alt) : '',
+      quantidade_peca: String(p.qty || 1)
+    }) : '';
+  });
+  return '\n\n*Peças adicionais:*\n' + linhas.join('\n');
+}
+
 // Fonte única de itens (descrição completa + qty + valor unitário + total),
 // já com o valor final redistribuído proporcionalmente entre os itens —
 // usada pelo PDF E pelo WhatsApp, para os dois nunca mostrarem números
@@ -27667,7 +27718,7 @@ function orcColetarItensDistribuidos(baseEfetiva){
     // que reflete só a ação explícita do vendedor em orcOpcaoSelecionar()
     // ("Marcar escolhida"); é ELE que WhatsApp/PDF devem usar para exibir
     // "(selecionada)" — nunca opcaoSelecionada.
-    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, det:det, totRaw:totRaw, conta:_contaColeta, grupoOpcaoId: _opColeta ? _opColeta.grupoId : null, opcaoSelecionada: _contaColeta, opcaoConfirmadaCliente: _opColeta ? !!_opColeta.escolhaConfirmada : false});
+    _itensDados.push({prod:prod, qty:qty, larg:larg, alt:alt, planLarg:planLarg, planAlt:planAlt, planProf:planProf, matLbl:matLbl, matResumo:matResumo, pecasPlan:pecasPlan, det:det, totRaw:totRaw, conta:_contaColeta, grupoOpcaoId: _opColeta ? _opColeta.grupoId : null, opcaoSelecionada: _contaColeta, opcaoConfirmadaCliente: _opColeta ? !!_opColeta.escolhaConfirmada : false});
   });
   // RODADA 6, seção 10/3 — Híbrido VR+Vitre: achado real da auditoria de
   // paridade PDF/WhatsApp — itens do catálogo Vitre vivem em
@@ -27707,7 +27758,36 @@ function orcColetarItensDistribuidos(baseEfetiva){
     var itemTotal = item.totRaw * _escalaEfetiva;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
     var desc = orcItemDescricaoComercial(item);
-    return { desc: desc, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false, opcaoConfirmadaCliente: !!item.opcaoConfirmadaCliente };
+    // RODADA FUNCIONAL 2026-09-17, Bloco 1 — campos granulares para os
+    // templates editáveis (orcamentoItemLinha/orcamentoOpcaoItem), ao lado
+    // de `desc` (mantido intacto — é o valor de {descricao}, retrocompat
+    // byte a byte com o texto hardcoded de sempre). Mesma fórmula de
+    // medidas que orcItemDescricaoComercial usa internamente (duplicada de
+    // propósito, não extraída — ver feedback_erp_vr_test_extraction_pattern:
+    // nunca dividir função já testada por extração isolada).
+    var _fmtDim = function(v){ return (v % 1 === 0 ? String(v) : v.toFixed(1).replace('.', ',')) + 'cm'; };
+    var _pLarg = parseFloat(item.planLarg)||0, _pAlt = parseFloat(item.planAlt)||0, _pProf = parseFloat(item.planProf)||0;
+    var _medidasArr = [];
+    if (_pAlt  > 0) _medidasArr.push(_fmtDim(_pAlt)  + ' largura');
+    if (_pLarg > 0) _medidasArr.push(_fmtDim(_pLarg) + ' comprimento');
+    if (_pProf > 0) _medidasArr.push(_fmtDim(_pProf) + ' altura');
+    var medidasStr = _medidasArr.length ? _medidasArr.join(' × ') : ((item.larg && item.alt) ? (item.larg+'×'+item.alt+'cm') : '');
+    var pecasAdicionaisTxt = (typeof orcPecasAdicionaisTexto === 'function') ? orcPecasAdicionaisTexto(item.pecasPlan, item.matLbl) : '';
+    // PDF (HTML) não pode usar o texto acima (markdown *bold*/\n do
+    // WhatsApp) — mesma origem de dados (item.pecasPlan), formatação
+    // própria, escapada com cfgEsc (nome da peça é texto livre do usuário).
+    var pecasAdicionaisHtml = '';
+    if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function') {
+      pecasAdicionaisHtml = '<div style="margin-top:4px;font-size:11px;color:var(--muted,#6b7280)"><strong>Peças adicionais:</strong><ul style="margin:2px 0 0;padding-left:16px">'
+        + item.pecasPlan.map(function(p){
+            var larg = parseFloat(p.larg)||0, alt = parseFloat(p.alt)||0;
+            var esp = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : '');
+            var matP = (item.matLbl||'') + (esp ? (' '+esp+'mm') : '');
+            return '<li>'+cfgEsc(p.nome||'Peça')+' — '+larg+'×'+alt+' cm — '+cfgEsc(matP)+'</li>';
+          }).join('')
+        + '</ul></div>';
+    }
+    return { desc: desc, prod: item.prod||'', material: item.matResumo||'', medidas: medidasStr, pecasAdicionais: pecasAdicionaisTxt, pecasAdicionaisHtml: pecasAdicionaisHtml, qty: item.qty, unit: itemUnit, total: itemTotal, grupoOpcaoId: item.grupoOpcaoId || null, opcaoSelecionada: item.opcaoSelecionada !== false, opcaoConfirmadaCliente: !!item.opcaoConfirmadaCliente };
   });
 }
 
@@ -27799,7 +27879,7 @@ async function orcImprimirOrcamentoPDF() {
       var _opcoesPDF = _itensPDF.filter(function(x){ return x.grupoOpcaoId===item.grupoOpcaoId; });
       itensRows += '<tr><td colspan="4" style="padding:12px 14px 2px;font-size:10px;font-weight:800;color:#5B21B6;text-transform:uppercase;letter-spacing:.4px">'+cfgEsc(_comparativoHeaderPDF)+'</td></tr>';
       _opcoesPDF.forEach(function(op, oi){
-        itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoConfirmadaCliente?'<strong>✓ ':'')+op.desc+(op.opcaoConfirmadaCliente?'</strong>':'')+'</td>'
+        itensRows += '<tr><td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+(op.opcaoConfirmadaCliente?'<strong>✓ ':'')+op.desc+(op.opcaoConfirmadaCliente?'</strong>':'')+(op.pecasAdicionaisHtml||'')+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(op.unit)+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+op.qty+'</td>'
           +'<td style="padding:6px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(op.total)+'</td>'
@@ -27810,7 +27890,7 @@ async function orcImprimirOrcamentoPDF() {
       });
       return;
     }
-    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+item.desc+'</td>'
+    itensRows += '<tr><td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;line-height:1.5">'+item.desc+(item.pecasAdicionaisHtml||'')+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:right;white-space:nowrap">'+fmtBRL(item.unit)+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;text-align:center">'+item.qty+'</td>'
       +'<td style="padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:800;text-align:right;white-space:nowrap">'+fmtBRL(item.total)+'</td>'
@@ -31068,6 +31148,22 @@ var MSG_TEMPLATES_PLACEHOLDERS = {
   // template (mesmo padrão já usado por {itens} em orcamentoEnviado: lista
   // dinâmica gerada a partir de dados reais, nunca hardcode paralelo aqui).
   orcamentoComparativo:    ['opcoes'],
+  // RODADA FUNCIONAL 2026-09-17, Bloco 1 — editor modular: a estrutura
+  // interna de cada item numerado e de cada opção comparativa (antes
+  // hardcoded dentro de orcEnviarOrcamentoWA, sempre "Quantidade: X |
+  // Valor unitário: Y | Subtotal: Z" numa única linha) agora tem template
+  // próprio e editável. {descricao} preserva o texto comercial completo de
+  // sempre (produto + medidas + material + observação); {produto}/
+  // {material}/{medidas} ficam disponíveis separadamente para quem quiser
+  // montar a linha de outro jeito. Bloco 2 — {pecas_adicionais} (só em
+  // orcamentoItemLinha) injeta os nomes das peças planificadas quando o
+  // item tem mais de uma.
+  orcamentoItemLinha:      ['numero', 'produto', 'descricao', 'quantidade', 'valor_unitario', 'subtotal', 'material', 'medidas', 'pecas_adicionais'],
+  orcamentoOpcaoItem:      ['letra', 'produto', 'descricao', 'quantidade', 'valor_unitario', 'subtotal', 'material', 'medidas'],
+  // Sem placeholder — só o texto do separador entre opções ("— OU —"),
+  // editável sem precisar mexer em código.
+  orcamentoSeparadorOpcoes: [],
+  orcamentoPecaAdicionalLinha: ['nome_peca', 'material_peca', 'espessura_peca', 'largura_peca', 'altura_peca', 'quantidade_peca'],
   crmFollowup:             ['nome', 'produto'],
   crmOrcamentoDisponivel:  ['nome', 'valor'],
   crmFechamento:           ['nome'],
@@ -31086,6 +31182,10 @@ var MSG_TEMPLATES_NOMES = {
   vitreOrcamentoEnviado:  '📤 Orçamento Vitre enviado ao cliente',
   orcamentoPosOsEnviado:  '📤 Orçamento (pós-OS) enviado ao cliente',
   orcamentoComparativo:   '🔀 Orçamento comparativo — opções para o cliente escolher',
+  orcamentoItemLinha:     '📄 Item do orçamento (linha numerada)',
+  orcamentoOpcaoItem:     '🔀 Opção comparativa (linha "a)/b)...")',
+  orcamentoSeparadorOpcoes: '➗ Separador entre opções comparativas',
+  orcamentoPecaAdicionalLinha: '🧩 Peça adicional (linha dentro do item)',
   crmFollowup:            '🔄 CRM: Follow-up',
   crmOrcamentoDisponivel: '💰 CRM: Orçamento disponível',
   crmFechamento:          '🤝 CRM: Fechamento',
@@ -31105,6 +31205,14 @@ function msgTemplatesDefault() {
     vitreOrcamentoEnviado: '{saudacao}\n\nSegue o orçamento da *{marca}*:\n\n{itens}\n\n{ofertas}\n*VALOR TOTAL: {valor}*\n\n*Validade do orçamento:* {validade}\n\nCaso queira aprovar o orçamento ou tirar alguma dúvida, é só responder a esta mensagem.\n\nAtenciosamente,\n*{responsavel}*',
     orcamentoPosOsEnviado: 'Olá, {cliente}!\n\nSegue o orçamento referente à OS #0{numero_os} — {marca}.\nProduto: {produto}.\nValor: {valor}.\n\nCaso queira aprovar ou tirar alguma dúvida, é só responder a esta mensagem.',
     orcamentoComparativo: 'Escolha uma das opções abaixo (você pode escolher apenas uma):\n\n{opcoes}',
+    // RODADA FUNCIONAL 2026-09-17, Bloco 1 — defaults reproduzem byte a
+    // byte a formatação anterior (hardcoded em orcEnviarOrcamentoWA), só
+    // agora editável. {pecas_adicionais} já vem formatado com sua própria
+    // quebra de linha (ou vazio) — não precisa de \n extra no template.
+    orcamentoItemLinha: '{numero}. {descricao}\nQuantidade: {quantidade}\nValor unitário: {valor_unitario}\nSubtotal: {subtotal}{pecas_adicionais}',
+    orcamentoOpcaoItem: '   {letra}) {descricao}\n      Quantidade: {quantidade} | Valor unitário: {valor_unitario} | Subtotal: {subtotal}',
+    orcamentoSeparadorOpcoes: '   ── OU ──',
+    orcamentoPecaAdicionalLinha: '- {nome_peca} — {largura_peca}×{altura_peca} cm — {material_peca}',
     crmFollowup:            'Olá {nome}! Tudo bem? Estou entrando em contato para dar continuidade ao seu interesse em {produto}. Podemos conversar?',
     crmOrcamentoDisponivel: 'Olá {nome}! Seu orçamento de {valor} está disponível. Posso esclarecer alguma dúvida ou ajustar algo?',
     crmFechamento:          'Olá {nome}! Verificando se conseguiu avaliar nossa proposta. Estamos prontos para iniciar sua produção assim que confirmar!',
@@ -31719,7 +31827,16 @@ var CFG_MSG_AUTO_EXEMPLO = {
   pix: '*Desconto PIX:* 5% de desconto pagando à vista via PIX (valor com PIX: R$ 332,50).',
   cartao: '*Parcelamento:* em até 3x de R$ 116,67 sem juros',
   oferta_especial: '*Oferta especial:* 10% de desconto já aplicado no valor acima — válido para fechamento até 15/09/2026. Após essa data, o valor retorna ao normal.',
-  get ofertas() { return '\n\n'+this.cartao+'\n\n'+this.oferta_especial+'\n\n'+this.pix; }
+  get ofertas() { return '\n\n'+this.cartao+'\n\n'+this.oferta_especial+'\n\n'+this.pix; },
+  // RODADA FUNCIONAL 2026-09-17, Bloco 1+2 — amostras para os 4 novos
+  // templates granulares (item numerado, opção comparativa, separador,
+  // peça adicional).
+  numero: '01', produto: 'Caixa Acrílica Cristal 3mm', descricao: 'Caixa Acrílica Cristal 3mm 26cm largura × 19cm comprimento em Acrílico Colorido 2mm',
+  quantidade: '1', valor_unitario: 'R$ 180,00', subtotal: 'R$ 180,00',
+  material: 'Acrílico Colorido 2mm + Acrílico Colorido 4mm', medidas: '26cm largura × 19cm comprimento',
+  pecas_adicionais: '\n\n*Peças adicionais:*\n- Base Caixa — 36×48 cm — Acrílico Colorido 2mm\n- Peça interna — 26×19 cm — Acrílico Colorido 4mm',
+  letra: 'a', nome_peca: 'Base Caixa', material_peca: 'Acrílico Colorido 2mm',
+  espessura_peca: '2', largura_peca: '36', altura_peca: '48', quantidade_peca: '1'
 };
 function cfgMsgAutoPreview(chave) {
   var txtEl = document.getElementById('cfgMsgAutoTxt_'+chave);
