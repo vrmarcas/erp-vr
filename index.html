@@ -10582,21 +10582,6 @@ function orcItemVRRestaurarDados(itemSalvo) {
 // espessura. Item sem peças detalhadas (OS antiga anterior a este
 // hotfix, ou item Vitre/catálogo sem planificação) cai no fallback de
 // sempre: item.mat como estava.
-// RODADA FUNCIONAL 2026-09-17, Bloco 4 — medidas ausentes na OS/Kanban.
-// Achado: as dimensões planificadas (planLarg/planAlt/planProf) SÃO
-// salvas no snapshot da OS (osProjecaoOperacionalItem copia os 3 campos),
-// mas todo ponto de renderização do Kanban/modal/impressão de OS lia
-// exclusivamente os campos legados it.larg/it.alt (colunas ocultas
-// oi_larg_/oi_alt_, vazias para item planificado via receita) — por isso
-// aparecia "—" mesmo com medida real disponível. Resolve com fallback
-// nunca inventa; se nenhuma das duas fontes existir, some.
-function osMedidasResolvidas(it) {
-  if (!it) return { larg: null, alt: null, prof: null };
-  var larg = it.larg || it.planLarg || null;
-  var alt = it.alt || it.planAlt || null;
-  var prof = it.planProf || null;
-  return { larg: larg, alt: alt, prof: prof };
-}
 function osItemMateriaisResumo(item) {
   if (!item) return '—';
   var pecas = (item.pieces && item.pieces.length) ? item.pieces
@@ -10703,9 +10688,15 @@ function _orcSincronizarOSVinculada(orc) {
   var _itensOrigFiltrados = (orc.itens || []).filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; });
   var novoMatLabel = (_itensOrigFiltrados.length && typeof osItemMateriaisResumo === 'function')
     ? osItemMateriaisResumo(_itensOrigFiltrados[0]) : os.material;
-  var _novaMd = novosItensOS.length ? osMedidasResolvidas(novosItensOS[0]) : { larg: null, alt: null, prof: null };
-  var novaMedidasStr = (_novaMd.larg && _novaMd.alt)
-    ? (_novaMd.larg + '×' + _novaMd.alt + (_novaMd.prof ? ('×' + _novaMd.prof) : '') + 'cm') : os.medidas;
+  // RODADA FUNCIONAL 2026-09-17, Bloco 4 — fallback it.larg/it.alt (legado)
+  // -> it.planLarg/it.planAlt/it.planProf (planificado via receita, já
+  // salvo no snapshot por osProjecaoOperacionalItem mas nunca lido aqui).
+  var _it0 = novosItensOS[0];
+  var _novaLarg = _it0 ? (_it0.larg || _it0.planLarg || null) : null;
+  var _novaAlt  = _it0 ? (_it0.alt  || _it0.planAlt  || null) : null;
+  var _novaProf = _it0 ? (_it0.planProf || null) : null;
+  var novaMedidasStr = (_novaLarg && _novaAlt)
+    ? (_novaLarg + '×' + _novaAlt + (_novaProf ? ('×' + _novaProf) : '') + 'cm') : os.medidas;
   var novoQtyTotal = novosItensOS.reduce(function(s, i) { return s + (parseInt(i.qty) || 1); }, 0) || (os.qty || 1);
 
   var jaEmProducao = !!(os.producaoStartId || os.matProd || os.status === 'producao' || os.status === 'pronta' || os.status === 'entregue');
@@ -14726,8 +14717,10 @@ function kbRenderItensDetalhe(os) {
   wrap.innerHTML = '<div class="section-lbl">📦 Itens do Pedido ('+itens.length+')</div>'
     + '<div class="kb-itens-list">'
     + itens.map(function (it, i) {
-        var _md = osMedidasResolvidas(it);
-        var medidas = (_md.larg && _md.alt) ? (_md.larg+'×'+_md.alt+(_md.prof?('×'+_md.prof):'')+' cm') : '—';
+        var _mLarg = it.larg || it.planLarg || null;
+        var _mAlt  = it.alt  || it.planAlt  || null;
+        var _mProf = it.planProf || null;
+        var medidas = (_mLarg && _mAlt) ? (_mLarg+'×'+_mAlt+(_mProf?('×'+_mProf):'')+' cm') : '—';
         var extrasDesc = (it.extras && it.extras.descricao) ? String(it.extras.descricao) : '';
         var obsPartes = [it.det, extrasDesc].filter(Boolean);
         var obsHtml = obsPartes.length ? '<div style="grid-column:1/-1"><span class="kb-os-field-lbl">Observações / Acabamento</span>'+cfgEsc(obsPartes.join(' · '))+'</div>' : '';
@@ -14993,8 +14986,11 @@ function kbOpen(id) {
   }
   const _cidade  = os.cidade  || os.clientCidade || '—';
   const _mat     = os.material || (os.itens && os.itens[0] ? (os.itens[0].matLabel || os.itens[0].mat || '') : '') || '—';
-  const _mdKb = os.itens && os.itens[0] ? osMedidasResolvidas(os.itens[0]) : { larg: null, alt: null, prof: null };
-  const _med     = os.medidas  || (_mdKb.larg && _mdKb.alt ? _mdKb.larg+'×'+_mdKb.alt+(_mdKb.prof?('×'+_mdKb.prof):'')+'cm' : '') || (os.esp ? os.esp+'mm' : '') || '—';
+  const _it0kb = os.itens && os.itens[0];
+  const _mdLargKb = _it0kb ? (_it0kb.larg || _it0kb.planLarg || null) : null;
+  const _mdAltKb  = _it0kb ? (_it0kb.alt  || _it0kb.planAlt  || null) : null;
+  const _mdProfKb = _it0kb ? (_it0kb.planProf || null) : null;
+  const _med     = os.medidas  || (_mdLargKb && _mdAltKb ? _mdLargKb+'×'+_mdAltKb+(_mdProfKb?('×'+_mdProfKb):'')+'cm' : '') || (os.esp ? os.esp+'mm' : '') || '—';
   const _qty     = os.qty      || (os.itens ? os.itens.reduce((s,i)=>s+(i.qty||1),0) : 1) || 1;
   const _late = _entrega !== '—' && _entrega <= '10/07';
   document.getElementById('kbOsTit').textContent = _titulo;
@@ -24004,8 +24000,10 @@ function osImprimirPDF(id) {
   }
 
   var linhasItens = itens.map(function(it,i){
-    var _md = osMedidasResolvidas(it);
-    var medidas = (_md.larg && _md.alt) ? (_md.larg+'×'+_md.alt+(_md.prof?('×'+_md.prof):'')+' cm') : '—';
+    var _mLarg = it.larg || it.planLarg || null;
+    var _mAlt  = it.alt  || it.planAlt  || null;
+    var _mProf = it.planProf || null;
+    var medidas = (_mLarg && _mAlt) ? (_mLarg+'×'+_mAlt+(_mProf?('×'+_mProf):'')+' cm') : '—';
     return '<tr><td style="text-align:center">'+(i+1)+'</td><td style="text-align:center">'+(it.qty!=null?it.qty:1)+'</td><td>'+cfgEsc(it.prod||'—')+'</td><td>'+cfgEsc(it.mat||'—')+'</td><td>'+medidas+'</td></tr>';
   }).join('');
 
@@ -29727,8 +29725,10 @@ function orcEnvAbrir(id) {
       +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid var(--border)">Total</th>'
       +'</tr></thead><tbody>';
     o.itens.forEach(function(it){
-      var _md=osMedidasResolvidas(it);
-      var tam=(_md.larg&&_md.alt)?_md.larg+'×'+_md.alt+(_md.prof?('×'+_md.prof):'')+' cm':'—';
+      var _mLarg=it.larg||it.planLarg||null;
+      var _mAlt=it.alt||it.planAlt||null;
+      var _mProf=it.planProf||null;
+      var tam=(_mLarg&&_mAlt)?_mLarg+'×'+_mAlt+(_mProf?('×'+_mProf):'')+' cm':'—';
       itensHtml+='<tr>'
         +'<td style="padding:5px 8px;border-bottom:1px solid var(--border)">'+(it.prod||'—')+'</td>'
         +'<td style="padding:5px 8px;text-align:center;border-bottom:1px solid var(--border)">'+(it.qty||1)+'</td>'
@@ -30483,8 +30483,11 @@ function orcEnvGerarOS(){
   // OS) precisa mostrar TODAS as espessuras usadas no primeiro item, não só
   // a string única do material selecionado — ver osItemMateriaisResumo().
   var matLabel=itens.length?osItemMateriaisResumo(itens[0]):'—';
-  var _mdGer=itens.length?osMedidasResolvidas(itens[0]):{larg:null,alt:null,prof:null};
-  var medidasStr=(_mdGer.larg&&_mdGer.alt)?(_mdGer.larg+'×'+_mdGer.alt+(_mdGer.prof?('×'+_mdGer.prof):'')+'cm'):'—';
+  var _it0ger=itens[0];
+  var _mLargGer=itens.length?(_it0ger.larg||_it0ger.planLarg||null):null;
+  var _mAltGer=itens.length?(_it0ger.alt||_it0ger.planAlt||null):null;
+  var _mProfGer=itens.length?(_it0ger.planProf||null):null;
+  var medidasStr=(_mLargGer&&_mAltGer)?(_mLargGer+'×'+_mAltGer+(_mProfGer?('×'+_mProfGer):'')+'cm'):'—';
   // RODADA 9 (2026-08-22, Bloco B) — achado real: o modal "Iniciar
   // Produção" tenta pré-selecionar o material no Estoque usando os.esp
   // (_kbOpenProdOverlay), mas esse campo nunca era escrito na criação da
