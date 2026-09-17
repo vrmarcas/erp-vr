@@ -76,6 +76,16 @@ fs.writeFileSync(modPath, src);
 global.window = global;
 global.__cfg = { mensagensAutomaticas: {} };
 global.cfgLoad = function () { return global.__cfg; };
+// Bloco 3 (ORC-000155) — cadastro de materiais para orcPecasAdicionaisTexto
+// resolver p.matId; sem isso _cfgMateriaisReais fica indisponível e o
+// teste 2.6 abaixo cairia no fallback antigo (o que seria o próprio bug).
+global._cfgDataLoaded = true;
+global._cfgMateriaisReais = function () {
+  return [
+    { nome: 'Acrílico Colorido 2mm', id: 'mat_msrsdhg1_nyfduc', rsm2: 145 },
+    { nome: 'Acrílico Colorido 4mm', id: 'mat_msrsdhg1_y7gdyj', rsm2: 245 }
+  ];
+};
 var mod = require(modPath);
 
 console.log('\n=== RODADA FUNCIONAL 2026-09-17 — Blocos 1+2: editor modular + peças adicionais ===\n');
@@ -165,6 +175,16 @@ test('2.5 — formato da linha por peça é o template editável orcamentoPecaAd
   ], 'Acrílico Colorido');
   assertTrue(out.indexOf('* Base Caixa (1x) — 36cm x 48cm') >= 0, 'template customizado da peça não foi aplicado');
   delete global.__cfg.mensagensAutomaticas.orcamentoPecaAdicionalLinha;
+});
+
+test('2.6 — BUG REAL (ORC-000155): peça manual com matId próprio usa o MATERIAL DA PEÇA (Colorido), não o material do item (Cristal), no bloco de peças adicionais', function () {
+  var out = mod.orcPecasAdicionaisTexto([
+    { nome: 'Peça 1', larg: 36, alt: 48, esp: '2', matId: 'mat_msrsdhg1_nyfduc', origem: 'MANUAL' },
+    { nome: 'Peça 2', larg: 26, alt: 19, esp: '4', matId: 'mat_msrsdhg1_y7gdyj', origem: 'MANUAL' }
+  ], 'Acrílico Cristal 3mm'); // matLbl do ITEM no caso real — nunca deveria vazar pras peças com matId próprio
+  assertTrue(out.indexOf('Acrílico Colorido 2mm') >= 0, 'BUG: peça 1 (matId Colorido 2mm) deveria mostrar o material real da peça — obtido: ' + out);
+  assertTrue(out.indexOf('Acrílico Colorido 4mm') >= 0, 'BUG: peça 2 (matId Colorido 4mm) deveria mostrar o material real da peça — obtido: ' + out);
+  assertTrue(out.indexOf('Cristal') < 0, 'REGRESSÃO Bloco 3: material do ITEM (Cristal) vazou pra peça que tem matId próprio (Colorido) — obtido: ' + out);
 });
 
 console.log('\n' + '─'.repeat(60));

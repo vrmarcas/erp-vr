@@ -10582,19 +10582,43 @@ function orcItemVRRestaurarDados(itemSalvo) {
 // espessura. Item sem peças detalhadas (OS antiga anterior a este
 // hotfix, ou item Vitre/catálogo sem planificação) cai no fallback de
 // sempre: item.mat como estava.
+// RODADA FUNCIONAL 2026-09-17, Bloco 3 — achado real (ORC-000155, causa
+// raiz confirmada campo a campo contra o snapshot de produção): uma peça
+// MANUAL (origem:'MANUAL', ex. "Peça 1"/"Peça 2" adicionadas à mão na
+// planificação) carrega seu PRÓPRIO material em `p.matId` — sempre
+// existiu no snapshot (usado para calcular precoM2/custo na hora de
+// adicionar a peça), mas esta função nunca lia esse campo: montava o
+// resumo com `baseLabel` derivado só de `item.mat` (o material do
+// dropdown do ITEM — no caso real, "Acrílico Cristal 3mm", o material das
+// peças AUTOMÁTICAS do corpo da caixa) para TODAS as peças, inclusive as
+// manuais com material diferente (no caso real, "Acrílico Colorido
+// 2mm"/"4mm"). Resultado: a peça saía rotulada com o material do item, não
+// o da peça — daí "Colorido" virar "Cristal" na mensagem/PDF. Corrigido
+// resolvendo o nome real via p.matId no cadastro de materiais
+// (_cfgMateriaisReais) quando presente; peça SEM matId (as automáticas da
+// receita, que sempre usam o material do item) preserva o comportamento
+// de sempre — nenhuma peça "ganha" um material que não escolheu.
 function osItemMateriaisResumo(item) {
   if (!item) return '—';
   var pecas = (item.pieces && item.pieces.length) ? item.pieces
     : ((item.recipeSnapshot && item.recipeSnapshot.pecas) || []);
   if (!pecas.length) return item.mat || '—';
   var baseLabel = String(item.mat || '').replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim() || (item.mat || 'Material');
+  var _matsCatalogo = (typeof _cfgMateriaisReais === 'function') ? _cfgMateriaisReais() : null;
   var vistos = {}, partes = [];
   pecas.forEach(function(p) {
     var espVal = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : null);
-    var chave = espVal != null ? String(espVal) : ' semesp';
+    var labelPeca = baseLabel;
+    if (p.matId && _matsCatalogo && _matsCatalogo.length) {
+      var matPeca = _matsCatalogo.find(function(m){ return m.id === p.matId; });
+      if (matPeca && matPeca.nome) {
+        labelPeca = String(matPeca.nome).replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim() || matPeca.nome;
+      }
+    }
+    var chave = labelPeca + '|' + (espVal != null ? String(espVal) : ' semesp');
     if (vistos[chave]) return;
     vistos[chave] = true;
-    partes.push(baseLabel + (espVal != null ? ' ' + espVal + 'mm' : ''));
+    partes.push(labelPeca + (espVal != null ? ' ' + espVal + 'mm' : ''));
   });
   return partes.length ? partes.join(' + ') : (item.mat || '—');
 }
@@ -27630,18 +27654,26 @@ function orcItemDescricaoComercial(d) {
 // quando há MAIS DE UMA peça nomeada — item de peça única já mostra
 // material/medidas no {descricao}/{material}/{medidas} normais, listar de
 // novo seria redundante. Cada linha usa o template editável
-// orcamentoPecaAdicionalLinha (Configurações → Mensagens Automáticas);
-// material_peca reaproveita o mesmo material do item (matLbl) + espessura
-// própria da peça — este código não inventa um material por peça que o
-// cadastro não tem.
+// orcamentoPecaAdicionalLinha (Configurações → Mensagens Automáticas).
+// Bloco 3 (achado ORC-000155, mesma causa raiz de osItemMateriaisResumo)
+// — peça MANUAL pode ter material PRÓPRIO (p.matId), diferente do
+// material do item (matLbl); resolve o nome real via p.matId no cadastro
+// quando presente, senão cai no material do item como sempre (peça
+// automática da receita nunca teve material próprio).
 function orcPecasAdicionaisTexto(pecasPlan, matLbl) {
   if (!pecasPlan || pecasPlan.length <= 1) return '';
+  var _matsCatalogo = (typeof _cfgMateriaisReais === 'function') ? _cfgMateriaisReais() : null;
   var linhas = pecasPlan.map(function(p) {
     var larg = parseFloat(p.larg) || 0, alt = parseFloat(p.alt) || 0;
     var esp = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : '');
+    var matNomePeca = matLbl || '';
+    if (p.matId && _matsCatalogo && _matsCatalogo.length) {
+      var matPeca = _matsCatalogo.find(function(m){ return m.id === p.matId; });
+      if (matPeca && matPeca.nome) matNomePeca = String(matPeca.nome).replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim() || matPeca.nome;
+    }
     return (typeof msgResolverTemplate === 'function') ? msgResolverTemplate('orcamentoPecaAdicionalLinha', {
       nome_peca: p.nome || 'Peça',
-      material_peca: (matLbl || '') + (esp ? (' ' + esp + 'mm') : ''),
+      material_peca: matNomePeca + (esp ? (' ' + esp + 'mm') : ''),
       espessura_peca: esp ? String(esp) : '',
       largura_peca: larg ? String(larg) : '',
       altura_peca: alt ? String(alt) : '',
@@ -27778,11 +27810,19 @@ function orcColetarItensDistribuidos(baseEfetiva){
     // própria, escapada com cfgEsc (nome da peça é texto livre do usuário).
     var pecasAdicionaisHtml = '';
     if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function') {
+      var _matsCatalogoPdf = (typeof _cfgMateriaisReais === 'function') ? _cfgMateriaisReais() : null;
       pecasAdicionaisHtml = '<div style="margin-top:4px;font-size:11px;color:var(--muted,#6b7280)"><strong>Peças adicionais:</strong><ul style="margin:2px 0 0;padding-left:16px">'
         + item.pecasPlan.map(function(p){
             var larg = parseFloat(p.larg)||0, alt = parseFloat(p.alt)||0;
             var esp = (p.esp != null && p.esp !== '') ? p.esp : (p.espessuraMm != null ? p.espessuraMm : '');
-            var matP = (item.matLbl||'') + (esp ? (' '+esp+'mm') : '');
+            // Bloco 3 (achado ORC-000155) — peça manual pode ter material
+            // próprio (p.matId), diferente do material do item (item.matLbl).
+            var matNomePecaPdf = item.matLbl || '';
+            if (p.matId && _matsCatalogoPdf && _matsCatalogoPdf.length) {
+              var matPecaPdf = _matsCatalogoPdf.find(function(m){ return m.id === p.matId; });
+              if (matPecaPdf && matPecaPdf.nome) matNomePecaPdf = String(matPecaPdf.nome).replace(/\s*\d+(?:[.,]\d+)?\s*mm\s*$/i, '').trim() || matPecaPdf.nome;
+            }
+            var matP = matNomePecaPdf + (esp ? (' '+esp+'mm') : '');
             return '<li>'+cfgEsc(p.nome||'Peça')+' — '+larg+'×'+alt+' cm — '+cfgEsc(matP)+'</li>';
           }).join('')
         + '</ul></div>';
