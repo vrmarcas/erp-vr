@@ -113,12 +113,26 @@ describe("DEADLINE — estimateProductionDeadline (com capacidade configurada, B
     expect(rMuita.productionDays!).toBeGreaterThan(rPouca.productionDays!);
   });
 
+  // Estabilização (Fase D.2.1, 2026-09-19) — achado real: este teste comparava
+  // o resultado de estimateProductionDeadline (que usa `new Date()` = "hoje"
+  // real, deadline.ts:132) contra o calendário real, então ficava dependente
+  // do dia em que a suíte roda (falhava quando "hoje" caía num fim de semana
+  // real). Fixamos o relógio do teste com jest fake timers — NENHUMA linha de
+  // deadline.ts foi tocada, a regra de negócio (pular sáb/dom) continua
+  // exatamente a mesma, só o "hoje" observado pelo teste passa a ser
+  // determinístico.
   test("estimatedDate pula fim de semana (dias úteis reais, nunca conta sáb/dom)", async () => {
-    setConfig({ leadTimeBaseDias: 10, capacidadeOsPorDia: 100, bufferDias: 0 });
-    setFila([]);
-    const r = await estimateProductionDeadline({ produto: "Caixa" });
-    const data = new Date(r.estimatedDate + "T12:00:00Z");
-    expect([0, 6]).not.toContain(data.getUTCDay()); // nunca cai em domingo(0) ou sábado(6)
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+    jest.setSystemTime(new Date("2026-08-24T12:00:00Z")); // segunda-feira fixa — nunca o dia real do sistema
+    try {
+      setConfig({ leadTimeBaseDias: 10, capacidadeOsPorDia: 100, bufferDias: 0 });
+      setFila([]);
+      const r = await estimateProductionDeadline({ produto: "Caixa" });
+      const data = new Date(r.estimatedDate + "T12:00:00Z");
+      expect([0, 6]).not.toContain(data.getUTCDay()); // nunca cai em domingo(0) ou sábado(6)
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
