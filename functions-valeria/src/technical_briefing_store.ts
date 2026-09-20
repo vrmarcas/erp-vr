@@ -111,6 +111,16 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
     ...(patch.clientConfirmedQuote !== undefined ? { clientConfirmedQuote: patch.clientConfirmedQuote } : {}),
     ...(patch.wantsDeadlineCheck !== undefined ? { wantsDeadlineCheck: patch.wantsDeadlineCheck } : {}),
     ...(patch.dataNecessidadeCliente !== undefined ? { dataNecessidadeCliente: patch.dataNecessidadeCliente } : {}),
+    // Fase D.2.1 (2026-09-19) — achado real: baseCatalogGroupId/baseProductId/
+    // baseProductSku (ValerIA 2.0, rastreabilidade de personalização a
+    // partir de produto de catálogo) foram adicionados ao tipo
+    // TechnicalBriefing na Fase B/C, mas esta função nunca foi atualizada
+    // para mesclá-los — catalog_tools.ts vinha chamando mergeTechnicalBriefing
+    // com esses campos no patch e eles eram silenciosamente descartados.
+    // Pego por trofeu_v1_v2_isolation.test.ts.
+    ...(patch.baseCatalogGroupId !== undefined ? { baseCatalogGroupId: patch.baseCatalogGroupId } : {}),
+    ...(patch.baseProductId !== undefined ? { baseProductId: patch.baseProductId } : {}),
+    ...(patch.baseProductSku !== undefined ? { baseProductSku: patch.baseProductSku } : {}),
     dimensions: {
       larguraMm: patchEfetivo.dimensions?.larguraMm !== undefined ? patchEfetivo.dimensions.larguraMm : atual.dimensions.larguraMm,
       alturaMm: patchEfetivo.dimensions?.alturaMm !== undefined ? patchEfetivo.dimensions.alturaMm : atual.dimensions.alturaMm,

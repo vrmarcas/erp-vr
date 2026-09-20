@@ -60,6 +60,21 @@ export async function permitidoParaPipeline(channelPhone: string | null): Promis
 }
 
 /**
+ * ValerIA 2.0 (Fase B, 2026-09-19) — checagem ESTRITA, semântica oposta a
+ * `permitidoParaPipeline`: allowlist vazia/ausente = NINGUÉM (não "sem
+ * restrição"). Usada só pelo gate `feature_flags.ts::valeriaV2EnabledForPhone`,
+ * onde o padrão seguro é V2 desligada até um número ser explicitamente
+ * cadastrado — reusa a MESMA collection/doc (`erp_vr/valeria_test_phone_numbers`),
+ * não cria uma segunda allowlist.
+ */
+export async function estaExplicitamenteNaAllowlist(channelPhone: string | null): Promise<boolean> {
+  if (!channelPhone) return false;
+  const numeros = await loadAllowlist();
+  if (numeros.length === 0) return false;
+  return numeros.some((n) => telefonesEquivalentes(n, channelPhone));
+}
+
+/**
  * Sprint P1.2c (achado real de E2E) — número na allowlist deve propagar
  * isTest=true por toda a cadeia comercial derivada (atendimento → lead →
  * simulação → orçamento), nunca só ganhar acesso ao pipeline. Ao

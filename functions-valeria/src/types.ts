@@ -250,6 +250,14 @@ export interface ErpConfig {
     /** Margem de segurança extra somada ao prazo calculado. */
     bufferDias?: number;
   };
+  /**
+   * ValerIA 2.0 (Fase B, 2026-09-19) — feature flag mestra. false/ausente
+   * = fluxo legado (comportamento de hoje), sem nenhuma mudança. true
+   * SOZINHO não libera nada — precisa também do telefone estar cadastrado
+   * em `erp_vr/valeria_test_phone_numbers` (ver feature_flags.ts). Nunca
+   * ativar direto para todos os clientes.
+   */
+  valeriaV2Enabled?: boolean;
 }
 
 export interface MaterialConfig {

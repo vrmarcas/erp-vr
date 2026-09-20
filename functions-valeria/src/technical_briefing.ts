@@ -77,6 +77,28 @@ export interface TechnicalBriefing {
   clientConfirmedQuote?: boolean | null;
   wantsDeadlineCheck?: boolean | null;
   dataNecessidadeCliente?: string | null;
+  /**
+   * ValerIA 2.0 (Fase B/C, 2026-09-19, revisado) — rastreabilidade opcional:
+   * quando a personalização nasceu de uma tentativa de encaixe no catálogo
+   * (CUSTOM_REQUESTED/CUSTOM_REQUIRED em product_resolution.ts), guarda a
+   * referência de origem. Campos SEPARADOS de propósito (nunca um grupo
+   * salvo dentro de um campo "productId", nunca um SKU confundido com id):
+   *   baseCatalogGroupId = família/modelo comercial de origem, sempre que
+   *                        existir (ex.: "caixa_tampa_de_correr").
+   *   baseProductId      = ID REAL do documento vitre_produtos, só quando
+   *                        um tamanho específico já havia sido resolvido
+   *                        antes do pedido de personalização.
+   *   baseProductSku     = SKU correspondente a baseProductId (hoje
+   *                        coincidem em valor — vitre_produtos usa o
+   *                        próprio SKU como id do documento — mas são
+   *                        conceitos diferentes; ver product_resolution.ts).
+   * Só contexto para revisão humana e defaults de source=CATALOG_GROUP —
+   * NUNCA lidos por computeTechnicalReadiness/resolveRecipe/quote_core
+   * (geometria e preço continuam dependendo só dos campos técnicos abaixo).
+   */
+  baseCatalogGroupId?: string | null;
+  baseProductId?: string | null;
+  baseProductSku?: string | null;
   confirmedFields: string[];
   missingRequiredFields: string[];
 }
@@ -96,6 +118,9 @@ export function emptyTechnicalBriefing(): TechnicalBriefing {
     clientConfirmedQuote: null,
     wantsDeadlineCheck: null,
     dataNecessidadeCliente: null,
+    baseCatalogGroupId: null,
+    baseProductId: null,
+    baseProductSku: null,
     confirmedFields: [],
     missingRequiredFields: [...CAMPO_ORDEM],
   };
