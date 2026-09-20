@@ -54,6 +54,8 @@ import { fsRead } from "./kv_store";
 import { encontrarPorTelefone } from "./telefone";
 import type { Cliente } from "./types";
 import { valeriaV2EnabledForPhone } from "./feature_flags";
+import { parseUpdateQualificationBody } from "./qualification_body_parser";
+import { FieldParseError } from "./http_field_parsers";
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -242,28 +244,45 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
   try {
     const body = req.body as Record<string, unknown>;
 
+    // Fase E.2 — borda HTTP: aceita tipos nativos OU as mesmas strings que
+    // o ChatVolt manda (schema JSON dele só comprova "type":"string" —
+    // ver http_field_parsers.ts). Depois deste ponto, todo o resto do
+    // pipeline (resolveProductMatch, mergeSignalsIntoDraft,
+    // qualification_engine...) recebe exatamente os mesmos tipos nativos
+    // de sempre — nenhuma lógica de negócio muda.
+    let parsedBody;
+    try {
+      parsedBody = parseUpdateQualificationBody(body);
+    } catch (e) {
+      if (e instanceof FieldParseError) {
+        res.status(400).json(err("VALIDATION_ERROR", e.message, { communicableToCustomer: false }));
+        return;
+      }
+      throw e;
+    }
+
     // Fase E.1.2 — derivado UMA VEZ por chamada, direto do atendimento real
     // (nunca inferido/vindo do LLM); só usado quando o draft ainda não
     // existe — um draft já persistido carrega isTest do turno em que foi
     // criado (mergeSignalsIntoDraft preserva o campo em todo turno seguinte).
     const draftAtual = (await loadCatalogDraft(ctx.conversationId)) || emptyCatalogDraft(ctx.conversationId, null, await deriveIsTest(ctx.conversationId));
 
-    const categoria = (body["categoria"] as string) || draftAtual.category || null;
+    const categoria = parsedBody.categoria || draftAtual.category || null;
     const configs = categoria ? [await getActiveCatalogConfig(categoria)].filter(Boolean) : await getAllActiveCatalogConfigs();
     const groups: CatalogGroup[] = configs.flatMap((c) => catalogGroupsFromConfig(c!));
 
     const signals: ResolutionSignals = {
       categoria,
-      explicitSkuOrProductId: (body["explicitSkuOrProductId"] as string) || null,
-      groupNameOrAlias: (body["groupNameOrAlias"] as string) || null,
-      catalogSizeLabel: (body["catalogSizeLabel"] as string) || null,
-      exactDimensionsCm: (body["exactDimensionsCm"] as ResolutionSignals["exactDimensionsCm"]) || null,
-      vagueSizeHintCm: typeof body["vagueSizeHintCm"] === "number" ? (body["vagueSizeHintCm"] as number) : null,
-      customerExplicitlyRequestsCustom: body["customerExplicitlyRequestsCustom"] === true,
+      explicitSkuOrProductId: parsedBody.explicitSkuOrProductId,
+      groupNameOrAlias: parsedBody.groupNameOrAlias,
+      catalogSizeLabel: parsedBody.catalogSizeLabel,
+      exactDimensionsCm: parsedBody.exactDimensionsCm,
+      vagueSizeHintCm: parsedBody.vagueSizeHintCm,
+      customerExplicitlyRequestsCustom: parsedBody.customerExplicitlyRequestsCustom,
       contextCatalogGroupId: draftAtual.baseCatalogGroupId || draftAtual.catalogGroupId || null,
       contextMatchedProductId: draftAtual.matchedProductId || draftAtual.baseProductId || null,
       contextMatchedProductSku: draftAtual.matchedProductSku || draftAtual.baseProductSku || null,
-      clientConfirmedSuggestedOption: body["clientConfirmedSuggestedOption"] === true,
+      clientConfirmedSuggestedOption: parsedBody.clientConfirmedSuggestedOption,
     };
 
     let resolution: ResolutionResult = resolveProductMatch(signals, groups);
@@ -297,11 +316,11 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
 
     const fieldUpdate: FieldUpdate = {
       category: categoria,
-      quantity: typeof body["quantity"] === "number" ? (body["quantity"] as number) : null,
-      customDimensions: (body["customDimensions"] as FieldUpdate["customDimensions"]) || null,
-      personalization: Array.isArray(body["personalization"]) ? (body["personalization"] as string[]) : undefined,
-      desiredDeadline: (body["desiredDeadline"] as string) || null,
-      deliveryData: (body["deliveryData"] as FieldUpdate["deliveryData"]) || null,
+      quantity: parsedBody.quantity,
+      customDimensions: parsedBody.customDimensions,
+      personalization: parsedBody.personalization,
+      desiredDeadline: parsedBody.desiredDeadline,
+      deliveryData: parsedBody.deliveryData,
     };
 
     const draftAtualizado = mergeSignalsIntoDraft(draftAtual, resolution, fieldUpdate, "CUSTOMER");
