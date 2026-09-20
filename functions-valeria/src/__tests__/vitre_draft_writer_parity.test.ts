@@ -64,7 +64,7 @@ describe("Paridade vitre_orcamentos — vitre_draft_writer.ts vs. valeriaVitreCr
     });
     // Campos extras que EU tenho e o oficial não — todos precisam estar
     // documentados no cabeçalho de vitre_draft_writer.ts como deliberados.
-    const EXTRAS_DELIBERADOS_MEUS = new Set<string>([]); // meu payload usa exatamente os mesmos nomes de campo do oficial.
+    const EXTRAS_DELIBERADOS_MEUS = new Set<string>(["isTest"]); // Fase E.1.2 — derivado de atendimentos/{id}.isTeste, ver cabeçalho.
     const inesperados = Object.keys(meuPayload).filter((campo) => !oficiais.has(campo) && !EXTRAS_DELIBERADOS_MEUS.has(campo));
     expect(inesperados).toEqual([]);
   });

@@ -67,6 +67,15 @@ export interface CatalogDraftFields {
 export interface CatalogDraft {
   conversationId: string;
   atendimentoId: string | null;
+  /**
+   * Fase E.1.2 (2026-09-20) — derivado UMA VEZ, na criação do draft, de
+   * `atendimentos/{conversationId}.isTeste` (mesma disciplina já usada em
+   * action_executor.ts para orçamentos: nunca inferido de nome/padrão de
+   * texto, nunca informado pelo LLM). `mergeSignalsIntoDraft` espalha
+   * `...draft` a cada turno, então este valor sobrevive automaticamente a
+   * toda a conversa sem precisar ser re-derivado.
+   */
+  isTest: boolean;
   category: string | null;
   catalogGroupId: string | null;
 
@@ -98,11 +107,12 @@ export interface CatalogDraft {
   updatedAt: number;
 }
 
-export function emptyCatalogDraft(conversationId: string, atendimentoId: string | null = null): CatalogDraft {
+export function emptyCatalogDraft(conversationId: string, atendimentoId: string | null = null, isTest: boolean = false): CatalogDraft {
   const now = Date.now();
   return {
     conversationId,
     atendimentoId,
+    isTest,
     category: null,
     catalogGroupId: null,
     resolutionType: null,

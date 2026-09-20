@@ -25,6 +25,8 @@ export interface CustomBriefingPatchInput {
   /** espessura padrão do grupo (mm), só aplicada quando o briefing atual ainda não tem nenhuma. */
   espessuraPadraoMmDoGrupo: number | null;
   thicknessMmAtual: number | null | undefined;
+  /** Fase E.1.2 — derivado por catalog_tools.ts de atendimentos/{id}.isTeste, nunca inferido aqui. */
+  isTest?: boolean | null;
 }
 
 export function buildCustomTechnicalBriefingPatch(input: CustomBriefingPatchInput): Partial<TechnicalBriefing> {
@@ -32,6 +34,7 @@ export function buildCustomTechnicalBriefingPatch(input: CustomBriefingPatchInpu
     baseCatalogGroupId: input.baseCatalogGroupId,
     baseProductId: input.baseProductId,
     baseProductSku: input.baseProductSku,
+    ...(input.isTest !== undefined ? { isTest: input.isTest } : {}),
   };
 
   if (input.receitaProductId) patch.productId = input.receitaProductId;

@@ -99,6 +99,17 @@ export interface TechnicalBriefing {
   baseCatalogGroupId?: string | null;
   baseProductId?: string | null;
   baseProductSku?: string | null;
+  /**
+   * Fase E.1.2 (2026-09-20) — defesa em profundidade: mesma marca de teste
+   * de `atendimentos/{conversationId}.isTeste`, propagada por
+   * catalog_tools.ts na primeira vez que o briefing é semeado a partir de
+   * CUSTOM_REQUESTED/CUSTOM_REQUIRED (nunca inferida aqui, nunca vinda do
+   * LLM). Opcional/nullable porque o TechnicalBriefing legado (V1) nunca
+   * preenche este campo — `undefined`/`null` não significa "não é teste",
+   * só "origem não propagou" (consumidores que precisarem saber com
+   * certeza continuam podendo consultar atendimentos/{conversationId}.isTeste).
+   */
+  isTest?: boolean | null;
   confirmedFields: string[];
   missingRequiredFields: string[];
 }
@@ -121,6 +132,7 @@ export function emptyTechnicalBriefing(): TechnicalBriefing {
     baseCatalogGroupId: null,
     baseProductId: null,
     baseProductSku: null,
+    isTest: null,
     confirmedFields: [],
     missingRequiredFields: [...CAMPO_ORDEM],
   };

@@ -46,7 +46,7 @@ import {
 import { resolveProductMatch, ResolutionSignals, CatalogGroup, ResolutionResult } from "./product_resolution";
 import { validateMatchedProduct, computeNextAction, buildQualificationOutput, QualificationPersistence } from "./qualification_engine";
 import { evaluateValeriaV2ProductEligibility, V2EligibilityProductInput } from "./valeria_v2_eligibility";
-import { createVitreDraftIfNotExists } from "./vitre_draft_writer";
+import { createVitreDraftIfNotExists, deriveIsTest } from "./vitre_draft_writer";
 import { requestQuoteReview } from "./human_handoff";
 import { loadTechnicalBriefing, saveTechnicalBriefing, mergeTechnicalBriefing } from "./technical_briefing_store";
 import { buildCustomTechnicalBriefingPatch } from "./custom_briefing_patch";
@@ -242,7 +242,11 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
   try {
     const body = req.body as Record<string, unknown>;
 
-    const draftAtual = (await loadCatalogDraft(ctx.conversationId)) || emptyCatalogDraft(ctx.conversationId);
+    // Fase E.1.2 — derivado UMA VEZ por chamada, direto do atendimento real
+    // (nunca inferido/vindo do LLM); só usado quando o draft ainda não
+    // existe — um draft já persistido carrega isTest do turno em que foi
+    // criado (mergeSignalsIntoDraft preserva o campo em todo turno seguinte).
+    const draftAtual = (await loadCatalogDraft(ctx.conversationId)) || emptyCatalogDraft(ctx.conversationId, null, await deriveIsTest(ctx.conversationId));
 
     const categoria = (body["categoria"] as string) || draftAtual.category || null;
     const configs = categoria ? [await getActiveCatalogConfig(categoria)].filter(Boolean) : await getAllActiveCatalogConfigs();
@@ -397,6 +401,7 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
         customDimensions: draftAtualizado.fields.customDimensions,
         espessuraPadraoMmDoGrupo: groupCustom?.espessuraPadraoMm ?? null,
         thicknessMmAtual: atual.thicknessMm,
+        isTest: draftAtualizado.isTest,
       });
       const atualizado = mergeTechnicalBriefing(atual, patch);
       await saveTechnicalBriefing(ctx.conversationId, atualizado);

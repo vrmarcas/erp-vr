@@ -121,6 +121,10 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
     ...(patch.baseCatalogGroupId !== undefined ? { baseCatalogGroupId: patch.baseCatalogGroupId } : {}),
     ...(patch.baseProductId !== undefined ? { baseProductId: patch.baseProductId } : {}),
     ...(patch.baseProductSku !== undefined ? { baseProductSku: patch.baseProductSku } : {}),
+    // Fase E.1.2 (2026-09-20) — mesma disciplina: isTest só é sobrescrito
+    // quando o patch traz o campo explicitamente (nunca apaga uma marca de
+    // teste já gravada por causa de um patch posterior que não a menciona).
+    ...(patch.isTest !== undefined ? { isTest: patch.isTest } : {}),
     dimensions: {
       larguraMm: patchEfetivo.dimensions?.larguraMm !== undefined ? patchEfetivo.dimensions.larguraMm : atual.dimensions.larguraMm,
       alturaMm: patchEfetivo.dimensions?.alturaMm !== undefined ? patchEfetivo.dimensions.alturaMm : atual.dimensions.alturaMm,

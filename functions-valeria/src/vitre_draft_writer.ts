@@ -60,6 +60,24 @@ export function draftDocId(conversationId: string): string {
 }
 
 /**
+ * Fase E.1.2 (2026-09-20) — mesma disciplina já usada em
+ * action_executor.ts para orçamentos V1: isTest NUNCA é inferido de
+ * nome/padrão de texto, nunca vem do LLM — só da flag explícita
+ * `atendimentos/{conversationId}.isTeste`. Leitura best-effort (uma
+ * conversa sem atendimento correspondente nunca trava a criação do
+ * rascunho, só assume isTest=false).
+ */
+export async function deriveIsTest(conversationId: string): Promise<boolean> {
+  try {
+    const snap = await admin.firestore().collection("atendimentos").doc(conversationId).get();
+    return snap.exists && snap.data()?.isTeste === true;
+  } catch (e) {
+    console.error("[vitre_draft_writer] falha ao derivar isTest do atendimento:", (e as Error).message);
+    return false;
+  }
+}
+
+/**
  * PARIDADE DE CONTRATO (Fase D, seção 0, 2026-09-19) — todo campo aqui tem
  * um par direto no doc que `valeriaVitreCriarRascunho`
  * (`functions/src/valeria_vitre.ts:277-289`) grava, MESMO conjunto de
@@ -75,8 +93,13 @@ export function draftDocId(conversationId: string): string {
  *     de um requestId externo — decisão de idempotência (ver cabeçalho).
  *   - `adicionais` sempre `[]` — V2 ainda não coleta personalização
  *     precificada nesta fase (Fase D trata só o catálogo-base).
+ *   - `isTest` (Fase E.1.2, 2026-09-20) — campo NOVO que o writer oficial
+ *     não tem; derivado de atendimentos/{id}.isTeste (mesma disciplina de
+ *     action_executor.ts), nunca inferido/vindo do LLM. Achado real da
+ *     bateria HTTP E.1: o rascunho V2 não carregava marca de teste alguma
+ *     — corrigido aqui, não no writer oficial (fora de escopo desta Tool).
  */
-export function buildVitreDraftPayload(input: CreateVitreDraftInput) {
+export function buildVitreDraftPayload(input: CreateVitreDraftInput, isTest: boolean = false) {
   const docId = draftDocId(input.conversationId);
   const total = +(input.produto.precoVenda * input.quantity).toFixed(2);
   return {
@@ -85,6 +108,7 @@ export function buildVitreDraftPayload(input: CreateVitreDraftInput) {
     tipo: "catalogo_vitre",
     marca: "vitre",
     status: "rascunho",
+    isTest,
     clienteNome: input.clienteNome,
     itens: [
       {
@@ -118,7 +142,8 @@ export async function createVitreDraftIfNotExists(input: CreateVitreDraftInput):
   const db = admin.firestore();
   const docId = draftDocId(input.conversationId);
   const docRef = db.collection(COL_ORC).doc(docId);
-  const payload = buildVitreDraftPayload(input);
+  const isTest = await deriveIsTest(input.conversationId);
+  const payload = buildVitreDraftPayload(input, isTest);
 
   try {
     await docRef.create(payload);

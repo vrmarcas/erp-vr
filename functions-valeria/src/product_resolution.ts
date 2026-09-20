@@ -352,8 +352,30 @@ export function resolveProductMatch(signals: ResolutionSignals, groups: CatalogG
         reasonCode: "EXACT_DIMENSIONS",
       });
     }
-    // 5. Dimensão exata que não bate com nenhum tamanho do grupo → personalização, preserva o GRUPO
-    // como base (nunca o grupo dentro de baseProductId — nenhum SKU real foi selecionado aqui).
+    // 5. Dimensão exata que não bate com nenhum tamanho do grupo → personalização.
+    // Achado real (Fase E.1.2, 2026-09-20): quando o cliente JÁ tinha um
+    // produto concreto resolvido em turno anterior (signals.contextMatchedProductId,
+    // que catalog_tools.ts sempre popula a partir do draft persistido —
+    // nunca depende do LLM reenviar o id) e agora pede uma medida que não
+    // bate com aquele SKU, isso é "alterar o produto que o cliente já
+    // escolheu" — CUSTOM_REQUESTED, preservando baseProductId/baseProductSku
+    // do contexto (mesma semântica já usada na regra 4b, só que sem exigir
+    // customerExplicitlyRequestsCustom=true). Nenhum SKU concreto ainda
+    // resolvido → continua CUSTOM_REQUIRED, baseProductId null (só o
+    // grupo/família como base) — nunca inventa um produto que o cliente
+    // nunca chegou a selecionar.
+    if (signals.contextMatchedProductId) {
+      return base({
+        resolutionType: "CUSTOM_REQUESTED",
+        catalogGroupId: effectiveGroup.catalogGroupId,
+        baseCatalogGroupId: effectiveGroup.catalogGroupId,
+        baseProductId: signals.contextMatchedProductId,
+        baseProductSku: signals.contextMatchedProductSku || null,
+        customizationRequired: true,
+        customizationReason: `Cliente já tinha um produto de catálogo selecionado (${signals.contextMatchedProductSku || signals.contextMatchedProductId}) e pediu a medida ${signals.exactDimensionsCm.largura}x${signals.exactDimensionsCm.altura}, que não corresponde a nenhum tamanho — alteração estrutural sobre produto já concreto.`,
+        reasonCode: "EXACT_DIMENSIONS_MODIFIES_SELECTED_PRODUCT",
+      });
+    }
     return base({
       resolutionType: "CUSTOM_REQUIRED",
       catalogGroupId: effectiveGroup.catalogGroupId,
