@@ -14,13 +14,26 @@
  * cadastradas como Tool no agente Chatvolt (isso é um checkpoint separado,
  * pendente de revisão explícita do prompt/Tools antes de qualquer troca
  * na configuração real do agente).
+ *
+ * ACHADO — Fase E.1, checkpoint pré-merge (2026-09-20): auditoria real do
+ * código confirmou que `valeriaGetCatalog` devolvia `urlCatalogo` direto
+ * de `CatalogConfig`, sem nenhum gate de vencimento — `catalog.ts`'s
+ * `getActiveCatalogConfig` só filtra por `ativo`, nunca por `validUntil`.
+ * Hoje isso está mascarado porque os 6 catálogos têm `urlCatalogo:null`,
+ * mas não havia proteção de RUNTIME equivalente a `catalog_validity.ts`
+ * (isCatalogSendable), que já existe e já era testado — só nunca tinha
+ * sido conectado a este módulo. Corrigido reusando esse módulo (nenhuma
+ * regra nova): `buildCatalogAvailabilityPayload` decide `sendable` e só
+ * devolve `urlCatalogo` quando `sendable===true` — o LLM nunca recebe uma
+ * URL de catálogo vencido, e nunca precisa comparar datas.
  */
 import * as admin from "firebase-admin";
 import * as functions from "firebase-functions";
 
 import { pipeline } from "./pipeline";
 import { ok, err } from "./response";
-import { getActiveCatalogConfig, getAllActiveCatalogConfigs, catalogGroupsFromConfig } from "./catalog";
+import { getActiveCatalogConfig, getAllActiveCatalogConfigs, catalogGroupsFromConfig, CatalogConfig } from "./catalog";
+import { isCatalogSendable } from "./catalog_validity";
 import {
   loadCatalogDraft,
   saveCatalogDraft,
@@ -83,6 +96,30 @@ function findGroupOf(groups: CatalogGroup[], catalogGroupId: string | null): Cat
   return groups.find((g) => g.catalogGroupId === catalogGroupId) || null;
 }
 
+/**
+ * Decide o que `valeriaGetCatalog` pode expor sobre disponibilidade de
+ * envio — função PURA (relógio sempre injetado, nunca `new Date()` aqui
+ * dentro), reusa `isCatalogSendable` (catalog_validity.ts) sem reimplementar
+ * a regra. `catalogKnown` = o documento existe e está `ativo` (o backend já
+ * pode reconhecer/qualificar o modelo); `sendable` = pode ser apresentado
+ * como catálogo vigente ao cliente. Decisão mais segura (seção 6, Fase
+ * E.1 checkpoint): quando `sendable===false`, `urlCatalogo` NUNCA é
+ * devolvido, mesmo que esteja preenchido no documento — o LLM nunca recebe
+ * uma URL de catálogo vencido para decidir sozinho se pode mandar.
+ */
+export function buildCatalogAvailabilityPayload(
+  config: Pick<CatalogConfig, "ativo" | "urlCatalogo" | "validUntil">,
+  now: Date
+): { catalogKnown: boolean; sendable: boolean; urlCatalogo: string | null; validUntil: string | null } {
+  const sendable = isCatalogSendable({ ativo: config.ativo, urlCatalogo: config.urlCatalogo, validUntil: config.validUntil }, now);
+  return {
+    catalogKnown: true,
+    sendable,
+    urlCatalogo: sendable ? config.urlCatalogo : null,
+    validUntil: config.validUntil,
+  };
+}
+
 async function resolveClienteNome(channelPhone: string | null | undefined): Promise<string> {
   if (!channelPhone) return "Cliente WhatsApp";
   try {
@@ -125,12 +162,13 @@ export const valeriaGetCatalog = RUN_OPTS.https.onRequest(async (req, res) => {
     if (!config) {
       res.json(
         ok(
-          { categoria, disponivel: false, urlCatalogo: null, grupos: [] },
+          { categoria, disponivel: false, catalogKnown: false, sendable: false, urlCatalogo: null, validUntil: null, grupos: [] },
           { communicableToCustomer: false, verified: true }
         )
       );
       return;
     }
+    const disponibilidade = buildCatalogAvailabilityPayload(config, new Date());
 
     const grupos = [];
     for (const g of config.grupos) {
@@ -170,7 +208,7 @@ export const valeriaGetCatalog = RUN_OPTS.https.onRequest(async (req, res) => {
 
     res.json(
       ok(
-        { categoria, disponivel: grupos.length > 0, urlCatalogo: config.urlCatalogo, grupos },
+        { categoria, disponivel: grupos.length > 0, ...disponibilidade, grupos },
         { communicableToCustomer: false, verified: true }
       )
     );
