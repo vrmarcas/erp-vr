@@ -529,6 +529,20 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
   const dataRef = (body["data"] ?? body["date"] ?? body["ts"]) as string | undefined
     ?? new Date().toISOString();
 
+  // Fase E.2.13 — guarda anti-loop do piloto ativo: se este messageId é uma
+  // mensagem que O PRÓPRIO backend enviou (chatvolt_send_adapter.ts), nunca
+  // tratar como inbound novo para o piloto. Necessário porque o endpoint de
+  // envio documenta que a mensagem enviada aparece SEMPRE como "from":"human"
+  // no histórico — não dá para confiar só em `from`. Falha aqui nunca
+  // bloqueia o evento (trata como "não é eco" e segue normalmente).
+  let isBackendEcho = false;
+  try {
+    const { wasSentByBackend } = await import("./active_pilot_send_ledger");
+    isBackendEcho = await wasSentByBackend(explicitMsgId);
+  } catch (e) {
+    console.error("[webhook] falha ao checar guarda anti-loop (tratando como não-eco):", (e as Error).message);
+  }
+
   const idempKey = explicitMsgId
     ?? buildWebhookIdempKey(eventType, ctx.conversationId, ctx.agentId, dataRef);
 
@@ -646,6 +660,36 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
                 shadowDebugError = { errorName: (e as Error).name ?? "Error", errorCode: (e as Error).message?.slice(0, 120) ?? "unknown" };
               }
               console.error("[webhook] shadow observation falhou (não bloqueia):", (e as Error).message);
+            }
+
+            // Fase E.2.13 — piloto ativo (ÚNICO caminho autorizado a enviar
+            // mensagem de verdade). Roda DEPOIS do shadow, nunca no lugar
+            // dele; nunca bloqueia o resto do webhook (mesma disciplina:
+            // qualquer falha aqui é só logada). `isBackendEcho` impede
+            // reprocessar como inbound novo uma mensagem que o próprio
+            // backend acabou de enviar (guarda anti-loop, calculada acima,
+            // antes de qualquer processamento). Elegibilidade real
+            // (activePilotEnabled + telefone + conversationId + isTest +
+            // sem humano) é decidida inteiramente dentro de
+            // runActivePilotObservation — aqui só delega.
+            if (!isBackendEcho) {
+              try {
+                const { runActivePilotObservation } = await import("./active_pilot_runner");
+                const pilotOutcome = await runActivePilotObservation({
+                  conversationId: ctx.conversationId,
+                  channelPhone: ctx.channelPhone,
+                  messageText: mensagemCliente,
+                  modoAtendimento: (atd.modoAtendimento as string | undefined) ?? null,
+                  isTeste: !!atd.isTeste,
+                  idempotencyKey: explicitMsgId ?? idempKey,
+                });
+                console.log(
+                  "[webhook] active pilot outcome:",
+                  JSON.stringify({ conversationId: ctx.conversationId, ran: pilotOutcome.ran, reason: pilotOutcome.reason, sendSuppressed: pilotOutcome.sendSuppressed })
+                );
+              } catch (e) {
+                console.error("[webhook] active pilot observation falhou (não bloqueia):", (e as Error).message);
+              }
             }
 
             // Sprint P1.2, item 10 — allowlist de números de teste

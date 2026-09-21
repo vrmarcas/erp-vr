@@ -167,6 +167,10 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
           receivedAt: input.webhookReceivedAtMs,
           sourceMessageCreatedAt: input.sourceMessageCreatedAtMs,
           normalizedInput: input.messageText,
+          // Observabilidade (Fase E.2.12) — quantity já era extraída corretamente
+          // (fieldUpdate.quantity), só não estava sendo persistida para inspeção.
+          // Nenhuma mudança na extração/decisão em si, só o que é gravado aqui.
+          extractedFieldUpdate: fieldUpdate,
           mode: result.mode,
           classificationReason: result.classification
             ? {
