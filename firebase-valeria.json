@@ -4,7 +4,7 @@
       "source": "functions-valeria",
       "codebase": "valeria",
       "predeploy": ["npm --prefix functions-valeria run build", "node scripts/guard_deploy_branch.js"],
-      "postdeploy": ["gcloud functions deploy valeriaWebhookChatvolt --region=us-central1 --source=functions-valeria --entry-point=valeriaWebhookChatvolt --runtime=nodejs22 --trigger-http --update-secrets=CHATVOLT_API_KEY=CHATVOLT_API_KEY:latest --quiet"],
+      "postdeploy": ["bash scripts/rebind_chatvolt_api_key.sh"],
       "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
     }
   ]

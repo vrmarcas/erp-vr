@@ -71,50 +71,70 @@ describe("C. build real a partir do src/ atual não deixa resíduo de fase anter
   });
 });
 
-describe("E. firebase-valeria.json — postdeploy restaura o binding do CHATVOLT_API_KEY (Fase E.2.18)", () => {
+describe("E. firebase-valeria.json — postdeploy chama só o wrapper (Fase E.2.19)", () => {
   function loadPostdeploy(): string[] {
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, "..", "firebase-valeria.json"), "utf8"));
     return cfg.functions[0].postdeploy;
   }
 
-  test("postdeploy existe e contém exatamente um comando de rebind via gcloud", () => {
+  test("postdeploy chama somente 'bash scripts/rebind_chatvolt_api_key.sh' — nada mais, sem '=' na string", () => {
     const postdeploy = loadPostdeploy();
     expect(Array.isArray(postdeploy)).toBe(true);
-    expect(postdeploy.length).toBeGreaterThanOrEqual(1);
-    expect(postdeploy.some((cmd) => /gcloud functions deploy valeriaWebhookChatvolt/.test(cmd))).toBe(true);
+    expect(postdeploy).toEqual(["bash scripts/rebind_chatvolt_api_key.sh"]);
+    // Fase E.2.18: Firebase CLI avisou que comandos de postdeploy com '=' podem não rodar
+    // corretamente — a string do postdeploy em si nunca deve mais conter '='.
+    expect(postdeploy[0]).not.toContain("=");
+  });
+});
+
+describe("F. scripts/rebind_chatvolt_api_key.sh — wrapper de rebind do CHATVOLT_API_KEY (Fase E.2.19)", () => {
+  function loadWrapper(): string {
+    return fs.readFileSync(path.join(ROOT, "..", "scripts", "rebind_chatvolt_api_key.sh"), "utf8");
+  }
+
+  test("fail-closed: set -euo pipefail presente", () => {
+    expect(loadWrapper()).toMatch(/^set -euo pipefail/m);
   });
 
-  test("postdeploy referencia CHATVOLT_API_KEY via --update-secrets, nunca materializa o valor do secret", () => {
-    const postdeploy = loadPostdeploy();
-    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
-    expect(cmd).toMatch(/--update-secrets=CHATVOLT_API_KEY=CHATVOLT_API_KEY:latest/);
-    // só referencia o secret pelo NOME — nunca um valor de secret embutido no comando
-    // (qualquer string longa alfanumérica solta seria suspeita; aqui só há nomes/flags conhecidos).
-    expect(cmd).not.toMatch(/CHATVOLT_API_KEY=[A-Za-z0-9/+_-]{20,}/); // nome != valor materializado
+  test("referencia CHATVOLT_API_KEY via --update-secrets, nunca materializa valor de secret", () => {
+    const sh = loadWrapper();
+    expect(sh).toMatch(/--update-secrets="\$\{SECRET_KEY\}=\$\{SECRET_REF\}"/);
+    expect(sh).toMatch(/SECRET_REF="CHATVOLT_API_KEY:latest"/);
+    // nenhum valor de secret (string opaca longa) commitado — só nomes/flags/referências por versão.
+    expect(sh).not.toMatch(/[A-Za-z0-9_-]{32,}/); // nenhuma string longa opaca (hash/token/chave) no arquivo
   });
 
-  test("postdeploy usa --update-secrets (atualiza/adiciona), nunca --set-secrets (que substituiria TODOS os secrets)", () => {
-    const postdeploy = loadPostdeploy();
-    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
-    expect(cmd).toMatch(/--update-secrets=/);
-    expect(cmd).not.toMatch(/--set-secrets=/); // --set-secrets removeria VALERIA_BEARER_SECRET/_PREV do binding
+  test("usa --update-secrets (atualiza/adiciona), nunca --set-secrets (que substituiria TODOS os secrets)", () => {
+    const sh = loadWrapper();
+    expect(sh).toMatch(/--update-secrets=/);
+    expect(sh).not.toMatch(/--set-secrets=/);
   });
 
-  test("postdeploy não engole erro do gcloud (sem '|| true', '; true' ou redirecionamento que mascare falha)", () => {
-    const postdeploy = loadPostdeploy();
-    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
-    expect(cmd).not.toMatch(/\|\|\s*true/);
-    expect(cmd).not.toMatch(/;\s*true\s*$/);
-    expect(cmd).not.toMatch(/2>\s*\/dev\/null/);
-    expect(cmd).not.toMatch(/\|\|\s*exit\s*0/);
+  test("faz verificação final via gcloud describe e falha (exit 1) se CHATVOLT_API_KEY não aparecer no binding", () => {
+    const sh = loadWrapper();
+    expect(sh).toMatch(/gcloud functions describe/);
+    expect(sh).toMatch(/check_secret_bound "CHATVOLT_API_KEY"/);
+    expect(sh).toMatch(/exit 1/);
   });
 
-  test("postdeploy usa a MESMA region/entryPoint/runtime já confirmados da function atual (nunca muda source de forma imprevisível)", () => {
-    const postdeploy = loadPostdeploy();
-    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
-    expect(cmd).toMatch(/--region=us-central1/);
-    expect(cmd).toMatch(/--entry-point=valeriaWebhookChatvolt/);
-    expect(cmd).toMatch(/--runtime=nodejs22/);
-    expect(cmd).toMatch(/--source=functions-valeria/);
+  test("verificação final também confirma os dois secrets pré-existentes (prova que --update-secrets não os removeu)", () => {
+    const sh = loadWrapper();
+    expect(sh).toMatch(/check_secret_bound "VALERIA_BEARER_SECRET"/);
+    expect(sh).toMatch(/check_secret_bound "VALERIA_BEARER_SECRET_PREV"/);
+  });
+
+  test("nunca imprime o valor de um secret (sem describe.*format.*value do próprio secret, sem cat/echo de credencial)", () => {
+    const sh = loadWrapper();
+    expect(sh).not.toMatch(/secrets\s+versions\s+access/); // nunca busca o VALOR do secret, só o binding (key)
+  });
+
+  test("usa region/entryPoint/runtime/source já confirmados da function atual — nunca muda URL/trigger/service account", () => {
+    const sh = loadWrapper();
+    expect(sh).toMatch(/REGION="us-central1"/);
+    expect(sh).toMatch(/ENTRY_POINT="valeriaWebhookChatvolt"/);
+    expect(sh).toMatch(/RUNTIME="nodejs22"/);
+    expect(sh).toMatch(/SOURCE_DIR="functions-valeria"/);
+    expect(sh).not.toMatch(/--trigger-topic|--trigger-bucket|--trigger-event/); // nunca muda o TIPO de trigger (continua HTTP)
+    expect(sh).toMatch(/--trigger-http/);
   });
 });
