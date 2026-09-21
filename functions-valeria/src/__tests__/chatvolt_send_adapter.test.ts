@@ -21,7 +21,7 @@ describe("sendChatvoltMessage — adapter de envio (Fase E.2.13, nunca chamado e
   test("resposta 2xx com id → devolve id e raw, chama o endpoint documentado com o texto exato", async () => {
     process.env.CHATVOLT_API_KEY = "fake_key_for_test";
     const fetchSpy = jest.fn(async (url: string, opts: RequestInit) => {
-      expect(url).toBe("https://api.chatvolt.ai/conversation/message/id/conv1");
+      expect(url).toBe("https://api.chatvolt.ai/conversation/message/conversationId/conv1");
       expect(opts.method).toBe("POST");
       expect(JSON.parse(opts.body as string)).toEqual({ message: "texto final validado" });
       return { ok: true, json: async () => ({ id: "msg_123" }) } as Response;
@@ -30,6 +30,30 @@ describe("sendChatvoltMessage — adapter de envio (Fase E.2.13, nunca chamado e
     const result = await sendChatvoltMessage("conv1", "texto final validado");
     expect(result.id).toBe("msg_123");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("Fase E.2.17 — URL usa o segmento de tipo \"conversationId\" (literal exigido pela API), NUNCA \"id\"", async () => {
+    process.env.CHATVOLT_API_KEY = "fake_key_for_test";
+    let urlChamada = "";
+    global.fetch = jest.fn(async (url: string) => {
+      urlChamada = url;
+      return { ok: true, json: async () => ({ id: "msg_789" }) } as Response;
+    }) as unknown as typeof fetch;
+    await sendChatvoltMessage("conv_xyz", "texto");
+    expect(urlChamada).toBe("https://api.chatvolt.ai/conversation/message/conversationId/conv_xyz");
+    expect(urlChamada).not.toBe("https://api.chatvolt.ai/conversation/message/id/conv_xyz");
+    expect(urlChamada).not.toMatch(/\/message\/id\//);
+  });
+
+  test("Authorization usa Bearer da CHATVOLT_API_KEY lida do ambiente", async () => {
+    process.env.CHATVOLT_API_KEY = "chave_de_teste_especifica";
+    let authHeader: string | undefined;
+    global.fetch = jest.fn(async (_url: string, opts: RequestInit) => {
+      authHeader = (opts.headers as Record<string, string>).Authorization;
+      return { ok: true, json: async () => ({ id: "msg_1" }) } as Response;
+    }) as unknown as typeof fetch;
+    await sendChatvoltMessage("conv1", "texto");
+    expect(authHeader).toBe("Bearer chave_de_teste_especifica");
   });
 
   test("resposta 2xx sem id em nenhum lugar esperado → lança (nunca confirma envio sem id)", async () => {

@@ -39,6 +39,14 @@ describe("Piloto ativo — guarda anti-loop no webhook.ts", () => {
   });
 });
 
+describe("Piloto ativo — path do send-message (Fase E.2.17)", () => {
+  test("chatvolt_send_adapter.ts usa o path com type=conversationId, nunca type=id", () => {
+    const adapter = src("chatvolt_send_adapter.ts");
+    expect(adapter).toMatch(/\/conversation\/message\/conversationId\/\$\{conversationId\}/);
+    expect(adapter).not.toMatch(/\/conversation\/message\/id\//);
+  });
+});
+
 describe("Piloto ativo — chatvolt_send_adapter.ts é a única fronteira de rede de escrita", () => {
   test("active_pilot_runner.ts não chama fetch diretamente — só via sendChatvoltMessage", () => {
     const runner = src("active_pilot_runner.ts");

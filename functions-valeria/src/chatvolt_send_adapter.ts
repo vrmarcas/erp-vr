@@ -1,5 +1,10 @@
 /**
- * chatvolt_send_adapter.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21).
+ * chatvolt_send_adapter.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21), path
+ * corrigido na Fase E.2.17 (2026-09-21) após teste real (Piloto 1,
+ * repetição) devolver 400 "Invalid literal value, expected
+ * \"conversationId\"" — o `type` literal aceito pela API não é "id", é
+ * um dos três valores documentados: "conversationId" | "phone" | "email".
+ * Este piloto só usa "conversationId".
  *
  * ÚNICA responsabilidade: enviar um texto JÁ PRONTO e JÁ VALIDADO pelo
  * `POST /conversation/message/{type}/{value}` do ChatVolt, uma única vez
@@ -7,18 +12,13 @@
  * texto, não decide se deve enviar, não sabe o que é um nextAction — quem
  * chama (active_pilot_runner.ts) decide tudo isso antes.
  *
- * Endpoint documentado em VALERIA_FASE_E2_6_ARQUITETURA_ASSINCRONA
- * (auditoria, não executada até esta fase): resposta inclui o objeto
- * `message` completo (id/conversationId/createdAt), autoria sempre
- * "from":"human" no schema documentado — por isso a guarda anti-loop em
- * active_pilot_send_ledger.ts nunca confia em `from`, só no `id`
- * devolvido aqui.
+ * Resposta inclui o objeto `message` completo (id/conversationId/
+ * createdAt), autoria sempre "from":"human" no schema documentado — por
+ * isso a guarda anti-loop em active_pilot_send_ledger.ts nunca confia em
+ * `from`, só no `id` devolvido aqui.
  *
- * NUNCA chamado nesta fase (E.2.13): `activePilotEnabled=false` em
- * produção — este arquivo existe para a orquestração ficar pronta e
- * testável, sem que nenhuma chamada de rede real ocorra enquanto o gate
- * estiver desligado (active_pilot_config.ts decide isso, não este
- * arquivo).
+ * NUNCA chamado enquanto `activePilotEnabled=false` em produção
+ * (active_pilot_config.ts decide isso, não este arquivo).
  */
 
 const API_BASE = "https://api.chatvolt.ai";
@@ -32,7 +32,7 @@ export async function sendChatvoltMessage(conversationId: string, text: string):
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (!apiKey) throw new Error("CHATVOLT_API_KEY ausente — não é possível enviar");
 
-  const res = await fetch(`${API_BASE}/conversation/message/id/${conversationId}`, {
+  const res = await fetch(`${API_BASE}/conversation/message/conversationId/${conversationId}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ message: text }),
