@@ -100,16 +100,30 @@ describe("Módulos shadow — prova estática de zero side effect real", () => {
     }
   });
 
-  test("shadow_runner.ts usa a MESMA chave de idempotência (diagKey === input.idempotencyKey) — retry nunca cria diagnóstico duplicado", () => {
+  test("shadow_runner.ts não grava mais em valeria_shadow_diagnostics (rodada 'mesmo documento', 2026-09-21) — acumula estágios em memória e devolve no retorno", () => {
     const src = fs.readFileSync(path.join(__dirname, "..", "shadow_runner.ts"), "utf8");
-    expect(src).toMatch(/const diagKey\s*=\s*input\.idempotencyKey;/);
+    expect(src).not.toMatch(/recordShadowDiagnosticStage/);
+    expect(src).not.toMatch(/from\s+["']\.\/shadow_diagnostics["']/);
+    // toda gravação de estágio é `stages.push(...)` — síncrono, em memória, sem I/O.
+    const pushes = src.match(/stages\.push\(/g) ?? [];
+    expect(pushes.length).toBeGreaterThanOrEqual(5); // RUNNER_ENTERED, GATE_EVALUATED, PIPELINE_COMPLETED, RESULT_WRITE_ATTEMPTED, RESULT_WRITE_CONFIRMED (+ EXCEPTION no catch)
   });
 
-  test("chamadas a recordShadowDiagnosticStage nunca são usadas em condicional (diagnóstico não pode influenciar decisão)", () => {
+  test("ShadowObservationOutcome sempre devolve `stages` — o chamador (webhook.ts) é quem decide gravar, runner nunca escreve estágio em Firestore", () => {
     const src = fs.readFileSync(path.join(__dirname, "..", "shadow_runner.ts"), "utf8");
-    // toda chamada é `await recordShadowDiagnosticStage(...)` solta, nunca `if (await recordShadowDiagnosticStage(...))`
-    expect(src).not.toMatch(/if\s*\(\s*await\s+recordShadowDiagnosticStage/);
-    const calls = src.match(/recordShadowDiagnosticStage\(/g) ?? [];
-    expect(calls.length).toBeGreaterThanOrEqual(5); // D, C, E, F, G, H
+    expect(src).toMatch(/stages:\s*string\[\]/);
+    // nenhuma chamada a stages.push está dentro de um `if (await ...)` que decida o retorno — é sempre incondicional na sequência.
+    expect(src).not.toMatch(/if\s*\(\s*await\s+.*stages\.push/);
+  });
+
+  test("webhook.ts usa a MESMA chave de idempotência para o doc de valeria_webhook_events (messageId = explicitMsgId ?? idempKey) — retry funde no mesmo doc via withIdempotency, nunca duplica", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "webhook.ts"), "utf8");
+    expect(src).toMatch(/messageId:\s*explicitMsgId \?\? idempKey/);
+  });
+
+  test("webhook.ts captura o DocumentReference do .add() e só faz UM .update() logo em seguida, restrito a shadowDebugEligivel", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "webhook.ts"), "utf8");
+    expect(src).toMatch(/const webhookEventRef\s*=\s*await\s+db\.collection\("valeria_webhook_events"\)\.add/);
+    expect(src).toMatch(/webhookEventRef\.update\(/);
   });
 });

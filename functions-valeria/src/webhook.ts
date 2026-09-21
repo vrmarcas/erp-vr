@@ -561,48 +561,27 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         mensagemCliente && !respostaAgente ? "entrada" : (respostaAgente ? "saida" : mapEventToInteracao(eventType as WebhookEventType).direcao);
       const mensagemLog = direcao === "entrada" ? mensagemCliente : respostaAgente;
 
-      // Ajuste de observabilidade (2026-09-21) — checkpoint incondicional,
-      // ANTES de qualquer gate/shadow/pipeline. Não altera nenhuma
-      // condição/retorno abaixo — só diagnóstico. (console.log mantido,
-      // mas não é mais a fonte principal — ver diagKey/diagEligivel abaixo,
-      // canal Firestore comprovadamente funcional.)
-      console.log(
-        "[webhook] post-context checkpoint",
-        JSON.stringify({
-          executionId: (process.env.FUNCTION_EXECUTION_ID as string | undefined) ?? null,
-          eventType,
-          direcao,
-          hasChannelPhone: !!ctx.channelPhone,
-          channelPhoneLength: ctx.channelPhone ? ctx.channelPhone.length : 0,
-          hasConversationId: !!ctx.conversationId,
-          hasMensagemCliente: !!mensagemCliente,
-        })
-      );
+      // Diagnóstico "mesmo documento" (2026-09-21) — substitui a rodada
+      // anterior (console.log invisível + collection separada
+      // valeria_shadow_diagnostics, também sem gravar). Acumula estágios
+      // EM MEMÓRIA (zero I/O aqui) e grava tudo no PRÓPRIO documento de
+      // valeria_webhook_events, num único .update() logo após o .add()
+      // (ver mais abaixo) — restrito a números explicitamente na allowlist
+      // de teste.
+      const shadowDebugStages: string[] = [];
+      let shadowDebugReason: string | null = null;
+      let shadowDebugGate: Record<string, unknown> | null = null;
+      let shadowDebugError: Record<string, unknown> | null = null;
 
-      // Fase "Diagnóstico Shadow via Firestore" (2026-09-21) — restrito a
-      // números explicitamente na allowlist de teste (item 1 do pedido).
-      // diagKey = mesma chave de idempotência já usada pelo webhook — uma
-      // execução lógica, um doc, retry funde no mesmo (merge:true).
-      const diagKey = explicitMsgId ?? idempKey;
-      let diagEligivel = false;
+      let shadowDebugEligivel = false;
       try {
         const { isNumeroDeTeste } = await import("./test_phone_allowlist");
-        diagEligivel = await isNumeroDeTeste(ctx.channelPhone ?? null);
+        shadowDebugEligivel = await isNumeroDeTeste(ctx.channelPhone ?? null);
       } catch {
-        diagEligivel = false;
+        shadowDebugEligivel = false;
       }
 
-      // Estágio B — CONTEXT_RESOLVED.
-      if (diagEligivel) {
-        const { recordShadowDiagnosticStage } = await import("./shadow_diagnostics");
-        await recordShadowDiagnosticStage(diagKey, "CONTEXT_RESOLVED", {
-          hasChannelPhone: !!ctx.channelPhone,
-          hasConversationId: !!ctx.conversationId,
-          hasMensagemCliente: !!mensagemCliente,
-          direcao,
-          eventType,
-        });
-      }
+      if (shadowDebugEligivel) shadowDebugStages.push("CONTEXT_RESOLVED"); // estágio B.
 
       // ── P1.0/P1.2b — espelho operacional no ERP + pipeline determinístico ──
       // Só para eventos reais de WhatsApp COM telefone de canal conhecido
@@ -627,21 +606,7 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           if (resultado && direcao === "entrada" && mensagemCliente) {
             const { atd } = resultado;
 
-            // Ajuste de observabilidade (2026-09-21) — checkpoint
-            // incondicional imediatamente ANTES do bloco que chama
-            // runShadowObservation. Não altera nenhuma condição/retorno.
-            console.log(
-              "[webhook] pre-shadow checkpoint",
-              JSON.stringify({
-                executionId: (process.env.FUNCTION_EXECUTION_ID as string | undefined) ?? null,
-                hasResultado: !!resultado,
-                direcaoIsEntrada: direcao === "entrada",
-                hasMensagemCliente: !!mensagemCliente,
-                hasAtd: !!atd,
-                modoAtendimento: (atd.modoAtendimento as string | undefined) ?? null,
-                isTest: !!atd.isTeste,
-              })
-            );
+            if (shadowDebugEligivel) shadowDebugStages.push("PRE_SHADOW"); // estágio C.
 
             // Fase E.2.8 — shadow observacional (zero side effect real).
             // SEMPRE antes de qualquer lógica V2/legado abaixo; nunca a
@@ -649,8 +614,9 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
             // shadowEligibilityReasonForPhone confirma flag+allowlist (ver
             // shadow_config.ts/shadow_runner.ts) — fora disso, no-op
             // imediato. Qualquer falha aqui é só logada, nunca propaga.
-            // Ajuste de observabilidade (2026-09-21): captura e loga o
-            // retorno {ran, reason} — decisão/elegibilidade inalteradas.
+            // Diagnóstico "mesmo documento": funde shadowOutcome.stages no
+            // acumulador local, nunca grava nada aqui — quem grava é o
+            // .update() logo após o .add() de valeria_webhook_events.
             try {
               const { runShadowObservation } = await import("./shadow_runner");
               const shadowOutcome = await runShadowObservation({
@@ -664,11 +630,21 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
                 sourceMessageCreatedAtMs: null,
                 webhookReceivedAtMs: now,
               });
+              if (shadowDebugEligivel) {
+                shadowDebugStages.push(...shadowOutcome.stages);
+                shadowDebugReason = shadowOutcome.reason;
+                shadowDebugGate = shadowOutcome.gateDetail ?? null;
+                shadowDebugError = shadowOutcome.errorDetail ?? null;
+              }
               console.log(
                 "[webhook] shadow outcome:",
-                JSON.stringify({ conversationId: ctx.conversationId, eventType, direcao, ...shadowOutcome })
+                JSON.stringify({ conversationId: ctx.conversationId, eventType, direcao, ran: shadowOutcome.ran, reason: shadowOutcome.reason })
               );
             } catch (e) {
+              if (shadowDebugEligivel) {
+                shadowDebugStages.push("SHADOW_EXCEPTION");
+                shadowDebugError = { errorName: (e as Error).name ?? "Error", errorCode: (e as Error).message?.slice(0, 120) ?? "unknown" };
+              }
               console.error("[webhook] shadow observation falhou (não bloqueia):", (e as Error).message);
             }
 
@@ -696,14 +672,19 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           } else {
             // Ajuste de observabilidade (2026-09-21) — mesmo motivo pelo
             // qual o shadow nunca é chamado nestes casos, só que agora
-            // explícito em log (nenhuma mudança de comportamento).
+            // explícito no doc (nenhuma mudança de comportamento).
             const motivo = !resultado ? "MISSING_ATTENDANCE" : direcao !== "entrada" ? "NOT_INBOUND" : "MISSING_MESSAGE";
+            if (shadowDebugEligivel) shadowDebugReason = motivo;
             console.log(
               "[webhook] shadow outcome:",
               JSON.stringify({ conversationId: ctx.conversationId, eventType, direcao, ran: false, reason: motivo })
             );
           }
         } catch (e) {
+          if (shadowDebugEligivel) {
+            shadowDebugStages.push("SHADOW_EXCEPTION");
+            shadowDebugError = { errorName: (e as Error).name ?? "Error", errorCode: (e as Error).message?.slice(0, 120) ?? "unknown" };
+          }
           console.error("[webhook] falha no espelho operacional WhatsApp (não bloqueia log do evento):", (e as Error).message);
         }
       }
@@ -721,7 +702,9 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         : undefined;
 
       // ── 1. Persiste evento bruto (path rápido, não bloqueador) ────────────
-      await db.collection("valeria_webhook_events").add({
+      // Captura o DocumentReference — necessário para o diagnóstico "mesmo
+      // documento" logo abaixo (não altera o payload comercial acima).
+      const webhookEventRef = await db.collection("valeria_webhook_events").add({
         eventType,
         conversationId:  ctx.conversationId,
         messageId:       explicitMsgId ?? idempKey,
@@ -743,13 +726,24 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         processado:      false,
       });
 
-      // Estágio A — WEBHOOK_EVENT_STORED (imediatamente depois do write acima).
-      if (diagEligivel) {
-        const { recordShadowDiagnosticStage } = await import("./shadow_diagnostics");
-        await recordShadowDiagnosticStage(diagKey, "WEBHOOK_EVENT_STORED", {
-          eventType,
-          conversationId: ctx.conversationId,
-        });
+      // Diagnóstico "mesmo documento" (2026-09-21) — PRIMEIRO update
+      // imediatamente após o .add() retornar, sem nenhum outro gate além
+      // da restrição a números de teste já computada acima
+      // (shadowDebugEligivel). Se nem "EVENT_CREATED" aparecer no próximo
+      // teste, prova que este .update() não está alcançando o documento
+      // observado — ver critério de parada combinado.
+      if (shadowDebugEligivel) {
+        shadowDebugStages.push("EVENT_CREATED");
+        try {
+          await webhookEventRef.update({
+            shadowDebugStages,
+            shadowDebugReason,
+            shadowDebugGate,
+            shadowDebugError,
+          });
+        } catch (e) {
+          console.error("[webhook] falha ao gravar shadowDebugStages (não bloqueia):", (e as Error).message);
+        }
       }
 
       // ── 2. Log leve de interação em valeria_msgs ───────────────────────────
