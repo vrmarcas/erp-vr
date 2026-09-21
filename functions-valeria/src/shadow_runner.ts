@@ -39,6 +39,24 @@ function maskPhoneForLog(channelPhone: string | null): string | null {
 const RESULTS_COL = "valeria_shadow_results";
 export const SHADOW_PIPELINE_VERSION = "e2.8-2026-09-20";
 
+/**
+ * Fronteira de persistência (Fase E.2.10): Firestore rejeita `undefined`
+ * em qualquer campo (`.set()` lança). O pipeline puro (shadow_pipeline,
+ * shadow_signal_extractor etc.) continua livre para usar `undefined` como
+ * "ausente" — essa função só normaliza `undefined → null`, recursivamente,
+ * IMEDIATAMENTE antes da escrita, sem alterar nenhuma decisão de negócio.
+ */
+export function sanitizeForFirestore<T>(value: T): T {
+  if (value === undefined) return null as unknown as T;
+  if (value === null || typeof value !== "object" || value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map((v) => sanitizeForFirestore(v)) as unknown as T;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = sanitizeForFirestore(v);
+  }
+  return out as T;
+}
+
 export interface ShadowObservationInput {
   conversationId: string;
   atendimentoId: string | null;
@@ -140,7 +158,7 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
       .collection(RESULTS_COL)
       .doc(docId)
       .set(
-        {
+        sanitizeForFirestore({
           idempotencyKey: input.idempotencyKey,
           conversationId: input.conversationId,
           atendimentoId: input.atendimentoId,
@@ -178,7 +196,7 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
           latency: { catalogLoadMs, extractionMs, pipelineMs, totalShadowMs },
           createdAt: Date.now(),
           diagnostico: "Dado de homologação — Fase E.2.8, nunca lido por fluxo real de atendimento.",
-        },
+        }),
         { merge: false }
       );
 
