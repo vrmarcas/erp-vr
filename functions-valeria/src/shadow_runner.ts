@@ -21,6 +21,7 @@ import { shadowEligibilityReasonForPhone } from "./shadow_config";
 import { runShadowPipeline, type ShadowInput } from "./shadow_pipeline";
 import { extractShadowSignals } from "./shadow_signal_extractor";
 import { chaveCanonicaBR } from "./telefone";
+import { recordShadowDiagnosticStage } from "./shadow_diagnostics";
 
 /** Só para log — nunca o telefone completo, só a chave canônica (DDD + últimos 4). Sem side effect, sem uso em decisão. */
 function maskPhoneForLog(channelPhone: string | null): string | null {
@@ -64,8 +65,33 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
     phone: maskPhoneForLog(input.channelPhone),
     isTest: input.isTeste,
   };
+  const diagKey = input.idempotencyKey;
+
+  // Estágio D — só e sempre a primeira linha real do runner (ver diagnóstico
+  // Firestore, não depende de console.log). Restrito a isTeste (item 1 do
+  // pedido: "somente para números allowlisted/isTest").
+  if (input.isTeste) {
+    await recordShadowDiagnosticStage(diagKey, "SHADOW_RUNNER_ENTERED", {
+      conversationId: input.conversationId,
+      atendimentoId: input.atendimentoId,
+    });
+  }
+
   try {
     const elig = await shadowEligibilityReasonForPhone(input.channelPhone);
+
+    // Estágio C.
+    if (input.isTeste) {
+      await recordShadowDiagnosticStage(diagKey, "SHADOW_GATE_EVALUATED", {
+        shadowEnabled: elig.shadowEnabled,
+        allowlisted: elig.allowlisted,
+        isTest: input.isTeste,
+        inbound: true, // runShadowObservation só é chamado pelo webhook para inbound real — ver checkpoint webhook.ts
+        hasMessage: !!input.messageText,
+        eligibilityReason: elig.reason,
+      });
+    }
+
     if (elig.reason !== "ELIGIBLE") {
       console.log(
         "[shadow_runner] decisão:",
@@ -102,7 +128,17 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
 
     const totalShadowMs = Date.now() - t0;
 
+    // Estágio E.
+    await recordShadowDiagnosticStage(diagKey, "SHADOW_PIPELINE_COMPLETED", {
+      mode: result.mode,
+      outputValid: result.outputValidation?.valid ?? null,
+      sideEffectsExecuted: result.sideEffectsExecuted,
+    });
+
     const docId = input.idempotencyKey; // doc id determinístico → retry sobrescreve o MESMO doc, nunca duplica.
+
+    // Estágio F.
+    await recordShadowDiagnosticStage(diagKey, "SHADOW_RESULT_WRITE_ATTEMPTED", { docId });
 
     await admin
       .firestore()
@@ -151,12 +187,20 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
         { merge: false }
       );
 
+    // Estágio G — só grava DEPOIS que o .set() acima já resolveu sem lançar.
+    await recordShadowDiagnosticStage(diagKey, "SHADOW_RESULT_WRITE_CONFIRMED", { docId, mode: result.mode, totalShadowMs });
+
     console.log(
       "[shadow_runner] decisão:",
       JSON.stringify({ ...logBase, ran: true, reason: "OK", mode: result.mode, totalShadowMs })
     );
     return { ran: true, reason: "OK" };
   } catch (e) {
+    // Estágio H.
+    await recordShadowDiagnosticStage(diagKey, "SHADOW_ERROR", {
+      errorName: (e as Error).name ?? "Error",
+      errorMessage: (e as Error).message,
+    });
     console.error(
       "[shadow_runner] falha (não bloqueia webhook real):",
       JSON.stringify({ ...logBase, ran: false, reason: "ERROR", errorMessage: (e as Error).message })

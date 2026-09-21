@@ -20,6 +20,7 @@ const SHADOW_FILES = [
   "shadow_redactor.ts",
   "shadow_config.ts",
   "interaction_classifier.ts",
+  "shadow_diagnostics.ts",
 ];
 
 const FORBIDDEN_IMPORTS = [
@@ -79,5 +80,36 @@ describe("Módulos shadow — prova estática de zero side effect real", () => {
       const src = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
       expect(src).not.toMatch(/firebase-admin/);
     }
+  });
+
+  test("shadow_diagnostics.ts só escreve em valeria_shadow_diagnostics", () => {
+    const srcRaw = fs.readFileSync(path.join(__dirname, "..", "shadow_diagnostics.ts"), "utf8");
+    expect(srcRaw).toMatch(/const COL\s*=\s*"valeria_shadow_diagnostics"/);
+    const src = stripComments(srcRaw);
+    const writeMatches = src.match(/\.collection\(([^)]+)\)/g) ?? [];
+    expect(writeMatches.length).toBeGreaterThan(0);
+    for (const m of writeMatches) {
+      expect(m).toContain("COL");
+    }
+  });
+
+  test("shadow_diagnostics.ts nunca escreve em collections reais (atendimentos/orçamento/briefing/handoff)", () => {
+    const src = stripComments(fs.readFileSync(path.join(__dirname, "..", "shadow_diagnostics.ts"), "utf8"));
+    for (const proibida of ["atendimentos", "vitre_orcamentos", "valeria_technical_briefings", "valeria_handoffs"]) {
+      expect(src).not.toContain(proibida);
+    }
+  });
+
+  test("shadow_runner.ts usa a MESMA chave de idempotência (diagKey === input.idempotencyKey) — retry nunca cria diagnóstico duplicado", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "shadow_runner.ts"), "utf8");
+    expect(src).toMatch(/const diagKey\s*=\s*input\.idempotencyKey;/);
+  });
+
+  test("chamadas a recordShadowDiagnosticStage nunca são usadas em condicional (diagnóstico não pode influenciar decisão)", () => {
+    const src = fs.readFileSync(path.join(__dirname, "..", "shadow_runner.ts"), "utf8");
+    // toda chamada é `await recordShadowDiagnosticStage(...)` solta, nunca `if (await recordShadowDiagnosticStage(...))`
+    expect(src).not.toMatch(/if\s*\(\s*await\s+recordShadowDiagnosticStage/);
+    const calls = src.match(/recordShadowDiagnosticStage\(/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(5); // D, C, E, F, G, H
   });
 });

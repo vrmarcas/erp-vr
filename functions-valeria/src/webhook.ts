@@ -563,7 +563,9 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
 
       // Ajuste de observabilidade (2026-09-21) — checkpoint incondicional,
       // ANTES de qualquer gate/shadow/pipeline. Não altera nenhuma
-      // condição/retorno abaixo — só diagnóstico.
+      // condição/retorno abaixo — só diagnóstico. (console.log mantido,
+      // mas não é mais a fonte principal — ver diagKey/diagEligivel abaixo,
+      // canal Firestore comprovadamente funcional.)
       console.log(
         "[webhook] post-context checkpoint",
         JSON.stringify({
@@ -576,6 +578,31 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           hasMensagemCliente: !!mensagemCliente,
         })
       );
+
+      // Fase "Diagnóstico Shadow via Firestore" (2026-09-21) — restrito a
+      // números explicitamente na allowlist de teste (item 1 do pedido).
+      // diagKey = mesma chave de idempotência já usada pelo webhook — uma
+      // execução lógica, um doc, retry funde no mesmo (merge:true).
+      const diagKey = explicitMsgId ?? idempKey;
+      let diagEligivel = false;
+      try {
+        const { isNumeroDeTeste } = await import("./test_phone_allowlist");
+        diagEligivel = await isNumeroDeTeste(ctx.channelPhone ?? null);
+      } catch {
+        diagEligivel = false;
+      }
+
+      // Estágio B — CONTEXT_RESOLVED.
+      if (diagEligivel) {
+        const { recordShadowDiagnosticStage } = await import("./shadow_diagnostics");
+        await recordShadowDiagnosticStage(diagKey, "CONTEXT_RESOLVED", {
+          hasChannelPhone: !!ctx.channelPhone,
+          hasConversationId: !!ctx.conversationId,
+          hasMensagemCliente: !!mensagemCliente,
+          direcao,
+          eventType,
+        });
+      }
 
       // ── P1.0/P1.2b — espelho operacional no ERP + pipeline determinístico ──
       // Só para eventos reais de WhatsApp COM telefone de canal conhecido
@@ -715,6 +742,15 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         createdAt:       nowIso,
         processado:      false,
       });
+
+      // Estágio A — WEBHOOK_EVENT_STORED (imediatamente depois do write acima).
+      if (diagEligivel) {
+        const { recordShadowDiagnosticStage } = await import("./shadow_diagnostics");
+        await recordShadowDiagnosticStage(diagKey, "WEBHOOK_EVENT_STORED", {
+          eventType,
+          conversationId: ctx.conversationId,
+        });
+      }
 
       // ── 2. Log leve de interação em valeria_msgs ───────────────────────────
       // BUG corrigido (Fase 0/1, achado pelo cenário 6): anexosMeta/
