@@ -1,5 +1,6 @@
 /**
- * deploy_pipeline_static_safety.test.ts — ValerIA 2.0, Fase E.2.10 (2026-09-21).
+ * deploy_pipeline_static_safety.test.ts — ValerIA 2.0, Fase E.2.10 (2026-09-21),
+ * estendido na Fase E.2.18 (2026-09-21).
  *
  * Regressão da causa raiz nº 1 de E.2.9: `firebase-valeria.json` não
  * compilava TypeScript antes de empacotar `lib/` para deploy — o deploy
@@ -11,6 +12,14 @@
  *  C. uma build real (tsc, com emit) a partir do `src/` atual produz um
  *     `lib/` que contém a instrumentação corrente — nenhum resíduo de
  *     fase anterior sobrevive a uma rebuild limpa.
+ *
+ * Fase E.2.18 — causa raiz nº 3 (bug do Firebase CLI que não propaga
+ * `CHATVOLT_API_KEY` para `secretEnvironmentVariables` em deploy seletivo
+ * de Gen1, provado por evidência direta em E.2.17: a extração local via
+ * `__endpoint`/`__trigger` do `firebase-functions` já está correta — o
+ * gap é só entre isso e a chamada real da API do Cloud Functions).
+ * Correção: `postdeploy` que restaura o binding via `gcloud functions
+ * deploy --update-secrets`, automaticamente, em todo deploy futuro.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -59,5 +68,53 @@ describe("C. build real a partir do src/ atual não deixa resíduo de fase anter
     // já que foram removidos de webhook.ts nesta fase (ver git history).
     expect(webhookJs).not.toContain("post-context checkpoint");
     expect(webhookJs).not.toContain("pre-shadow checkpoint");
+  });
+});
+
+describe("E. firebase-valeria.json — postdeploy restaura o binding do CHATVOLT_API_KEY (Fase E.2.18)", () => {
+  function loadPostdeploy(): string[] {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, "..", "firebase-valeria.json"), "utf8"));
+    return cfg.functions[0].postdeploy;
+  }
+
+  test("postdeploy existe e contém exatamente um comando de rebind via gcloud", () => {
+    const postdeploy = loadPostdeploy();
+    expect(Array.isArray(postdeploy)).toBe(true);
+    expect(postdeploy.length).toBeGreaterThanOrEqual(1);
+    expect(postdeploy.some((cmd) => /gcloud functions deploy valeriaWebhookChatvolt/.test(cmd))).toBe(true);
+  });
+
+  test("postdeploy referencia CHATVOLT_API_KEY via --update-secrets, nunca materializa o valor do secret", () => {
+    const postdeploy = loadPostdeploy();
+    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
+    expect(cmd).toMatch(/--update-secrets=CHATVOLT_API_KEY=CHATVOLT_API_KEY:latest/);
+    // só referencia o secret pelo NOME — nunca um valor de secret embutido no comando
+    // (qualquer string longa alfanumérica solta seria suspeita; aqui só há nomes/flags conhecidos).
+    expect(cmd).not.toMatch(/CHATVOLT_API_KEY=[A-Za-z0-9/+_-]{20,}/); // nome != valor materializado
+  });
+
+  test("postdeploy usa --update-secrets (atualiza/adiciona), nunca --set-secrets (que substituiria TODOS os secrets)", () => {
+    const postdeploy = loadPostdeploy();
+    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
+    expect(cmd).toMatch(/--update-secrets=/);
+    expect(cmd).not.toMatch(/--set-secrets=/); // --set-secrets removeria VALERIA_BEARER_SECRET/_PREV do binding
+  });
+
+  test("postdeploy não engole erro do gcloud (sem '|| true', '; true' ou redirecionamento que mascare falha)", () => {
+    const postdeploy = loadPostdeploy();
+    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
+    expect(cmd).not.toMatch(/\|\|\s*true/);
+    expect(cmd).not.toMatch(/;\s*true\s*$/);
+    expect(cmd).not.toMatch(/2>\s*\/dev\/null/);
+    expect(cmd).not.toMatch(/\|\|\s*exit\s*0/);
+  });
+
+  test("postdeploy usa a MESMA region/entryPoint/runtime já confirmados da function atual (nunca muda source de forma imprevisível)", () => {
+    const postdeploy = loadPostdeploy();
+    const cmd = postdeploy.find((c) => /gcloud functions deploy/.test(c))!;
+    expect(cmd).toMatch(/--region=us-central1/);
+    expect(cmd).toMatch(/--entry-point=valeriaWebhookChatvolt/);
+    expect(cmd).toMatch(/--runtime=nodejs22/);
+    expect(cmd).toMatch(/--source=functions-valeria/);
   });
 });
