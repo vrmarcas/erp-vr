@@ -85,6 +85,16 @@ export interface ShadowResult {
   wouldRequestHumanReason: string | null;
   /** Literal `false` sempre — nenhuma escrita real ocorre neste módulo. */
   sideEffectsExecuted: false;
+  /**
+   * Fase E.2.22 — draft de catálogo resultante deste turno (grupo/tamanho/
+   * SKU/qualificação já mesclados), SÓ preenchido no ramo COMMERCIAL_INTENT
+   * (EXPLORATORY/AMBIGUOUS/HUMAN/SYSTEM_IGNORE nunca tocam o draft — `null`
+   * nesses casos). Esta função continua pura: só CALCULA o próximo estado,
+   * nunca persiste — persistir é responsabilidade do chamador
+   * (active_pilot_runner.ts grava de verdade; shadow_runner.ts só observa,
+   * nunca chama saveCatalogDraft).
+   */
+  mergedDraft: CatalogDraft | null;
 }
 
 function shadowResultBase(conversationId: string, mode: InteractionMode, overrides: Partial<ShadowResult> = {}): ShadowResult {
@@ -102,6 +112,7 @@ function shadowResultBase(conversationId: string, mode: InteractionMode, overrid
     wouldRequestHuman: false,
     wouldRequestHumanReason: null,
     sideEffectsExecuted: false,
+    mergedDraft: null,
     ...overrides,
   };
 }
@@ -123,10 +134,41 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
     return shadowResultBase(input.conversationId, "HUMAN");
   }
 
-  // 3. Classificação determinística.
+  // 3. Classificação determinística. `classifyIntent` é stateless (só o
+  // texto deste turno) — Fase E.2.22: o estado estruturado complementa a
+  // classificação textual isolada (nunca a substitui, nunca sobrescreve
+  // EXPLORATORY, que é um sinal explícito de pergunta) quando o
+  // classificador devolveu AMBIGUOUS e há evidência estruturada de
+  // continuidade comercial, por dois caminhos possíveis:
+  //  (a) sinal de produto extraído NESTE turno (ex.: "tampa de correr
+  //      tamanho M" tem grupo+tamanho explícitos, mas nenhuma palavra
+  //      decisiva tipo "quero" — o classificador sozinho erra para
+  //      AMBIGUOUS; o extrator determinístico não);
+  //  (b) draft de turno ANTERIOR já tem catalogGroupId ativo (qualificação
+  //      em andamento) — ex.: "G" isolado respondendo a uma pergunta de
+  //      tamanho pendente.
+  // NUNCA reabre um draft já terminal (READY_*/ROUTED_TO_CUSTOM/
+  // UNSUPPORTED) — só continuidade de qualificação ativa.
   const classification = classifyIntent(input.messageText);
+  const signalsForClassificationOverride: ResolutionSignals = input.resolutionSignals ?? {};
+  const hasProductSignalThisTurn = Boolean(
+    signalsForClassificationOverride.explicitSkuOrProductId ||
+      signalsForClassificationOverride.groupNameOrAlias ||
+      signalsForClassificationOverride.catalogSizeLabel ||
+      signalsForClassificationOverride.exactDimensionsCm ||
+      signalsForClassificationOverride.vagueSizeHintCm != null ||
+      signalsForClassificationOverride.customerExplicitlyRequestsCustom ||
+      signalsForClassificationOverride.clientConfirmedSuggestedOption
+  );
+  const hasActiveCommercialThread =
+    !!input.priorDraft?.catalogGroupId &&
+    !["READY_CATALOG_DRAFT", "ROUTED_TO_CUSTOM", "UNSUPPORTED", "READY_FOR_PRODUCT_MAPPING_REVIEW"].includes(input.priorDraft.qualificationStatus);
+  const effectiveClassification =
+    classification.classification === "AMBIGUOUS" && (hasProductSignalThisTurn || hasActiveCommercialThread)
+      ? { ...classification, classification: "COMMERCIAL_INTENT" as const, reasonCode: "CONTINUATION_OF_ACTIVE_DRAFT" }
+      : classification;
 
-  if (classification.classification === "EXPLORATORY" || classification.classification === "AMBIGUOUS") {
+  if (effectiveClassification.classification === "EXPLORATORY" || effectiveClassification.classification === "AMBIGUOUS") {
     const topic = pickFactTopic(input.messageText);
     const facts = factTable[topic] ?? factTable.DEFAULT;
     const redactionInput: RedactionInput = {
@@ -147,22 +189,14 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
 
   // 4. COMMERCIAL_INTENT — reaproveita resolução/qualificação/nextAction já existentes (puros).
   const draft: CatalogDraft = input.priorDraft ?? emptyCatalogDraft(input.conversationId, null, input.isTeste);
-  const signals: ResolutionSignals = input.resolutionSignals ?? {};
+  const signals: ResolutionSignals = signalsForClassificationOverride;
   // Só recalcula a resolução quando o turno traz algum sinal de produto
-  // novo — mesma disciplina implícita em mergeSignalsIntoDraft (`resolution:
+  // novo (mesmo `hasProductSignalThisTurn` já computado acima, reaproveitado
+  // — mesma disciplina implícita em mergeSignalsIntoDraft (`resolution:
   // ResolutionResult | null`, seção A do cabeçalho de catalog_draft.ts):
   // um turno que só traz quantidade/prazo/etc, sem nenhum sinal de
   // produto, NUNCA deve recalcular do zero e sobrescrever um match já
   // resolvido em turno anterior com um AMBIGUOUS espúrio.
-  const hasProductSignalThisTurn = Boolean(
-    signals.explicitSkuOrProductId ||
-      signals.groupNameOrAlias ||
-      signals.catalogSizeLabel ||
-      signals.exactDimensionsCm ||
-      signals.vagueSizeHintCm != null ||
-      signals.customerExplicitlyRequestsCustom ||
-      signals.clientConfirmedSuggestedOption
-  );
   const resolution = hasProductSignalThisTurn ? resolveProductMatch(signals, input.catalogGroups) : null;
   const fieldUpdate: FieldUpdate = input.fieldUpdate ?? {};
   const mergedDraft = mergeSignalsIntoDraft(draft, resolution, fieldUpdate, "CUSTOMER");
@@ -187,7 +221,7 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
   const outputValidation = validateOutput(rawHypotheticalText, { questionAllowed: true, factsAllowed: [] });
 
   return shadowResultBase(input.conversationId, "COMMERCIAL_INTENT", {
-    classification,
+    classification: effectiveClassification,
     resolution,
     qualification,
     nextAction,
@@ -197,5 +231,6 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
     outputValidation,
     wouldRequestHuman,
     wouldRequestHumanReason: wouldRequestHuman ? "resolutionType=UNSUPPORTED (categoria fora do catálogo ativo)" : null,
+    mergedDraft,
   });
 }

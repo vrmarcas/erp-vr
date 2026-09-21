@@ -28,6 +28,11 @@ import { shadowEligibilityReasonForPhone } from "./shadow_config";
 import { runShadowPipeline, type ShadowInput } from "./shadow_pipeline";
 import { extractShadowSignals } from "./shadow_signal_extractor";
 import { chaveCanonicaBR } from "./telefone";
+// Fase E.2.22 — SÓ LEITURA (loadCatalogDraft), nunca saveCatalogDraft: o
+// shadow observa qual seria a evolução do draft para representar
+// fielmente o comportamento multi-turno, mas nunca persiste — persistir é
+// exclusividade do active pilot (active_pilot_runner.ts).
+import { loadCatalogDraft } from "./catalog_draft";
 
 /** Só para log — nunca o telefone completo, só a chave canônica (DDD + últimos 4). Sem side effect, sem uso em decisão. */
 function maskPhoneForLog(channelPhone: string | null): string | null {
@@ -126,8 +131,12 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
     const catalogGroups = configs.flatMap(catalogGroupsFromConfig);
     const catalogLoadMs = Date.now() - tCatalogStart;
 
+    // Fase E.2.22 — leitura do draft anterior (mesma semântica de contexto
+    // do active pilot), SÓ para alimentar a decisão hipotética; nunca gravado.
+    const priorDraft = await loadCatalogDraft(input.conversationId);
+
     const tExtractStart = Date.now();
-    const { signals, fieldUpdate } = extractShadowSignals(input.messageText, catalogGroups);
+    const { signals, fieldUpdate } = extractShadowSignals(input.messageText, catalogGroups, priorDraft);
     const extractionMs = Date.now() - tExtractStart;
 
     const shadowInput: ShadowInput = {
@@ -136,6 +145,7 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
       modoAtendimento: input.modoAtendimento,
       isEchoOfOwnMessage: false, // shadow nunca envia nada — estruturalmente não há o que ecoar
       isTeste: input.isTeste,
+      priorDraft,
       catalogGroups,
       resolutionSignals: signals,
       fieldUpdate,
@@ -190,6 +200,11 @@ export async function runShadowObservation(input: ShadowObservationInput): Promi
             : null,
           qualification: result.qualification,
           nextAction: result.nextAction,
+          // Fase E.2.22 — draft ANTES (leitura) e DEPOIS (hipotético, nunca
+          // salvo) deste turno, só para observabilidade da continuidade
+          // multi-turno no shadow.
+          priorDraftSnapshot: priorDraft,
+          wouldBeMergedDraft: result.mergedDraft,
           questionAllowed: result.redactionInput?.questionAllowed ?? null,
           rawHypotheticalResponse: result.rawHypotheticalText,
           finalHypotheticalResponse: result.hypotheticalText,

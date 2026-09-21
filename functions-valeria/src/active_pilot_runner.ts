@@ -1,5 +1,6 @@
 /**
- * active_pilot_runner.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21).
+ * active_pilot_runner.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21), com
+ * continuidade multi-turno na Fase E.2.22 (2026-09-21).
  *
  * Orquestra o caminho REAL (a única diferença do shadow é que, quando
  * elegível e o validador aprova, ENVIA de verdade): reaproveita
@@ -7,13 +8,26 @@
  * classificar/resolver/decidir/redigir/validar — a MESMA decisão que o
  * shadow já prova estar correta — e só adiciona o que o shadow
  * estruturalmente não pode ter: idempotência de envio + guarda anti-loop
- * + chamada ao adapter.
+ * + chamada ao adapter + persistência do draft de catálogo.
  *
  * Gate de elegibilidade (active_pilot_config.ts) é checado ANTES de
  * qualquer I/O de catálogo — mesma disciplina de curto-circuito do
  * shadow_runner.ts. Se o validador rejeitar o texto, o envio é
  * SUPRIMIDO (nunca envia o texto saneado do shadow — aqui o padrão é mais
  * estrito: ou o texto é válido como veio do redator, ou não envia nada).
+ *
+ * ORDEM persistência-vs-envio (Fase E.2.22, análise de failure modes):
+ * o draft é salvo ANTES do validador/envio, nunca depois. Motivo: (a)
+ * `mergeSignalsIntoDraft`/`resolveProductMatch` são puros e IDEMPOTENTES
+ * — reprocessar a MESMA mensagem (retry) produz o MESMO draft resultante,
+ * então salvar cedo nunca duplica nem corrompe estado; (b) se salvássemos
+ * só DEPOIS de enviar com sucesso, uma falha no `saveCatalogDraft` (só
+ * essa escrita, não a de envio) faria a próxima leitura do ledger achar
+ * `status=SENT` (idempotência de envio já é outro mecanismo) e NUNCA MAIS
+ * reprocessar aquele turno — perderíamos a evolução do draft de forma
+ * IRRECUPERÁVEL. Salvar antes é estritamente mais seguro: o entendimento
+ * do backend sobre o que o cliente disse é uma decisão do backend,
+ * independente de o envio da resposta ao cliente ter sucesso ou não.
  */
 import { getAllActiveCatalogConfigs, catalogGroupsFromConfig } from "./catalog";
 import { activePilotEligibilityForRequest, type ActivePilotEligibilityReason } from "./active_pilot_config";
@@ -21,6 +35,7 @@ import { extractShadowSignals } from "./shadow_signal_extractor";
 import { runShadowPipeline, type ShadowInput } from "./shadow_pipeline";
 import { sendChatvoltMessage } from "./chatvolt_send_adapter";
 import { getSendState, canAttemptSend, reservePending, markSent, markFailed } from "./active_pilot_send_ledger";
+import { loadCatalogDraft, saveCatalogDraft } from "./catalog_draft";
 import { chaveCanonicaBR } from "./telefone";
 
 function maskPhoneForLog(channelPhone: string | null): string | null {
@@ -77,7 +92,10 @@ export async function runActivePilotObservation(input: ActivePilotInput): Promis
   try {
     const configs = await getAllActiveCatalogConfigs();
     const catalogGroups = configs.flatMap(catalogGroupsFromConfig);
-    const { signals, fieldUpdate } = extractShadowSignals(input.messageText, catalogGroups);
+    // Continuidade multi-turno (Fase E.2.22) — carrega o draft já
+    // persistido desta conversa (null se for o primeiro turno comercial).
+    const priorDraft = await loadCatalogDraft(input.conversationId);
+    const { signals, fieldUpdate } = extractShadowSignals(input.messageText, catalogGroups, priorDraft);
 
     const shadowInput: ShadowInput = {
       conversationId: input.conversationId,
@@ -85,11 +103,20 @@ export async function runActivePilotObservation(input: ActivePilotInput): Promis
       modoAtendimento: input.modoAtendimento,
       isEchoOfOwnMessage: false, // já filtrado pela guarda anti-loop ANTES de chegar aqui (webhook.ts)
       isTeste: input.isTeste,
+      priorDraft,
       catalogGroups,
       resolutionSignals: signals,
       fieldUpdate,
     };
     const result = runShadowPipeline(shadowInput);
+
+    // Persiste a evolução do draft ANTES do validador/envio — ver análise
+    // de failure modes no cabeçalho do arquivo. Só existe em turnos
+    // COMMERCIAL_INTENT (mergedDraft é null em EXPLORATORY/AMBIGUOUS/etc,
+    // e nesses casos o draft anterior simplesmente permanece intocado).
+    if (result.mergedDraft) {
+      await saveCatalogDraft(result.mergedDraft);
+    }
 
     // Mais estrito que o shadow: só envia o texto EXATAMENTE como o redator
     // produziu quando o validador aprova — nunca o texto saneado de fallback.

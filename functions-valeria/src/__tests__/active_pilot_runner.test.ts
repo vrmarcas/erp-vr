@@ -12,11 +12,21 @@ import { getSendState, canAttemptSend, reservePending, markSent, markFailed } fr
 import { getAllActiveCatalogConfigs, catalogGroupsFromConfig } from "../catalog";
 import { sendChatvoltMessage } from "../chatvolt_send_adapter";
 import { runShadowPipeline } from "../shadow_pipeline";
+import { loadCatalogDraft, saveCatalogDraft } from "../catalog_draft";
 
 jest.mock("../active_pilot_config");
 jest.mock("../active_pilot_send_ledger");
 jest.mock("../catalog");
 jest.mock("../chatvolt_send_adapter");
+// Só mocka a fronteira de I/O (load/save) — shadow_pipeline.ts usa as
+// funções PURAS deste módulo de verdade (emptyCatalogDraft/
+// mergeSignalsIntoDraft/computeQualificationState); um auto-mock completo
+// as substituiria por jest.fn() retornando undefined e quebraria a
+// decisão real do pipeline.
+jest.mock("../catalog_draft", () => {
+  const actual = jest.requireActual("../catalog_draft");
+  return { ...actual, loadCatalogDraft: jest.fn(), saveCatalogDraft: jest.fn() };
+});
 // shadow_pipeline.ts é puro e já testado — mantém a implementação REAL por
 // padrão (garante que EXPLORATORY/COMMERCIAL_INTENT usam a mesma decisão
 // já validada na bateria A-E), só troca para um resultado forjado no teste
@@ -37,6 +47,8 @@ const mockCatalogGroupsFromConfig = catalogGroupsFromConfig as jest.Mock;
 const mockSend = sendChatvoltMessage as jest.Mock;
 const mockRunShadowPipeline = runShadowPipeline as jest.Mock;
 const REAL_RUN_SHADOW_PIPELINE = jest.requireActual("../shadow_pipeline").runShadowPipeline;
+const mockLoadCatalogDraft = loadCatalogDraft as jest.Mock;
+const mockSaveCatalogDraft = saveCatalogDraft as jest.Mock;
 
 const BASE_INPUT = {
   conversationId: "conv1",
@@ -54,6 +66,8 @@ beforeEach(() => {
   mockCatalogGroupsFromConfig.mockReturnValue([]);
   mockEligibility.mockResolvedValue({ reason: "ELIGIBLE", activePilotEnabled: true, phoneAllowlisted: true, conversationAllowlisted: true });
   mockSend.mockResolvedValue({ id: "sent_msg_1", raw: {} });
+  mockLoadCatalogDraft.mockResolvedValue(null);
+  mockSaveCatalogDraft.mockResolvedValue(undefined);
   mockRunShadowPipeline.mockImplementation(REAL_RUN_SHADOW_PIPELINE);
 });
 
@@ -166,5 +180,69 @@ describe("Fluxo feliz — envia exatamente uma vez e registra SENT", () => {
     expect(out.sendSuppressed).toBe(true);
     expect(mockMarkFailed).toHaveBeenCalled();
     expect(mockMarkSent).not.toHaveBeenCalled();
+  });
+});
+
+describe("Continuidade multi-turno — item 11 da Fase E.2.22", () => {
+  test("chama loadCatalogDraft(conversationId) antes de decidir", async () => {
+    await runActivePilotObservation({ ...BASE_INPUT, messageText: "Quero fazer uma caixa." });
+    expect(mockLoadCatalogDraft).toHaveBeenCalledWith("conv1");
+  });
+
+  test("passa o draft carregado como priorDraft para o pipeline (afeta a decisão)", async () => {
+    const priorDraft = {
+      conversationId: "conv1", atendimentoId: null, isTest: true, category: "caixas",
+      catalogGroupId: "caixa_tampa_de_correr", resolutionType: null,
+      matchedProductId: null, matchedProductSku: null,
+      baseCatalogGroupId: null, baseProductId: null, baseProductSku: null,
+      clientConfirmed: false, customizationRequired: false, customizationReason: null,
+      fields: { quantity: null, customDimensions: null, personalization: [], desiredDeadline: null, deliveryData: null },
+      fieldSources: {}, qualificationStatus: "QUALIFYING_CATALOG" as const, missingFields: ["tamanho"],
+      promovido: false, createdAt: 0, updatedAt: 0,
+    };
+    mockLoadCatalogDraft.mockResolvedValue(priorDraft);
+    // "tamanho m" sozinho, sem "quero"/decisivo — só vira COMMERCIAL_INTENT
+    // por causa do priorDraft com catalogGroupId já ativo (continuidade).
+    const out = await runActivePilotObservation({ ...BASE_INPUT, messageText: "Tamanho M." });
+    expect(out.reason).toBe("SENT"); // se caísse em EXPLORATORY/AMBIGUOUS sem contexto, o texto seria outro
+    expect(mockRunShadowPipeline).toHaveBeenCalledWith(expect.objectContaining({ priorDraft }));
+  });
+
+  test("persiste o draft atualizado via saveCatalogDraft quando há mergedDraft (COMMERCIAL_INTENT)", async () => {
+    await runActivePilotObservation({ ...BASE_INPUT, messageText: "Quero fazer uma caixa." });
+    expect(mockSaveCatalogDraft).toHaveBeenCalledTimes(1);
+    const [savedDraft] = mockSaveCatalogDraft.mock.calls[0];
+    expect(savedDraft.conversationId).toBe("conv1");
+  });
+
+  test("EXPLORATORY não persiste draft (mergedDraft é null nesse ramo)", async () => {
+    await runActivePilotObservation({ ...BASE_INPUT, messageText: "Vocês fazem peças sob medida?" });
+    expect(mockSaveCatalogDraft).not.toHaveBeenCalled();
+  });
+
+  test("persiste o draft ANTES de tentar enviar (ordem: save antes de send) — ver failure-mode analysis no cabeçalho do módulo", async () => {
+    const ordem: string[] = [];
+    mockSaveCatalogDraft.mockImplementation(async () => { ordem.push("save"); });
+    mockSend.mockImplementation(async () => { ordem.push("send"); return { id: "sent_msg_1", raw: {} }; });
+    await runActivePilotObservation({ ...BASE_INPUT, messageText: "Quero fazer uma caixa." });
+    expect(ordem).toEqual(["save", "send"]);
+  });
+
+  test("draft é salvo mesmo quando o validador rejeita o envio (entendimento do backend independe da entrega)", async () => {
+    mockRunShadowPipeline.mockReturnValueOnce({
+      mode: "COMMERCIAL_INTENT",
+      rawHypotheticalText: "pergunta proibida?",
+      hypotheticalText: "texto saneado",
+      outputValidation: { valid: false, violations: ["QUESTION_NOT_ALLOWED"], sanitizedText: "texto saneado" },
+      mergedDraft: { conversationId: "conv1", catalogGroupId: "caixa_tampa_de_correr" },
+    });
+    await runActivePilotObservation({ ...BASE_INPUT, messageText: "qualquer coisa" });
+    expect(mockSaveCatalogDraft).toHaveBeenCalledTimes(1);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test("side effects comerciais reais continuam desligados (sideEffectsExecuted nunca é usado para criar orçamento/produção/handoff aqui)", async () => {
+    const runnerSrc = require("fs").readFileSync(require("path").join(__dirname, "..", "active_pilot_runner.ts"), "utf8");
+    expect(runnerSrc).not.toMatch(/vitre_draft_writer|human_handoff|technical_briefing_store|quote_core/);
   });
 });
