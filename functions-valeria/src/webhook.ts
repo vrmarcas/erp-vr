@@ -561,6 +561,22 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
         mensagemCliente && !respostaAgente ? "entrada" : (respostaAgente ? "saida" : mapEventToInteracao(eventType as WebhookEventType).direcao);
       const mensagemLog = direcao === "entrada" ? mensagemCliente : respostaAgente;
 
+      // Ajuste de observabilidade (2026-09-21) — checkpoint incondicional,
+      // ANTES de qualquer gate/shadow/pipeline. Não altera nenhuma
+      // condição/retorno abaixo — só diagnóstico.
+      console.log(
+        "[webhook] post-context checkpoint",
+        JSON.stringify({
+          executionId: (process.env.FUNCTION_EXECUTION_ID as string | undefined) ?? null,
+          eventType,
+          direcao,
+          hasChannelPhone: !!ctx.channelPhone,
+          channelPhoneLength: ctx.channelPhone ? ctx.channelPhone.length : 0,
+          hasConversationId: !!ctx.conversationId,
+          hasMensagemCliente: !!mensagemCliente,
+        })
+      );
+
       // ── P1.0/P1.2b — espelho operacional no ERP + pipeline determinístico ──
       // Só para eventos reais de WhatsApp COM telefone de canal conhecido
       // (nunca para o chat de teste interno do Chatvolt, sem channelPhone).
@@ -583,6 +599,22 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           });
           if (resultado && direcao === "entrada" && mensagemCliente) {
             const { atd } = resultado;
+
+            // Ajuste de observabilidade (2026-09-21) — checkpoint
+            // incondicional imediatamente ANTES do bloco que chama
+            // runShadowObservation. Não altera nenhuma condição/retorno.
+            console.log(
+              "[webhook] pre-shadow checkpoint",
+              JSON.stringify({
+                executionId: (process.env.FUNCTION_EXECUTION_ID as string | undefined) ?? null,
+                hasResultado: !!resultado,
+                direcaoIsEntrada: direcao === "entrada",
+                hasMensagemCliente: !!mensagemCliente,
+                hasAtd: !!atd,
+                modoAtendimento: (atd.modoAtendimento as string | undefined) ?? null,
+                isTest: !!atd.isTeste,
+              })
+            );
 
             // Fase E.2.8 — shadow observacional (zero side effect real).
             // SEMPRE antes de qualquer lógica V2/legado abaixo; nunca a
