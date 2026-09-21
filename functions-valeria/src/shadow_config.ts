@@ -46,6 +46,35 @@ export async function shadowEligibleForPhone(channelPhone: string | null): Promi
   return computeShadowEligible(shadowFlagOn, isAllowlisted);
 }
 
+/**
+ * Fase E.2.8 — ajuste de observabilidade (2026-09-21): mesma decisão de
+ * `computeShadowEligible`, mas devolvendo o motivo explícito em vez de só
+ * um booleano — nenhuma mudança de comportamento/elegibilidade, só
+ * diagnóstico. Pura, testável sem Firestore.
+ */
+export type ShadowEligibilityReason = "SHADOW_DISABLED" | "PHONE_NOT_ALLOWLISTED" | "ELIGIBLE";
+
+export function computeShadowEligibilityReason(shadowFlagOn: boolean, isPhoneAllowlisted: boolean): ShadowEligibilityReason {
+  if (!shadowFlagOn) return "SHADOW_DISABLED";
+  if (!isPhoneAllowlisted) return "PHONE_NOT_ALLOWLISTED";
+  return "ELIGIBLE";
+}
+
+export interface ShadowEligibilityResult {
+  reason: ShadowEligibilityReason;
+  shadowEnabled: boolean;
+  allowlisted: boolean;
+}
+
+export async function shadowEligibilityReasonForPhone(channelPhone: string | null): Promise<ShadowEligibilityResult> {
+  const shadowEnabled = await loadShadowFlag();
+  // Mesmo curto-circuito de sempre (não consulta allowlist se o flag já está off) —
+  // só que agora reporta `allowlisted:false` nesse caso em vez de nunca checar,
+  // para o log não sugerir "desconhecido" quando na verdade nem foi relevante.
+  const allowlisted = shadowEnabled ? await estaExplicitamenteNaAllowlist(channelPhone) : false;
+  return { reason: computeShadowEligibilityReason(shadowEnabled, allowlisted), shadowEnabled, allowlisted };
+}
+
 /** Só para testes — nunca chamado em produção. */
 export function _resetShadowCacheParaTeste(): void {
   _cache = null;

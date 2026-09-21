@@ -587,12 +587,14 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
             // Fase E.2.8 — shadow observacional (zero side effect real).
             // SEMPRE antes de qualquer lógica V2/legado abaixo; nunca a
             // bloqueia nem depende dela. Só roda de fato quando
-            // shadowEligibleForPhone confirma flag+allowlist (ver
+            // shadowEligibilityReasonForPhone confirma flag+allowlist (ver
             // shadow_config.ts/shadow_runner.ts) — fora disso, no-op
             // imediato. Qualquer falha aqui é só logada, nunca propaga.
+            // Ajuste de observabilidade (2026-09-21): captura e loga o
+            // retorno {ran, reason} — decisão/elegibilidade inalteradas.
             try {
               const { runShadowObservation } = await import("./shadow_runner");
-              await runShadowObservation({
+              const shadowOutcome = await runShadowObservation({
                 conversationId: ctx.conversationId,
                 atendimentoId: ctx.conversationId,
                 channelPhone: ctx.channelPhone,
@@ -603,6 +605,10 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
                 sourceMessageCreatedAtMs: null,
                 webhookReceivedAtMs: now,
               });
+              console.log(
+                "[webhook] shadow outcome:",
+                JSON.stringify({ conversationId: ctx.conversationId, eventType, direcao, ...shadowOutcome })
+              );
             } catch (e) {
               console.error("[webhook] shadow observation falhou (não bloqueia):", (e as Error).message);
             }
@@ -628,6 +634,15 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
               if (complexidadeDetectada) sinais.produtoComplexoSemReceita = true;
               await avaliarEPersistirHandoff(ctx.conversationId, mensagemCliente, sinais);
             }
+          } else {
+            // Ajuste de observabilidade (2026-09-21) — mesmo motivo pelo
+            // qual o shadow nunca é chamado nestes casos, só que agora
+            // explícito em log (nenhuma mudança de comportamento).
+            const motivo = !resultado ? "MISSING_ATTENDANCE" : direcao !== "entrada" ? "NOT_INBOUND" : "MISSING_MESSAGE";
+            console.log(
+              "[webhook] shadow outcome:",
+              JSON.stringify({ conversationId: ctx.conversationId, eventType, direcao, ran: false, reason: motivo })
+            );
           }
         } catch (e) {
           console.error("[webhook] falha no espelho operacional WhatsApp (não bloqueia log do evento):", (e as Error).message);
