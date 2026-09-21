@@ -583,6 +583,30 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           });
           if (resultado && direcao === "entrada" && mensagemCliente) {
             const { atd } = resultado;
+
+            // Fase E.2.8 — shadow observacional (zero side effect real).
+            // SEMPRE antes de qualquer lógica V2/legado abaixo; nunca a
+            // bloqueia nem depende dela. Só roda de fato quando
+            // shadowEligibleForPhone confirma flag+allowlist (ver
+            // shadow_config.ts/shadow_runner.ts) — fora disso, no-op
+            // imediato. Qualquer falha aqui é só logada, nunca propaga.
+            try {
+              const { runShadowObservation } = await import("./shadow_runner");
+              await runShadowObservation({
+                conversationId: ctx.conversationId,
+                atendimentoId: ctx.conversationId,
+                channelPhone: ctx.channelPhone,
+                messageText: mensagemCliente,
+                modoAtendimento: (atd.modoAtendimento as string | undefined) ?? null,
+                isTeste: !!atd.isTeste,
+                idempotencyKey: explicitMsgId ?? idempKey,
+                sourceMessageCreatedAtMs: null,
+                webhookReceivedAtMs: now,
+              });
+            } catch (e) {
+              console.error("[webhook] shadow observation falhou (não bloqueia):", (e as Error).message);
+            }
+
             // Sprint P1.2, item 10 — allowlist de números de teste
             // (test_phone_allowlist.ts, config Firestore, nunca
             // hardcoded). Allowlist vazia = sem restrição (produção
