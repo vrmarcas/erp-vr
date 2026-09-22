@@ -1,5 +1,6 @@
 /**
- * active_pilot_config.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21).
+ * active_pilot_config.ts — ValerIA 2.0, Fase E.2.13 (2026-09-21), SEM
+ * cache desde a Fase E.2.30 (2026-09-22).
  *
  * Gate DELIBERADAMENTE SEPARADO de `valeriaV2Enabled` (feature_flags.ts) e
  * de `shadowEnabled` (shadow_config.ts) — nunca reutiliza nenhum dos dois.
@@ -13,37 +14,51 @@
  *
  * Qualquer uma das cinco condições falhando é suficiente para recusar —
  * nunca "quase elegível".
+ *
+ * Fase E.2.30 — achado real (Piloto 4, E.2.29): `activePilotEnabled` não é
+ * só observacional (diferente de `shadowEnabled`) — autoriza envio real ao
+ * cliente. Um cache de 15s (mesmo padrão de shadow_config.ts/
+ * feature_flags.ts) fez uma instância warm processar um inbound real com
+ * `activePilotEnabled=false` em memória mesmo já com `true` gravado no
+ * Firestore momentos antes — provado por log
+ * (`reason:"ACTIVE_PILOT_DISABLED"` na 1ª mensagem, `ELIGIBLE`/enviado na
+ * 2ª, ~54s depois). Pelo mesmo motivo, DESATIVAR o piloto também ficaria
+ * sujeito a até 15s de atraso numa instância warm — inaceitável para o
+ * único gate que autoriza efeito real. Por isso, e SÓ neste arquivo
+ * (shadow_config.ts/feature_flags.ts continuam com cache — são gates só-
+ * observacionais ou já aceitos com essa latência), toda leitura vai direto
+ * ao Firestore, sem cache em memória. Custo aceito: 1 leitura Firestore
+ * extra por inbound elegível para o piloto — segurança operacional pesa
+ * mais que essa economia neste estágio.
  */
 import * as admin from "firebase-admin";
 import { estaExplicitamenteNaAllowlist } from "./test_phone_allowlist";
 
 const COL = "erp_vr";
 const DOC_ID = "valeria_active_pilot_config";
-const CACHE_TTL_MS = 15_000;
 
 interface ActivePilotDocConfig {
   activePilotEnabled: boolean;
   allowedConversationIds: string[];
 }
 
-let _cache: { cfg: ActivePilotDocConfig; at: number } | null = null;
-
+/**
+ * Sempre lê o Firestore, sem cache — frescor máximo garantido para o gate
+ * de envio real. Falha de leitura = fail-closed (piloto tratado como
+ * desligado), NUNCA um valor antigo em memória.
+ */
 async function loadActivePilotDocConfig(): Promise<ActivePilotDocConfig> {
-  const now = Date.now();
-  if (_cache && now - _cache.at < CACHE_TTL_MS) return _cache.cfg;
   try {
     const snap = await admin.firestore().collection(COL).doc(DOC_ID).get();
     const data = snap.exists ? snap.data() : null;
-    const cfg: ActivePilotDocConfig = {
+    return {
       activePilotEnabled: !!data?.activePilotEnabled,
       allowedConversationIds: Array.isArray(data?.allowedConversationIds) ? (data!.allowedConversationIds as string[]) : [],
     };
-    _cache = { cfg, at: now };
   } catch (e) {
-    console.error("[active_pilot_config] falha ao ler config (tratando como desligado):", (e as Error).message);
-    _cache = { cfg: { activePilotEnabled: false, allowedConversationIds: [] }, at: now };
+    console.error("[active_pilot_config] falha ao ler config (fail-closed: tratando como desligado):", (e as Error).message);
+    return { activePilotEnabled: false, allowedConversationIds: [] };
   }
-  return _cache.cfg;
 }
 
 export type ActivePilotEligibilityReason =
@@ -93,9 +108,4 @@ export async function activePilotEligibilityForRequest(
     phoneAllowlisted,
     conversationAllowlisted,
   };
-}
-
-/** Só para testes — nunca chamado em produção. */
-export function _resetActivePilotCacheParaTeste(): void {
-  _cache = null;
 }
