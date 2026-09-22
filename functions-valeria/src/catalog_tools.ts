@@ -87,13 +87,15 @@ const RUN_OPTS = functions.runWith({ secrets: SECRET_NAMES, timeoutSeconds: 30, 
  */
 const CATEGORIA_PARA_RECEITA: Record<string, string> = { caixas: "Caixa" };
 
-async function loadVitreProduct(productId: string): Promise<V2EligibilityProductInput | null> {
+/** Exportada na Fase E.2.35 (antes privada) — reusada por commercial_quote_orchestrator.ts, mesma implementação, nenhuma mudança de comportamento. */
+export async function loadVitreProduct(productId: string): Promise<V2EligibilityProductInput | null> {
   const snap = await admin.firestore().collection(VITRE_COL).doc(productId).get();
   if (!snap.exists) return null;
   return { id: snap.id, ...(snap.data() as Omit<V2EligibilityProductInput, "id">) };
 }
 
-function findGroupOf(groups: CatalogGroup[], catalogGroupId: string | null): CatalogGroup | null {
+/** Exportada na Fase E.2.35 (antes privada) — reusada por commercial_quote_orchestrator.ts, mesma implementação, nenhuma mudança de comportamento. */
+export function findGroupOf(groups: CatalogGroup[], catalogGroupId: string | null): CatalogGroup | null {
   if (!catalogGroupId) return null;
   return groups.find((g) => g.catalogGroupId === catalogGroupId) || null;
 }
@@ -122,7 +124,8 @@ export function buildCatalogAvailabilityPayload(
   };
 }
 
-async function resolveClienteNome(channelPhone: string | null | undefined): Promise<string> {
+/** Exportada na Fase E.2.35 (antes privada) — reusada por commercial_quote_orchestrator.ts, mesma implementação, nenhuma mudança de comportamento. */
+export async function resolveClienteNome(channelPhone: string | null | undefined): Promise<string> {
   if (!channelPhone) return "Cliente WhatsApp";
   try {
     const clientes = await fsRead<Cliente[]>("clientes");

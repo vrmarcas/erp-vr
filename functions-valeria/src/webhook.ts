@@ -677,6 +677,7 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
                 const { runActivePilotObservation } = await import("./active_pilot_runner");
                 const pilotOutcome = await runActivePilotObservation({
                   conversationId: ctx.conversationId,
+                  organizationId: ctx.organizationId,
                   channelPhone: ctx.channelPhone,
                   messageText: mensagemCliente,
                   modoAtendimento: (atd.modoAtendimento as string | undefined) ?? null,
@@ -685,7 +686,7 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
                 });
                 console.log(
                   "[webhook] active pilot outcome:",
-                  JSON.stringify({ conversationId: ctx.conversationId, ran: pilotOutcome.ran, reason: pilotOutcome.reason, sendSuppressed: pilotOutcome.sendSuppressed })
+                  JSON.stringify({ conversationId: ctx.conversationId, ran: pilotOutcome.ran, reason: pilotOutcome.reason, sendSuppressed: pilotOutcome.sendSuppressed, sideEffectsExecuted: pilotOutcome.sideEffectsExecuted })
                 );
               } catch (e) {
                 console.error("[webhook] active pilot observation falhou (não bloqueia):", (e as Error).message);

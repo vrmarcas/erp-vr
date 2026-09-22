@@ -69,17 +69,55 @@ describe("Piloto ativo — chatvolt_send_adapter.ts é a única fronteira de red
 });
 
 describe("Piloto ativo — envio só depois do validador aprovar", () => {
-  test("active_pilot_runner.ts chama sendChatvoltMessage só dentro do bloco que checa outputValidation.valid", () => {
+  test("active_pilot_runner.ts chama sendChatvoltMessage só dentro do bloco que checa finalValidation.valid", () => {
     const runner = src("active_pilot_runner.ts");
-    const validatorCheckIdx = runner.indexOf("outputValidation?.valid");
+    // Fase E.2.35 — finalValidation substitui result.outputValidation direto,
+    // porque quando o side effect comercial real acontece, a validação é
+    // RECOMPUTADA (sideEffectsExecuted=true) fora do pipeline puro — ver
+    // active_pilot_static_safety.test.ts "side effect comercial" abaixo.
+    const validatorCheckIdx = runner.indexOf("finalValidation?.valid");
     const sendCallIdx = runner.indexOf("sendChatvoltMessage(");
     expect(validatorCheckIdx).toBeGreaterThan(0);
     expect(sendCallIdx).toBeGreaterThan(validatorCheckIdx); // checagem do validador vem ANTES da chamada de envio
   });
 
-  test("active_pilot_runner.ts envia rawHypotheticalText (nunca o texto saneado de fallback do shadow)", () => {
+  test("active_pilot_runner.ts envia finalRawText (nunca o texto saneado de fallback do shadow)", () => {
     const runner = src("active_pilot_runner.ts");
-    expect(runner).toMatch(/sendChatvoltMessage\(input\.conversationId,\s*result\.rawHypotheticalText\)/);
+    expect(runner).toMatch(/sendChatvoltMessage\(input\.conversationId,\s*finalRawText\)/);
+  });
+});
+
+describe("Piloto ativo — side effect comercial real (Fase E.2.35)", () => {
+  test("gate comercial é SEPARADO do gate do piloto — active_pilot_runner.ts nunca reusa activePilotEligibilityForRequest para autorizar side effect", () => {
+    const runner = src("active_pilot_runner.ts");
+    expect(runner).toMatch(/commercialSideEffectsEligibilityForConversation/);
+    expect(runner).toMatch(/from\s+["']\.\/commercial_side_effects_config["']/);
+  });
+
+  test("side effect só é chamado quando qualificationStatus===READY_CATALOG_DRAFT e ainda não promovido", () => {
+    const runner = src("active_pilot_runner.ts");
+    expect(runner).toMatch(/qualificationStatus === "READY_CATALOG_DRAFT"/);
+    expect(runner).toMatch(/!result\.mergedDraft\.promovido/);
+  });
+
+  test("sideEffectsExecuted só vira true DENTRO do bloco que checa sideEffectResult.executed (nunca otimista)", () => {
+    const runner = src("active_pilot_runner.ts");
+    const executedCheckIdx = runner.indexOf("if (sideEffectResult.executed)");
+    const setTrueIdx = runner.indexOf("sideEffectsExecuted = true;");
+    expect(executedCheckIdx).toBeGreaterThan(0);
+    expect(setTrueIdx).toBeGreaterThan(executedCheckIdx);
+  });
+
+  test("commercial_quote_orchestrator.ts é a única fronteira de escrita de orçamento/handoff do piloto — active_pilot_runner.ts nunca chama createVitreDraftIfNotExists/requestQuoteReview diretamente", () => {
+    const runner = src("active_pilot_runner.ts");
+    expect(runner).not.toMatch(/createVitreDraftIfNotExists|requestQuoteReview\(/);
+    expect(runner).toMatch(/executeReadyCatalogDraftSideEffects/);
+  });
+
+  test("commercial_quote_orchestrator.ts reusa os helpers de catalog_tools.ts — nunca duplica loadVitreProduct/findGroupOf/resolveClienteNome", () => {
+    const orchestrator = src("commercial_quote_orchestrator.ts");
+    expect(orchestrator).toMatch(/from\s+["']\.\/catalog_tools["']/);
+    expect(orchestrator).not.toMatch(/async function loadVitreProduct|function findGroupOf|async function resolveClienteNome/);
   });
 });
 

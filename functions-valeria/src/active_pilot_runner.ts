@@ -37,6 +37,20 @@ import { sendChatvoltMessage } from "./chatvolt_send_adapter";
 import { getSendState, canAttemptSend, reservePending, markSent, markFailed } from "./active_pilot_send_ledger";
 import { loadCatalogDraft, saveCatalogDraft } from "./catalog_draft";
 import { chaveCanonicaBR } from "./telefone";
+// Fase E.2.35 — side effect comercial real (orçamento + handoff), gate
+// SEPARADO de activePilotEnabled (commercial_side_effects_config.ts) e
+// orquestração que reusa os mesmos helpers já em produção em
+// catalog_tools.ts (commercial_quote_orchestrator.ts) — nunca duplica
+// implementação. computeNextAction/defaultTemplateRedactor/validateOutput
+// são chamados diretamente aqui (não via runShadowPipeline) para o texto
+// final pós-side-effect: shadow_pipeline.ts é PURO por design e nunca
+// pode afirmar sideEffectsExecuted=true (guarantee do módulo) — só quem
+// sabe se o side effect REAL aconteceu é este arquivo.
+import { commercialSideEffectsEligibilityForConversation } from "./commercial_side_effects_config";
+import { executeReadyCatalogDraftSideEffects } from "./commercial_quote_orchestrator";
+import { computeNextAction } from "./qualification_engine";
+import { defaultTemplateRedactor, type RedactionInput } from "./shadow_redactor";
+import { validateOutput } from "./shadow_output_validator";
 
 function maskPhoneForLog(channelPhone: string | null): string | null {
   const chave = chaveCanonicaBR(channelPhone);
@@ -46,6 +60,7 @@ function maskPhoneForLog(channelPhone: string | null): string | null {
 
 export interface ActivePilotInput {
   conversationId: string;
+  organizationId: string;
   channelPhone: string | null;
   messageText: string;
   modoAtendimento: string | null;
@@ -67,6 +82,8 @@ export interface ActivePilotOutcome {
   reason: ActivePilotOutcomeReason;
   sendSuppressed: boolean;
   sentMessageId: string | null;
+  /** Fase E.2.35 — true só quando o orçamento real foi criado E o handoff real teve sucesso nesta chamada. */
+  sideEffectsExecuted: boolean;
 }
 
 export async function runActivePilotObservation(input: ActivePilotInput): Promise<ActivePilotOutcome> {
@@ -78,14 +95,14 @@ export async function runActivePilotObservation(input: ActivePilotInput): Promis
 
   const elig = await activePilotEligibilityForRequest(input.channelPhone, input.conversationId, input.isTeste, input.modoAtendimento);
   if (elig.reason !== "ELIGIBLE") {
-    return { ran: false, reason: elig.reason, sendSuppressed: true, sentMessageId: null };
+    return { ran: false, reason: elig.reason, sendSuppressed: true, sentMessageId: null, sideEffectsExecuted: false };
   }
 
   // Idempotência do envio — nunca reenviar uma key já SENT/PENDING.
   const existing = await getSendState(input.idempotencyKey);
   if (existing && !canAttemptSend(existing)) {
     const reason: ActivePilotOutcomeReason = existing.status === "SENT" ? "ALREADY_SENT" : "SEND_IN_PROGRESS";
-    return { ran: false, reason, sendSuppressed: true, sentMessageId: existing.sentMessageId };
+    return { ran: false, reason, sendSuppressed: true, sentMessageId: existing.sentMessageId, sideEffectsExecuted: false };
   }
   await reservePending(input.idempotencyKey, input.conversationId);
 
@@ -118,21 +135,63 @@ export async function runActivePilotObservation(input: ActivePilotInput): Promis
       await saveCatalogDraft(result.mergedDraft);
     }
 
-    // Mais estrito que o shadow: só envia o texto EXATAMENTE como o redator
-    // produziu quando o validador aprova — nunca o texto saneado de fallback.
-    if (!result.outputValidation?.valid || !result.rawHypotheticalText) {
-      await markFailed(input.idempotencyKey, "VALIDATOR_REJECTED");
-      console.log("[active_pilot_runner] envio suprimido:", JSON.stringify({ ...logBase, reason: "VALIDATOR_REJECTED", violations: result.outputValidation?.violations ?? [] }));
-      return { ran: true, reason: "VALIDATOR_REJECTED", sendSuppressed: true, sentMessageId: null };
+    // Fase E.2.35 — side effect comercial real (orçamento + handoff), só
+    // quando o draft chegou a READY_CATALOG_DRAFT NESTE turno, ainda não
+    // foi promovido, e o gate comercial (separado de activePilotEnabled)
+    // autoriza explicitamente esta conversationId. Fora desse caso, o
+    // texto/validação seguem exatamente como o pipeline puro já decidiu
+    // (READY_FOR_QUOTE_REVIEW, neutro — comportamento inalterado).
+    let sideEffectsExecuted = false;
+    let finalRawText = result.rawHypotheticalText;
+    let finalValidation = result.outputValidation;
+
+    if (result.mergedDraft && result.mergedDraft.qualificationStatus === "READY_CATALOG_DRAFT" && !result.mergedDraft.promovido) {
+      const commercialElig = await commercialSideEffectsEligibilityForConversation(input.conversationId);
+      if (commercialElig.reason === "ELIGIBLE") {
+        const sideEffectResult = await executeReadyCatalogDraftSideEffects({
+          conversationId: input.conversationId,
+          organizationId: input.organizationId,
+          channelPhone: input.channelPhone,
+          catalogGroups,
+          draft: result.mergedDraft,
+        });
+        console.log("[active_pilot_runner] side effect comercial:", JSON.stringify({ ...logBase, ...sideEffectResult }));
+
+        if (sideEffectResult.executed) {
+          // Só agora — draft real criado/reconhecido E handoff real com
+          // sucesso — o texto REQUEST_QUOTE_REVIEW passa a ser factual.
+          // Nunca via runShadowPipeline (que é puro e nunca pode afirmar
+          // sideEffectsExecuted=true) — recomputado diretamente aqui.
+          sideEffectsExecuted = true;
+          const qualification = { qualificationStatus: result.mergedDraft.qualificationStatus, missingFields: result.mergedDraft.missingFields };
+          const { nextAction, questionContext } = computeNextAction(qualification, {
+            groupName: result.mergedDraft.catalogGroupId ?? undefined,
+            catalogDraftCreatedThisCall: true,
+          });
+          const redactionInput: RedactionInput = { mode: "COMMERCIAL_INTENT", questionAllowed: true, factsAllowed: [], nextAction, questionContext };
+          finalRawText = defaultTemplateRedactor(redactionInput);
+          finalValidation = validateOutput(finalRawText, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: true });
+        }
+      } else {
+        console.log("[active_pilot_runner] side effect comercial não autorizado:", JSON.stringify({ ...logBase, reason: commercialElig.reason }));
+      }
     }
 
-    const sendResult = await sendChatvoltMessage(input.conversationId, result.rawHypotheticalText);
+    // Mais estrito que o shadow: só envia o texto EXATAMENTE como o redator
+    // produziu quando o validador aprova — nunca o texto saneado de fallback.
+    if (!finalValidation?.valid || !finalRawText) {
+      await markFailed(input.idempotencyKey, "VALIDATOR_REJECTED");
+      console.log("[active_pilot_runner] envio suprimido:", JSON.stringify({ ...logBase, reason: "VALIDATOR_REJECTED", violations: finalValidation?.violations ?? [] }));
+      return { ran: true, reason: "VALIDATOR_REJECTED", sendSuppressed: true, sentMessageId: null, sideEffectsExecuted };
+    }
+
+    const sendResult = await sendChatvoltMessage(input.conversationId, finalRawText);
     await markSent(input.idempotencyKey, sendResult.id);
-    console.log("[active_pilot_runner] enviado:", JSON.stringify({ ...logBase, mode: result.mode, sentMessageId: sendResult.id }));
-    return { ran: true, reason: "SENT", sendSuppressed: false, sentMessageId: sendResult.id };
+    console.log("[active_pilot_runner] enviado:", JSON.stringify({ ...logBase, mode: result.mode, sentMessageId: sendResult.id, sideEffectsExecuted }));
+    return { ran: true, reason: "SENT", sendSuppressed: false, sentMessageId: sendResult.id, sideEffectsExecuted };
   } catch (e) {
     await markFailed(input.idempotencyKey, (e as Error).message?.slice(0, 200) ?? "unknown");
     console.error("[active_pilot_runner] falha (não bloqueia webhook real):", JSON.stringify({ ...logBase, error: (e as Error).message }));
-    return { ran: true, reason: "SEND_ERROR", sendSuppressed: true, sentMessageId: null };
+    return { ran: true, reason: "SEND_ERROR", sendSuppressed: true, sentMessageId: null, sideEffectsExecuted: false };
   }
 }
