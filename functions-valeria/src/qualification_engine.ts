@@ -34,6 +34,16 @@ export type NextAction =
   | "ASK_QUANTITY"
   | "CONTINUE_CUSTOM_TECHNICAL_BRIEFING" // conversa — backend já seedou o TechnicalBriefing nesta chamada, só falta perguntar o resto
   | "REQUEST_QUOTE_REVIEW" // backend JÁ criou o rascunho e JÁ acionou o handoff — LLM só avisa o cliente
+  /**
+   * Fase E.2.27 — dados comerciais completos (produto+tamanho+quantidade),
+   * MAS nenhuma ação real de backend ainda ocorreu nesta chamada
+   * (`catalogDraftCreatedThisCall` ausente/false — ex.: shadow/piloto
+   * observacional, que nunca cria rascunho nem aciona handoff). Distinto
+   * de REQUEST_QUOTE_REVIEW: o LLM NUNCA deve dizer que algo foi
+   * "deixado pronto"/"enviado para revisão"/"a equipe vai confirmar" —
+   * só reconhecer que os dados foram completados.
+   */
+  | "READY_FOR_QUOTE_REVIEW"
   | "ESCALATE_UNSUPPORTED"
   /**
    * Fase D.2.2 — backend JÁ acionou a revisão humana com motivo
@@ -130,9 +140,18 @@ export function computeNextAction(
       };
 
     case "READY_CATALOG_DRAFT":
-      // Backend já criou o rascunho + já acionou QUOTE_REVIEW (catalog_tools.ts)
-      // antes de chegar aqui — nextAction é só "avise o cliente", não "crie o rascunho".
-      return { nextAction: "REQUEST_QUOTE_REVIEW", questionContext: { productName: context.matchedProductName ?? null } };
+      // Fase E.2.27 — REQUEST_QUOTE_REVIEW só pode ser emitido como ação
+      // CONSUMADA quando o chamador confirma, via
+      // `catalogDraftCreatedThisCall`, que o rascunho+handoff JÁ foram
+      // acionados NESTA MESMA chamada (é isso que catalog_tools.ts faz
+      // antes de chegar aqui). Sem essa confirmação (ex.: shadow_pipeline.ts,
+      // que nunca cria rascunho nem aciona handoff), os dados estão
+      // completos mas nenhuma ação real ocorreu — READY_FOR_QUOTE_REVIEW
+      // é neutro, nunca afirma execução que não aconteceu.
+      if (context.catalogDraftCreatedThisCall) {
+        return { nextAction: "REQUEST_QUOTE_REVIEW", questionContext: { productName: context.matchedProductName ?? null } };
+      }
+      return { nextAction: "READY_FOR_QUOTE_REVIEW", questionContext: { productName: context.matchedProductName ?? null } };
 
     case "READY_FOR_PRODUCT_MAPPING_REVIEW":
       // Fase D.2.2 — backend já acionou a revisão humana (PRODUCT_MAPPING_REQUIRED),

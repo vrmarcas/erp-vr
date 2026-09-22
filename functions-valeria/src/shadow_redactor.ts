@@ -40,6 +40,11 @@ const QUESTION_BY_NEXT_ACTION: Partial<Record<NextAction, (ctx: QuestionContext)
 const STATEMENT_BY_NEXT_ACTION: Partial<Record<NextAction, (ctx: QuestionContext) => string>> = {
   CONTINUE_CUSTOM_TECHNICAL_BRIEFING: () => "Anotei seu pedido personalizado, já vamos seguir com os próximos detalhes.",
   REQUEST_QUOTE_REVIEW: (ctx) => `Deixei tudo pronto${ctx.productName ? ` para ${ctx.productName}` : ""} — nossa equipe vai revisar e confirmar o orçamento.`,
+  // Fase E.2.27 — dados completos, mas NENHUMA ação real de backend
+  // ocorreu ainda (ver computeNextAction/READY_CATALOG_DRAFT). Nunca
+  // afirmar "pronto"/"enviei"/"equipe vai revisar" aqui — só reconhecer
+  // que os dados foram completados.
+  READY_FOR_QUOTE_REVIEW: () => "Perfeito, já tenho as informações necessárias.",
   REQUEST_PRODUCT_MAPPING_REVIEW: () => "Já registrei seu pedido — nossa equipe vai confirmar os detalhes desse modelo.",
   ESCALATE_UNSUPPORTED: () => "Vou verificar essa possibilidade com a equipe e já te retorno.",
 };

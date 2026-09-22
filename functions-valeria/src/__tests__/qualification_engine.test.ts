@@ -97,8 +97,21 @@ describe("computeNextAction — backend decide o que falta, sem texto pronto", (
     expect(r.nextAction).not.toBe("ESCALATE_UNSUPPORTED");
   });
 
-  test("READY_CATALOG_DRAFT → REQUEST_QUOTE_REVIEW (backend já criou o rascunho, não pede pro LLM criar)", () => {
-    expect(computeNextAction({ qualificationStatus: "READY_CATALOG_DRAFT", missingFields: [] }).nextAction).toBe("REQUEST_QUOTE_REVIEW");
+  test("READY_CATALOG_DRAFT + catalogDraftCreatedThisCall=true → REQUEST_QUOTE_REVIEW (backend já criou o rascunho, não pede pro LLM criar)", () => {
+    expect(
+      computeNextAction({ qualificationStatus: "READY_CATALOG_DRAFT", missingFields: [] }, { catalogDraftCreatedThisCall: true }).nextAction
+    ).toBe("REQUEST_QUOTE_REVIEW");
+  });
+
+  test("Fase E.2.27 — READY_CATALOG_DRAFT SEM catalogDraftCreatedThisCall → READY_FOR_QUOTE_REVIEW, NUNCA REQUEST_QUOTE_REVIEW (dados completos ≠ ação já executada)", () => {
+    const r = computeNextAction({ qualificationStatus: "READY_CATALOG_DRAFT", missingFields: [] });
+    expect(r.nextAction).toBe("READY_FOR_QUOTE_REVIEW");
+    expect(r.nextAction).not.toBe("REQUEST_QUOTE_REVIEW");
+  });
+
+  test("Fase E.2.27 — READY_CATALOG_DRAFT + catalogDraftCreatedThisCall=false (explícito) → também READY_FOR_QUOTE_REVIEW", () => {
+    const r = computeNextAction({ qualificationStatus: "READY_CATALOG_DRAFT", missingFields: [] }, { catalogDraftCreatedThisCall: false });
+    expect(r.nextAction).toBe("READY_FOR_QUOTE_REVIEW");
   });
 
   test("QUALIFYING_CATALOG sem grupo → ASK_MODEL; com grupo sem tamanho → ASK_SIZE; com produto sem quantidade → ASK_QUANTITY", () => {

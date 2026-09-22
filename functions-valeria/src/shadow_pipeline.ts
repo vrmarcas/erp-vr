@@ -187,7 +187,7 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
       factsAllowed: facts,
     };
     const rawHypotheticalText = redactor(redactionInput);
-    const outputValidation = validateOutput(rawHypotheticalText, { questionAllowed: false, factsAllowed: facts });
+    const outputValidation = validateOutput(rawHypotheticalText, { questionAllowed: false, factsAllowed: facts, sideEffectsExecuted: false });
     return shadowResultBase(input.conversationId, classification.classification, {
       classification,
       redactionInput,
@@ -244,7 +244,7 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
     questionContext,
   };
   const rawHypotheticalText = redactor(redactionInput);
-  const outputValidation = validateOutput(rawHypotheticalText, { questionAllowed: true, factsAllowed: [] });
+  const outputValidation = validateOutput(rawHypotheticalText, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: false });
 
   return shadowResultBase(input.conversationId, "COMMERCIAL_INTENT", {
     classification: effectiveClassification,

@@ -109,13 +109,24 @@ const PULPITO_10MM_COPO: CatalogGroup = {
   tamanhos: [],
 };
 
-function turno(draft: CatalogDraft, signals: ResolutionSignals, groups: CatalogGroup[], fieldUpdate: Partial<CatalogDraft["fields"]> = {}) {
+function turno(
+  draft: CatalogDraft,
+  signals: ResolutionSignals,
+  groups: CatalogGroup[],
+  fieldUpdate: Partial<CatalogDraft["fields"]> = {},
+  contextOverrides: { catalogDraftCreatedThisCall?: boolean } = {}
+) {
   const resolution = resolveProductMatch(signals, groups);
   const novoDraft = mergeSignalsIntoDraft(draft, resolution, { quantity: null, customDimensions: null, personalization: [], desiredDeadline: null, deliveryData: null, ...fieldUpdate }, "CUSTOMER");
   const qualification = computeQualificationState(novoDraft);
   novoDraft.qualificationStatus = qualification.qualificationStatus;
   novoDraft.missingFields = qualification.missingFields;
-  const { nextAction } = computeNextAction(qualification, { groupName: resolution.catalogGroupId ?? undefined });
+  // Fase E.2.27: catalogDraftCreatedThisCall representa o que a Tool REAL
+  // (catalog_tools.ts) já teria executado antes de chamar computeNextAction
+  // — este helper só simula a camada de decisão pura, então cada teste
+  // passa explicitamente esse contexto quando quer representar "a Tool já
+  // criou o rascunho e acionou o handoff nesta chamada".
+  const { nextAction } = computeNextAction(qualification, { groupName: resolution.catalogGroupId ?? undefined, ...contextOverrides });
   return { draft: novoDraft, resolution, qualification, nextAction };
 }
 
@@ -134,14 +145,18 @@ describe("Cenário A — Caixa com SKU (fluxo completo até QUOTE_REVIEW)", () =
     expect(t.resolution.matchedProductSku).toBe("C4TC3M");
     expect(t.nextAction).toBe("ASK_QUANTITY");
 
-    t = turno(draft, { groupNameOrAlias: "tampa de correr", catalogSizeLabel: "M", contextCatalogGroupId: draft.catalogGroupId, contextMatchedProductId: draft.matchedProductId, contextMatchedProductSku: draft.matchedProductSku }, [CAIXA_TAMPA_CORRER], { quantity: 10 });
+    t = turno(draft, { groupNameOrAlias: "tampa de correr", catalogSizeLabel: "M", contextCatalogGroupId: draft.catalogGroupId, contextMatchedProductId: draft.matchedProductId, contextMatchedProductSku: draft.matchedProductSku }, [CAIXA_TAMPA_CORRER], { quantity: 10 }, { catalogDraftCreatedThisCall: true });
     draft = t.draft;
 
     // Estado final: pronto para a Tool executar a transição determinística
     // (createVitreDraftIfNotExists + requestQuoteReview) — testado
     // separadamente em vitre_draft_writer_parity.test.ts (contrato do
     // rascunho) e human_handoff (chamada ao endpoint real). Aqui provamos
-    // que a CAMADA DE DECISÃO chega exatamente a este estado.
+    // que a CAMADA DE DECISÃO chega exatamente a este estado — e
+    // `catalogDraftCreatedThisCall: true` representa a Tool REAL já tendo
+    // executado o rascunho+handoff nesta mesma chamada (Fase E.2.27:
+    // REQUEST_QUOTE_REVIEW só é emitido como ação consumada quando isso é
+    // verdade — sem isso, o resultado correto seria READY_FOR_QUOTE_REVIEW).
     expect(draft.qualificationStatus).toBe("READY_CATALOG_DRAFT");
     expect(draft.fields.quantity).toBe(10);
     expect(t.nextAction).toBe("REQUEST_QUOTE_REVIEW");
@@ -186,7 +201,7 @@ describe("Cenário C — Troféu Modelo 11 (catálogo V2, NUNCA hardcode V1 Go!J
     expect(t.nextAction).toBe("ASK_QUANTITY");
 
     // Turno 2: personalização comercial (logo + nome) NÃO muda resolutionType nem SKU
-    t = turno(draft, { groupNameOrAlias: "modelo 11", contextCatalogGroupId: draft.catalogGroupId, contextMatchedProductId: draft.matchedProductId, contextMatchedProductSku: draft.matchedProductSku }, [TROFEU_MODELO_11], { quantity: 1, personalization: ["logo_evento", "nome_joao"] });
+    t = turno(draft, { groupNameOrAlias: "modelo 11", contextCatalogGroupId: draft.catalogGroupId, contextMatchedProductId: draft.matchedProductId, contextMatchedProductSku: draft.matchedProductSku }, [TROFEU_MODELO_11], { quantity: 1, personalization: ["logo_evento", "nome_joao"] }, { catalogDraftCreatedThisCall: true });
     draft = t.draft;
     expect(draft.matchedProductId).toBe("TFMOD10"); // SKU nunca muda por personalização comercial
     expect(draft.qualificationStatus).toBe("READY_CATALOG_DRAFT");

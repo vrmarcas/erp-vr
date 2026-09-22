@@ -134,7 +134,14 @@ describe("runShadowPipeline — COMMERCIAL_INTENT (reaproveita product_resolutio
       })
     );
     expect(second.qualification?.qualificationStatus).toBe("READY_CATALOG_DRAFT");
-    expect(second.nextAction).toBe("REQUEST_QUOTE_REVIEW");
+    // Fase E.2.27: runShadowPipeline NUNCA executa o side effect real (cria
+    // rascunho/aciona handoff) — por isso NUNCA pode emitir REQUEST_QUOTE_REVIEW
+    // (que afirmaria uma ação já executada). Dados completos → READY_FOR_QUOTE_REVIEW,
+    // que reconhece o estado sem alegar ação backend que não ocorreu (achado real
+    // do Piloto 4, Fase E.2.26: o texto de REQUEST_QUOTE_REVIEW chegou a ser
+    // enviado a um cliente real afirmando algo falso).
+    expect(second.nextAction).toBe("READY_FOR_QUOTE_REVIEW");
+    expect(second.nextAction).not.toBe("REQUEST_QUOTE_REVIEW");
   });
 });
 
@@ -146,7 +153,16 @@ describe("runShadowPipeline — idempotência", () => {
     });
     const a = runShadowPipeline(input);
     const b = runShadowPipeline(input);
-    expect(a).toEqual(b);
+    // mergedDraft.createdAt/updatedAt vêm de Date.now() no momento de cada
+    // chamada — podem divergir por 1ms de wall-clock real entre `a` e `b`
+    // mesmo com entrada idêntica; isso não é o que este teste quer provar
+    // (idempotência LÓGICA da decisão, não do relógio), então os dois
+    // timestamps são ignorados na comparação.
+    const stripTimestamps = (r: typeof a) => ({
+      ...r,
+      mergedDraft: r.mergedDraft ? { ...r.mergedDraft, createdAt: 0, updatedAt: 0 } : null,
+    });
+    expect(stripTimestamps(a)).toEqual(stripTimestamps(b));
   });
 });
 

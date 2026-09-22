@@ -61,6 +61,63 @@ describe("validateOutput — questionAllowed=true (COMMERCIAL_INTENT)", () => {
   });
 });
 
+// ── Fase E.2.27 — "mentira operacional": afirmação de ação já executada ────
+describe("validateOutput — sideEffectsExecuted=false bloqueia afirmação de ação já executada", () => {
+  test("CASO B — 'Deixei tudo pronto — nossa equipe vai revisar e confirmar o orçamento.' + sideEffectsExecuted=false → REPROVADO", () => {
+    const bad = "Deixei tudo pronto — nossa equipe vai revisar e confirmar o orçamento.";
+    const r = validateOutput(bad, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: false });
+    expect(r.valid).toBe(false);
+    expect(r.violations.length).toBeGreaterThan(0);
+    expect(r.sanitizedText).not.toBe(bad);
+  });
+
+  test("CASO C — 'Perfeito, já tenho as informações necessárias.' + sideEffectsExecuted=false → PASS", () => {
+    const good = "Perfeito, já tenho as informações necessárias.";
+    const r = validateOutput(good, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: false });
+    expect(r.valid).toBe(true);
+    expect(r.violations).toEqual([]);
+    expect(r.sanitizedText).toBe(good);
+  });
+
+  test("outras variações da mesma classe de mentira operacional são pegas (padrão semântico, não frase exata)", () => {
+    const casos: Array<[string, boolean]> = [
+      ["Já enviei para a revisão da equipe.", false],
+      ["Nossa equipe vai revisar seu pedido em breve.", false],
+      ["Seu orçamento está sendo preparado agora.", false],
+      ["Já encaminhei tudo para análise.", false],
+      ["Vamos confirmar o seu orçamento em instantes.", false],
+      ["Já registrei seu pedido no sistema.", false],
+      ["O rascunho foi criado com sucesso.", false],
+      // controles positivos — não devem disparar o padrão
+      ["Perfeito, já tenho as informações necessárias.", true],
+      ["Quantas unidades você precisa?", true],
+    ];
+    for (const [texto, deveSerValido] of casos) {
+      const r = validateOutput(texto, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: false });
+      expect(r.valid).toBe(deveSerValido);
+    }
+  });
+
+  test("CASO E — o MESMO texto factual passa quando sideEffectsExecuted=true (ação realmente ocorreu)", () => {
+    const texto = "Deixei tudo pronto — nossa equipe vai revisar e confirmar o orçamento.";
+    const r = validateOutput(texto, { questionAllowed: true, factsAllowed: [], sideEffectsExecuted: true });
+    expect(r.valid).toBe(true);
+    expect(r.sanitizedText).toBe(texto);
+  });
+
+  test("sideEffectsExecuted omitido (undefined) não aplica esta checagem — compatibilidade retroativa", () => {
+    const texto = "Deixei tudo pronto — nossa equipe vai revisar e confirmar o orçamento.";
+    const r = validateOutput(texto, { questionAllowed: true, factsAllowed: [] });
+    expect(r.valid).toBe(true);
+  });
+
+  test("checagem de ação-executada independe de questionAllowed (também bloqueia em modo EXPLORATORY/AMBIGUOUS)", () => {
+    const bad = "Já registrei seu pedido no sistema.";
+    const r = validateOutput(bad, { questionAllowed: false, factsAllowed: ["fato seguro."], sideEffectsExecuted: false });
+    expect(r.valid).toBe(false);
+  });
+});
+
 describe("validateOutput — determinismo", () => {
   test("mesma entrada produz sempre a mesma saída", () => {
     const args: [string, { questionAllowed: boolean; factsAllowed: string[] }] = [
