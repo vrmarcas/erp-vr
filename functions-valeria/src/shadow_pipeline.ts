@@ -163,8 +163,18 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
   const hasActiveCommercialThread =
     !!input.priorDraft?.catalogGroupId &&
     !["READY_CATALOG_DRAFT", "ROUTED_TO_CUSTOM", "UNSUPPORTED", "READY_FOR_PRODUCT_MAPPING_REVIEW"].includes(input.priorDraft.qualificationStatus);
+  // Correção de campo (ex.: "na verdade, 20 unidades") sobre um produto JÁ
+  // resolvido em turno anterior — quantidade sozinha não conta como "sinal
+  // de produto" (não deve reabrir resoluções em turnos que só trazem
+  // quantidade/prazo), mas conta como continuidade quando o draft anterior
+  // já tem um produto concreto selecionado, mesmo que o status já seja
+  // terminal (READY_CATALOG_DRAFT) — corrigir quantidade num draft já
+  // pronto é legítimo, `promovido` continua false até a promoção real.
+  const hasQuantitySignalThisTurn = (input.fieldUpdate ?? {}).quantity != null;
+  const hasResolvedProductInPriorDraft = !!input.priorDraft?.matchedProductId;
   const effectiveClassification =
-    classification.classification === "AMBIGUOUS" && (hasProductSignalThisTurn || hasActiveCommercialThread)
+    classification.classification === "AMBIGUOUS" &&
+    (hasProductSignalThisTurn || hasActiveCommercialThread || (hasQuantitySignalThisTurn && hasResolvedProductInPriorDraft))
       ? { ...classification, classification: "COMMERCIAL_INTENT" as const, reasonCode: "CONTINUATION_OF_ACTIVE_DRAFT" }
       : classification;
 
@@ -199,8 +209,24 @@ export function runShadowPipeline(input: ShadowInput): ShadowResult {
   // resolvido em turno anterior com um AMBIGUOUS espúrio.
   const resolution = hasProductSignalThisTurn ? resolveProductMatch(signals, input.catalogGroups) : null;
   const fieldUpdate: FieldUpdate = input.fieldUpdate ?? {};
-  const mergedDraft = mergeSignalsIntoDraft(draft, resolution, fieldUpdate, "CUSTOMER");
-  const qualification = computeQualificationState(mergedDraft);
+  const mergedDraftBeforeQualification = mergeSignalsIntoDraft(draft, resolution, fieldUpdate, "CUSTOMER");
+  const qualification = computeQualificationState(mergedDraftBeforeQualification);
+  // Fase E.2.25 — `mergeSignalsIntoDraft` nunca escrevia de volta o
+  // resultado de `computeQualificationState` no próprio objeto do draft;
+  // o draft PERSISTIDO ficava com `qualificationStatus`/`missingFields`
+  // desatualizados (sempre o que o draft ANTERIOR já tinha), mesmo que o
+  // `nextAction`/texto deste turno estivessem corretos (calculados a
+  // partir da variável `qualification` em memória, não do draft). Ponto
+  // corrigido aqui — o ÚNICO lugar que monta `mergedDraft` para TODOS os
+  // consumidores (active_pilot_runner.ts persiste; shadow_runner.ts só
+  // observa) — nunca em cada chamador separadamente. Invariante:
+  // mergedDraft.qualificationStatus === qualification.qualificationStatus
+  // e mergedDraft.missingFields === qualification.missingFields, sempre.
+  const mergedDraft: CatalogDraft = {
+    ...mergedDraftBeforeQualification,
+    qualificationStatus: qualification.qualificationStatus,
+    missingFields: qualification.missingFields,
+  };
 
   const nextActionCtx: NextActionContext = {
     groupName: mergedDraft.catalogGroupId ?? undefined,
