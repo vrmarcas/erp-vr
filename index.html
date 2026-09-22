@@ -26120,8 +26120,14 @@ function vitreOrcListenerInit() {
       var temPermissao = (vitreCatMinhaFuncao() === 'comercial' || vitreCatSouMaster());
       var podeContinuar = o.status === 'rascunho' && temPermissao;
       var podeConverter = temPermissao && ['venda_confirmada', 'pagamento_pendente', 'pagamento_parcial', 'pago'].indexOf(o.status) >= 0 && !o.osId;
+      // Fase E.2.38, item 4 — referência curta e discreta ao atendimento de
+      // origem, só quando existir (rascunhos manuais não têm
+      // conversationId) — facilita auditoria/associação manual sem poluir
+      // a linha; não é um link clicável nem substitui a ponte do painel de
+      // Atendimentos (essa já abre direto no rascunho certo).
+      var vConvRef = o.conversationId ? '<span style="font-size:9.5px;color:var(--muted)" title="' + cfgEsc(o.conversationId) + '">Conversa: ' + cfgEsc(o.conversationId.slice(0, 8)) + '…</span>' : '';
       return '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border-radius:8px;padding:9px 12px;font-size:12px;flex-wrap:wrap;gap:6px">'
-        + '<span>' + cfgEsc(o.clienteNome || '') + ' — ' + (o.itens || []).length + ' item(ns) — <strong>' + orcFmt(o.total || 0) + '</strong></span>'
+        + '<span>' + cfgEsc(o.clienteNome || '') + ' — ' + (o.itens || []).length + ' item(ns) — <strong>' + orcFmt(o.total || 0) + '</strong>' + (vConvRef ? ' · ' + vConvRef : '') + '</span>'
         + '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
         + '<span style="background:' + VITRE_ORC_STATUS_COLOR[o.status] + '22;color:' + VITRE_ORC_STATUS_COLOR[o.status] + ';padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">' + (VITRE_ORC_STATUS_LABEL[o.status] || o.status) + '</span>'
         + (o.status === 'convertido' && o.osId ? '<span style="font-size:10px;color:var(--muted)">OS ' + o.osId.slice(0, 6) + '</span>' : '')
@@ -35705,6 +35711,14 @@ var ATD_ORC_PENDENTE_ID = null; // Sprint P1.3 — orçamento Valéria aguardand
 // etc.) extraído pela ValerIA durante a conversa, ver atdBriefingListenerInit.
 var ATD_BRIEFING_UNSUB = null;
 var ATD_BRIEFING_CACHE = null;
+// Fase E.2.38 — rascunho vitre_orcamentos (origem valeria_v2) correspondente
+// ao atendimento selecionado, se existir. Busca one-shot (não listener —
+// item 7 do pedido: só refaz quando o atendimento selecionado muda), nunca
+// escreve atendimentos.orcamentoId (esse campo pertence ao modelo legado
+// erp_vr/orcamentos — ver investigação da Fase E.2.37). O vínculo real é
+// vitre_orcamentos.conversationId === atendimento.id.
+var ATD_VALERIA_ORC_CACHE = null;
+var ATD_VALERIA_ORC_ATENDIMENTO_ID = null; // atendimentoId ao qual ATD_VALERIA_ORC_CACHE pertence — guarda contra corrida (troca de atendimento com a consulta ainda em voo)
 
 function atdSouMaster(){ return typeof _currentSession!=='undefined' && _currentSession && _currentSession.funcao==='master'; }
 
@@ -35920,6 +35934,7 @@ function atdSelecionar(id){
   atdRenderPainel(atd);
   atdMsgListenerInit(id);
   atdBriefingListenerInit(id);
+  atdValeriaOrcInit(id);
 }
 
 function atdMobileVoltar(){
@@ -35931,6 +35946,8 @@ function atdFecharThread(){
   if(ATD_MSG_UNSUB){ ATD_MSG_UNSUB(); ATD_MSG_UNSUB=null; }
   if(ATD_BRIEFING_UNSUB){ ATD_BRIEFING_UNSUB(); ATD_BRIEFING_UNSUB=null; }
   ATD_BRIEFING_CACHE = null;
+  ATD_VALERIA_ORC_CACHE = null;
+  ATD_VALERIA_ORC_ATENDIMENTO_ID = null;
   document.getElementById('atdThreadEmpty').style.display = '';
   document.getElementById('atdThreadActive').style.display = 'none';
 }
@@ -35956,6 +35973,60 @@ function atdBriefingListenerInit(atendimentoId){
     console.warn('[Atendimentos] briefing indisponível (regra ainda não deployada ou sem dado):', e && e.code);
     ATD_BRIEFING_CACHE = null;
   });
+}
+
+// Fase E.2.38 — ponte visual atendimento → rascunho ValerIA V2. Busca
+// one-shot (nunca listener — item 7 do pedido: só refaz quando o
+// atendimento selecionado muda, não a cada render). Nunca escreve
+// atendimentos.orcamentoId (campo do modelo legado erp_vr/orcamentos,
+// incompatível — ver Fase E.2.37); o vínculo é sempre
+// vitre_orcamentos.conversationId === atendimentoId, lido aqui.
+function atdValeriaOrcInit(atendimentoId){
+  ATD_VALERIA_ORC_CACHE = null;
+  ATD_VALERIA_ORC_ATENDIMENTO_ID = null;
+  if(typeof _db==='undefined' || !_db) return;
+  _db.collection('vitre_orcamentos')
+    .where('conversationId', '==', atendimentoId)
+    .where('status', '==', 'rascunho')
+    .where('origem', '==', 'valeria_v2')
+    .get()
+    .then(function(snap){
+      if(ATD_SELECTED_ID!==atendimentoId) return; // atendimento trocou enquanto a consulta estava em voo — descarta
+      var docs = snap.docs.map(function(d){ return d.data(); });
+      var escolhido = null;
+      if(docs.length===1){
+        escolhido = docs[0];
+      } else if(docs.length>1){
+        // O writer usa doc id determinístico por conversationId (Fase
+        // E.2.35) — mais de 1 nunca é esperado. Se acontecer, nunca
+        // escolhe arbitrariamente: só aceita o doc com o id determinístico
+        // exato; senão registra warning e não mostra vínculo ambíguo.
+        var esperadoId = 'valeria2_catalog_' + atendimentoId;
+        escolhido = docs.find(function(o){ return o.id === esperadoId; }) || null;
+        if(!escolhido){
+          console.warn('[Atendimentos] múltiplos rascunhos ValerIA ambíguos para ' + atendimentoId + ' — nenhum vínculo mostrado.');
+        }
+      }
+      ATD_VALERIA_ORC_CACHE = escolhido;
+      ATD_VALERIA_ORC_ATENDIMENTO_ID = atendimentoId;
+      var atdAtual = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+      if(atdAtual) atdRenderPainel(atdAtual);
+    })
+    .catch(function(e){
+      console.warn('[Atendimentos] rascunho ValerIA indisponível (regra ainda não deployada ou sem dado):', e && e.code);
+      ATD_VALERIA_ORC_CACHE = null;
+    });
+}
+
+// Abre o wizard Vitre JÁ EXISTENTE para revisar um rascunho criado pela
+// ValerIA V2 — reutiliza 100% vitreOrcAbrirRascunho() (nunca duplica
+// lógica de edição de orçamento), mesmo padrão de navegação cross-página
+// já usado por atdRevisarCriarOrcamento() (nav('orcamento', null)).
+function atdAbrirRascunhoValeria(orcamentoId){
+  nav('orcamento', null);
+  setTimeout(function(){
+    if(typeof vitreOrcAbrirRascunho==='function') vitreOrcAbrirRascunho(orcamentoId);
+  }, 300);
 }
 
 function atdRenderThreadHeader(atd){
@@ -36184,6 +36255,26 @@ function atdRenderPainel(atd){
   html += '<div class="atd-painel-row"><span>Cliente</span><span>'+(atd.clienteId?'vinculado':'não cadastrado')+'</span></div>';
   html += '<div class="atd-painel-row"><span>Orçamento</span><span>'+(atd.orcamentoId?'vinculado':'—')+'</span></div>';
   html += '</div>';
+  // Fase E.2.38 — banner do rascunho ValerIA V2 (vitre_orcamentos), SEM
+  // relação com o campo "Orçamento" do CRM acima (esse é o modelo legado
+  // erp_vr/orcamentos). Só aparece quando atdValeriaOrcInit() já resolveu
+  // para ESTE atendimento (guarda ATD_VALERIA_ORC_ATENDIMENTO_ID===atd.id
+  // — nunca mostra um resultado de um atendimento anterior ainda em
+  // memória). Ausência de rascunho: nada é renderizado aqui, sem banner
+  // vazio nem erro (item 5 do pedido).
+  if(ATD_VALERIA_ORC_CACHE && ATD_VALERIA_ORC_ATENDIMENTO_ID===atd.id){
+    var vDraft = ATD_VALERIA_ORC_CACHE;
+    var vItem = (vDraft.itens && vDraft.itens[0]) || {};
+    var vTotal = Number(vDraft.total||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    html += '<div class="atd-painel-sec" style="background:#EAF3F3;border-radius:8px;padding:10px 12px">';
+    html += '<h4>🧾 Orçamento ValerIA aguardando revisão</h4>';
+    html += '<div class="atd-painel-row"><span>Produto</span><span>'+cfgEsc(vItem.nomeSnapshot||'—')+'</span></div>';
+    html += '<div class="atd-painel-row"><span>Quantidade</span><span>'+cfgEsc(vItem.qtd!=null?String(vItem.qtd):'—')+'</span></div>';
+    html += '<div class="atd-painel-row"><span>Total</span><span>R$ '+vTotal+'</span></div>';
+    html += '<div class="atd-painel-row"><span>Status</span><span>rascunho</span></div>';
+    html += '<button onclick="atdAbrirRascunhoValeria(\''+cfgEsc(vDraft.id)+'\')" style="margin-top:8px;width:100%;border:none;background:#1E7A86;color:#fff;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:700;cursor:pointer">📋 Revisar orçamento</button>';
+    html += '</div>';
+  }
   html += '<div class="atd-painel-sec"><h4>Ações</h4><div class="atd-painel-actions">';
   // RODADA 9, Bloco G/I — a conversa não pode ficar isolada: liga
   // ATENDIMENTO → CONTATO → CLIENTE → LEAD/OPORTUNIDADE → ORÇAMENTO. Se já
