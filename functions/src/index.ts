@@ -96,6 +96,9 @@ export {
   vitreClassificarItensPedidoUnificado,
 } from "./vitre";
 
+// ── Envio real de orçamento Vitre pelo WhatsApp, direto do ERP (Fase E.2.43, 2026-09-22) ──
+export { sendVitreQuoteToConversation } from "./vitre_quote_send";
+
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 // Fase 0/1 Valéria×ChatVolt (2026-08-09): das 10 Functions v1 deste módulo,
 // 8 foram SUPERSEDIDAS em produção pelas versões v2 do codebase "valeria"

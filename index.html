@@ -2519,6 +2519,8 @@ function _authFirebaseError(code){
 }
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Fase E.2.43 — geração de PDF programático (envio de orçamento pelo WhatsApp direto do ERP). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -4153,6 +4155,7 @@ function _authFirebaseError(code){
                 <button class="topbar-btn" id="vitreOrcBtnSalvar" style="background:#1E7A86;border:none;color:#fff" onclick="_btnBusy(this,'Salvando…',6000); vitreOrcSalvar()">💾 Salvar Rascunho</button>
                 <button class="topbar-btn ghost ready-hide" id="vitreOrcBtnPdf" style="display:none" onclick="_btnBusy(this,'Gerando…',6000); vitreOrcGerarPDF()">🖨️ PDF Vitre</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnWA" style="display:none;background:#25D366;color:#fff" onclick="_btnBusy(this,'Gerando…',6000); vitreOrcEnviarWhatsApp()">📱 Preview WhatsApp</button>
+                <button class="topbar-btn" id="vitreOrcBtnEnviarWhatsApp" style="display:none;background:#25D366;border:none;color:#fff" onclick="vitreOrcAbrirModalEnvio()">📲 Enviar pelo WhatsApp</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnMarcarEnviado" style="display:none" onclick="_btnBusy(this,'Enviando…',6000); vitreOrcMarcarEnviado()">✓ Marcar como enviado</button>
                 <button class="topbar-btn ghost" id="vitreOrcBtnNovaVersao" style="display:none;border-color:#D97706;color:#D97706" onclick="vitreOrcNovaVersao()">✎ Revisar / Nova versão</button>
                 <button class="topbar-btn" id="vitreOrcBtnIrPagamento" style="display:none;background:#059669;border:none;color:#fff" onclick="vitreOrcStep(4)">Avançar → Pagamento</button>
@@ -4485,6 +4488,36 @@ function _authFirebaseError(code){
         <div style="display:flex;gap:10px;margin-top:16px">
           <button onclick="comissaoSalvarMetas()" style="flex:1;background:var(--brand-mid);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">💾 Salvar Metas</button>
           <button onclick="document.getElementById('comissaoMetaModal').style.display='none'" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fase E.2.43 — modal de confirmação de envio de orçamento Vitre pelo
+         WhatsApp (reutilizado pelo wizard E por Atendimentos — nunca
+         duplicado). Nada é enviado ao abrir; só no clique "Enviar agora". -->
+    <div id="vitreEnvioModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:4000;align-items:center;justify-content:center">
+      <div style="background:var(--card);border-radius:16px;padding:24px;width:92%;max-width:520px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">📲 Enviar orçamento pelo WhatsApp</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:16px">A mensagem e o PDF serão enviados pela mesma conversa do WhatsApp já vinculada — o cliente recebe direto, sem abrir WhatsApp Web.</div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Destinatário</div>
+        <div id="vitreEnvioDestinatario" style="font-size:13px;font-weight:700;margin-bottom:14px">—</div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Mensagem (editável)</div>
+        <textarea id="vitreEnvioMensagem" rows="6" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;margin-bottom:14px"></textarea>
+
+        <div style="background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:14px">
+          <div style="font-weight:700;margin-bottom:4px">Resumo do orçamento</div>
+          <div id="vitreEnvioResumo" style="color:var(--muted);line-height:1.6"></div>
+        </div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:16px">📎 Anexo: <span id="vitreEnvioNomeArquivo" style="font-weight:700">—</span></div>
+
+        <div id="vitreEnvioErro" style="display:none;color:#DC2626;font-size:11px;font-weight:700;margin-bottom:12px"></div>
+
+        <div style="display:flex;gap:10px">
+          <button id="vitreEnvioBtnEnviar" onclick="vitreOrcConfirmarEnvioWhatsApp()" style="flex:1;background:#25D366;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">Enviar agora</button>
+          <button onclick="vitreOrcFecharModalEnvio()" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
         </div>
       </div>
     </div>
@@ -25477,6 +25510,7 @@ function vitreOrcResetEstado() {
   var st = document.getElementById('vitreOrcClienteStatus'); if (st) st.textContent = 'Novo cliente';
   var pdf = document.getElementById('vitreOrcBtnPdf'); if (pdf) pdf.style.display = 'none';
   var wa = document.getElementById('vitreOrcBtnWA'); if (wa) wa.style.display = 'none';
+  var waE = document.getElementById('vitreOrcBtnEnviarWhatsApp'); if (waE) waE.style.display = 'none';
   var me = document.getElementById('vitreOrcBtnMarcarEnviado'); if (me) me.style.display = 'none';
   var nv = document.getElementById('vitreOrcBtnNovaVersao'); if (nv) nv.style.display = 'none';
   var ip = document.getElementById('vitreOrcBtnIrPagamento'); if (ip) ip.style.display = 'none';
@@ -25852,7 +25886,7 @@ function vitreOrcSalvar() {
       id: VITRE_ORC_ATUAL_ID, itens: itensPayload, descontoGlobal: descontoGlobal, frete: frete, acrescimoGlobal: acrescimoGlobal,
     }).then(function () {
       showToast('Rascunho atualizado — total ' + orcFmt(calc.totalCentavos / 100) + '.', 'ok');
-      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoGlobal: descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
+      VITRE_ORC_ULTIMO = { id: VITRE_ORC_ATUAL_ID, conversationId: (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.conversationId) || null, clienteNome: clienteNome, clienteTel: document.getElementById('vitreOrcClienteTel').value.trim(), observacoes: document.getElementById('vitreOrcObservacoes').value.trim(), itens: VITRE_ORC_ITENS.slice(), total: calc.totalCentavos / 100, subtotal: calc.subtotalCentavos / 100, acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100, descontoGlobal: descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: frete, prazoValidadeDias: prazoValidadeDias };
       vitreOrcAtualizarEstadoAtual();
     }).catch(function (e) { showToast('Erro ao atualizar rascunho: ' + ((e && e.message) || ''), 'err'); });
     return;
@@ -25875,7 +25909,7 @@ function vitreOrcSalvar() {
     showToast('Orçamento Vitre salvo — total ' + orcFmt(res.data.total || 0) + '.', 'ok');
     VITRE_ORC_ATUAL_ID = res.data.id;
     VITRE_ORC_ULTIMO = {
-      id: res.data.id, clienteNome: clienteNome, clienteTel: payload.clienteTel || '', itens: VITRE_ORC_ITENS.slice(),
+      id: res.data.id, conversationId: null, clienteNome: clienteNome, clienteTel: payload.clienteTel || '', observacoes: payload.observacoes || '', itens: VITRE_ORC_ITENS.slice(),
       total: res.data.total || (calc.totalCentavos / 100), subtotal: calc.subtotalCentavos / 100,
       acrescimosItensTotal: calc.acrescimosItensCentavos / 100, acrescimoGlobalTotal: calc.acrescimoGlobalCentavos / 100,
       descontoGlobal: payload.descontoGlobal, descontoPct: descontoPct, valorDesconto: calc.valorDescontoCentavos / 100, frete: payload.frete, prazoValidadeDias: payload.prazoValidadeDias,
@@ -25910,6 +25944,7 @@ function vitreOrcNovaVersao() {
     showToast('Nova versão criada (v' + res.data.versaoNova + ') — pode editar os itens de novo.', 'ok');
     document.getElementById('vitreOrcBtnPdf').style.display = 'none';
     document.getElementById('vitreOrcBtnWA').style.display = 'none';
+    document.getElementById('vitreOrcBtnEnviarWhatsApp').style.display = 'none';
     vitreOrcAtualizarEstadoAtual().then(function () { vitreOrcStep(2); });
   }).catch(function (e) {
     var msg = (e && e.message) || '';
@@ -26159,7 +26194,8 @@ function vitreOrcAbrirRascunho(id) {
     document.getElementById('vitreOrcVendedor').value = (typeof _currentSession !== 'undefined' && _currentSession && _currentSession.user) || '';
     document.getElementById('vitreOrcDataSolicitacao').value = o.criadoEm ? new Date(o.criadoEm).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
     // Snapshot original — NUNCA busca o preço atual do catálogo aqui.
-    VITRE_ORC_ITENS = (o.itens || []).map(function (it) { return { sku: it.sku, nome: it.nomeSnapshot, precoVenda: it.precoSnapshot, qtd: it.qtd, adicionais: it.adicionais || [], acrescimo: it.acrescimo || null }; });
+    // Fase E.2.43 — normalização extraída para vitreOrcNormalizarItensDoDoc (reutilizada pelo modal de envio de Atendimentos).
+    VITRE_ORC_ITENS = vitreOrcNormalizarItensDoDoc(o.itens);
     // P1.4 — reabertura: prioriza o objeto descontoGlobal{tipo,valor} novo;
     // documentos antigos (só descontoPct) são interpretados como percentual
     // — nunca perdem o valor salvo, nunca viram R$ por engano.
@@ -26176,10 +26212,15 @@ function vitreOrcAbrirRascunho(id) {
       document.getElementById('vitreOrcAcrescGlobalValor').value = o.acrescimoGlobal.valor || 0;
       document.getElementById('vitreOrcAcrescGlobalMotivo').value = o.acrescimoGlobal.motivo || '';
     }
-    VITRE_ORC_ULTIMO = { id: o.id, clienteNome: o.clienteNome, clienteTel: o.clienteTel, itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoGlobal: o.descontoGlobal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
+    VITRE_ORC_ULTIMO = { id: o.id, conversationId: o.conversationId || null, clienteNome: o.clienteNome, clienteTel: o.clienteTel, observacoes: o.observacoes || '', itens: VITRE_ORC_ITENS.slice(), total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal, descontoGlobal: o.descontoGlobal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete, prazoValidadeDias: o.prazoValidadeDias };
     VITRE_ORC_ATUAL = o;
     document.getElementById('vitreOrcBtnPdf').style.display = '';
     document.getElementById('vitreOrcBtnWA').style.display = '';
+    // Fase E.2.43 — "Enviar pelo WhatsApp" só aparece quando há uma
+    // conversationId real vinculada (orçamento nasceu de uma conversa
+    // ChatVolt) E ainda está em rascunho — nunca para orçamentos manuais
+    // sem conversa associada (não sabemos para onde mandar) nem já enviados.
+    document.getElementById('vitreOrcBtnEnviarWhatsApp').style.display = (o.conversationId && o.status === 'rascunho') ? '' : 'none';
     vitreOrcStep(2);
     vitreOrcRenderItens();
     showToast('Rascunho carregado — valores mantidos como salvos originalmente.', 'info');
@@ -26338,6 +26379,246 @@ function vitreOrcEnviarWhatsApp() {
   var url = 'https://wa.me/' + telNorm + '?text=' + encodeURIComponent(msg);
   var win = window.open('', '_blank');
   if (win) win.location.href = url;
+}
+
+// ════════════════════════════════════════════════════════════
+// Fase E.2.43 — envio real de orçamento Vitre pelo WhatsApp,
+// direto do ERP (texto + PDF, pela mesma conversationId do
+// atendimento). Reutiliza os MESMOS dados que já alimentam
+// vitreOrcGerarPDF/vitreOrcEnviarWhatsApp (VITRE_ORC_ULTIMO) —
+// nunca inventa campo novo. O modal (#vitreEnvioModal) é
+// compartilhado entre o wizard e o painel de Atendimentos —
+// nunca duplicado.
+// ════════════════════════════════════════════════════════════
+
+/** Mesma normalização já usada inline em vitreOrcAbrirRascunho — extraída para reuso (Atendimentos usa o mesmo doc cru). */
+function vitreOrcNormalizarItensDoDoc(itensDoc) {
+  return (itensDoc || []).map(function (it) { return { sku: it.sku, nome: it.nomeSnapshot, precoVenda: it.precoSnapshot, qtd: it.qtd, adicionais: it.adicionais || [], acrescimo: it.acrescimo || null }; });
+}
+/** Constrói o mesmo formato de VITRE_ORC_ULTIMO a partir de um doc cru de vitre_orcamentos — usado tanto ao reabrir o wizard quanto ao abrir o modal de envio direto de Atendimentos. */
+function vitreOrcBuildUltimoFromDoc(o) {
+  return {
+    id: o.id, conversationId: o.conversationId || null, clienteNome: o.clienteNome, clienteTel: o.clienteTel,
+    observacoes: o.observacoes || '', itens: vitreOrcNormalizarItensDoDoc(o.itens),
+    total: o.total, subtotal: o.subtotal, acrescimosItensTotal: o.acrescimosItensTotal, acrescimoGlobalTotal: o.acrescimoGlobalTotal,
+    descontoGlobal: o.descontoGlobal, descontoPct: o.descontoPct, valorDesconto: o.valorDesconto, frete: o.frete,
+    prazoValidadeDias: o.prazoValidadeDias, status: o.status,
+  };
+}
+
+/**
+ * generateVitreQuotePdf — PDF programático real (client-side, jsPDF), em
+ * vez de window.print(). Reproduz as MESMAS informações do PDF atual
+ * (vitreOrcGerarPDF): cliente, itens/SKU/qtd/unitário/subtotal, desconto,
+ * frete, total, validade, observações — nunca inventa dado novo. Nunca
+ * remove/substitui o botão "PDF Vitre" (window.print) existente — os dois
+ * convivem.
+ */
+function generateVitreQuotePdf(quote) {
+  var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if (!jsPDFCtor) throw new Error('jsPDF não carregado — não foi possível gerar o PDF.');
+  var brand = brandConfigGet('vitre');
+  var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
+  var pageWidth = doc.internal.pageSize.getWidth();
+  var marginX = 15;
+  var y = 18;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(30, 30, 30);
+  doc.text(brand.nome || 'VR Marcas', marginX, y);
+  doc.setFontSize(16); doc.text('ORÇAMENTO', pageWidth - marginX, y, { align: 'right' });
+  y += 6;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+  var dataHoje = new Date().toLocaleDateString('pt-BR');
+  doc.text('Nº ' + (quote.id || '').slice(0, 8) + '   Data: ' + dataHoje + '   Validade: ' + (quote.prazoValidadeDias || 7) + ' dias', pageWidth - marginX, y, { align: 'right' });
+  y += 4;
+  doc.setDrawColor(30, 122, 134); doc.setLineWidth(0.8); doc.line(marginX, y, pageWidth - marginX, y);
+  y += 9;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(30, 30, 30);
+  doc.text(String(quote.clienteNome || 'Cliente'), marginX, y);
+  y += 5;
+  if (quote.clienteTel) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+    doc.text('Tel: ' + quote.clienteTel, marginX, y);
+    y += 6;
+  } else { y += 3; }
+
+  doc.setFillColor(240, 240, 240);
+  doc.rect(marginX, y, pageWidth - marginX * 2, 7, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 100, 100);
+  doc.text('Produto', marginX + 2, y + 5);
+  doc.text('SKU', marginX + 88, y + 5);
+  doc.text('Qtd', marginX + 118, y + 5, { align: 'center' });
+  doc.text('Unit.', marginX + 145, y + 5, { align: 'right' });
+  doc.text('Subtotal', pageWidth - marginX - 2, y + 5, { align: 'right' });
+  y += 11;
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+  (quote.itens || []).forEach(function (it) {
+    var qtd = Number(it.qtd) || 0;
+    var unit = Number(it.precoVenda) || 0;
+    var adicC = (it.adicionais || []).reduce(function (s, a) { return s + (Number(a.preco) || 0); }, 0);
+    var totalItem = (unit + adicC) * qtd;
+    doc.text(String(it.nome || ''), marginX + 2, y);
+    doc.text(String(it.sku || ''), marginX + 88, y);
+    doc.text(String(qtd), marginX + 118, y, { align: 'center' });
+    doc.text('R$ ' + unit.toFixed(2), marginX + 145, y, { align: 'right' });
+    doc.text('R$ ' + totalItem.toFixed(2), pageWidth - marginX - 2, y, { align: 'right' });
+    y += 6;
+    if (it.adicionais && it.adicionais.length) {
+      doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
+      doc.text('+ ' + it.adicionais.map(function (a) { return a.nome; }).join(', '), marginX + 2, y);
+      doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+      y += 5;
+    }
+  });
+
+  y += 3;
+  doc.setDrawColor(220, 220, 220); doc.setLineWidth(0.3); doc.line(marginX, y, pageWidth - marginX, y);
+  y += 7;
+
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+  if (quote.valorDesconto) { doc.text('Desconto: - R$ ' + Number(quote.valorDesconto).toFixed(2), pageWidth - marginX, y, { align: 'right' }); y += 5; }
+  if (quote.frete) { doc.text('Frete: R$ ' + Number(quote.frete).toFixed(2), pageWidth - marginX, y, { align: 'right' }); y += 5; }
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(30, 30, 30);
+  doc.text('TOTAL: R$ ' + Number(quote.total || 0).toFixed(2), pageWidth - marginX, y, { align: 'right' });
+  y += 10;
+
+  if (quote.observacoes) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+    doc.text('Observações', marginX, y); y += 5;
+    doc.setFont('helvetica', 'normal');
+    var obsLines = doc.splitTextToSize(String(quote.observacoes), pageWidth - marginX * 2);
+    doc.text(obsLines, marginX, y);
+    y += obsLines.length * 5 + 4;
+  }
+
+  doc.setFontSize(7.5); doc.setTextColor(170, 170, 170);
+  doc.text('ESTE ORÇAMENTO NÃO TEM VALOR FISCAL · Válido por ' + (quote.prazoValidadeDias || 7) + ' dias a partir da emissão', marginX, 287);
+
+  var blob = doc.output('blob');
+  var fileName = 'orcamento_' + (quote.id || 'vitre').slice(0, 8) + '.pdf';
+  return { blob: blob, fileName: fileName, mimeType: 'application/pdf' };
+}
+
+function blobToBase64(blob) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onloadend = function () {
+      // reader.result é "data:application/pdf;base64,AAAA..." — só a parte após a vírgula.
+      var b64 = String(reader.result || '').split(',')[1] || '';
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+var VITRE_ENVIO_MODAL_QUOTE = null; // quote (formato VITRE_ORC_ULTIMO) atualmente aberto no modal de envio
+var VITRE_ENVIO_BUSY = false; // trava double-click/duplo Enter — reseta em qualquer caminho (sucesso ou erro)
+
+/**
+ * vitreOrcAbrirModalEnvio — abre o modal de confirmação (nada é enviado
+ * ainda). `quoteOverride` é usado pelo botão de Atendimentos (doc cru já
+ * normalizado por vitreOrcBuildUltimoFromDoc); sem argumento, usa
+ * VITRE_ORC_ULTIMO (chamado a partir do wizard).
+ */
+function vitreOrcAbrirModalEnvio(quoteOverride) {
+  var quote = quoteOverride || VITRE_ORC_ULTIMO;
+  if (!quote) { showToast('Salve/abra o orçamento antes de enviar.', 'err'); return; }
+  if (!quote.conversationId) { showToast('Este orçamento não está vinculado a uma conversa do WhatsApp — não é possível enviar por aqui.', 'err'); return; }
+  if (quote.status && quote.status !== 'rascunho') { showToast('Este orçamento já não está em rascunho — não pode ser reenviado por aqui.', 'err'); return; }
+  VITRE_ENVIO_MODAL_QUOTE = quote;
+
+  var brand = brandConfigGet('vitre');
+  var responsavel = (typeof orcGetResponsavel === 'function') ? orcGetResponsavel(brand.nome) : '';
+  var saudacao = (typeof orcSaudacaoHorario === 'function') ? orcSaudacaoHorario() : 'Olá';
+  var itensTxt = (quote.itens || []).map(function (it) {
+    var unit = Number(it.precoVenda) || 0;
+    var adicC = (it.adicionais || []).reduce(function (s, a) { return s + (Number(a.preco) || 0); }, 0);
+    return '• ' + it.qtd + 'x ' + it.nome + ' — R$ ' + ((unit + adicC) * (Number(it.qtd) || 0)).toFixed(2);
+  }).join('\n');
+  var condLinhas = '';
+  if (quote.frete > 0) condLinhas += 'Frete: R$ ' + Number(quote.frete).toFixed(2) + '\n';
+  // Mesmo template já usado no Preview WhatsApp (item 13 do pedido) — editável a seguir.
+  var msg = (typeof msgResolverTemplate === 'function') ? msgResolverTemplate('vitreOrcamentoEnviado', {
+    saudacao: saudacao, cliente: quote.clienteNome, marca: brand.nome, itens: itensTxt,
+    ofertas: condLinhas, valor: 'R$ ' + Number(quote.total || 0).toFixed(2), validade: quote.prazoValidadeDias, responsavel: responsavel,
+  }) : ('Olá! Segue o orçamento — total R$ ' + Number(quote.total || 0).toFixed(2) + '.');
+
+  document.getElementById('vitreEnvioDestinatario').textContent = (quote.clienteNome || 'Cliente') + (quote.clienteTel ? ' · ' + quote.clienteTel : '');
+  document.getElementById('vitreEnvioMensagem').value = msg;
+  document.getElementById('vitreEnvioResumo').innerHTML = itensTxt.replace(/\n/g, '<br>') + '<br><strong>Total: R$ ' + Number(quote.total || 0).toFixed(2) + '</strong>';
+  document.getElementById('vitreEnvioNomeArquivo').textContent = 'orcamento_' + (quote.id || 'vitre').slice(0, 8) + '.pdf';
+  document.getElementById('vitreEnvioErro').style.display = 'none';
+  var btn = document.getElementById('vitreEnvioBtnEnviar');
+  btn.disabled = false; btn.textContent = 'Enviar agora';
+  document.getElementById('vitreEnvioModal').style.display = 'flex';
+}
+
+function vitreOrcFecharModalEnvio() {
+  if (VITRE_ENVIO_BUSY) return; // nunca fecha no meio de um envio em andamento
+  document.getElementById('vitreEnvioModal').style.display = 'none';
+  VITRE_ENVIO_MODAL_QUOTE = null;
+}
+
+/**
+ * vitreOrcConfirmarEnvioWhatsApp — ÚNICO ponto que realmente envia.
+ * Ordem: gera PDF → base64 → chama a Cloud Function (que faz upload,
+ * envia ao ChatVolt, audita, e SÓ ENTÃO marca status:"enviado" — nunca
+ * este client marca nada otimisticamente). requestId novo a cada
+ * abertura do modal — um clique duplo no MESMO carregamento do modal usa
+ * o mesmo requestId (trava por VITRE_ENVIO_BUSY); reabrir o modal depois
+ * de uma falha gera um requestId novo de propósito (nova tentativa lógica).
+ */
+function vitreOrcConfirmarEnvioWhatsApp() {
+  if (VITRE_ENVIO_BUSY) return; // trava contra double-click
+  var quote = VITRE_ENVIO_MODAL_QUOTE;
+  if (!quote) return;
+  var mensagem = document.getElementById('vitreEnvioMensagem').value.trim();
+  if (!mensagem) { showToast('A mensagem não pode ficar vazia.', 'err'); return; }
+
+  VITRE_ENVIO_BUSY = true;
+  var btn = document.getElementById('vitreEnvioBtnEnviar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  var erroEl = document.getElementById('vitreEnvioErro');
+  erroEl.style.display = 'none';
+
+  var requestId = 'vitre_send_' + quote.id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+  Promise.resolve().then(function () {
+    return generateVitreQuotePdf(quote);
+  }).then(function (pdf) {
+    return blobToBase64(pdf.blob).then(function (b64) { return { pdf: pdf, base64: b64 }; });
+  }).then(function (res) {
+    return firebase.functions().httpsCallable('sendVitreQuoteToConversation')({
+      conversationId: quote.conversationId,
+      quoteId: quote.id,
+      message: mensagem,
+      pdfBase64: res.base64,
+      fileName: res.pdf.fileName,
+      requestId: requestId,
+    });
+  }).then(function (result) {
+    var r = result.data || {};
+    if (!r.sent) {
+      throw new Error(r.errorCode || 'Falha desconhecida no envio.');
+    }
+    showToast(r.jaProcessado ? 'Este orçamento já havia sido enviado.' : 'Orçamento enviado pelo WhatsApp com sucesso!', 'ok');
+    document.getElementById('vitreEnvioModal').style.display = 'none';
+    VITRE_ENVIO_MODAL_QUOTE = null;
+    // Reflete o novo status localmente — nunca antes da confirmação real acima.
+    if (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.id === quote.id) { VITRE_ORC_ATUAL.status = 'enviado'; vitreOrcAtualizarEstadoAtual(); }
+    document.getElementById('vitreOrcBtnEnviarWhatsApp').style.display = 'none';
+  }).catch(function (e) {
+    var msg = (e && e.message) || 'Erro ao enviar.';
+    erroEl.textContent = '❌ Não foi possível enviar: ' + msg + ' — o orçamento continua como rascunho, pode tentar de novo.';
+    erroEl.style.display = '';
+  }).finally(function () {
+    VITRE_ENVIO_BUSY = false;
+    btn.disabled = false; btn.textContent = 'Enviar agora';
+  });
 }
 
 // ============================================================
@@ -36029,6 +36310,17 @@ function atdAbrirRascunhoValeria(orcamentoId){
   }, 300);
 }
 
+// Fase E.2.43 — abre o MESMO modal de envio do wizard (vitreOrcAbrirModalEnvio),
+// direto do painel de Atendimentos, sem precisar navegar para a tela de
+// Orçamentos primeiro. Nunca duplica a lógica de montagem de mensagem/PDF —
+// só normaliza o doc já em cache (ATD_VALERIA_ORC_CACHE) para o mesmo
+// formato que o wizard usa (vitreOrcBuildUltimoFromDoc).
+function atdAbrirEnvioOrcamentoValeria(){
+  if(!ATD_VALERIA_ORC_CACHE) return;
+  if(typeof vitreOrcBuildUltimoFromDoc!=='function' || typeof vitreOrcAbrirModalEnvio!=='function') return;
+  vitreOrcAbrirModalEnvio(vitreOrcBuildUltimoFromDoc(ATD_VALERIA_ORC_CACHE));
+}
+
 function atdRenderThreadHeader(atd){
   document.getElementById('atdThreadNome').textContent = atd.nome || 'Sem nome';
   var origemLbl = atd.channel==='erp_web' ? 'Web (ERP)' : atd.channel;
@@ -36271,6 +36563,12 @@ function atdRenderPainel(atd){
     html += '<div class="atd-painel-row"><span>Produto</span><span>'+cfgEsc(vItem.nomeSnapshot||'—')+'</span></div>';
     html += '<div class="atd-painel-row"><span>Quantidade</span><span>'+cfgEsc(vItem.qtd!=null?String(vItem.qtd):'—')+'</span></div>';
     html += '<div class="atd-painel-row"><span>Total</span><span>R$ '+vTotal+'</span></div>';
+    // Fase E.2.43 — só quando revisável/enviável (status já vem filtrado
+    // como "rascunho" pela própria consulta de atdValeriaOrcInit; a
+    // checagem aqui é defensiva, nunca redundante por acaso).
+    if(vDraft.status==='rascunho'){
+      html += '<button onclick="atdAbrirEnvioOrcamentoValeria()" style="margin-top:6px;width:100%;border:1px solid #25D366;background:transparent;color:#1c8a4a;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer">📲 Enviar orçamento</button>';
+    }
     html += '<div class="atd-painel-row"><span>Status</span><span>rascunho</span></div>';
     html += '<button onclick="atdAbrirRascunhoValeria(\''+cfgEsc(vDraft.id)+'\')" style="margin-top:8px;width:100%;border:none;background:#1E7A86;color:#fff;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:700;cursor:pointer">📋 Revisar orçamento</button>';
     html += '</div>';
