@@ -13,8 +13,12 @@
  * Endpoint ChatVolt usado AQUI é o NOVO/documentado oficialmente (Fase
  * E.2.41, pesquisa em docs.chatvolt.ai), o único que aceita attachments:
  *   POST https://api.chatvolt.ai/conversation/message/conversationId/{id}
- *   body: { message, channel, attachments: [{ url, name, mimeType }] }
- * Schema de attachment é EXATAMENTE esses 3 campos — nenhum inventado.
+ *   body: { message, channel, attachments: [{ url, name, mimeType, size }] }
+ * `size` (Fase E.2.45.2) — NÃO está na documentação pública (só url/name/
+ * mimeType lá), mas a validação REAL do endpoint exige, confirmado pelo
+ * HTTP 400 real do primeiro envio ao vivo (E.2.45.1):
+ * `attachments[0].size: Required`. Sempre o tamanho real do buffer salvo
+ * no Storage (pdfBuffer.length) — nunca estimado.
  *
  * Storage (Fase E.2.43, item 5 do pedido — opção A escolhida: browser gera
  * o PDF/blob, o BACKEND (aqui) recebe os bytes já prontos (base64) e faz o
@@ -112,13 +116,17 @@ async function uploadQuotePdfAndSign(quoteId: string, pdfBuffer: Buffer, fileNam
 /**
  * Único ponto que chama o endpoint NOVO do ChatVolt (com suporte a
  * attachments) — nunca o endpoint antigo usado por atdEnviarMensagemHumano.
- * Payload EXATAMENTE o documentado (Fase E.2.41): message, channel,
- * attachments:[{url,name,mimeType}] — nenhum campo extra inventado.
+ * Payload: message, channel, attachments:[{url,name,mimeType,size}].
+ * `size` (Fase E.2.45.2) — achado real do primeiro envio ao vivo: a
+ * documentação pública (docs.chatvolt.ai) só lista url/name/mimeType, mas a
+ * validação REAL do endpoint exige também `size` (bytes), confirmado pelo
+ * erro `attachments[0].size: Required` (HTTP 400) na E.2.45.1. Sempre o
+ * tamanho REAL do mesmo buffer que foi salvo no Storage — nunca estimado.
  */
 async function sendChatvoltMessageWithAttachment(
   conversationId: string,
   message: string,
-  attachment: { url: string; name: string; mimeType: string } | null
+  attachment: { url: string; name: string; mimeType: string; size: number } | null
 ): Promise<{ ok: boolean; providerMessageId: string | null; error?: string }> {
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (!apiKey) return { ok: false, providerMessageId: null, error: "CHATVOLT_API_KEY ausente" };
@@ -219,6 +227,7 @@ export const sendVitreQuoteToConversation = functions
       url: pdfUrl,
       name: fileName,
       mimeType: "application/pdf",
+      size: pdfBuffer.length,
     });
     if (!sendResult.ok || !sendResult.providerMessageId) {
       console.error("[vitre_quote_send] falha no envio ChatVolt:", sendResult.error);

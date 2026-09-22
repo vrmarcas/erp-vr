@@ -1,6 +1,7 @@
 /**
  * test_e243_vitre_quote_send_static_safety.js — ValerIA 2.0, Fase E.2.43
- * (2026-09-22).
+ * (2026-09-22), estendido na Fase E.2.45.2 (2026-09-22) com o campo `size`
+ * do attachment.
  *
  * functions/src (codebase V1) não tem harness Jest (confirmado — só
  * scripts/test_*.js ad-hoc, mesmo padrão do resto desta pasta). Este script
@@ -9,6 +10,11 @@
  * upload → signed URL → ChatVolt → só com sucesso real → auditoria → status.
  * Mesma disciplina de active_pilot_static_safety.test.ts (functions-valeria),
  * adaptada para um script Node simples nesta pasta sem Jest.
+ *
+ * Fase E.2.45.2 — o primeiro envio real (E.2.45.1) revelou HTTP 400
+ * `attachments[0].size: Required`, campo não documentado publicamente mas
+ * exigido pela validação real do ChatVolt. Testes 10/10b/10c/10d cobrem a
+ * correção e travam regressão do payload antigo sem `size`.
  *
  * Uso: node scripts/test_e243_vitre_quote_send_static_safety.js
  */
@@ -75,9 +81,26 @@ assert(!/pdfBuffer|pdfBase64/.test(auditoriaBlock), 'bloco de auditoria nunca re
 assert(SRC.includes('const CHATVOLT_SEND_ENDPOINT = "https://api.chatvolt.ai/conversation/message/conversationId/"'), 'CHATVOLT_SEND_ENDPOINT aponta para o endpoint NOVO (api.chatvolt.ai) — o único documentado com suporte a attachments');
 assert(!SRC.includes('axios.post(`https://app.chatvolt.ai'), 'nenhuma chamada axios.post usa o endpoint ANTIGO (app.chatvolt.ai, sem suporte a anexos)');
 
-// 10. Payload de attachment é EXATAMENTE {url, name, mimeType} — nenhum campo extra (aceita ; opcional antes de "}").
-const attachmentObjMatch = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;?\s*\}/);
-assert(!!attachmentObjMatch, 'tipo do attachment tem EXATAMENTE {url, name, mimeType} — schema oficial documentado, nada inventado');
+// 10. Payload de attachment é EXATAMENTE {url, name, mimeType, size} (Fase
+// E.2.45.2 — `size` adicionado após o HTTP 400 real do primeiro envio ao
+// vivo, "attachments[0].size: Required", não documentado publicamente mas
+// exigido pela validação real do endpoint). Nenhum campo extra além desses 4.
+const attachmentObjMatch = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*size:\s*number;?\s*\}/);
+assert(!!attachmentObjMatch, 'tipo do attachment tem EXATAMENTE {url, name, mimeType, size} — inclui o campo size exigido pela validação real do ChatVolt');
+
+// 10b. Regressão — o payload SEM size (bug real da E.2.45.1) nunca volta a existir.
+const attachmentObjSemSize = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*\}(?!\s*\|)/);
+assert(!attachmentObjSemSize, 'regressão: o tipo antigo do attachment SEM size (causa do HTTP 400 real) não reaparece em nenhum lugar do arquivo');
+
+// 10c. size é passado como pdfBuffer.length (número real do buffer enviado), nunca um valor estimado/hardcoded/string.
+const idxAttachmentCallSite = HANDLER.indexOf('sendChatvoltMessageWithAttachment(conversationId, message, {');
+const attachmentCallBlock = HANDLER.slice(idxAttachmentCallSite, idxAttachmentCallSite + 300);
+assert(/size:\s*pdfBuffer\.length/.test(attachmentCallBlock), 'size enviado é exatamente pdfBuffer.length — o tamanho REAL do buffer salvo no Storage, nunca estimado');
+assert(!/size:\s*["']/.test(attachmentCallBlock), 'size nunca é enviado como string — sempre número');
+
+// 10d. size > 0 garantido estruturalmente — PDF_VAZIO já bloqueia pdfBuffer.length===0 ANTES do call site do attachment.
+const idxPdfVazio = HANDLER.indexOf('PDF_VAZIO');
+assert(idxPdfVazio > 0 && idxPdfVazio < idxAttachmentCallSite, 'PDF_VAZIO (pdfBuffer.length===0) é bloqueado ANTES do attachment ser montado — size enviado é sempre > 0');
 
 // 11. Nunca CHAMA .makePublic() de verdade (menção em comentário explicando o que evitar é esperada e correta).
 assert(SRC.includes('getSignedUrl'), 'usa getSignedUrl (URL assinada de curta duração)');
