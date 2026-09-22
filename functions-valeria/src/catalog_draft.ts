@@ -100,7 +100,7 @@ export interface CatalogDraft {
   missingFields: string[];
 
   promovido: boolean;
-  promovidoParaTipo?: "vitre_rascunho" | "technical_briefing" | "product_mapping_review" | null;
+  promovidoParaTipo?: "vitre_rascunho" | "technical_briefing" | "product_mapping_review" | "unsupported_handoff" | null;
   promovidoParaId?: string | null;
 
   createdAt: number;
@@ -143,6 +143,23 @@ export interface FieldUpdate {
   personalization?: string[];
   desiredDeadline?: string | null;
   deliveryData?: CatalogDraftFields["deliveryData"];
+}
+
+/**
+ * Fase E.2.42 — único ponto que transforma `personalization: string[]` em
+ * texto para o campo `observacoes` já existente em vitre_orcamentos (lido
+ * de volta pelo wizard Vitre em vitreOrcAbrirRascunho, ver index.html —
+ * zero mudança de UI necessária). Nunca afeta preço/SKU — é só anotação
+ * para revisão humana (Fase E.2.42, item 7 do pedido: personalização
+ * cosmética preserva o SKU, mas não é automaticamente gratuita). `undefined`
+ * quando não há nada a anotar, para nunca sobrescrever um `observacoes`
+ * manual do humano com uma string vazia.
+ */
+export function formatPersonalizationForObservacoes(personalization: string[] | null | undefined): string | undefined {
+  if (!personalization || personalization.length === 0) return undefined;
+  const itens = personalization.map((p) => p.trim()).filter((p) => p.length > 0);
+  if (itens.length === 0) return undefined;
+  return "Personalização (ValerIA): " + itens.join("; ");
 }
 
 /**
@@ -282,7 +299,7 @@ export async function saveCatalogDraft(draft: CatalogDraft): Promise<void> {
 
 export async function markCatalogDraftPromoted(
   conversationId: string,
-  tipo: "vitre_rascunho" | "technical_briefing" | "product_mapping_review",
+  tipo: "vitre_rascunho" | "technical_briefing" | "product_mapping_review" | "unsupported_handoff",
   id: string
 ): Promise<void> {
   await admin

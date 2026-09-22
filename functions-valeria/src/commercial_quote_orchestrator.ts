@@ -24,7 +24,7 @@
  * continua idempotente de qualquer forma, via doc id determinístico).
  */
 import type { CatalogDraft } from "./catalog_draft";
-import { markCatalogDraftPromoted } from "./catalog_draft";
+import { markCatalogDraftPromoted, formatPersonalizationForObservacoes } from "./catalog_draft";
 import type { CatalogGroup } from "./product_resolution";
 import { validateMatchedProduct } from "./qualification_engine";
 import { createVitreDraftIfNotExists, type CreateVitreDraftResult } from "./vitre_draft_writer";
@@ -88,6 +88,9 @@ export async function executeReadyCatalogDraftSideEffects(input: CommercialSideE
         precoVenda: produtoFinal.precoVenda,
       },
       quantity: input.draft.fields.quantity,
+      // Fase E.2.42 — mesmo tratamento do fluxo real (catalog_tools.ts):
+      // personalização cosmética vai para observacoes, nunca altera preço/SKU.
+      observacoes: formatPersonalizationForObservacoes(input.draft.fields.personalization),
     });
   } catch (e) {
     console.error("[commercial_quote_orchestrator] falha ao criar rascunho Vitre:", (e as Error).message);

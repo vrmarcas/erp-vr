@@ -22,6 +22,7 @@
  * cliente deu uma medida exata que não corresponde a nenhum tamanho — isso
  * é pedido de personalização, não aproximação).
  */
+import { classifyPersonalizationText } from "./personalization_classifier";
 
 export type ResolutionType =
   | "EXACT_CATALOG_MATCH"
@@ -135,6 +136,15 @@ export interface ResolutionSignals {
   contextMatchedProductSku?: string | null;
   /** true depois que o cliente confirmou explicitamente uma opção sugerida (CATALOG_OPTION_AVAILABLE anterior). */
   clientConfirmedSuggestedOption?: boolean;
+  /**
+   * Fase E.2.42 — mesmos itens de CatalogDraftFields.personalization (texto
+   * livre extraído pelo LLM, nunca um schema paralelo — ver catalog_draft.ts).
+   * Só passado para cá quando o pedido de custom (regra 4b) já tem um SKU
+   * concreto resolvido neste turno ou em contexto: classifyPersonalizationText
+   * decide se é cosmético (preserva o SKU) ou estrutural/desconhecido
+   * (mantém o comportamento custom já existente).
+   */
+  personalization?: string[] | null;
 }
 
 export interface ResolutionResult {
@@ -299,12 +309,33 @@ export function resolveProductMatch(signals: ResolutionSignals, groups: CatalogG
   // M, mas em 35x25x10" — aqui "M" resolve um SKU real dentro do próprio turno).
   if (signals.customerExplicitlyRequestsCustom && (contextGroupIdForCustom || signals.contextMatchedProductId)) {
     const sizeResolvedThisTurn = signals.catalogSizeLabel && effectiveGroup ? findSizeByLabel(effectiveGroup, signals.catalogSizeLabel) : null;
+    const resolvedProductId = sizeResolvedThisTurn?.vitreProductId || signals.contextMatchedProductId || null;
+    const resolvedProductSku = sizeResolvedThisTurn?.vitreProductSku || signals.contextMatchedProductSku || null;
+
+    // Fase E.2.42 — só quando já existe um SKU concreto resolvido (neste
+    // turno OU em contexto) E a personalização classifica como COSMETIC
+    // (nunca UNKNOWN, nunca vazia — classifyPersonalizationText é
+    // conservador por padrão), o pedido NÃO derruba para custom: o cliente
+    // continua no produto de catálogo, e a personalização vai junto para o
+    // rascunho Vitre (observacoes), nunca vira SKU/preço diferente.
+    if (resolvedProductId && classifyPersonalizationText(signals.personalization) === "COSMETIC") {
+      return base({
+        resolutionType: "EXACT_CATALOG_MATCH",
+        matchedProductId: resolvedProductId,
+        matchedProductSku: resolvedProductSku,
+        catalogGroupId: contextGroupIdForCustom,
+        clientConfirmed: true,
+        matchConfidence: 1,
+        reasonCode: "COSMETIC_PERSONALIZATION_KEEPS_SKU",
+      });
+    }
+
     return base({
       resolutionType: "CUSTOM_REQUESTED",
       catalogGroupId: contextGroupIdForCustom,
       baseCatalogGroupId: contextGroupIdForCustom,
-      baseProductId: sizeResolvedThisTurn?.vitreProductId || signals.contextMatchedProductId || null,
-      baseProductSku: sizeResolvedThisTurn?.vitreProductSku || signals.contextMatchedProductSku || null,
+      baseProductId: resolvedProductId,
+      baseProductSku: resolvedProductSku,
       customizationRequired: true,
       customizationReason: "Cliente pediu alteração explícita sobre um produto/grupo de catálogo já identificado.",
       reasonCode: "CUSTOM_REQUESTED_WITH_BASE",

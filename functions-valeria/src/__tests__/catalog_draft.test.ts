@@ -4,7 +4,7 @@
  * loadCatalogDraft/saveCatalogDraft/markCatalogDraftPromoted exigem
  * Firestore real (mesma disciplina do resto do módulo).
  */
-import { emptyCatalogDraft, mergeSignalsIntoDraft, computeQualificationState, CatalogDraft } from "../catalog_draft";
+import { emptyCatalogDraft, mergeSignalsIntoDraft, computeQualificationState, CatalogDraft, formatPersonalizationForObservacoes } from "../catalog_draft";
 import { ResolutionResult } from "../product_resolution";
 
 function resolution(overrides: Partial<ResolutionResult>): ResolutionResult {
@@ -151,5 +151,33 @@ describe("computeQualificationState", () => {
     expect(
       computeQualificationState(draftWith({ resolutionType: "AMBIGUOUS", catalogGroupId: "caixa_moldura" })).missingFields
     ).toEqual(["tamanho"]);
+  });
+});
+
+describe("formatPersonalizationForObservacoes — Fase E.2.42 (ponte personalization → vitre_orcamentos.observacoes)", () => {
+  test("lista vazia/ausente → undefined (nunca sobrescreve observacoes manual com string vazia)", () => {
+    expect(formatPersonalizationForObservacoes(undefined)).toBeUndefined();
+    expect(formatPersonalizationForObservacoes(null)).toBeUndefined();
+    expect(formatPersonalizationForObservacoes([])).toBeUndefined();
+  });
+
+  test("lista só com strings vazias/whitespace → undefined", () => {
+    expect(formatPersonalizationForObservacoes(["", "   "])).toBeUndefined();
+  });
+
+  test("1 item → texto formatado com prefixo identificando a origem", () => {
+    expect(formatPersonalizationForObservacoes(["Aplicar logo do cliente"])).toBe("Personalização (ValerIA): Aplicar logo do cliente");
+  });
+
+  test("múltiplos itens → unidos por '; ', itens vazios filtrados", () => {
+    expect(formatPersonalizationForObservacoes(["Logo do cliente", "", "Nome Fazenda Santa Luzia gravado na tampa"])).toBe(
+      "Personalização (ValerIA): Logo do cliente; Nome Fazenda Santa Luzia gravado na tampa"
+    );
+  });
+
+  test("nunca altera preço/SKU — é só texto, sem nenhum efeito numérico", () => {
+    const texto = formatPersonalizationForObservacoes(["Logo do cliente"]);
+    expect(typeof texto).toBe("string");
+    expect(texto).not.toMatch(/\d/); // nenhum número (preço/desconto) é injetado por esta função
   });
 });

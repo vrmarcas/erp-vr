@@ -42,6 +42,7 @@ import {
   mergeSignalsIntoDraft,
   computeQualificationState,
   FieldUpdate,
+  formatPersonalizationForObservacoes,
 } from "./catalog_draft";
 import { resolveProductMatch, ResolutionSignals, CatalogGroup, ResolutionResult } from "./product_resolution";
 import { validateMatchedProduct, computeNextAction, buildQualificationOutput, QualificationPersistence } from "./qualification_engine";
@@ -286,6 +287,10 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
       contextMatchedProductId: draftAtual.matchedProductId || draftAtual.baseProductId || null,
       contextMatchedProductSku: draftAtual.matchedProductSku || draftAtual.baseProductSku || null,
       clientConfirmedSuggestedOption: parsedBody.clientConfirmedSuggestedOption,
+      // Fase E.2.42 — mesmo array que já alimenta fieldUpdate.personalization
+      // abaixo, também repassado ao resolver para a decisão
+      // cosmético×estrutural (regra 4b de product_resolution.ts).
+      personalization: parsedBody.personalization,
     };
 
     let resolution: ResolutionResult = resolveProductMatch(signals, groups);
@@ -339,6 +344,7 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
       catalogDraftCreated: false,
       quoteReviewCreated: false,
       productMappingReviewRequested: false,
+      unsupportedHandoffRequested: false,
     };
 
     // ── Transição determinística 1: catálogo completo → cria rascunho Vitre
@@ -360,6 +366,13 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
           clienteNome,
           produto: { id: produtoFinal.id!, sku: produtoFinal.sku || draftAtualizado.matchedProductSku!, nome: produtoFinal.nome || "", precoVenda: produtoFinal.precoVenda },
           quantity: draftAtualizado.fields.quantity!,
+          // Fase E.2.42 — personalização cosmética (ex.: "Quero essa caixa M
+          // com meu logo") preserva o SKU/preço Vitre (product_resolution.ts,
+          // regra 4b) mas precisa chegar à revisão humana de algum jeito —
+          // reaproveita o campo observacoes já existente e já lido de volta
+          // pelo wizard Vitre (vitreOrcAbrirRascunho), nunca um adicional
+          // pago/preço alterado automaticamente.
+          observacoes: formatPersonalizationForObservacoes(draftAtualizado.fields.personalization),
         });
         persistence.catalogDraftCreated = true;
 
@@ -396,6 +409,28 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
       draftAtualizado.promovido = true;
       draftAtualizado.promovidoParaTipo = "product_mapping_review";
       draftAtualizado.promovidoParaId = draftAtualizado.catalogGroupId;
+    } else if (
+      // ── Transição determinística 1c (Fase E.2.42) — categoria fora de
+      // qualquer catálogo ativo. Antes desta fase, UNSUPPORTED não
+      // disparava nada deterministicamente — dependia só do LLM dizer a
+      // frase canônica (ESCALATE_UNSUPPORTED), sem nenhuma escrita real.
+      // Nunca cria vitre_orcamentos nem orçamento VR automático — só
+      // encaminha para revisão humana, mesmo padrão de PRODUCT_MAPPING_REQUIRED.
+      qualification.qualificationStatus === "UNSUPPORTED" &&
+      !draftAtualizado.promovido
+    ) {
+      const unsupportedResult = await requestQuoteReview({
+        conversationId: ctx.conversationId,
+        organizationId: ctx.organizationId,
+        motivo: "UNSUPPORTED_PRODUCT",
+        requestId: `valeria2_unsupported_${ctx.conversationId}`,
+      });
+      persistence.unsupportedHandoffRequested = unsupportedResult.ok || unsupportedResult.jaSolicitado;
+
+      await markCatalogDraftPromoted(ctx.conversationId, "unsupported_handoff", categoria || "categoria_desconhecida");
+      draftAtualizado.promovido = true;
+      draftAtualizado.promovidoParaTipo = "unsupported_handoff";
+      draftAtualizado.promovidoParaId = categoria || "categoria_desconhecida";
     } else if (draftAtualizado.promovido) {
       // C. chamada repetida depois de já promovido — não recria nada, só reporta
       // o que já tinha sido feito (diferencia por tipo, nunca mistura os dois).
@@ -404,6 +439,8 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
         persistence.quoteReviewCreated = true;
       } else if (draftAtualizado.promovidoParaTipo === "product_mapping_review") {
         persistence.productMappingReviewRequested = true;
+      } else if (draftAtualizado.promovidoParaTipo === "unsupported_handoff") {
+        persistence.unsupportedHandoffRequested = true;
       }
     }
 

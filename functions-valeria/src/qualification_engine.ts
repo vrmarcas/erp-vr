@@ -193,6 +193,14 @@ export interface QualificationPersistence {
    * junto com catalogDraftCreated=false — nunca os dois juntos.
    */
   productMappingReviewRequested: boolean;
+  /**
+   * Fase E.2.42 — true quando esta chamada disparou o handoff determinístico
+   * com motivo UNSUPPORTED_PRODUCT (categoria fora de qualquer catálogo
+   * ativo). Antes desta fase, UNSUPPORTED dependia só do LLM dizer a frase
+   * canônica — nenhuma escrita real acontecia. Nunca cria vitre_orcamentos
+   * nem orçamento VR automático.
+   */
+  unsupportedHandoffRequested: boolean;
 }
 
 export interface QualificationEngineOutput {

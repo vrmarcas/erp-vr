@@ -47,6 +47,16 @@ export interface CreateVitreDraftInput {
   clienteNome: string;
   produto: VitreDraftProductInput;
   quantity: number;
+  /**
+   * Fase E.2.42 — texto de personalização cosmética (ex.: "Personalização
+   * (ValerIA): Aplicar logo do cliente"), já formatado por
+   * formatPersonalizationForObservacoes (catalog_draft.ts). Reaproveita o
+   * MESMO campo `observacoes` que o wizard manual Vitre já lê/grava
+   * (functions/src/vitre.ts:595,624; index.html:vitreOrcObservacoes) — nunca
+   * um campo novo, nunca afeta preço/SKU. Omitido do payload quando
+   * ausente/vazio (nunca sobrescreve uma observação manual com string vazia).
+   */
+  observacoes?: string;
 }
 
 export interface CreateVitreDraftResult {
@@ -92,12 +102,21 @@ export async function deriveIsTest(conversationId: string): Promise<boolean> {
  *   - `requestId`/`id` usam o MESMO valor determinístico (doc id), em vez
  *     de um requestId externo — decisão de idempotência (ver cabeçalho).
  *   - `adicionais` sempre `[]` — V2 ainda não coleta personalização
- *     precificada nesta fase (Fase D trata só o catálogo-base).
+ *     PRECIFICADA nesta fase (Fase D trata só o catálogo-base). Fase E.2.42
+ *     fecha só a parte de ANOTAÇÃO (nunca preço) — ver `observacoes` abaixo.
  *   - `isTest` (Fase E.1.2, 2026-09-20) — campo NOVO que o writer oficial
  *     não tem; derivado de atendimentos/{id}.isTeste (mesma disciplina de
  *     action_executor.ts), nunca inferido/vindo do LLM. Achado real da
  *     bateria HTTP E.1: o rascunho V2 não carregava marca de teste alguma
  *     — corrigido aqui, não no writer oficial (fora de escopo desta Tool).
+ *   - `observacoes` (Fase E.2.42, 2026-09-22) — campo OPCIONAL, omitido do
+ *     payload quando ausente. `valeriaVitreCriarRascunho` (writer oficial,
+ *     valeria_vitre.ts) não tem esse campo; o wizard MANUAL Vitre
+ *     (functions/src/vitre.ts:595,624) tem. Reaproveita o mesmo nome/campo
+ *     — carrega o texto de personalização cosmética (logo/nome/gravação)
+ *     que product_resolution.ts (regra 4b) decidiu preservar o SKU, para o
+ *     humano ver na revisão (vitreOrcAbrirRascunho já lê `observacoes` de
+ *     volta, zero mudança de UI). Nunca escreve preço/adicional.
  */
 export function buildVitreDraftPayload(input: CreateVitreDraftInput, isTest: boolean = false) {
   const docId = draftDocId(input.conversationId);
@@ -130,6 +149,7 @@ export function buildVitreDraftPayload(input: CreateVitreDraftInput, isTest: boo
     conversationId: input.conversationId,
     organizationId: input.organizationId,
     criadoEm: Date.now(),
+    ...(input.observacoes ? { observacoes: input.observacoes } : {}),
   };
 }
 
