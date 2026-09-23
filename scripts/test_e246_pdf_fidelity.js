@@ -1,5 +1,9 @@
 /**
- * test_e246_pdf_fidelity.js — ValerIA 2.0 / ERP, Fase E.2.46 (2026-09-22).
+ * test_e246_pdf_fidelity.js — ValerIA 2.0 / ERP, Fase E.2.46 (2026-09-22),
+ * estendido nas Fases E.2.46.1 (renderização direta via html2canvas,
+ * substituindo jsPDF.html()), E.2.46.2 (JPEG q=0.92 no lugar de PNG —
+ * ~7,9MB → ~128KB no orçamento piloto, sem perda visual perceptível) e
+ * E.2.47 (esconder elementos .no-print na captura do PDF).
  *
  * index.html não tem harness de testes (mesmo padrão de
  * scripts/test_e238_*.js / test_e243_*.js). Este script:
@@ -10,7 +14,15 @@
  *   (b) checagens estáticas — fonte única de verdade (vitreOrcGerarPDF e
  *       generateVitreQuotePdf chamam a MESMA função, nunca duas
  *       implementações de layout), dependências (html2canvas) presentes,
- *       nenhum arquivo do fluxo VR personalizado tocado (item 17 do pedido).
+ *       renderização via html2canvas direto + doc.addImage() (nunca mais
+ *       jsPDF.html()), JPEG q=0.92 (nunca mais PNG), nenhum arquivo do
+ *       fluxo VR personalizado tocado (item 17 do pedido).
+ *
+ * A fidelidade visual e o tamanho final do arquivo (piloto ~128KB,
+ * cenário multipágina de 24 itens ~523KB/2 páginas reais) foram
+ * verificados ao vivo com jsPDF+html2canvas reais num harness temporário
+ * (removido) e aprovados visualmente — este script cobre a parte
+ * ESTÁTICA/estrutural, não repete a renderização real a cada execução.
  *
  * Uso: node scripts/test_e246_pdf_fidelity.js
  */
@@ -177,7 +189,7 @@ console.log('\n== Parte 4 — testes funcionais A-K (item 15 do pedido) ==');
   }
 
   // J. quebra de página (comportamento estrutural — ver Parte 5, checagem estática do autoPaging)
-  console.log('  ℹ️  J. quebra de página — coberta na Parte 5 (checagem estática de autoPaging:"text" em generateVitreQuotePdf)');
+  console.log('  ℹ️  J. quebra de página — coberta na Parte 5 (checagem estática do fatiamento manual de canvas em generateVitreQuotePdf, Fase E.2.46.1)');
 
   // K. formatação pt-BR (cobre valores grandes/decimais em conjunto)
   {
@@ -196,11 +208,32 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   assert(!blocoGerarPDF.includes("+ '<!DOCTYPE"), 'vitreOrcGerarPDF() não monta mais o HTML manualmente (string concatenada) — delega para a função compartilhada');
 
   const idxGenPdf = INDEX_HTML.indexOf('function generateVitreQuotePdf(quote)');
-  const blocoGenPdf = INDEX_HTML.slice(idxGenPdf, idxGenPdf + 3500);
+  const blocoGenPdf = INDEX_HTML.slice(idxGenPdf, idxGenPdf + 6000);
   assert(blocoGenPdf.includes('vitreOrcMontarHtmlOrcamento(quote)'), 'generateVitreQuotePdf() usa vitreOrcMontarHtmlOrcamento — mesma fonte, nunca um segundo layout desenhado à mão');
   assert(!blocoGenPdf.includes("doc.setFillColor") && !blocoGenPdf.includes('doc.rect('), 'generateVitreQuotePdf() não desenha mais tabela/retângulos manualmente com jsPDF (abordagem antiga da Fase E.2.43, causa raiz do bug visual)');
-  assert(blocoGenPdf.includes("autoPaging: 'text'"), 'J. generateVitreQuotePdf() usa autoPaging:"text" — suporta conteúdo que ultrapassa 1 página, mesmo comportamento que o layout oficial já previa via CSS de impressão');
-  assert(blocoGenPdf.includes('html2canvas'), 'generateVitreQuotePdf() usa html2canvas (via jsPDF.html()) para renderizar o HTML oficial em vez de redesenhar');
+  assert(blocoGenPdf.includes('window.html2canvas('), 'generateVitreQuotePdf() usa html2canvas para renderizar o HTML oficial em vez de redesenhar (chamado direto desde a Fase E.2.46.1, nunca via jsPDF.html())');
+
+  // Fase E.2.46.1 — achado real na aprovação visual: jsPDF.html() calcula
+  // sua própria escala e se mostrou pouco confiável com o elemento de
+  // origem dentro de um iframe (conteúdo saía comprimido/quebrado).
+  // Corrigido chamando html2canvas DIRETAMENTE (nunca mais via jsPDF.html())
+  // com width/height/windowWidth/windowHeight explícitos, e inserindo o
+  // canvas como imagem via doc.addImage() — nunca mais doc.html().
+  assert(!blocoGenPdf.includes('doc.html('), 'E.2.46.1 — regressão: jsPDF.html() (causa raiz do conteúdo comprimido) não reaparece — só html2canvas direto + doc.addImage()');
+  assert(blocoGenPdf.includes('doc.addImage('), 'E.2.46.1 — usa doc.addImage() para inserir o canvas renderizado, escala sempre explícita e sob controle');
+  assert(/windowWidth:\s*PAGE_WIDTH_PX/.test(blocoGenPdf) && /windowHeight:\s*contentHeightPx/.test(blocoGenPdf), 'E.2.46.1 — width/height/windowWidth/windowHeight são explícitos (medidos do conteúdo real), nunca deixados para o jsPDF calcular sozinho');
+  assert(/while\s*\(offsetPx < canvas\.height\)/.test(blocoGenPdf), 'J. multipágina: fatia o canvas por altura de página A4 manualmente (substituiu autoPaging do jsPDF.html(), removido nesta fase)');
+
+  // Fase E.2.46.2 — achado real na aprovação: PNG (sem perdas) gerava PDF
+  // de ~7,9MB para 1 item, arriscando estourar MAX_PDF_BYTES do backend em
+  // orçamentos maiores. JPEG q=0.92 reduz ~61x sem diferença visual
+  // perceptível (mesmo scale:2, mesma resolução) — testado objetivamente
+  // contra scale 1.5/2 × PNG/JPEG(0.85/0.92) antes de escolher.
+  assert(/scale:\s*2/.test(blocoGenPdf), 'E.2.46.2 — scale:2 preservado (nitidez máxima, tamanho deixou de ser o fator limitante com JPEG)');
+  assert((blocoGenPdf.match(/toDataURL\('image\/jpeg',\s*JPEG_QUALITY\)/g) || []).length === 2, 'E.2.46.2 — as DUAS chamadas de exportação (página única E cada fatia multipágina) usam JPEG, nenhuma delas ficou em PNG');
+  assert(/var JPEG_QUALITY = 0\.92/.test(blocoGenPdf), 'E.2.46.2 — qualidade JPEG é exatamente 0.92 (aprovada), nunca um valor diferente sem nova aprovação');
+  assert(!/toDataURL\('image\/png'\)/.test(blocoGenPdf), 'E.2.46.2 — regressão: PNG (causa do arquivo de 7,9MB) não reaparece em nenhuma exportação de canvas');
+  assert(/fillStyle = '#ffffff'/.test(blocoGenPdf) && /fillRect\(0, 0, canvasFatia\.width, canvasFatia\.height\)/.test(blocoGenPdf), 'E.2.46.2 — cada fatia multipágina recebe fundo branco explícito antes de desenhar (JPEG não tem canal alfa, nunca deixa fundo transparente virar preto)');
 
   // Fase E.2.47 — achado real na aprovação visual: @media print só se
   // aplica numa impressão de verdade, nunca numa captura via html2canvas —
@@ -215,7 +248,7 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   assert(idxHideNoPrint > 0 && idxRenderCall > 0 && idxHideNoPrint < idxRenderCall, 'E.2.47 — .no-print é escondido ANTES da função render() ser definida/chamada, nunca depois');
 
   // Dependência html2canvas presente no <head>.
-  assert(INDEX_HTML.includes('cdnjs.cloudflare.com/ajax/libs/html2canvas/'), 'script html2canvas carregado (dependência de jsPDF.html())');
+  assert(INDEX_HTML.includes('cdnjs.cloudflare.com/ajax/libs/html2canvas/'), 'script html2canvas carregado (dependência direta de generateVitreQuotePdf desde a Fase E.2.46.1)');
   assert(INDEX_HTML.includes('cdnjs.cloudflare.com/ajax/libs/jspdf/'), 'script jsPDF continua carregado');
 
   // Regressão — nenhuma referência antiga a jsPDF desenhando manualmente sobrou em nenhum lugar do arquivo.

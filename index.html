@@ -26470,12 +26470,22 @@ function vitreOrcBuildUltimoFromDoc(o) {
  * generateVitreQuotePdf — Fase E.2.46: reescrita para reutilizar o MESMO
  * HTML/CSS oficial (vitreOrcMontarHtmlOrcamento — Prioridade 1 do pedido,
  * "reutilizar o layout existente"), em vez de redesenhar o documento com
- * chamadas manuais de jsPDF (abordagem anterior, Fase E.2.43 — causa raiz
- * do PDF visualmente divergente do orçamento oficial do ERP). Renderiza o
- * HTML oficial dentro de um iframe fora da tela (mesma origem — sem CORS)
- * via jsPDF.html()/html2canvas, produzindo um PDF pixel-fiel ao que
- * "🖨️ PDF Vitre"/impressão já mostra. Agora assíncrona (retorna Promise) —
- * chamador (vitreOrcConfirmarEnvioWhatsApp) já usa .then(), compatível.
+ * chamadas manuais de jsPDF (abordagem da Fase E.2.43 — causa raiz do PDF
+ * visualmente divergente do orçamento oficial do ERP). Renderiza o HTML
+ * oficial dentro de um iframe fora da tela (mesma origem — sem CORS).
+ *
+ * Fase E.2.46.1 — achado real na aprovação visual: `jsPDF.html()` (usado
+ * até aqui) computa sua PRÓPRIA escala internamente a partir de
+ * `width`/`windowWidth`, e essa conta se mostrou pouco confiável quando o
+ * elemento de origem vive no `contentDocument` de um iframe (janela
+ * diferente da que o script está rodando) — o resultado real foi conteúdo
+ * comprimido num canto, grid/tabela/rodapé quebrados. Corrigido chamando
+ * `html2canvas` DIRETAMENTE (nunca via `jsPDF.html()`), com `width`/
+ * `height`/`windowWidth`/`windowHeight` explícitos medidos do próprio
+ * conteúdo renderizado — sem ambiguidade de escala — e inserindo o canvas
+ * resultante como imagem no PDF via `doc.addImage()`, nas proporções reais
+ * da página A4. Suporta múltiplas páginas fatiando o canvas verticalmente
+ * quando o conteúdo (muitos itens) ultrapassa uma A4.
  */
 function generateVitreQuotePdf(quote) {
   return new Promise(function (resolve, reject) {
@@ -26491,7 +26501,7 @@ function generateVitreQuotePdf(quote) {
     iframe.style.left = '-99999px';
     iframe.style.top = '0';
     iframe.style.width = PAGE_WIDTH_PX + 'px';
-    iframe.style.height = '1200px';
+    iframe.style.height = '1600px'; // folga generosa — a altura REAL capturada é medida do conteúdo, nunca este valor fixo
     iframe.setAttribute('aria-hidden', 'true');
     document.body.appendChild(iframe);
 
@@ -26517,27 +26527,72 @@ function generateVitreQuotePdf(quote) {
     for (var i = 0; i < elementosNoPrint.length; i++) { elementosNoPrint[i].style.display = 'none'; }
 
     function render() {
-      try {
-        var doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
-        var el = idoc.querySelector('.page') || idoc.body;
-        doc.html(el, {
-          x: 0,
-          y: 0,
-          width: 595.28, // largura A4 em pt — jsPDF escala PAGE_WIDTH_PX (windowWidth) para isto automaticamente
-          windowWidth: PAGE_WIDTH_PX,
-          autoPaging: 'text', // permite múltiplas páginas quando o conteúdo (muitos itens) ultrapassa uma A4
-          html2canvas: { useCORS: true, allowTaint: false },
-          callback: function (docResult) {
-            cleanup();
-            var blob = docResult.output('blob');
-            var fileName = 'orcamento_' + vitreOrcNumeroExibicao(quote.id) + '.pdf';
-            resolve({ blob: blob, fileName: fileName, mimeType: 'application/pdf' });
-          },
-        });
-      } catch (e) {
+      var el = idoc.querySelector('.page') || idoc.body;
+      // Altura REAL do conteúdo já renderizado no iframe — nunca um valor
+      // fixo arbitrário — para capturar a página inteira, sem cortar.
+      var contentHeightPx = Math.ceil(el.getBoundingClientRect().height) || el.scrollHeight || 1131;
+
+      window.html2canvas(el, {
+        width: PAGE_WIDTH_PX,
+        height: contentHeightPx,
+        windowWidth: PAGE_WIDTH_PX,
+        windowHeight: contentHeightPx,
+        scale: 2, // resolução maior — texto/logo nítidos no PDF final
+        useCORS: true,
+        backgroundColor: '#ffffff', // fundo opaco obrigatório — JPEG não tem canal alfa
+      }).then(function (canvas) {
+        cleanup();
+        try {
+          var doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
+          var pageWidthPt = doc.internal.pageSize.getWidth();
+          var pageHeightPt = doc.internal.pageSize.getHeight();
+          var imgWidthPt = pageWidthPt;
+          var imgHeightPt = (canvas.height * imgWidthPt) / canvas.width;
+          // Fase E.2.46.2 — JPEG em vez de PNG (mesmo canvas/mesma
+          // fidelidade visual, só a codificação final muda): o orçamento é
+          // majoritariamente fundo branco/texto/linhas — PNG (sem perdas)
+          // ficava ~7,9MB num único item; JPEG q=0.92 fica ~130KB, sem
+          // diferença visual perceptível (comparado lado a lado, scale:2
+          // preservado). Nunca reintroduzir PNG aqui sem motivo — risco
+          // real de estourar o limite do backend (MAX_PDF_BYTES) em
+          // orçamentos com mais itens/páginas.
+          var JPEG_QUALITY = 0.92;
+
+          if (imgHeightPt <= pageHeightPt) {
+            doc.addImage(canvas.toDataURL('image/jpeg', JPEG_QUALITY), 'JPEG', 0, 0, imgWidthPt, imgHeightPt);
+          } else {
+            // Múltiplas páginas (item J, Fase E.2.46) — fatia o canvas por
+            // altura de página A4, nunca deforma/corta a largura.
+            var pxPorPaginaA4 = (canvas.width * pageHeightPt) / imgWidthPt;
+            var offsetPx = 0;
+            var pagina = 0;
+            while (offsetPx < canvas.height) {
+              var fatiaAlturaPx = Math.min(pxPorPaginaA4, canvas.height - offsetPx);
+              var canvasFatia = document.createElement('canvas');
+              canvasFatia.width = canvas.width;
+              canvasFatia.height = fatiaAlturaPx;
+              var ctxFatia = canvasFatia.getContext('2d');
+              ctxFatia.fillStyle = '#ffffff'; // idem — JPEG sem alfa, fundo branco explícito antes de desenhar
+              ctxFatia.fillRect(0, 0, canvasFatia.width, canvasFatia.height);
+              ctxFatia.drawImage(canvas, 0, offsetPx, canvas.width, fatiaAlturaPx, 0, 0, canvas.width, fatiaAlturaPx);
+              var fatiaAlturaPt = (fatiaAlturaPx * imgWidthPt) / canvas.width;
+              if (pagina > 0) doc.addPage();
+              doc.addImage(canvasFatia.toDataURL('image/jpeg', JPEG_QUALITY), 'JPEG', 0, 0, imgWidthPt, fatiaAlturaPt);
+              offsetPx += fatiaAlturaPx;
+              pagina++;
+            }
+          }
+
+          var blob = doc.output('blob');
+          var fileName = 'orcamento_' + vitreOrcNumeroExibicao(quote.id) + '.pdf';
+          resolve({ blob: blob, fileName: fileName, mimeType: 'application/pdf' });
+        } catch (e) {
+          reject(e);
+        }
+      }).catch(function (e) {
         cleanup();
         reject(e);
-      }
+      });
     }
 
     // Aguarda a imagem do logo carregar antes de renderizar — html2canvas
