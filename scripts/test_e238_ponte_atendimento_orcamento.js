@@ -210,10 +210,15 @@ function fakeDb(resultPromise, whereCalls) {
   const vincularCallSites = (INDEX_HTML.match(/httpsCallable\(['"]atdVincularOrcamento['"]\)/g) || []).length;
   assert(vincularCallSites === 1, 'nenhum novo call site de httpsCallable("atdVincularOrcamento") foi introduzido', 'encontrados: ' + vincularCallSites);
 
+  // Checagem relativa a ESTA fase (E.2.38): nenhum arquivo de backend foi
+  // tocado. Não exige mais "só index.html" no diff total do repo — fases
+  // posteriores (E.2.43+) legitimamente alteram outros arquivos de
+  // front/scripts; a garantia real (backend intocado) já é validada de
+  // forma robusta logo abaixo, contra o diff de functions/functions-valeria.
   const gitDiffFiles = execSync('git diff --name-only', { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
   assert(
-    gitDiffFiles.length === 1 && gitDiffFiles[0] === 'index.html',
-    'nenhum arquivo de backend (functions/, functions-valeria/) foi alterado nesta fase — só index.html',
+    !gitDiffFiles.some((f) => f.startsWith('functions/') || f.startsWith('functions-valeria/')),
+    'nenhum arquivo de backend (functions/, functions-valeria/) aparece no diff atual',
     'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
   );
 

@@ -37,12 +37,20 @@ function extractFunction(src, name) {
   return src.slice(start, i);
 }
 
+// Fase E.2.46 — generateVitreQuotePdf() passou a depender de DOM real
+// (iframe/html2canvas) para reproduzir fielmente o layout oficial (ver
+// scripts/test_e246_pdf_fidelity.js, que testa a saída HTML real e a
+// fidelidade visual foi verificada em navegador real). AQUI, nas Partes 3/4
+// (orquestração do modal de envio), generateVitreQuotePdf é MOCKADA — o que
+// se testa é vitreOrcConfirmarEnvioWhatsApp chamando-a e reagindo
+// corretamente, não a renderização em si.
 const FN_NAMES = [
-  'vitreOrcNormalizarItensDoDoc', 'vitreOrcBuildUltimoFromDoc', 'generateVitreQuotePdf',
+  'vitreOrcNormalizarItensDoDoc', 'vitreOrcBuildUltimoFromDoc',
   'blobToBase64', 'vitreOrcAbrirModalEnvio', 'vitreOrcFecharModalEnvio', 'vitreOrcConfirmarEnvioWhatsApp',
   'atdAbrirEnvioOrcamentoValeria',
 ];
 const COMBINED_SRC = FN_NAMES.map((n) => extractFunction(INDEX_HTML, n)).join('\n\n');
+const GENERATE_PDF_SRC = extractFunction(INDEX_HTML, 'generateVitreQuotePdf');
 
 console.log('== Parte 1 — funções puras/normalizadoras ==');
 
@@ -73,18 +81,11 @@ function baseContext(overrides) {
     VITRE_ENVIO_BUSY: false,
     VITRE_ENVIO_MODAL_QUOTE: null,
     vitreOrcAtualizarEstadoAtual: () => { calls.console.push(['vitreOrcAtualizarEstadoAtual']); },
-    window: {
-      jspdf: {
-        jsPDF: function FakeJsPDF() {
-          this.internal = { pageSize: { getWidth: () => 210 } };
-          this.setFont = () => this; this.setFontSize = () => this; this.setTextColor = () => this;
-          this.setDrawColor = () => this; this.setLineWidth = () => this; this.setFillColor = () => this;
-          this.text = () => this; this.line = () => this; this.rect = () => this;
-          this.splitTextToSize = (t) => [t];
-          this.output = (fmt) => ({ __blob: true, format: fmt });
-        },
-      },
-    },
+    // Mock — a implementação REAL (iframe + html2canvas + jsPDF.html()) é
+    // testada à parte em scripts/test_e246_pdf_fidelity.js (saída HTML) e
+    // verificada visualmente em navegador real (Fase E.2.46). Aqui só
+    // importa que vitreOrcConfirmarEnvioWhatsApp reage certo ao resultado.
+    generateVitreQuotePdf: (quote) => Promise.resolve({ blob: { __blob: true }, fileName: 'orcamento_' + String(quote.id || 'vitre').slice(0, 8) + '.pdf', mimeType: 'application/pdf' }),
     firebase: {
       functions: () => ({
         httpsCallable: (name) => (payload) => {
@@ -127,27 +128,9 @@ function baseContext(overrides) {
   assert(built.itens[0].precoVenda === 165 && built.total === 3300, 'vitreOrcBuildUltimoFromDoc nunca altera preço/total do doc original');
 }
 
-console.log('\n== Parte 2 — generateVitreQuotePdf ==');
-{
-  const { ctx } = baseContext({});
-  vm.runInContext(COMBINED_SRC, ctx, { filename: 'e243.js' });
-  const quote = {
-    id: 'valeria2_catalog_cmt95yjqa0dksuvqt63to9tbm', clienteNome: 'Cliente WhatsApp', clienteTel: null,
-    itens: [{ sku: 'C4TC3M', nome: 'Caixa 4mm, tampa de correr 3mm', precoVenda: 165, qtd: 20, adicionais: [] }],
-    total: 3300, subtotal: 3300, frete: 0, valorDesconto: 0, prazoValidadeDias: 7,
-    observacoes: 'Personalização (ValerIA): Aplicar logo do cliente',
-  };
-  const pdf = ctx.generateVitreQuotePdf(quote);
-  assert(pdf.mimeType === 'application/pdf', 'mimeType retornado é exatamente "application/pdf"');
-  assert(pdf.fileName === 'orcamento_valeria2.pdf' || /^orcamento_.*\.pdf$/.test(pdf.fileName), 'fileName segue o padrão orcamento_{id curto}.pdf', 'recebido: ' + pdf.fileName);
-  assert(pdf.blob && pdf.blob.__blob === true, 'blob retornado vem de doc.output("blob") (formato real do jsPDF)');
-
-  const semJsPdf = baseContext({ window: {} });
-  vm.runInContext(COMBINED_SRC, semJsPdf.ctx, { filename: 'e243.js' });
-  let threw = false;
-  try { semJsPdf.ctx.generateVitreQuotePdf(quote); } catch (e) { threw = /jsPDF/.test(e.message); }
-  assert(threw, 'sem jsPDF carregado (window.jspdf ausente), lança erro claro em vez de falhar silenciosamente');
-}
+console.log('\n== Parte 2 — generateVitreQuotePdf real: guardas de dependência (Fase E.2.46) ==');
+// (assíncrona — corpo movido para dentro da IIFE async abaixo, já que a nova
+// implementação retorna sempre uma Promise)
 
 console.log('\n== Parte 3 — vitreOrcAbrirModalEnvio (guardas) ==');
 {
@@ -177,6 +160,28 @@ console.log('\n== Parte 3 — vitreOrcAbrirModalEnvio (guardas) ==');
 console.log('\n== Parte 4 — vitreOrcConfirmarEnvioWhatsApp (ordem, idempotência, falha) ==');
 
 (async () => {
+  // Parte 2 (real) — checagens de guarda de generateVitreQuotePdf (jsPDF/
+  // html2canvas ausentes) — falham ANTES de tocar iframe/DOM, testáveis
+  // sem browser real. A renderização em si (saída HTML/visual) é coberta
+  // por test_e246_pdf_fidelity.js + verificação em navegador real.
+  {
+    const quote = { id: 'valeria2_catalog_conv1', itens: [], clienteNome: 'X', total: 0 };
+
+    const semJsPdf = baseContext({ window: {} });
+    vm.runInContext(GENERATE_PDF_SRC, semJsPdf.ctx, { filename: 'e243_pdf.js' });
+    await semJsPdf.ctx.generateVitreQuotePdf(quote).then(
+      () => assert(false, 'sem jsPDF: deveria rejeitar a Promise, nunca resolver'),
+      (e) => assert(/jsPDF/.test(e.message), 'sem jsPDF carregado (window.jspdf ausente) → Promise REJEITADA com erro claro')
+    );
+
+    const semHtml2Canvas = baseContext({ window: { jspdf: { jsPDF: function () {} } } });
+    vm.runInContext(GENERATE_PDF_SRC, semHtml2Canvas.ctx, { filename: 'e243_pdf2.js' });
+    await semHtml2Canvas.ctx.generateVitreQuotePdf(quote).then(
+      () => assert(false, 'sem html2canvas: deveria rejeitar a Promise, nunca resolver'),
+      (e) => assert(/html2canvas/.test(e.message), 'sem html2canvas carregado → Promise REJEITADA com erro claro')
+    );
+  }
+
   // Caminho de sucesso — chamada correta ao backend, ordem PDF→base64→callable.
   {
     const { ctx, calls } = baseContext({});
