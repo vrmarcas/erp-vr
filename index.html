@@ -36420,6 +36420,12 @@ var ATD_COMPOSER_ANEXO = null;
 var ATD_ANEXO_MIME_EXT = { 'application/pdf': ['pdf'], 'image/jpeg': ['jpg','jpeg'], 'image/png': ['png'] };
 var ATD_ANEXO_MAX_BYTES = 8 * 1024 * 1024;
 var ATD_ORC_PENDENTE_ID = null; // Sprint P1.3 — orçamento Valéria aguardando confirmação de pagamento (thread atualmente aberta)
+// Fase E.2.50 — cutoff do deploy que passou a persistir attachments[] em
+// mensagens inbound (Fase E.2.49 final). Mensagens ANTERIORES a este
+// instante que ainda mostram o placeholder técnico cru ("📸"/"📄") sem
+// nenhum anexo são resíduo — nunca reescritas no Firestore, só exibidas de
+// forma amigável aqui no renderer.
+var ATD_INBOUND_ANEXOS_CUTOFF_MS = Date.parse('2026-09-23T16:07:07.853Z');
 // RODADA 9, Bloco H — briefing estruturado (produto/medidas/material/prazo
 // etc.) extraído pela ValerIA durante a conversa, ver atdBriefingListenerInit.
 var ATD_BRIEFING_UNSUB = null;
@@ -36831,6 +36837,9 @@ function atdAnexoHtml(m){
     var tamanhoTxt = (typeof a.size==='number' && a.size>0) ? Math.round(a.size/1024)+' KB' : '';
     var isImage = !!(a.mimeType && a.mimeType.indexOf('image/')===0);
     var icone = (a.mimeType==='application/pdf') ? '📄' : (isImage ? '🖼️' : '📎');
+    // Fase E.2.50 — só o rótulo visual varia por tipo; a ação (abrir a
+    // mesma signed URL sob demanda) é idêntica para todos os tipos.
+    var rotuloAbrir = isImage ? 'Abrir imagem' : (a.mimeType==='application/pdf' ? 'Abrir documento' : 'Abrir arquivo');
     // Fase E.2.48C — imagens ganham um thumbnail real, carregado sob
     // demanda DEPOIS da renderização (atdCarregarThumbsAnexos), via a
     // MESMA signed URL de curta duração já usada por "Abrir documento" —
@@ -36839,9 +36848,27 @@ function atdAnexoHtml(m){
     return '<div class="atd-msg-attachment" onclick="atdAbrirAnexo(\''+cfgEsc(m.atendimentoId||'')+'\',\''+cfgEsc(m.id)+'\')"'+thumbAttrs+'>'
       + '<div class="atd-msg-attachment-row">'+icone+' <span class="atd-msg-attachment-name">'+cfgEsc(a.name||'documento')+'</span></div>'
       + (tamanhoTxt ? '<div class="atd-msg-attachment-size">'+tamanhoTxt+'</div>' : '')
-      + '<div class="atd-msg-attachment-open">Abrir documento</div>'
+      + '<div class="atd-msg-attachment-open">'+rotuloAbrir+'</div>'
       + '</div>';
   }).join('');
+}
+
+/**
+ * atdTextoExibicaoMsg — Fase E.2.50. NUNCA reescreve o Firestore — só
+ * decide o que mostrar. Só troca o texto por um aviso amigável quando as
+ * 4 condições batem exatamente: mensagem do cliente, sem nenhum anexo,
+ * texto EXATAMENTE um dos 2 placeholders técnicos confirmados, e anterior
+ * ao deploy que passou a persistir attachments inbound (E.2.49 final) —
+ * qualquer outra combinação preserva o texto original tal como veio.
+ */
+function atdTextoExibicaoMsg(m){
+  var semAnexo = !m.attachments || !m.attachments.length;
+  var placeholderConhecido = m.text === '📸' || m.text === '📄';
+  var antesDoCutoff = typeof m.createdAt === 'number' && m.createdAt < ATD_INBOUND_ANEXOS_CUTOFF_MS;
+  if(m.actorType==='customer' && semAnexo && placeholderConhecido && antesDoCutoff){
+    return '📎 Mídia recebida anteriormente — anexo indisponível no histórico';
+  }
+  return m.text || '';
 }
 
 function atdRenderMsgs(lista){
@@ -36852,7 +36879,7 @@ function atdRenderMsgs(lista){
     var falhou = m.deliveryStatus==='failed';
     var retryBtn = falhou ? '<button type="button" class="atd-retry-btn" onclick="atdRetentar(\''+cfgEsc(m.id)+'\', this)">🔄 Tentar novamente</button>' : '';
     return '<div class="atd-msg '+cls+(falhou?' atd-msg-failed':'')+'">'
-      + cfgEsc(m.text||'')
+      + cfgEsc(atdTextoExibicaoMsg(m))
       + atdAnexoHtml(m)
       + '<div class="atd-msg-meta">'+cfgEsc(m.actorName||'')+' · '+atdFmtHora(m.createdAt)+'</div>'
       + retryBtn
@@ -36954,7 +36981,7 @@ function atdEnviar(){
   }
 
   var btn = document.getElementById('atdBtnEnviar');
-  ATD_SENDING = true; if(btn) btn.disabled = true; input.disabled = true;
+  ATD_SENDING = true; if(btn){ btn.disabled = true; btn.textContent = 'Enviando…'; } input.disabled = true;
   var requestId = atdGerarRequestId();
   var fnName = atd.modoAtendimento==='humano' ? 'atdEnviarMensagemHumano' : 'atdSimularMensagemCliente';
 
@@ -36969,7 +36996,7 @@ function atdEnviar(){
       showToast('Erro ao enviar: '+atdErroAmigavel(e),'err');
     })
     .finally(function(){
-      ATD_SENDING = false; if(btn) btn.disabled = false;
+      ATD_SENDING = false; if(btn){ btn.disabled = false; btn.textContent = 'Enviar'; }
       var atualAtd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
       input.disabled = !!(atualAtd && atualAtd.status==='resolvido');
       input.focus();
@@ -36985,7 +37012,7 @@ function atdEnviar(){
 function atdEnviarComAnexo(texto, anexo){
   var input = document.getElementById('atdComposerInput');
   var btn = document.getElementById('atdBtnEnviar');
-  ATD_SENDING = true; if(btn) btn.disabled = true; input.disabled = true;
+  ATD_SENDING = true; if(btn){ btn.disabled = true; btn.textContent = 'Enviando…'; } input.disabled = true;
   var requestId = atdGerarRequestId();
 
   firebase.functions().httpsCallable('atdEnviarAnexoManual')({
@@ -37002,9 +37029,9 @@ function atdEnviarComAnexo(texto, anexo){
     atdComposerRemoverAnexo();
     showToast(r.jaProcessado ? 'Este arquivo já havia sido enviado.' : 'Arquivo enviado pelo WhatsApp com sucesso!', 'ok');
   }).catch(function(e){
-    showToast('Não foi possível enviar o arquivo: ' + ((e && e.message) || e) + ' — pode tentar de novo.', 'err');
+    showToast('Não foi possível enviar o arquivo: ' + atdErroAmigavelAnexo(e && e.message) + ' — pode tentar de novo.', 'err');
   }).finally(function(){
-    ATD_SENDING = false; if(btn) btn.disabled = false;
+    ATD_SENDING = false; if(btn){ btn.disabled = false; btn.textContent = 'Enviar'; }
     var atualAtd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
     input.disabled = !!(atualAtd && atualAtd.status==='resolvido');
     input.focus();
@@ -37071,6 +37098,36 @@ function atdErroAmigavel(e){
   if(msg.indexOf('CHATVOLT_TIMEOUT')>=0 || msg.indexOf('CHATVOLT_INDISPONIVEL')>=0) return 'A Valéria demorou para responder — tente novamente.';
   if(msg) return msg;
   return 'erro desconhecido';
+}
+
+/**
+ * Fase E.2.50 — mapa fechado dos errorCode técnicos que
+ * atdEnviarAnexoManual/atdEnviarOrcamentoOficial devolvem (nunca uma
+ * exceção/stack — sempre {sent:false, errorCode}), traduzido para
+ * mensagem humana. Qualquer código não mapeado (incluindo nomes de
+ * provider/ChatVolt/storagePath que por acidente cheguem aqui) cai no
+ * fallback genérico — NUNCA mostra o código cru ao usuário.
+ */
+var ATD_ERRO_ANEXO_MAPA = {
+  ATENDIMENTO_NAO_ENCONTRADO: 'Atendimento não encontrado — atualize a página e tente novamente.',
+  ORCAMENTO_NAO_VINCULADO: 'Este atendimento não tem um orçamento vinculado.',
+  ORCAMENTO_NAO_ENCONTRADO: 'O orçamento vinculado não foi encontrado.',
+  ORCAMENTO_INCOMPLETO: 'O orçamento ainda não está completo — confira os itens e o valor antes de enviar.',
+  PDF_BASE64_INVALIDO: 'Não foi possível gerar o PDF — tente novamente.',
+  PDF_VAZIO: 'O PDF gerado ficou vazio — tente novamente.',
+  PDF_MUITO_GRANDE: 'O PDF ficou grande demais para envio.',
+  PDF_UPLOAD_FAILED: 'Não foi possível preparar o arquivo para envio — tente novamente.',
+  MIME_NAO_PERMITIDO: 'Tipo de arquivo não permitido. Use PDF, JPG ou PNG.',
+  FILENAME_INVALIDO: 'Nome de arquivo inválido.',
+  ARQUIVO_BASE64_INVALIDO: 'Não foi possível ler o arquivo selecionado — tente selecioná-lo novamente.',
+  ARQUIVO_VAZIO: 'O arquivo selecionado está vazio.',
+  ARQUIVO_MUITO_GRANDE: 'Arquivo maior que 8MB — escolha um arquivo menor.',
+  UPLOAD_FAILED: 'Não foi possível enviar o arquivo agora — tente novamente.',
+  CHATVOLT_SEND_FAILED: 'Não foi possível enviar pelo WhatsApp agora — tente novamente em instantes.',
+};
+var ATD_ERRO_ANEXO_FALLBACK = 'Não foi possível concluir o envio agora. Tente novamente em instantes.';
+function atdErroAmigavelAnexo(errorCode){
+  return ATD_ERRO_ANEXO_MAPA[errorCode] || ATD_ERRO_ANEXO_FALLBACK;
 }
 
 function atdAssumir(){
@@ -37248,7 +37305,7 @@ function atdConfirmarEnvioOrcamentoOficial(){
     showToast(r.jaProcessado ? 'Este orçamento já havia sido enviado.' : 'Orçamento enviado pelo WhatsApp com sucesso!', 'ok');
     atdFecharModalEnvioOrcamentoOficial();
   }).catch(function(e){
-    var msg = (e && e.message) || 'Erro ao enviar.';
+    var msg = atdErroAmigavelAnexo(e && e.message);
     erroEl.textContent = '❌ Não foi possível enviar: ' + msg + ' — nada foi marcado como enviado, pode tentar de novo.';
     erroEl.style.display = '';
   }).finally(function(){

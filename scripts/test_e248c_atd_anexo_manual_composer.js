@@ -47,13 +47,25 @@ function extractFunction(src, name) {
   return src.slice(start, i);
 }
 
+function extractVar(src, name) {
+  const marker = 'var ' + name + ' =';
+  const start = src.indexOf(marker);
+  if (start < 0) throw new Error('var ' + name + ' não encontrada em index.html');
+  const end = src.indexOf(';', start);
+  return src.slice(start, end + 1);
+}
+
 const FN_NAMES = [
   'atdComposerAnexarClique', 'atdComposerAnexoSelecionado', 'atdComposerRemoverAnexo',
   'atdRenderComposerAnexoPreview', 'atdEnviar', 'atdEnviarComAnexo', 'atdGerarRequestId', 'atdErroAmigavel',
+  // Fase E.2.50 — atdEnviarComAnexo passou a chamar atdErroAmigavelAnexo().
+  'atdErroAmigavelAnexo',
 ];
+// Fase E.2.50 — atdErroAmigavelAnexo depende deste mapa/fallback de módulo.
+const VAR_NAMES = ['ATD_ERRO_ANEXO_MAPA', 'ATD_ERRO_ANEXO_FALLBACK'];
 const FN_BODIES = {};
 FN_NAMES.forEach((n) => { FN_BODIES[n] = extractFunction(INDEX_HTML, n); });
-const COMBINED_SRC = FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
+const COMBINED_SRC = VAR_NAMES.map((n) => extractVar(INDEX_HTML, n)).join('\n') + '\n\n' + FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
 
 function makeFakeDoc() {
   const elements = {};

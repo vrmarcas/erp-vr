@@ -49,13 +49,28 @@ function extractFunction(src, name) {
   return src.slice(start, i);
 }
 
+function extractVar(src, name) {
+  const marker = 'var ' + name + ' =';
+  const start = src.indexOf(marker);
+  if (start < 0) throw new Error('var ' + name + ' não encontrada em index.html');
+  const end = src.indexOf(';', start);
+  return src.slice(start, end + 1);
+}
+
 const FN_NAMES = [
   'atdResolverOrcamentoVinculado', 'atdAbrirModalEnvioOrcamentoOficial', 'atdFecharModalEnvioOrcamentoOficial',
-  'atdConfirmarEnvioOrcamentoOficial', 'atdAnexoHtml', 'atdRenderMsgs', 'atdAbrirAnexo',
+  'atdConfirmarEnvioOrcamentoOficial', 'atdAnexoHtml', 'atdTextoExibicaoMsg', 'atdRenderMsgs', 'atdAbrirAnexo',
+  // Fase E.2.50 — atdConfirmarEnvioOrcamentoOficial passou a chamar
+  // atdErroAmigavelAnexo(); atdRenderMsgs passou a chamar atdTextoExibicaoMsg()
+  // (já listada acima) — nova dependência precisa entrar no combinado.
+  'atdErroAmigavelAnexo',
 ];
+// Fase E.2.50 — atdErroAmigavelAnexo/atdTextoExibicaoMsg dependem destas
+// constantes de módulo (mapa de erros e cutoff temporal).
+const VAR_NAMES = ['ATD_ERRO_ANEXO_MAPA', 'ATD_ERRO_ANEXO_FALLBACK', 'ATD_INBOUND_ANEXOS_CUTOFF_MS'];
 const FN_BODIES = {};
 FN_NAMES.forEach((n) => { FN_BODIES[n] = extractFunction(INDEX_HTML, n); });
-const COMBINED_SRC = FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
+const COMBINED_SRC = VAR_NAMES.map((n) => extractVar(INDEX_HTML, n)).join('\n') + '\n\n' + FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
 
 function makeFakeDoc() {
   const elements = {};
@@ -235,7 +250,10 @@ console.log('\n== Parte 5 — atdConfirmarEnvioOrcamentoOficial: payload, idempo
   ctx3.atdConfirmarEnvioOrcamentoOficial();
   await new Promise((r) => setTimeout(r, 10));
   assert(doc3._elements['atdOrcOficialEnvioModal'].style.display !== 'none', 'falha do backend → modal continua aberto (nunca fecha como se tivesse dado certo)');
-  assert(doc3._elements['atdOrcOficialEnvioErro'].style.display === '' && doc3._elements['atdOrcOficialEnvioErro'].textContent.indexOf('CHATVOLT_SEND_FAILED') >= 0, 'erro real do backend é mostrado ao humano (errorCode incluído, nunca escondido)');
+  // Fase E.2.50 — comportamento mudou de propósito: o humano continua
+  // sendo avisado do erro, mas o errorCode técnico cru (CHATVOLT_SEND_FAILED)
+  // nunca mais aparece na tela; vira mensagem amigável via atdErroAmigavelAnexo.
+  assert(doc3._elements['atdOrcOficialEnvioErro'].style.display === '' && doc3._elements['atdOrcOficialEnvioErro'].textContent.indexOf('CHATVOLT_SEND_FAILED') < 0, 'erro real do backend é mostrado ao humano de forma amigável (errorCode técnico nunca aparece cru — Fase E.2.50)');
   assert(doc3._elements['atdOrcOficialEnvioMensagem'].value === mensagemDigitada, 'mensagem digitada pelo vendedor é preservada após falha (nunca perdida/resetada)');
   assert(doc3._elements['atdOrcOficialEnvioBtnEnviar'].disabled === false, 'botão reabilitado após falha — humano pode tentar de novo');
 
