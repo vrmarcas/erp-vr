@@ -26505,6 +26505,17 @@ function generateVitreQuotePdf(quote) {
     idoc.write(html);
     idoc.close();
 
+    // Fase E.2.47 — achado real na aprovação visual: a regra `@media print
+    // {.no-print{display:none}}` do HTML oficial só vale quando o navegador
+    // está de fato imprimindo; html2canvas nunca aciona esse modo, então o
+    // botão "Imprimir / Salvar PDF" (e qualquer outro elemento marcado
+    // .no-print) apareceria dentro do PDF real enviado ao cliente. Escondido
+    // explicitamente aqui, só nesta renderização — nunca afeta a tela de
+    // impressão normal (vitreOrcGerarPDF), que continua usando a mesma regra
+    // CSS de sempre.
+    var elementosNoPrint = idoc.querySelectorAll('.no-print');
+    for (var i = 0; i < elementosNoPrint.length; i++) { elementosNoPrint[i].style.display = 'none'; }
+
     function render() {
       try {
         var doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });

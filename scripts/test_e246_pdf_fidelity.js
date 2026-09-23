@@ -202,6 +202,18 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   assert(blocoGenPdf.includes("autoPaging: 'text'"), 'J. generateVitreQuotePdf() usa autoPaging:"text" — suporta conteúdo que ultrapassa 1 página, mesmo comportamento que o layout oficial já previa via CSS de impressão');
   assert(blocoGenPdf.includes('html2canvas'), 'generateVitreQuotePdf() usa html2canvas (via jsPDF.html()) para renderizar o HTML oficial em vez de redesenhar');
 
+  // Fase E.2.47 — achado real na aprovação visual: @media print só se
+  // aplica numa impressão de verdade, nunca numa captura via html2canvas —
+  // sem isso, o botão "Imprimir / Salvar PDF" (.no-print) vazava para
+  // dentro do PDF real enviado ao cliente. Confirmado corrigido ao vivo
+  // (harness com jsPDF+html2canvas reais, PDF gerado e inspecionado
+  // visualmente) — aqui, checagem estática de que a correção existe e
+  // roda ANTES da renderização (render()).
+  const idxHideNoPrint = blocoGenPdf.indexOf("querySelectorAll('.no-print')");
+  const idxRenderCall = blocoGenPdf.indexOf('function render()');
+  assert(idxHideNoPrint > 0, 'E.2.47 — generateVitreQuotePdf() esconde elementos .no-print explicitamente antes de renderizar (html2canvas nunca aciona @media print sozinho)');
+  assert(idxHideNoPrint > 0 && idxRenderCall > 0 && idxHideNoPrint < idxRenderCall, 'E.2.47 — .no-print é escondido ANTES da função render() ser definida/chamada, nunca depois');
+
   // Dependência html2canvas presente no <head>.
   assert(INDEX_HTML.includes('cdnjs.cloudflare.com/ajax/libs/html2canvas/'), 'script html2canvas carregado (dependência de jsPDF.html())');
   assert(INDEX_HTML.includes('cdnjs.cloudflare.com/ajax/libs/jspdf/'), 'script jsPDF continua carregado');
