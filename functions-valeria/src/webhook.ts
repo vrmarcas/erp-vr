@@ -462,16 +462,43 @@ export function mapEventToInteracao(
 /**
  * Extrai metadados de anexos do payload do Chatvolt.
  * NUNCA tenta baixar o conteúdo — apenas metadados.
+ *
+ * Fase E.2.49 (correção de crash real em produção, 2026-09-23) — achado
+ * real nos logs de `valeriaWebhookChatvolt`: para QUALQUER anexo que não
+ * seja áudio (imagem/PDF), `a["transcricao"]` é `undefined` (o payload do
+ * Chatvolt nunca tem esse campo para mídia não-falada). A versão anterior
+ * desta função sempre GRAVAVA a chave `transcricao` no objeto, mesmo com
+ * valor `undefined` — e o Admin SDK do Firestore rejeita qualquer valor
+ * `undefined` num `.add()`/`.set()` (sem `ignoreUndefinedProperties`,
+ * deliberadamente nunca habilitado — ver comentário abaixo), derrubando a
+ * função inteira (status "crash", nenhuma mensagem/anexo persistido, nem
+ * o log em valeria_webhook_events/valeria_msgs). Corrigido construindo o
+ * objeto SÓ com os campos que realmente vieram no payload — nunca uma
+ * chave com valor undefined/null, para nenhum dos 5 campos opcionais,
+ * nunca só para `transcricao`.
+ *
+ * NUNCA habilitar `admin.firestore().settings({ ignoreUndefinedProperties: true })`
+ * globalmente como "solução" alternativa — isso esconderia silenciosamente
+ * qualquer OUTRO valor undefined indevido em QUALQUER escrita deste
+ * codebase (não só aqui), inclusive bugs reais que hoje o Firestore
+ * corretamente rejeita com um erro visível.
  */
-function extractAnexosMeta(raw: unknown): AnexoMeta[] {
+export function extractAnexosMeta(raw: unknown): AnexoMeta[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as Record<string, unknown>[]).map((a) => ({
-    url:        a["url"]        as string | undefined,
-    mimeType:   (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined,
-    tamanho:    (a["tamanho"]  ?? a["size"])                   as number | undefined,
-    nome:       (a["nome"]     ?? a["name"] ?? a["filename"])  as string | undefined,
-    transcricao: a["transcricao"]                              as string | undefined,
-  }));
+  return (raw as Record<string, unknown>[]).map((a) => {
+    const meta: AnexoMeta = {};
+    const url = a["url"] as string | undefined;
+    const mimeType = (a["mimeType"] ?? a["mime_type"] ?? a["type"]) as string | undefined;
+    const tamanho = (a["tamanho"] ?? a["size"]) as number | undefined;
+    const nome = (a["nome"] ?? a["name"] ?? a["filename"]) as string | undefined;
+    const transcricao = a["transcricao"] as string | undefined;
+    if (url != null) meta.url = url;
+    if (mimeType != null) meta.mimeType = mimeType;
+    if (tamanho != null) meta.tamanho = tamanho;
+    if (nome != null) meta.nome = nome;
+    if (transcricao != null) meta.transcricao = transcricao;
+    return meta;
+  });
 }
 
 // ── Handler principal ─────────────────────────────────────────────────────────
