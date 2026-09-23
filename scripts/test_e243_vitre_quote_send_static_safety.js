@@ -65,8 +65,10 @@ const idxSendCheck = HANDLER.indexOf('if (!sendResult.ok || !sendResult.provider
 assert(idxSendCheck > idxChatvoltSend, 'checagem de sucesso real (ok && providerMessageId) logo após a chamada ChatVolt');
 
 // 6. Auditoria vem ANTES de marcar status:"enviado" (nunca depois).
-const idxWriteAudit = HANDLER.indexOf('writeAudit("enviar_orcamento_vitre_whatsapp"');
-const idxStatusEnviado = HANDLER.indexOf('status: "enviado"');
+// Fase E.2.47 — writeAudit() agora usa uma action condicional (reenvio de
+// homologação vs. primeiro envio real), nunca mais a string literal fixa.
+const idxWriteAudit = HANDLER.indexOf('await writeAudit(resendHomologacao ?');
+const idxStatusEnviado = HANDLER.indexOf('status: "enviado",');
 assert(idxWriteAudit > 0 && idxStatusEnviado > idxWriteAudit, 'auditoria é persistida ANTES de marcar status:"enviado"');
 
 // 7. status:"enviado" é a ÚLTIMA coisa que a função faz no caminho de sucesso.
@@ -115,6 +117,47 @@ assert(SRC.includes('requireRole(caller, ["comercial"]') , 'exige role comercial
 // 14. Reenvio de um quote já "enviado" nunca reenvia — só reporta o que já aconteceu.
 const idxJaEnviado = HANDLER.indexOf('quote.status === "enviado"');
 assert(idxJaEnviado > 0 && idxJaEnviado < idxUpload, 'quote já enviado é detectado e curto-circuitado ANTES de qualquer novo upload/envio');
+
+console.log('== vitre_quote_send.ts — reenvio de homologação (Fase E.2.47) ==');
+
+// 15. Sem resendHomologacao=true, quote.status==="enviado" continua
+// curto-circuitando exatamente como antes (regressão do comportamento
+// já existente — item 1 do pedido: nunca muda o caminho normal).
+assert(/quote\.status === "enviado" && !resendHomologacao/.test(HANDLER), 'sem resendHomologacao, quote já enviado continua bloqueado/curto-circuitado exatamente como antes');
+
+// 16. COM resendHomologacao=true, um quote "enviado" NÃO é rejeitado por QUOTE_ESTADO_INVALIDO.
+assert(/!\(quote\.status === "enviado" && resendHomologacao\)/.test(HANDLER), 'com resendHomologacao=true, quote.status==="enviado" nunca cai em QUOTE_ESTADO_INVALIDO — reenvio real é permitido');
+
+// 17. Idempotência do reenvio usa uma CHAVE DIFERENTE do envio original — nunca colide/compartilha com vitre_quote_send:.
+assert(/vitre_quote_resend_homolog:\$\{quoteId\}:\$\{requestId\}/.test(HANDLER), 'chave de idempotência do reenvio de homologação é distinta (vitre_quote_resend_homolog:) — nunca reaproveita a chave do primeiro envio');
+
+// 18. Auditoria do reenvio usa uma ACTION diferente — nunca reaproveita "enviar_orcamento_vitre_whatsapp".
+assert(/resendHomologacao \? "reenviar_orcamento_vitre_whatsapp" : "enviar_orcamento_vitre_whatsapp"/.test(HANDLER), 'auditoria usa action "reenviar_orcamento_vitre_whatsapp" para reenvio, nunca a mesma action do primeiro envio real');
+
+// 19. Item 1 do pedido — reenvio de homologação NUNCA escreve status/enviadoEm/
+// enviadoProviderMessageId/enviadoCanal/enviadoPorUid (só campos aditivos
+// ultimoReenvioHomologacao*, num bloco if() SEPARADO do envio original).
+const idxIfResend = HANDLER.indexOf('if (resendHomologacao) {');
+const idxElseNormal = HANDLER.indexOf('} else {', idxIfResend);
+assert(idxIfResend > 0 && idxElseNormal > idxIfResend, 'existe um bloco if(resendHomologacao)/else separado para a escrita final no Firestore');
+const blocoResendWrite = HANDLER.slice(idxIfResend, idxElseNormal);
+assert(
+  blocoResendWrite.includes('ultimoReenvioHomologacaoEm') &&
+  blocoResendWrite.includes('ultimoReenvioHomologacaoProviderMessageId') &&
+  !/\bstatus:\s*"enviado"/.test(blocoResendWrite) &&
+  !blocoResendWrite.includes('enviadoEm:') &&
+  !blocoResendWrite.includes('enviadoProviderMessageId:') &&
+  !blocoResendWrite.includes('enviadoCanal:'),
+  '19. bloco de reenvio grava SÓ campos aditivos (ultimoReenvioHomologacao*) — nunca toca status/enviadoEm/enviadoProviderMessageId/enviadoCanal originais'
+);
+const blocoNormalWrite = HANDLER.slice(idxElseNormal, idxElseNormal + 400);
+assert(
+  blocoNormalWrite.includes('status: "enviado"') && blocoNormalWrite.includes('enviadoEm:') && blocoNormalWrite.includes('enviadoProviderMessageId:'),
+  'o caminho normal (else) continua escrevendo status/enviadoEm/enviadoProviderMessageId exatamente como antes'
+);
+
+// 20. resendHomologacao nunca é lido do body sem checagem estrita === true (nunca aceita truthy genérico/string).
+assert(/data\?\.resendHomologacao === true/.test(SRC), 'resendHomologacao só é true com checagem estrita === true — nunca aceita valor truthy genérico vindo do client');
 
 console.log('\n' + '='.repeat(60));
 console.log(pass + ' passaram, ' + fail + ' falharam.');

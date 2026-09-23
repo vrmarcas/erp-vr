@@ -117,11 +117,14 @@ function fakeDb(resultPromise, whereCalls) {
     assert(ctx.ATD_VALERIA_ORC_ATENDIMENTO_ID === 'conv1', 'ATD_VALERIA_ORC_ATENDIMENTO_ID marcado com o atendimento certo');
     assert(calls.renderPainel.length === 1, 'atdRenderPainel chamado exatamente 1x após resolver');
     const filtros = whereCalls.filter((c) => c[0] === 'where').map((c) => c.slice(1));
+    // Fase E.2.47 (reenvio de homologação) — a consulta passou a aceitar
+    // status IN ['rascunho','enviado'] (antes: status==='rascunho' apenas),
+    // para permitir o banner de reenvio de orçamentos já enviados.
     assert(
       filtros.some((f) => f[0] === 'conversationId' && f[2] === 'conv1') &&
-      filtros.some((f) => f[0] === 'status' && f[2] === 'rascunho') &&
+      filtros.some((f) => f[0] === 'status' && f[1] === 'in' && Array.isArray(f[2]) && f[2].includes('rascunho') && f[2].includes('enviado')) &&
       filtros.some((f) => f[0] === 'origem' && f[2] === 'valeria_v2'),
-      'consulta usa conversationId + status=rascunho + origem=valeria_v2'
+      'consulta usa conversationId + status in [rascunho, enviado] + origem=valeria_v2'
     );
   }
 
@@ -217,25 +220,38 @@ function fakeDb(resultPromise, whereCalls) {
   // forma robusta logo abaixo, contra o diff de functions/functions-valeria.
   const gitDiffFiles = execSync('git diff --name-only', { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
   assert(
-    !gitDiffFiles.some((f) => f.startsWith('functions/') || f.startsWith('functions-valeria/')),
-    'nenhum arquivo de backend (functions/, functions-valeria/) aparece no diff atual',
+    !gitDiffFiles.some((f) => f.startsWith('functions-valeria/')),
+    'nenhum arquivo de functions-valeria/ (gates ValerIA V2) aparece no diff atual',
+    'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
+  );
+  assert(
+    !gitDiffFiles.some((f) => f.startsWith('functions/') && f !== 'functions/src/vitre_quote_send.ts'),
+    'nenhum arquivo de functions/ além de vitre_quote_send.ts (escopo do reenvio de homologação, Fase E.2.47) aparece no diff atual',
     'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
   );
 
-  const diffOutput = execSync('git diff -- functions functions-valeria', { cwd: ROOT }).toString();
-  assert(diffOutput.trim() === '', 'diff de functions/ e functions-valeria/ está vazio — fluxo comercial/gates/handoff intocados');
+  // Fase E.2.47 estende legitimamente o escopo para functions/src/vitre_quote_send.ts
+  // (campo resendHomologacao). O que continua garantido: functions-valeria/ (gates/
+  // fluxo comercial ValerIA V2) permanece 100% intocado.
+  const diffOutput = execSync('git diff -- functions-valeria', { cwd: ROOT }).toString();
+  assert(diffOutput.trim() === '', 'diff de functions-valeria/ está vazio — fluxo comercial/gates/handoff ValerIA V2 intocados');
 
-  // atdAssumirAtendimento (takeover) é só backend TS — confirmação adicional de que não foi tocado, via grep no diff (já coberto acima, mas explícito por nome).
-  assert(!diffOutput.includes('atdAssumirAtendimento'), 'atdAssumirAtendimento não aparece em nenhum diff — takeover humano intocado');
+  // atdAssumirAtendimento (takeover) é só backend TS, definido em functions/src/atendimentos.ts
+  // (nunca em vitre_quote_send.ts) — confirmação adicional de que não foi tocado, via grep no
+  // diff completo de functions/ + functions-valeria/ (já coberto por arquivo acima, explícito por nome).
+  const diffFunctionsCompleto = execSync('git diff -- functions functions-valeria', { cwd: ROOT }).toString();
+  assert(!diffFunctionsCompleto.includes('atdAssumirAtendimento'), 'atdAssumirAtendimento não aparece em nenhum diff — takeover humano intocado');
 
   const fnRenderPainel = extractFunction(INDEX_HTML, 'atdRenderPainel');
   assert(
     fnRenderPainel.includes('ATD_VALERIA_ORC_CACHE && ATD_VALERIA_ORC_ATENDIMENTO_ID===atd.id'),
     'atdRenderPainel só mostra o banner quando o cache pertence ao atendimento ATUALMENTE renderizado — nunca vaza dado de um atendimento anterior'
   );
+  // Fase E.2.47 (reenvio de homologação) — filtro ampliado para
+  // status IN ['rascunho','enviado'], nunca outros status (ex.: 'cancelado').
   assert(
-    /\.where\(\s*['"]status['"]\s*,\s*['"]==['"]\s*,\s*['"]rascunho['"]\s*\)/.test(fnValeriaOrcInit),
-    'consulta filtra explicitamente status==="rascunho" no servidor — nunca traz outros status para o cliente decidir'
+    /\.where\(\s*['"]status['"]\s*,\s*['"]in['"]\s*,\s*\[\s*['"]rascunho['"]\s*,\s*['"]enviado['"]\s*\]\s*\)/.test(fnValeriaOrcInit),
+    'consulta filtra explicitamente status in [rascunho, enviado] no servidor — nunca traz outros status (ex.: cancelado) para o cliente decidir'
   );
   assert(
     /\.where\(\s*['"]origem['"]\s*,\s*['"]==['"]\s*,\s*['"]valeria_v2['"]\s*\)/.test(fnValeriaOrcInit),

@@ -80,6 +80,19 @@ interface SendVitreQuoteInput {
   pdfBase64: string;
   fileName: string;
   requestId: string;
+  /**
+   * Fase E.2.47 (reenvio de homologação) — SOMENTE quando `true` e
+   * `quote.status==="enviado"`, permite enviar uma NOVA mensagem/PDF real
+   * pela mesma conversationId sem tratar isso como o primeiro envio
+   * comercial. Nunca sobrescreve status/enviadoEm/enviadoProviderMessageId/
+   * enviadoCanal/enviadoPorUid originais (a trilha do primeiro envio real
+   * continua histórico válido) — só grava um registro ADITIVO
+   * (ultimoReenvioHomologacao*) e uma auditoria com action própria
+   * ("reenviar_orcamento_vitre_whatsapp"), nunca reaproveitando
+   * "enviar_orcamento_vitre_whatsapp". Quando ausente/false, o
+   * comportamento é EXATAMENTE o mesmo de antes desta fase.
+   */
+  resendHomologacao?: boolean;
 }
 
 interface SendVitreQuoteResult {
@@ -163,6 +176,7 @@ export const sendVitreQuoteToConversation = functions
     const pdfBase64 = String(data?.pdfBase64 || "");
     const fileName = String(data?.fileName || "orcamento.pdf").trim() || "orcamento.pdf";
     const requestId = String(data?.requestId || "").trim();
+    const resendHomologacao = data?.resendHomologacao === true;
 
     if (!conversationId) throw new functions.https.HttpsError("invalid-argument", "conversationId obrigatório.");
     if (!quoteId) throw new functions.https.HttpsError("invalid-argument", "quoteId obrigatório.");
@@ -172,8 +186,10 @@ export const sendVitreQuoteToConversation = functions
 
     // Idempotência (item 9) — double click/retry/refresh com o MESMO
     // requestId nunca reenvia; uma segunda tentativa lógica (novo clique
-    // humano após falha) usa um requestId NOVO de propósito.
-    const idemKey = `vitre_quote_send:${quoteId}:${requestId}`;
+    // humano após falha) usa um requestId NOVO de propósito. Prefixo
+    // diferente para reenvio de homologação — nunca compartilha chave com
+    // o mecanismo de idempotência do primeiro envio real.
+    const idemKey = resendHomologacao ? `vitre_quote_resend_homolog:${quoteId}:${requestId}` : `vitre_quote_send:${quoteId}:${requestId}`;
     const acquired = await acquireIdem(idemKey);
     if (!acquired) return { sent: true, providerMessageId: null, attachmentSent: true, errorCode: null, jaProcessado: true };
 
@@ -185,10 +201,12 @@ export const sendVitreQuoteToConversation = functions
     if (!quoteSnap.exists) return fail("QUOTE_NOT_FOUND");
     const quote = quoteSnap.data()!;
     if (quote.conversationId !== conversationId) return fail("CONVERSATION_MISMATCH");
-    if (quote.status === "enviado") {
+    if (quote.status === "enviado" && !resendHomologacao) {
       // Já enviado por uma chamada anterior (ex.: requestId diferente do
       // mesmo clique duplicado) — nunca reenvia, só reporta o que já
-      // aconteceu, sem erro.
+      // aconteceu, sem erro. (Reenvio de homologação explícito passa
+      // direto — ver bloco abaixo, item 1 do pedido: nunca sobrescreve
+      // esta mesma trilha original.)
       return {
         sent: true,
         providerMessageId: (quote.enviadoProviderMessageId as string | undefined) ?? null,
@@ -197,7 +215,9 @@ export const sendVitreQuoteToConversation = functions
         jaProcessado: true,
       };
     }
-    if (quote.status !== "rascunho") return fail(`QUOTE_ESTADO_INVALIDO:${quote.status}`);
+    if (quote.status !== "rascunho" && !(quote.status === "enviado" && resendHomologacao)) {
+      return fail(`QUOTE_ESTADO_INVALIDO:${quote.status}`);
+    }
 
     // 2. validar conversationId (atendimento existe).
     const atdSnap = await db.collection(COL_ATD).doc(conversationId).get();
@@ -235,9 +255,12 @@ export const sendVitreQuoteToConversation = functions
     }
 
     // 8. auditoria — nunca os bytes do PDF, só metadados (item 10 do pedido).
+    // Fase E.2.47 — reenvio de homologação usa uma action DIFERENTE, nunca
+    // reaproveita "enviar_orcamento_vitre_whatsapp" (essa continua
+    // significando exclusivamente o primeiro envio comercial real).
     const now = Date.now();
     const nome = await nomeStaff(caller.uid);
-    await writeAudit("enviar_orcamento_vitre_whatsapp", caller.uid, caller.role, {
+    await writeAudit(resendHomologacao ? "reenviar_orcamento_vitre_whatsapp" : "enviar_orcamento_vitre_whatsapp", caller.uid, caller.role, {
       quoteId,
       conversationId,
       providerMessageId: sendResult.providerMessageId,
@@ -249,17 +272,32 @@ export const sendVitreQuoteToConversation = functions
       texto: message,
     });
 
-    // 9. só agora, com tudo confirmado, marca enviado.
-    await quoteRef.set(
-      {
-        status: "enviado",
-        enviadoEm: now,
-        enviadoPorUid: caller.uid,
-        enviadoCanal: "whatsapp",
-        enviadoProviderMessageId: sendResult.providerMessageId,
-      },
-      { merge: true }
-    );
+    // 9. só agora, com tudo confirmado, persiste o resultado.
+    if (resendHomologacao) {
+      // Item 1 do pedido — NUNCA sobrescreve status/enviadoEm/
+      // enviadoProviderMessageId/enviadoCanal/enviadoPorUid originais (a
+      // trilha do primeiro envio real continua histórico válido). Só um
+      // registro ADITIVO, nunca lido por nenhuma outra lógica de negócio.
+      await quoteRef.set(
+        {
+          ultimoReenvioHomologacaoEm: now,
+          ultimoReenvioHomologacaoProviderMessageId: sendResult.providerMessageId,
+          ultimoReenvioHomologacaoPorUid: caller.uid,
+        },
+        { merge: true }
+      );
+    } else {
+      await quoteRef.set(
+        {
+          status: "enviado",
+          enviadoEm: now,
+          enviadoPorUid: caller.uid,
+          enviadoCanal: "whatsapp",
+          enviadoProviderMessageId: sendResult.providerMessageId,
+        },
+        { merge: true }
+      );
+    }
 
     return { sent: true, providerMessageId: sendResult.providerMessageId, attachmentSent: true, errorCode: null };
   });

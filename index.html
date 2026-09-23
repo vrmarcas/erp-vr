@@ -4499,8 +4499,10 @@ function _authFirebaseError(code){
          duplicado). Nada é enviado ao abrir; só no clique "Enviar agora". -->
     <div id="vitreEnvioModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:4000;align-items:center;justify-content:center">
       <div style="background:var(--card);border-radius:16px;padding:24px;width:92%;max-width:520px;max-height:90vh;overflow-y:auto">
-        <div style="font-size:15px;font-weight:800;margin-bottom:4px">📲 Enviar orçamento pelo WhatsApp</div>
+        <div id="vitreEnvioTitulo" style="font-size:15px;font-weight:800;margin-bottom:4px">📲 Enviar orçamento pelo WhatsApp</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:16px">A mensagem e o PDF serão enviados pela mesma conversa do WhatsApp já vinculada — o cliente recebe direto, sem abrir WhatsApp Web.</div>
+        <!-- Fase E.2.47 — só aparece quando o orçamento já está status="enviado" (reenvio de homologação); nunca no primeiro envio. -->
+        <div id="vitreEnvioAvisoReenvio" style="display:none;background:#FEF3C7;color:#92400E;font-weight:700;font-size:11px;padding:8px 10px;border-radius:8px;margin-bottom:14px">🔁 Este orçamento JÁ FOI ENVIADO — isto é um REENVIO. O registro original (data/mensagem/ID do primeiro envio) não é alterado; só um novo evento de reenvio é registrado.</div>
 
         <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Destinatário</div>
         <div id="vitreEnvioDestinatario" style="font-size:13px;font-weight:700;margin-bottom:14px">—</div>
@@ -26638,7 +26640,11 @@ function vitreOrcAbrirModalEnvio(quoteOverride) {
   var quote = quoteOverride || VITRE_ORC_ULTIMO;
   if (!quote) { showToast('Salve/abra o orçamento antes de enviar.', 'err'); return; }
   if (!quote.conversationId) { showToast('Este orçamento não está vinculado a uma conversa do WhatsApp — não é possível enviar por aqui.', 'err'); return; }
-  if (quote.status && quote.status !== 'rascunho') { showToast('Este orçamento já não está em rascunho — não pode ser reenviado por aqui.', 'err'); return; }
+  // Fase E.2.47 — status "enviado" agora é um caso válido (REENVIO de
+  // homologação, nunca o primeiro envio) — qualquer outro status
+  // (cancelado etc.) continua bloqueado, como sempre.
+  var isResend = quote.status === 'enviado';
+  if (quote.status && quote.status !== 'rascunho' && !isResend) { showToast('Este orçamento está em um estado que não permite envio por aqui (status: ' + quote.status + ').', 'err'); return; }
   VITRE_ENVIO_MODAL_QUOTE = quote;
 
   var brand = brandConfigGet('vitre');
@@ -26651,19 +26657,25 @@ function vitreOrcAbrirModalEnvio(quoteOverride) {
   }).join('\n');
   var condLinhas = '';
   if (quote.frete > 0) condLinhas += 'Frete: R$ ' + Number(quote.frete).toFixed(2) + '\n';
-  // Mesmo template já usado no Preview WhatsApp (item 13 do pedido) — editável a seguir.
-  var msg = (typeof msgResolverTemplate === 'function') ? msgResolverTemplate('vitreOrcamentoEnviado', {
-    saudacao: saudacao, cliente: quote.clienteNome, marca: brand.nome, itens: itensTxt,
-    ofertas: condLinhas, valor: 'R$ ' + Number(quote.total || 0).toFixed(2), validade: quote.prazoValidadeDias, responsavel: responsavel,
-  }) : ('Olá! Segue o orçamento — total R$ ' + Number(quote.total || 0).toFixed(2) + '.');
+  // Reenvio: mensagem curta, nunca a mensagem completa de "primeiro envio"
+  // (evita reafirmar coisas como se fosse a primeira vez). Primeiro envio:
+  // mesmo template já usado no Preview WhatsApp (item 13 do pedido) — editável a seguir.
+  var msg = isResend
+    ? 'Segue uma nova versão do orçamento para conferência.'
+    : ((typeof msgResolverTemplate === 'function') ? msgResolverTemplate('vitreOrcamentoEnviado', {
+        saudacao: saudacao, cliente: quote.clienteNome, marca: brand.nome, itens: itensTxt,
+        ofertas: condLinhas, valor: 'R$ ' + Number(quote.total || 0).toFixed(2), validade: quote.prazoValidadeDias, responsavel: responsavel,
+      }) : ('Olá! Segue o orçamento — total R$ ' + Number(quote.total || 0).toFixed(2) + '.'));
 
+  document.getElementById('vitreEnvioTitulo').textContent = isResend ? '🔁 Reenviar orçamento (homologação)' : '📲 Enviar orçamento pelo WhatsApp';
+  document.getElementById('vitreEnvioAvisoReenvio').style.display = isResend ? '' : 'none';
   document.getElementById('vitreEnvioDestinatario').textContent = (quote.clienteNome || 'Cliente') + (quote.clienteTel ? ' · ' + quote.clienteTel : '');
   document.getElementById('vitreEnvioMensagem').value = msg;
   document.getElementById('vitreEnvioResumo').innerHTML = itensTxt.replace(/\n/g, '<br>') + '<br><strong>Total: R$ ' + Number(quote.total || 0).toFixed(2) + '</strong>';
   document.getElementById('vitreEnvioNomeArquivo').textContent = 'orcamento_' + (quote.id || 'vitre').slice(0, 8) + '.pdf';
   document.getElementById('vitreEnvioErro').style.display = 'none';
   var btn = document.getElementById('vitreEnvioBtnEnviar');
-  btn.disabled = false; btn.textContent = 'Enviar agora';
+  btn.disabled = false; btn.textContent = isResend ? 'Reenviar agora' : 'Enviar agora';
   document.getElementById('vitreEnvioModal').style.display = 'flex';
 }
 
@@ -26688,14 +26700,18 @@ function vitreOrcConfirmarEnvioWhatsApp() {
   if (!quote) return;
   var mensagem = document.getElementById('vitreEnvioMensagem').value.trim();
   if (!mensagem) { showToast('A mensagem não pode ficar vazia.', 'err'); return; }
+  // Fase E.2.47 — detectado a partir do estado real do orçamento (nunca de
+  // uma flag manual): status já "enviado" só pode significar reenvio de
+  // homologação, nunca o primeiro envio comercial.
+  var isResend = quote.status === 'enviado';
 
   VITRE_ENVIO_BUSY = true;
   var btn = document.getElementById('vitreEnvioBtnEnviar');
-  btn.disabled = true; btn.textContent = 'Enviando…';
+  btn.disabled = true; btn.textContent = isResend ? 'Reenviando…' : 'Enviando…';
   var erroEl = document.getElementById('vitreEnvioErro');
   erroEl.style.display = 'none';
 
-  var requestId = 'vitre_send_' + quote.id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  var requestId = (isResend ? 'vitre_resend_homolog_' : 'vitre_send_') + quote.id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
   Promise.resolve().then(function () {
     return generateVitreQuotePdf(quote);
@@ -26709,18 +26725,23 @@ function vitreOrcConfirmarEnvioWhatsApp() {
       pdfBase64: res.base64,
       fileName: res.pdf.fileName,
       requestId: requestId,
+      resendHomologacao: isResend,
     });
   }).then(function (result) {
     var r = result.data || {};
     if (!r.sent) {
       throw new Error(r.errorCode || 'Falha desconhecida no envio.');
     }
-    showToast(r.jaProcessado ? 'Este orçamento já havia sido enviado.' : 'Orçamento enviado pelo WhatsApp com sucesso!', 'ok');
+    showToast(
+      r.jaProcessado ? 'Este orçamento já havia sido enviado.' : (isResend ? 'Reenvio de homologação concluído!' : 'Orçamento enviado pelo WhatsApp com sucesso!'),
+      'ok'
+    );
     document.getElementById('vitreEnvioModal').style.display = 'none';
     VITRE_ENVIO_MODAL_QUOTE = null;
-    // Reflete o novo status localmente — nunca antes da confirmação real acima.
-    if (VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.id === quote.id) { VITRE_ORC_ATUAL.status = 'enviado'; vitreOrcAtualizarEstadoAtual(); }
-    document.getElementById('vitreOrcBtnEnviarWhatsApp').style.display = 'none';
+    // Reflete o novo status localmente — nunca antes da confirmação real
+    // acima. Reenvio de homologação NUNCA muda o status (já era "enviado").
+    if (!isResend && VITRE_ORC_ATUAL && VITRE_ORC_ATUAL.id === quote.id) { VITRE_ORC_ATUAL.status = 'enviado'; vitreOrcAtualizarEstadoAtual(); }
+    if (!isResend) document.getElementById('vitreOrcBtnEnviarWhatsApp').style.display = 'none';
   }).catch(function (e) {
     var msg = (e && e.message) || 'Erro ao enviar.';
     erroEl.textContent = '❌ Não foi possível enviar: ' + msg + ' — o orçamento continua como rascunho, pode tentar de novo.';
@@ -36376,9 +36397,12 @@ function atdValeriaOrcInit(atendimentoId){
   ATD_VALERIA_ORC_CACHE = null;
   ATD_VALERIA_ORC_ATENDIMENTO_ID = null;
   if(typeof _db==='undefined' || !_db) return;
+  // Fase E.2.47 — também busca status "enviado" (além de "rascunho") para
+  // permitir o banner de reenvio de homologação; a distinção do que
+  // mostrar (revisar vs. reenviar) é feita na renderização, nunca aqui.
   _db.collection('vitre_orcamentos')
     .where('conversationId', '==', atendimentoId)
-    .where('status', '==', 'rascunho')
+    .where('status', 'in', ['rascunho', 'enviado'])
     .where('origem', '==', 'valeria_v2')
     .get()
     .then(function(snap){
@@ -36668,19 +36692,25 @@ function atdRenderPainel(atd){
     var vDraft = ATD_VALERIA_ORC_CACHE;
     var vItem = (vDraft.itens && vDraft.itens[0]) || {};
     var vTotal = Number(vDraft.total||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    // Fase E.2.47 — atdValeriaOrcInit() agora também busca status="enviado"
+    // (reenvio de homologação); rascunho e enviado têm título/ação
+    // diferentes, nunca tratados como a mesma coisa.
+    var vJaEnviado = vDraft.status === 'enviado';
     html += '<div class="atd-painel-sec" style="background:#EAF3F3;border-radius:8px;padding:10px 12px">';
-    html += '<h4>🧾 Orçamento ValerIA aguardando revisão</h4>';
+    html += '<h4>'+(vJaEnviado ? '✅ Orçamento ValerIA já enviado' : '🧾 Orçamento ValerIA aguardando revisão')+'</h4>';
     html += '<div class="atd-painel-row"><span>Produto</span><span>'+cfgEsc(vItem.nomeSnapshot||'—')+'</span></div>';
     html += '<div class="atd-painel-row"><span>Quantidade</span><span>'+cfgEsc(vItem.qtd!=null?String(vItem.qtd):'—')+'</span></div>';
     html += '<div class="atd-painel-row"><span>Total</span><span>R$ '+vTotal+'</span></div>';
-    // Fase E.2.43 — só quando revisável/enviável (status já vem filtrado
-    // como "rascunho" pela própria consulta de atdValeriaOrcInit; a
-    // checagem aqui é defensiva, nunca redundante por acaso).
-    if(vDraft.status==='rascunho'){
+    html += '<div class="atd-painel-row"><span>Status</span><span>'+cfgEsc(vDraft.status)+'</span></div>';
+    if(vJaEnviado){
+      // Reenvio de homologação — NUNCA passa por vitreOrcAbrirRascunho()
+      // (esse bloqueia explicitamente qualquer status != rascunho); vai
+      // direto para o modal de envio, que já sabe tratar isResend.
+      html += '<button onclick="atdAbrirEnvioOrcamentoValeria()" style="margin-top:6px;width:100%;border:1px solid #D97706;background:transparent;color:#92400E;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer">🔁 Reenviar orçamento (homologação)</button>';
+    } else {
       html += '<button onclick="atdAbrirEnvioOrcamentoValeria()" style="margin-top:6px;width:100%;border:1px solid #25D366;background:transparent;color:#1c8a4a;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer">📲 Enviar orçamento</button>';
+      html += '<button onclick="atdAbrirRascunhoValeria(\''+cfgEsc(vDraft.id)+'\')" style="margin-top:8px;width:100%;border:none;background:#1E7A86;color:#fff;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:700;cursor:pointer">📋 Revisar orçamento</button>';
     }
-    html += '<div class="atd-painel-row"><span>Status</span><span>rascunho</span></div>';
-    html += '<button onclick="atdAbrirRascunhoValeria(\''+cfgEsc(vDraft.id)+'\')" style="margin-top:8px;width:100%;border:none;background:#1E7A86;color:#fff;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:700;cursor:pointer">📋 Revisar orçamento</button>';
     html += '</div>';
   }
   html += '<div class="atd-painel-sec"><h4>Ações</h4><div class="atd-painel-actions">';

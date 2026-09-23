@@ -145,9 +145,23 @@ console.log('\n== Parte 3 — vitreOrcAbrirModalEnvio (guardas) ==');
   ctx.vitreOrcAbrirModalEnvio({ id: 'q1', conversationId: null, itens: [], clienteNome: 'X', total: 100, status: 'rascunho' });
   assert(calls.toast.length === 1 && /conversa do WhatsApp/.test(calls.toast[0].msg), 'orçamento sem conversationId → bloqueado, nunca tenta enviar sem saber para onde');
 
+  // Fase E.2.47 — status "enviado" deixa de ser bloqueado: agora é o
+  // caso de REENVIO de homologação, tratado explicitamente (nunca
+  // confundido com o primeiro envio).
   calls.toast.length = 0;
   ctx.vitreOrcAbrirModalEnvio({ id: 'q1', conversationId: 'conv1', itens: [], clienteNome: 'X', total: 100, status: 'enviado' });
-  assert(calls.toast.length === 1 && /já não está em rascunho/.test(calls.toast[0].msg), 'orçamento já enviado → bloqueado, nunca reenvia pelo modal');
+  assert(calls.toast.length === 0, 'E.2.47 — orçamento já "enviado" NÃO é mais bloqueado — abre o modal em modo reenvio');
+  assert(ctx.document._elements['vitreEnvioModal'].style.display === 'flex', 'E.2.47 — modal abre normalmente para reenvio');
+  assert(ctx.document._elements['vitreEnvioTitulo'].textContent === '🔁 Reenviar orçamento (homologação)', 'E.2.47 — título do modal muda para deixar claro que é um reenvio, nunca o primeiro envio');
+  assert(ctx.document._elements['vitreEnvioAvisoReenvio'].style.display === '', 'E.2.47 — aviso de reenvio fica visível (display não é "none")');
+  assert(ctx.document._elements['vitreEnvioBtnEnviar'].textContent === 'Reenviar agora', 'E.2.47 — botão de confirmação muda para "Reenviar agora"');
+  assert(ctx.document._elements['vitreEnvioMensagem'].value === 'Segue uma nova versão do orçamento para conferência.', 'E.2.47 — mensagem padrão do reenvio é curta, nunca reafirma a mensagem completa de primeiro envio');
+
+  // Qualquer OUTRO status (cancelado etc.) continua bloqueado — só
+  // "rascunho" e "enviado" são aceitos.
+  calls.toast.length = 0;
+  ctx.vitreOrcAbrirModalEnvio({ id: 'q1', conversationId: 'conv1', itens: [], clienteNome: 'X', total: 100, status: 'cancelado' });
+  assert(calls.toast.length === 1 && calls.toast[0].type === 'err', 'E.2.47 — regressão: status "cancelado" continua bloqueado, nunca abre o modal');
 
   calls.toast.length = 0;
   const quoteOk = { id: 'valeria2_catalog_conv1', conversationId: 'conv1', itens: [{ sku: 'C4TC3M', nome: 'Caixa', precoVenda: 165, qtd: 20, adicionais: [] }], clienteNome: 'Cliente WhatsApp', total: 3300, frete: 0, prazoValidadeDias: 7, status: 'rascunho' };
@@ -155,6 +169,9 @@ console.log('\n== Parte 3 — vitreOrcAbrirModalEnvio (guardas) ==');
   assert(calls.toast.length === 0, 'orçamento válido (conversationId + rascunho) → abre sem toast de erro');
   assert(ctx.document._elements['vitreEnvioModal'].style.display === 'flex', 'modal fica visível (display:flex) após abrir com sucesso');
   assert(ctx.document._elements['vitreEnvioMensagem'].value.indexOf('MSG[vitreOrcamentoEnviado]') >= 0, 'mensagem pré-preenchida usa o MESMO template de vitreOrcEnviarWhatsApp (msgResolverTemplate)');
+  assert(ctx.document._elements['vitreEnvioTitulo'].textContent === '📲 Enviar orçamento pelo WhatsApp', 'primeiro envio (rascunho) mantém o título original, nunca o de reenvio');
+  assert(ctx.document._elements['vitreEnvioAvisoReenvio'].style.display === 'none', 'primeiro envio (rascunho) nunca mostra o aviso de reenvio');
+  assert(ctx.document._elements['vitreEnvioBtnEnviar'].textContent === 'Enviar agora', 'primeiro envio (rascunho) mantém o texto "Enviar agora", nunca "Reenviar agora"');
 }
 
 console.log('\n== Parte 4 — vitreOrcConfirmarEnvioWhatsApp (ordem, idempotência, falha) ==');
@@ -195,7 +212,26 @@ console.log('\n== Parte 4 — vitreOrcConfirmarEnvioWhatsApp (ordem, idempotênc
     assert(payload.conversationId === 'conv1' && payload.quoteId === 'valeria2_catalog_conv1', 'payload envia conversationId/quoteId corretos');
     assert(typeof payload.pdfBase64 === 'string' && payload.pdfBase64.length === 0 === false || typeof payload.pdfBase64 === 'string', 'payload inclui pdfBase64 (string, mesmo que o mock de blob→base64 produza vazio)');
     assert(typeof payload.requestId === 'string' && payload.requestId.indexOf('vitre_send_') === 0, 'requestId determinístico por operação, prefixo vitre_send_ (idempotência)');
+    assert(payload.resendHomologacao === false, 'E.2.47 — primeiro envio (rascunho) envia resendHomologacao:false explicitamente');
     assert(ctx.document._elements['vitreEnvioModal'].style.display === 'none', 'modal fecha só APÓS confirmação real de sucesso do backend');
+  }
+
+  // Fase E.2.47 — reenvio de homologação: payload correto, requestId com
+  // prefixo distinto, status NUNCA é alterado localmente (já era "enviado").
+  {
+    const { ctx, calls } = baseContext({});
+    vm.runInContext(COMBINED_SRC, ctx, { filename: 'e243.js' });
+    const quoteResend = { id: 'valeria2_catalog_conv1', conversationId: 'conv1', itens: [{ sku: 'C4TC3M', nome: 'Caixa', precoVenda: 165, qtd: 20, adicionais: [] }], clienteNome: 'Cliente WhatsApp', total: 3300, frete: 0, prazoValidadeDias: 7, status: 'enviado' };
+    ctx.VITRE_ORC_ATUAL = { id: 'valeria2_catalog_conv1', status: 'enviado' };
+    ctx.vitreOrcAbrirModalEnvio(quoteResend);
+    ctx.vitreOrcConfirmarEnvioWhatsApp();
+    await new Promise((r) => setTimeout(r, 50));
+    assert(calls.callable.length === 1, 'reenvio chama a Cloud Function exatamente 1x');
+    const payloadResend = calls.callable[0].payload;
+    assert(payloadResend.resendHomologacao === true, 'E.2.47 — reenvio envia resendHomologacao:true explicitamente');
+    assert(typeof payloadResend.requestId === 'string' && payloadResend.requestId.indexOf('vitre_resend_homolog_') === 0, 'E.2.47 — requestId do reenvio usa prefixo distinto (vitre_resend_homolog_), nunca colide com o do primeiro envio');
+    assert(ctx.VITRE_ORC_ATUAL.status === 'enviado', 'E.2.47 — status local NUNCA é reatribuído no reenvio (já era "enviado", nada muda)');
+    assert(ctx.document._elements['vitreEnvioModal'].style.display === 'none', 'modal fecha após reenvio confirmado com sucesso');
   }
 
   // Double-click — segunda chamada enquanto a primeira ainda está em voo nunca dispara 2 callables.
@@ -255,6 +291,11 @@ console.log('\n== Parte 4 — vitreOrcConfirmarEnvioWhatsApp (ordem, idempotênc
 
   const idxBtnAtd = INDEX_HTML.indexOf('atdAbrirEnvioOrcamentoValeria()');
   assert(idxBtnAtd > 0, 'botão de Atendimentos chama atdAbrirEnvioOrcamentoValeria');
+
+  const idxBtnReenvio = INDEX_HTML.indexOf("🔁 Reenviar orçamento (homologação)</button>");
+  assert(idxBtnReenvio > 0, 'botão "🔁 Reenviar orçamento (homologação)" existe no banner de Atendimentos');
+  assert(INDEX_HTML.slice(Math.max(0, idxBtnReenvio - 250), idxBtnReenvio).includes('atdAbrirEnvioOrcamentoValeria()'), 'botão de reenvio (homologação) chama atdAbrirEnvioOrcamentoValeria');
+  assert(INDEX_HTML.slice(Math.max(0, idxBtnReenvio - 700), idxBtnReenvio).includes('if(vJaEnviado){'), 'botão de reenvio (homologação) está dentro do bloco condicional vJaEnviado');
 
   // PDF antigo (window.print) preservado — nunca removido.
   assert(INDEX_HTML.includes('function vitreOrcGerarPDF()') && INDEX_HTML.includes("onclick=\"window.print()\""), 'botão/gerador de PDF antigo (window.print) continua presente, nunca removido (item 2 do pedido)');

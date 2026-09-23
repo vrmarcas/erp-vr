@@ -261,7 +261,12 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   const diffFiles = execSync('git diff --name-only', { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
   console.log('  ℹ️  arquivos alterados no diff atual:', JSON.stringify(diffFiles));
   assert(diffFiles.includes('index.html'), '17. index.html está entre os arquivos alterados (é o escopo desta fase)');
-  assert(!diffFiles.some((f) => f.startsWith('functions/') || f.startsWith('functions-valeria/')), '1/17. nenhum arquivo de backend (functions/, functions-valeria/) foi alterado nesta fase');
+  // Fase E.2.47 (reenvio de homologação) legitimamente estende o escopo para
+  // functions/src/vitre_quote_send.ts (campo resendHomologacao). O que esta
+  // asserção continua garantindo é que functions-valeria/ (gates/ValerIA V2)
+  // e qualquer OUTRO arquivo de functions/ permanecem intocados.
+  assert(!diffFiles.some((f) => f.startsWith('functions-valeria/')), '1/17. nenhum arquivo de functions-valeria/ (gates ValerIA V2) foi alterado nesta fase');
+  assert(!diffFiles.some((f) => f.startsWith('functions/') && f !== 'functions/src/vitre_quote_send.ts'), '1/17. nenhum arquivo de functions/ além de vitre_quote_send.ts (escopo do reenvio de homologação, Fase E.2.47) foi alterado nesta fase');
   // Só bloqueia se o CÓDIGO dessas funções VR-personalizado for tocado (definição
   // adicionada/removida no diff) — uma MENÇÃO em comentário (ex.: explicando por
   // que parcelamento/PIX não existem no modelo Vitre) é esperada e documentada.
