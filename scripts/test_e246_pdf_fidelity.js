@@ -260,7 +260,12 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   // anteriores podem legitimamente ter sido ajustados nesta mesma sessão.
   const diffFiles = execSync('git diff --name-only', { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
   console.log('  ℹ️  arquivos alterados no diff atual:', JSON.stringify(diffFiles));
-  assert(diffFiles.includes('index.html'), '17. index.html está entre os arquivos alterados (é o escopo desta fase)');
+  // (Removida a asserção "index.html está no diff": era um snapshot do
+  // escopo transiente da Fase E.2.46/E.2.47, válido só enquanto essas
+  // mudanças estavam descomitadas. Após o commit, index.html some do
+  // `git diff` — não é uma regressão, é o esperado. Fases futuras que não
+  // tocam index.html, como a E.2.47.1 (só pipeline de deploy), não devem
+  // falhar por causa disso.)
   // Fase E.2.47 (reenvio de homologação) legitimamente estende o escopo para
   // functions/src/vitre_quote_send.ts (campo resendHomologacao). O que esta
   // asserção continua garantindo é que functions-valeria/ (gates/ValerIA V2)
