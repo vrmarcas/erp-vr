@@ -7,7 +7,13 @@
  * caminho crítico de resposta — o evento bruto fica em valeria_webhook_events
  * para reprocessamento assíncrono ou consulta posterior.
  *
- * NUNCA baixa conteúdo de anexos — registra apenas metadados (URL, MIME, size).
+ * Para o evento bruto (valeria_webhook_events/valeria_msgs), NUNCA baixa
+ * conteúdo de anexos — registra apenas metadados (URL, MIME, size). Já para
+ * o espelho do atendimento (Fase E.2.49), o anexo da mensagem inbound
+ * CORRELACIONADA a este webhook (providerMessageId === m.id) é baixado uma
+ * única vez e copiado para o Storage do próprio projeto (ver
+ * processarAnexosInbound) — a URL do Chatvolt nunca é persistida, por ser
+ * temporária.
  *
  * Eventos suportados:
  *   USER_MESSAGE_RECEIVED  — mensagem recebida do usuário
@@ -80,6 +86,148 @@ const SINCRONIA_VAZIA: SincroniaConversa = {
 };
 
 /**
+ * Fase E.2.49 (2026-09-23) — anexos INBOUND reais do cliente (payload real
+ * confirmado: `{url, mimeType, tamanho, nome:"📸"}`, URL pública do S3 do
+ * Chatvolt, sem header de auth, sem parâmetro de assinatura — mas
+ * explicitamente TEMPORÁRIA/não contratual, nunca usada como fonte
+ * permanente: todo anexo aceito é baixado UMA vez e copiado para o Storage
+ * do próprio projeto). Suporta inicialmente só os 3 tipos confirmados/
+ * previstos — qualquer outro MIME é rejeitado com segurança (nunca
+ * executa/interpreta o conteúdo, nunca derruba o webhook).
+ */
+const ANEXO_INBOUND_MIME_PERMITIDOS: Record<string, { ext: string; prefixo: string }> = {
+  "image/jpeg": { ext: "jpg", prefixo: "imagem" },
+  "image/png": { ext: "png", prefixo: "imagem" },
+  "application/pdf": { ext: "pdf", prefixo: "documento" },
+};
+const ANEXO_INBOUND_MAX_BYTES = 8 * 1024 * 1024;
+const ANEXO_INBOUND_TIMEOUT_MS = 20_000;
+/** Placeholder técnico confirmado (payload real) — NUNCA um texto de cliente de verdade; só é removido quando há anexo confirmado. */
+const ANEXO_INBOUND_PLACEHOLDER_TEXTO = "📸";
+
+interface AnexoInboundPersistido {
+  name: string;
+  mimeType: string;
+  size: number;
+  storagePath: string;
+  providerMessageId: string;
+}
+
+/**
+ * Baixa um anexo com limite real de bytes (nunca confia só no
+ * Content-Length declarado — corta durante o streaming se o corpo real
+ * exceder o limite) e timeout explícito. Nunca lança — sempre devolve um
+ * resultado tipado para o chamador decidir o log específico.
+ */
+export async function baixarAnexoComLimite(
+  url: string,
+  maxBytes: number,
+  timeoutMs: number
+): Promise<{ ok: true; buffer: Buffer; contentType: string | null } | { ok: false; motivo: string }> {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!resp.ok) return { ok: false, motivo: `http_${resp.status}` };
+    const contentType = resp.headers.get("content-type");
+    const declaredLen = Number(resp.headers.get("content-length") ?? "0");
+    if (declaredLen > maxBytes) return { ok: false, motivo: "content_length_excede_limite" };
+    const body = resp.body as ReadableStream<Uint8Array> | null;
+    if (!body || typeof (body as { getReader?: unknown }).getReader !== "function") {
+      const ab = await resp.arrayBuffer();
+      if (ab.byteLength > maxBytes) return { ok: false, motivo: "corpo_excede_limite" };
+      return { ok: true, buffer: Buffer.from(ab), contentType };
+    }
+    const reader = body.getReader();
+    const partes: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > maxBytes) {
+          try { await reader.cancel(); } catch { /* melhor esforço */ }
+          return { ok: false, motivo: "corpo_excede_limite" };
+        }
+        partes.push(value);
+      }
+    }
+    return { ok: true, buffer: Buffer.concat(partes), contentType };
+  } catch (e) {
+    const nome = (e as Error).name;
+    return { ok: false, motivo: nome === "TimeoutError" || nome === "AbortError" ? "timeout" : "excecao_fetch" };
+  }
+}
+
+/**
+ * Baixa, valida e persiste no Storage os anexos de UMA mensagem inbound já
+ * correlacionada por `providerMessageId === m.id` (nunca por texto/hora/
+ * nome — únicos campos confiáveis confirmados no payload real). Nunca
+ * lança — qualquer falha por item é só logada (eventos sanitizados, nunca
+ * binário/URL assinada/segredo) e aquele item é omitido do resultado; a
+ * mensagem em si (texto) é sempre persistida pelo chamador independente do
+ * resultado aqui.
+ */
+export async function processarAnexosInbound(
+  atendimentoId: string,
+  providerMessageId: string,
+  anexosMeta: AnexoMeta[]
+): Promise<AnexoInboundPersistido[]> {
+  if (anexosMeta.length === 0) return [];
+  const admin2 = (await import("firebase-admin")).default;
+  const bucket = admin2.storage().bucket();
+  const persistidos: AnexoInboundPersistido[] = [];
+
+  for (let i = 0; i < anexosMeta.length; i++) {
+    const anexo = anexosMeta[i];
+    const log = (evento: string, extra: Record<string, unknown> = {}) =>
+      console.log(`[webhook.processarAnexosInbound] ${evento}:`, JSON.stringify({ atendimentoId, providerMessageId, indice: i, ...extra }));
+
+    if (!anexo.url) { log("inbound_attachment_download_failed", { motivo: "sem_url" }); continue; }
+    const mimeDeclaradoRaw = anexo.mimeType ?? null;
+    const permitido = mimeDeclaradoRaw ? ANEXO_INBOUND_MIME_PERMITIDOS[mimeDeclaradoRaw] : undefined;
+    if (!permitido || !mimeDeclaradoRaw) { log("inbound_attachment_mime_mismatch", { motivo: "mime_declarado_nao_suportado", mimeDeclarado: mimeDeclaradoRaw }); continue; }
+    const mimeDeclarado: string = mimeDeclaradoRaw;
+
+    const resultado = await baixarAnexoComLimite(anexo.url, ANEXO_INBOUND_MAX_BYTES, ANEXO_INBOUND_TIMEOUT_MS);
+    if (!resultado.ok) {
+      if (resultado.motivo === "content_length_excede_limite" || resultado.motivo === "corpo_excede_limite") {
+        log("inbound_attachment_too_large", { motivo: resultado.motivo });
+      } else {
+        log("inbound_attachment_download_failed", { motivo: resultado.motivo });
+      }
+      continue;
+    }
+
+    const contentTypeReal = resultado.contentType?.split(";")[0]?.trim().toLowerCase() ?? null;
+    if (contentTypeReal && contentTypeReal !== mimeDeclarado) {
+      log("inbound_attachment_mime_mismatch", { motivo: "content_type_real_diverge", mimeDeclarado, contentTypeReal });
+      continue;
+    }
+    if (resultado.buffer.byteLength > ANEXO_INBOUND_MAX_BYTES) {
+      log("inbound_attachment_too_large", { motivo: "buffer_excede_limite_pos_download" });
+      continue;
+    }
+
+    const nomeGerado = anexosMeta.length > 1
+      ? `${permitido.prefixo}_${providerMessageId}_${i}.${permitido.ext}`
+      : `${permitido.prefixo}_${providerMessageId}.${permitido.ext}`;
+    const storagePath = `atendimentos_inbound/${atendimentoId}/${providerMessageId}/${nomeGerado}`;
+
+    try {
+      await bucket.file(storagePath).save(resultado.buffer, { contentType: mimeDeclarado, resumable: false });
+    } catch (e) {
+      log("inbound_attachment_storage_failed", { motivo: (e as Error).message?.slice(0, 200) });
+      continue;
+    }
+
+    log("inbound_attachment_saved", { storagePath, mimeType: mimeDeclarado, size: resultado.buffer.byteLength });
+    persistidos.push({ name: nomeGerado, mimeType: mimeDeclarado, size: resultado.buffer.byteLength, storagePath, providerMessageId });
+  }
+
+  return persistidos;
+}
+
+/**
  * Sprint P1.2b (achado real de E2E) — o webhook só passou a existir no
  * MEIO de conversas reais já em andamento (Tools sempre funcionaram,
  * technicalBriefing nunca ficou incompleto — só o espelho ERP/mensagens
@@ -100,7 +248,10 @@ const SINCRONIA_VAZIA: SincroniaConversa = {
  * que não vem no payload do evento) — nunca inventa texto: se a API
  * falhar, retorna vazio e quem chama decide o fallback.
  */
-async function sincronizarConversaCompleta(conversationId: string): Promise<SincroniaConversa> {
+async function sincronizarConversaCompleta(
+  conversationId: string,
+  correlacaoAnexo: { providerMessageId: string | null; anexosMeta: AnexoMeta[] } = { providerMessageId: null, anexosMeta: [] }
+): Promise<SincroniaConversa> {
   const apiKey = process.env.CHATVOLT_API_KEY;
   if (!apiKey) return SINCRONIA_VAZIA;
   try {
@@ -122,7 +273,16 @@ async function sincronizarConversaCompleta(conversationId: string): Promise<Sinc
     const db = admin.firestore();
     const msgsCol = db.collection("atendimentos").doc(conversationId).collection("mensagens");
 
-    const mensagens = (json.messages ?? []).filter((m) => !!m.text);
+    // Fase E.2.49 — antes: `filter(m => !!m.text)` descartava silenciosamente
+    // qualquer mensagem só-com-anexo (sem legenda), inclusive o placeholder
+    // técnico "📸" nunca era tratado como "tem conteúdo real". Agora também
+    // mantém a mensagem cujo id é EXATAMENTE o `providerMessageId` já
+    // correlacionado (evento deste webhook, nunca por texto/hora/nome).
+    const temAnexoCorrelacionado = (m: { id: string }) =>
+      correlacaoAnexo.providerMessageId != null &&
+      m.id === correlacaoAnexo.providerMessageId &&
+      correlacaoAnexo.anexosMeta.length > 0;
+    const mensagens = (json.messages ?? []).filter((m) => !!m.text || temAnexoCorrelacionado(m));
     const ordenadas = [...mensagens].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
     let ultimaMensagem: string | null = null;
@@ -144,7 +304,7 @@ async function sincronizarConversaCompleta(conversationId: string): Promise<Sinc
     const faltando = ordenadas.filter((_, i) => !existentes[i]?.exists);
 
     await Promise.all(
-      faltando.map((m) => {
+      faltando.map(async (m) => {
         const createdAtMs = new Date(m.createdAt).getTime();
         // "human" no vocabulário do ChatVolt = o CLIENTE do outro lado da
         // conversa (não confundir com humano do ERP assumindo o
@@ -164,10 +324,25 @@ async function sincronizarConversaCompleta(conversationId: string): Promise<Sinc
         // disponíveis) em vez de arriscar um autor errado no ERP.
         const actorType = m.from === "agent" ? "agent_unknown" : m.from === "human" ? "customer" : "system";
         const actorName = actorType === "agent_unknown" ? "Equipe/Valéria (autor não identificável)" : null;
+
+        // Fase E.2.49 — só tenta baixar/persistir anexo para a mensagem
+        // exatamente correlacionada a este webhook (nunca reprocessa outras
+        // mensagens do histórico, mesmo que também tenham anexo — cada uma
+        // só é baixada quando o PRÓPRIO evento dela chega).
+        const anexosDaMensagem = temAnexoCorrelacionado(m)
+          ? await processarAnexosInbound(conversationId, m.id, correlacaoAnexo.anexosMeta)
+          : [];
+        // Placeholder conservador: só remove o texto quando ele é
+        // EXATAMENTE o placeholder técnico confirmado E existe ao menos um
+        // anexo de fato persistido — nunca generaliza para outros textos
+        // curtos/emoji, nunca apaga um texto real do cliente.
+        const textoFinal =
+          anexosDaMensagem.length > 0 && m.text === ANEXO_INBOUND_PLACEHOLDER_TEXTO ? "" : (m.text ?? "");
+
         return msgsCol.doc(m.id).set({
           id: m.id, atendimentoId: conversationId, providerMessageId: m.id,
           idempotencyKey: null, actorType, actorId: null, actorName,
-          text: m.text, attachments: [], deliveryStatus: "sent",
+          text: textoFinal, attachments: anexosDaMensagem, deliveryStatus: "sent",
           provider: "whatsapp", createdAt: createdAtMs,
         });
       })
@@ -196,6 +371,8 @@ async function upsertAtendimentoWhatsApp(params: {
   channelPhone: string | null;
   texto: string;
   permiteCriar: boolean;
+  providerMessageId: string | null;
+  anexosMeta: AnexoMeta[];
 }): Promise<{ isNovo: boolean; atd: FirebaseFirestore.DocumentData } | null> {
   const admin = (await import("firebase-admin")).default;
   const db = admin.firestore();
@@ -209,7 +386,9 @@ async function upsertAtendimentoWhatsApp(params: {
     // primeira vez que ela chega ao ERP pode já vir no meio de uma
     // conversa em andamento — Tools sempre funcionaram, só o espelho ERP
     // ficou para trás) + nome/telefone reais do contato do canal.
-    const sync = await sincronizarConversaCompleta(params.conversationId);
+    const sync = await sincronizarConversaCompleta(params.conversationId, {
+      providerMessageId: params.providerMessageId, anexosMeta: params.anexosMeta,
+    });
     // P1.2c (achado real de E2E) — número na allowlist (config Firestore,
     // nunca hardcoded) já nasce isTeste=true. Todo o resto da cadeia
     // (lead/simulação/orçamento) já lê atendimentos/{id}.isTeste como
@@ -262,7 +441,9 @@ async function upsertAtendimentoWhatsApp(params: {
   }
 
   const atd = snap.data()!;
-  const sync = await sincronizarConversaCompleta(params.conversationId);
+  const sync = await sincronizarConversaCompleta(params.conversationId, {
+    providerMessageId: params.providerMessageId, anexosMeta: params.anexosMeta,
+  });
   const patch: Record<string, unknown> = { updatedAt: now };
   if (sync.ultimaMensagem) {
     patch.ultimaMensagem = sync.ultimaMensagem;
@@ -624,6 +805,13 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
 
       if (shadowDebugEligivel) shadowDebugStages.push("CONTEXT_RESOLVED"); // estágio B.
 
+      // Metadados de anexos — NUNCA conteúdo. Calculado ANTES do upsert
+      // (Fase E.2.49) porque upsertAtendimentoWhatsApp/sincronizarConversaCompleta
+      // precisam correlacionar por providerMessageId (explicitMsgId, o
+      // messageId do próprio evento do webhook — confirmado igual a `m.id`
+      // de GET /conversations) para decidir se baixam/persistem o anexo.
+      const anexos: AnexoMeta[] = extractAnexosMeta(body["anexos"] ?? body["attachments"]);
+
       // ── P1.0/P1.2b — espelho operacional no ERP + pipeline determinístico ──
       // Só para eventos reais de WhatsApp COM telefone de canal conhecido
       // (nunca para o chat de teste interno do Chatvolt, sem channelPhone).
@@ -643,6 +831,8 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
             channelPhone: ctx.channelPhone,
             texto: mensagemCliente ?? "",
             permiteCriar: direcao === "entrada" && !!mensagemCliente,
+            providerMessageId: explicitMsgId ?? null,
+            anexosMeta: anexos,
           });
           if (resultado && direcao === "entrada" && mensagemCliente) {
             const { atd } = resultado;
@@ -760,9 +950,6 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
           console.error("[webhook] falha no espelho operacional WhatsApp (não bloqueia log do evento):", (e as Error).message);
         }
       }
-
-      // Metadados de anexos — NUNCA conteúdo
-      const anexos: AnexoMeta[] = extractAnexosMeta(body["anexos"] ?? body["attachments"]);
 
       // Info de bloqueio
       const bloqueioInfo: BloqueioInfo | undefined = tipo === "bloqueio"
