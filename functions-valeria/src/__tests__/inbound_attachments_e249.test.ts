@@ -28,7 +28,7 @@ jest.mock("firebase-admin", () => ({
   })),
 }));
 
-import { baixarAnexoComLimite, processarAnexosInbound } from "../webhook";
+import { baixarAnexoComLimite, processarAnexosInbound, decidirTextoFinalInbound } from "../webhook";
 
 const ORIGINAL_FETCH = global.fetch;
 
@@ -254,5 +254,42 @@ describe("processarAnexosInbound", () => {
     const resultado = await processarAnexosInbound("atd_12", "msg_sem_mime", [{ url: "https://s3/x", tamanho: 10 }]);
     expect(resultado).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * decidirTextoFinalInbound — homologação real (Teste 2, 2026-09-23) achou
+ * um segundo placeholder técnico real ("📄", PDF) além do "📸" (imagem) já
+ * confirmado. Ajuste mínimo: lista fechada de 2 placeholders confirmados,
+ * nunca regex ampla, nunca decisão só por MIME.
+ */
+describe("decidirTextoFinalInbound", () => {
+  test("imagem + '📸' com anexo persistido — texto vira vazio", () => {
+    expect(decidirTextoFinalInbound("📸", 1)).toBe("");
+  });
+
+  test("PDF + '📄' com anexo persistido — texto vira vazio", () => {
+    expect(decidirTextoFinalInbound("📄", 1)).toBe("");
+  });
+
+  test("imagem + legenda real — preserva o texto exatamente como veio", () => {
+    expect(decidirTextoFinalInbound("Segue a arte aprovada", 1)).toBe("Segue a arte aprovada");
+  });
+
+  test("PDF + texto real — preserva o texto exatamente como veio", () => {
+    expect(decidirTextoFinalInbound("Segue o boleto", 1)).toBe("Segue o boleto");
+  });
+
+  test("'📄' SEM anexo persistido (download/validação falhou) — preserva o placeholder, nunca suprime sem attachment real", () => {
+    expect(decidirTextoFinalInbound("📄", 0)).toBe("📄");
+  });
+
+  test("emoji diferente, não confirmado como placeholder (ex: '📎'), mesmo com anexo — preserva, nunca generaliza", () => {
+    expect(decidirTextoFinalInbound("📎", 1)).toBe("📎");
+  });
+
+  test("texto nulo/ausente, sem anexo — vira string vazia (nunca undefined/null no Firestore)", () => {
+    expect(decidirTextoFinalInbound(null, 0)).toBe("");
+    expect(decidirTextoFinalInbound(undefined, 0)).toBe("");
   });
 });

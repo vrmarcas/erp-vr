@@ -102,8 +102,30 @@ const ANEXO_INBOUND_MIME_PERMITIDOS: Record<string, { ext: string; prefixo: stri
 };
 const ANEXO_INBOUND_MAX_BYTES = 8 * 1024 * 1024;
 const ANEXO_INBOUND_TIMEOUT_MS = 20_000;
-/** Placeholder técnico confirmado (payload real) — NUNCA um texto de cliente de verdade; só é removido quando há anexo confirmado. */
-const ANEXO_INBOUND_PLACEHOLDER_TEXTO = "📸";
+/**
+ * Placeholders técnicos confirmados em produção — NUNCA texto de cliente de
+ * verdade; só removido quando há anexo REALMENTE persistido. "📸" (imagem)
+ * confirmado na Fase E.2.49 original; "📄" (PDF) confirmado no Teste 2 de
+ * homologação real (2026-09-23) — mesmo emoji do ícone de PDF do WhatsApp
+ * usado pelo ChatVolt como placeholder de texto. Lista fechada por
+ * desenho — nunca generaliza para outro emoji/MIME sem confirmação real.
+ */
+const ANEXO_INBOUND_PLACEHOLDERS_TEXTO = new Set(["📸", "📄"]);
+
+/**
+ * Decide o texto final a persistir para uma mensagem inbound: só suprime
+ * (string vazia) quando há pelo menos um anexo REALMENTE persistido E o
+ * texto original é EXATAMENTE um dos placeholders técnicos confirmados —
+ * nunca por MIME sozinho, nunca por regex ampla. Qualquer outro texto
+ * (real, ou um emoji ainda não confirmado como placeholder) é preservado
+ * exatamente como veio.
+ */
+export function decidirTextoFinalInbound(textoOriginal: string | null | undefined, quantidadeAnexosPersistidos: number): string {
+  if (quantidadeAnexosPersistidos > 0 && textoOriginal != null && ANEXO_INBOUND_PLACEHOLDERS_TEXTO.has(textoOriginal)) {
+    return "";
+  }
+  return textoOriginal ?? "";
+}
 
 interface AnexoInboundPersistido {
   name: string;
@@ -332,12 +354,7 @@ async function sincronizarConversaCompleta(
         const anexosDaMensagem = temAnexoCorrelacionado(m)
           ? await processarAnexosInbound(conversationId, m.id, correlacaoAnexo.anexosMeta)
           : [];
-        // Placeholder conservador: só remove o texto quando ele é
-        // EXATAMENTE o placeholder técnico confirmado E existe ao menos um
-        // anexo de fato persistido — nunca generaliza para outros textos
-        // curtos/emoji, nunca apaga um texto real do cliente.
-        const textoFinal =
-          anexosDaMensagem.length > 0 && m.text === ANEXO_INBOUND_PLACEHOLDER_TEXTO ? "" : (m.text ?? "");
+        const textoFinal = decidirTextoFinalInbound(m.text, anexosDaMensagem.length);
 
         return msgsCol.doc(m.id).set({
           id: m.id, atendimentoId: conversationId, providerMessageId: m.id,
