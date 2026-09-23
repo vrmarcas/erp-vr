@@ -23,6 +23,14 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'functions', 'src', 'vitre_quote_send.ts'), 'utf8');
+// Fase E.2.48B — uploadFileAndSign/sendChatvoltMessageWithAttachment foram
+// extraídas para um módulo compartilhado (chatvolt_attachment_send.ts),
+// reutilizado pelo novo fluxo de envio do orçamento oficial do ERP (Atendimentos)
+// — extração pura, mesmo comportamento, mesmos nomes de call site. As
+// asserções que checavam a DEFINIÇÃO dessas funções agora leem esse módulo;
+// as que checam o CALL SITE/ordem dentro do handler continuam lendo só
+// vitre_quote_send.ts (nunca mudou de lugar).
+const SHARED_SRC = fs.readFileSync(path.join(__dirname, '..', 'functions', 'src', 'chatvolt_attachment_send.ts'), 'utf8');
 
 let pass = 0, fail = 0;
 function assert(cond, desc) {
@@ -80,19 +88,24 @@ assert(!/pdfBuffer|pdfBase64/.test(auditoriaBlock), 'bloco de auditoria nunca re
 
 // 9. Endpoint ChatVolt correto (o NOVO, com suporte a attachments) — checa o
 // valor REAL da constante usada na chamada axios, nunca menções em comentário.
-assert(SRC.includes('const CHATVOLT_SEND_ENDPOINT = "https://api.chatvolt.ai/conversation/message/conversationId/"'), 'CHATVOLT_SEND_ENDPOINT aponta para o endpoint NOVO (api.chatvolt.ai) — o único documentado com suporte a attachments');
-assert(!SRC.includes('axios.post(`https://app.chatvolt.ai'), 'nenhuma chamada axios.post usa o endpoint ANTIGO (app.chatvolt.ai, sem suporte a anexos)');
+// Fase E.2.48B: a definição vive em chatvolt_attachment_send.ts (extraída);
+// vitre_quote_send.ts nunca mais referencia o endpoint ANTIGO, em lugar nenhum.
+assert(SHARED_SRC.includes('export const CHATVOLT_SEND_ENDPOINT = "https://api.chatvolt.ai/conversation/message/conversationId/"'), 'CHATVOLT_SEND_ENDPOINT (módulo compartilhado) aponta para o endpoint NOVO (api.chatvolt.ai) — o único documentado com suporte a attachments');
+assert(!SRC.includes('axios.post(`https://app.chatvolt.ai'), 'nenhuma chamada axios.post em vitre_quote_send.ts usa o endpoint ANTIGO (app.chatvolt.ai, sem suporte a anexos)');
+assert(!SHARED_SRC.includes('axios.post(`https://app.chatvolt.ai'), 'nenhuma chamada axios.post no módulo compartilhado usa o endpoint ANTIGO');
 
 // 10. Payload de attachment é EXATAMENTE {url, name, mimeType, size} (Fase
 // E.2.45.2 — `size` adicionado após o HTTP 400 real do primeiro envio ao
 // vivo, "attachments[0].size: Required", não documentado publicamente mas
 // exigido pela validação real do endpoint). Nenhum campo extra além desses 4.
-const attachmentObjMatch = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*size:\s*number;?\s*\}/);
-assert(!!attachmentObjMatch, 'tipo do attachment tem EXATAMENTE {url, name, mimeType, size} — inclui o campo size exigido pela validação real do ChatVolt');
+// Fase E.2.48B: a definição vive em chatvolt_attachment_send.ts.
+const attachmentObjMatch = SHARED_SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*size:\s*number;?\s*\}/);
+assert(!!attachmentObjMatch, 'tipo do attachment (módulo compartilhado) tem EXATAMENTE {url, name, mimeType, size} — inclui o campo size exigido pela validação real do ChatVolt');
 
-// 10b. Regressão — o payload SEM size (bug real da E.2.45.1) nunca volta a existir.
-const attachmentObjSemSize = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*\}(?!\s*\|)/);
-assert(!attachmentObjSemSize, 'regressão: o tipo antigo do attachment SEM size (causa do HTTP 400 real) não reaparece em nenhum lugar do arquivo');
+// 10b. Regressão — o payload SEM size (bug real da E.2.45.1) nunca volta a existir, em nenhum dos dois arquivos.
+const attachmentObjSemSizeShared = SHARED_SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*\}(?!\s*\|)/);
+const attachmentObjSemSizeVitre = SRC.match(/attachment:\s*\{\s*url:\s*string;\s*name:\s*string;\s*mimeType:\s*string;\s*\}(?!\s*\|)/);
+assert(!attachmentObjSemSizeShared && !attachmentObjSemSizeVitre, 'regressão: o tipo antigo do attachment SEM size (causa do HTTP 400 real) não reaparece em nenhum lugar de nenhum dos dois arquivos');
 
 // 10c. size é passado como pdfBuffer.length (número real do buffer enviado), nunca um valor estimado/hardcoded/string.
 const idxAttachmentCallSite = HANDLER.indexOf('sendChatvoltMessageWithAttachment(conversationId, message, {');
@@ -105,8 +118,9 @@ const idxPdfVazio = HANDLER.indexOf('PDF_VAZIO');
 assert(idxPdfVazio > 0 && idxPdfVazio < idxAttachmentCallSite, 'PDF_VAZIO (pdfBuffer.length===0) é bloqueado ANTES do attachment ser montado — size enviado é sempre > 0');
 
 // 11. Nunca CHAMA .makePublic() de verdade (menção em comentário explicando o que evitar é esperada e correta).
-assert(SRC.includes('getSignedUrl'), 'usa getSignedUrl (URL assinada de curta duração)');
-assert(!/\.makePublic\(/.test(SRC), 'nunca CHAMA .makePublic() — arquivo nunca fica público/indexável (comentário mencionando isso como o que evitar é esperado)');
+// Fase E.2.48B: getSignedUrl agora vive em chatvolt_attachment_send.ts (uploadFileAndSign).
+assert(SHARED_SRC.includes('getSignedUrl'), 'usa getSignedUrl (URL assinada de curta duração) no módulo compartilhado');
+assert(!/\.makePublic\(/.test(SRC) && !/\.makePublic\(/.test(SHARED_SRC), 'nunca CHAMA .makePublic() em nenhum dos dois arquivos — arquivo nunca fica público/indexável (comentário mencionando isso como o que evitar é esperado)');
 
 // 12. Path determinístico por quoteId — nunca acumula versões.
 assert(SRC.includes('`${STORAGE_PREFIX}/${quoteId}.pdf`'), 'path do Storage é determinístico por quoteId (sobrescreve, nunca acumula cópias)');

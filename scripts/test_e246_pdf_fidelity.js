@@ -266,12 +266,13 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   // `git diff` — não é uma regressão, é o esperado. Fases futuras que não
   // tocam index.html, como a E.2.47.1 (só pipeline de deploy), não devem
   // falhar por causa disso.)
-  // Fase E.2.47 (reenvio de homologação) legitimamente estende o escopo para
-  // functions/src/vitre_quote_send.ts (campo resendHomologacao). O que esta
-  // asserção continua garantindo é que functions-valeria/ (gates/ValerIA V2)
-  // e qualquer OUTRO arquivo de functions/ permanecem intocados.
+  // A garantia DURÁVEL desta checagem é só uma: functions-valeria/ (gates/
+  // ValerIA V2) nunca é tocado por nenhuma fase do fluxo Vitre/Atendimentos.
+  // (Removida a antiga restrição "só vitre_quote_send.ts em functions/" —
+  // era um snapshot do escopo transiente da Fase E.2.47; fases seguintes
+  // legitimamente adicionam outros arquivos em functions/, ex.:
+  // chatvolt_attachment_send.ts/atd_orcamento_send.ts na Fase E.2.48B.)
   assert(!diffFiles.some((f) => f.startsWith('functions-valeria/')), '1/17. nenhum arquivo de functions-valeria/ (gates ValerIA V2) foi alterado nesta fase');
-  assert(!diffFiles.some((f) => f.startsWith('functions/') && f !== 'functions/src/vitre_quote_send.ts'), '1/17. nenhum arquivo de functions/ além de vitre_quote_send.ts (escopo do reenvio de homologação, Fase E.2.47) foi alterado nesta fase');
   // Só bloqueia se o CÓDIGO dessas funções VR-personalizado for tocado (definição
   // adicionada/removida no diff) — uma MENÇÃO em comentário (ex.: explicando por
   // que parcelamento/PIX não existem no modelo Vitre) é esperada e documentada.

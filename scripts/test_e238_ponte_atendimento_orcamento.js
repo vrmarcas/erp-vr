@@ -224,14 +224,14 @@ function fakeDb(resultPromise, whereCalls) {
     'nenhum arquivo de functions-valeria/ (gates ValerIA V2) aparece no diff atual',
     'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
   );
-  assert(
-    !gitDiffFiles.some((f) => f.startsWith('functions/') && f !== 'functions/src/vitre_quote_send.ts'),
-    'nenhum arquivo de functions/ além de vitre_quote_send.ts (escopo do reenvio de homologação, Fase E.2.47) aparece no diff atual',
-    'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
-  );
+  // (Removida a restrição "só vitre_quote_send.ts em functions/" — era um
+  // snapshot do escopo transiente da Fase E.2.47. Fases seguintes
+  // (E.2.48B: chatvolt_attachment_send.ts/atd_orcamento_send.ts) legitimamente
+  // adicionam outros arquivos em functions/. A garantia durável que esta
+  // suíte (E.2.38 — ponte Atendimentos↔orçamento) precisa preservar é só
+  // functions-valeria/ intocado, já checado acima.)
 
-  // Fase E.2.47 estende legitimamente o escopo para functions/src/vitre_quote_send.ts
-  // (campo resendHomologacao). O que continua garantido: functions-valeria/ (gates/
+  // O que continua garantido: functions-valeria/ (gates/
   // fluxo comercial ValerIA V2) permanece 100% intocado.
   const diffOutput = execSync('git diff -- functions-valeria', { cwd: ROOT }).toString();
   assert(diffOutput.trim() === '', 'diff de functions-valeria/ está vazio — fluxo comercial/gates/handoff ValerIA V2 intocados');

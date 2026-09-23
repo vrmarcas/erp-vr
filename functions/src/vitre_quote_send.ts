@@ -44,16 +44,14 @@
  */
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import axios from "axios";
 import { getCallerVerificado, requireRole, acquireIdem as acquireIdemShared, writeAudit as writeAuditShared } from "./auth_helper";
+import { uploadFileAndSign, sendChatvoltMessageWithAttachment } from "./chatvolt_attachment_send";
 
 const COL_ORC = "vitre_orcamentos";
 const COL_ATD = "atendimentos";
 const COL_IDEM = "vitre_idem_keys";
 const COL_AUDIT = "vitre_audit_log";
 const STORAGE_PREFIX = "orcamentos_pdf";
-const CHATVOLT_SEND_ENDPOINT = "https://api.chatvolt.ai/conversation/message/conversationId/";
-const SIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000; // 24h — cobre a janela de entrega/retry do WhatsApp, nunca "para sempre".
 const MAX_PDF_BYTES = 8 * 1024 * 1024; // 8MB — folga generosa sobre um orçamento de 1-2 páginas, nunca aceita blob absurdo.
 
 function acquireIdem(key: string) {
@@ -111,52 +109,14 @@ function fail(errorCode: string): SendVitreQuoteResult {
  * Upload do PDF (Admin SDK — nunca client SDK, nunca bucket público) +
  * Signed URL V4 de curta duração. Path DETERMINÍSTICO por quoteId — um
  * reenvio (retry humano, nova versão do mesmo orçamento) sobrescreve o
- * mesmo objeto, nunca acumula cópias.
+ * mesmo objeto, nunca acumula cópias. Fase E.2.48B — wrapper fino sobre
+ * uploadFileAndSign (módulo compartilhado chatvolt_attachment_send.ts,
+ * extraído desta mesma função); mantém nome/assinatura/call site
+ * idênticos ao que já era testado/homologado, só resolve o path aqui.
  */
 async function uploadQuotePdfAndSign(quoteId: string, pdfBuffer: Buffer, fileName: string): Promise<string> {
-  const bucket = admin.storage().bucket();
   const filePath = `${STORAGE_PREFIX}/${quoteId}.pdf`;
-  const file = bucket.file(filePath);
-  await file.save(pdfBuffer, {
-    contentType: "application/pdf",
-    metadata: { contentDisposition: `inline; filename="${fileName}"` },
-    resumable: false,
-  });
-  const [url] = await file.getSignedUrl({ action: "read", expires: Date.now() + SIGNED_URL_TTL_MS });
-  return url;
-}
-
-/**
- * Único ponto que chama o endpoint NOVO do ChatVolt (com suporte a
- * attachments) — nunca o endpoint antigo usado por atdEnviarMensagemHumano.
- * Payload: message, channel, attachments:[{url,name,mimeType,size}].
- * `size` (Fase E.2.45.2) — achado real do primeiro envio ao vivo: a
- * documentação pública (docs.chatvolt.ai) só lista url/name/mimeType, mas a
- * validação REAL do endpoint exige também `size` (bytes), confirmado pelo
- * erro `attachments[0].size: Required` (HTTP 400) na E.2.45.1. Sempre o
- * tamanho REAL do mesmo buffer que foi salvo no Storage — nunca estimado.
- */
-async function sendChatvoltMessageWithAttachment(
-  conversationId: string,
-  message: string,
-  attachment: { url: string; name: string; mimeType: string; size: number } | null
-): Promise<{ ok: boolean; providerMessageId: string | null; error?: string }> {
-  const apiKey = process.env.CHATVOLT_API_KEY;
-  if (!apiKey) return { ok: false, providerMessageId: null, error: "CHATVOLT_API_KEY ausente" };
-  try {
-    const body: Record<string, unknown> = { message, channel: "whatsapp" };
-    if (attachment) body.attachments = [attachment];
-    const res = await axios.post(`${CHATVOLT_SEND_ENDPOINT}${conversationId}`, body, {
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      timeout: 20_000,
-    });
-    const providerMessageId = (res.data?.message?.id as string | undefined) ?? null;
-    const ok = res.status === 200 && res.data?.success === true && !!providerMessageId;
-    return { ok, providerMessageId, error: ok ? undefined : `resposta inesperada: ${JSON.stringify(res.data).slice(0, 300)}` };
-  } catch (e) {
-    const err = e as { response?: { status?: number; data?: unknown }; message?: string };
-    return { ok: false, providerMessageId: null, error: `HTTP ${err.response?.status ?? "?"}: ${JSON.stringify(err.response?.data ?? err.message).slice(0, 300)}` };
-  }
+  return uploadFileAndSign(filePath, pdfBuffer, "application/pdf", fileName);
 }
 
 /**

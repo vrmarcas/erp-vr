@@ -616,6 +616,11 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .atd-msg-system{align-self:center;background:transparent;color:var(--muted);font-size:10.5px;font-style:italic;max-width:100%;text-align:center}
 .atd-msg-failed{border:1px dashed var(--danger);color:var(--danger)}
 .atd-msg-meta{font-size:9px;opacity:.7;margin-top:3px}
+.atd-msg-attachment{margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.06);cursor:pointer}
+.atd-msg-attachment-row{font-weight:700;font-size:11.5px}
+.atd-msg-attachment-name{word-break:break-all}
+.atd-msg-attachment-size{font-size:10px;opacity:.75;margin-top:1px}
+.atd-msg-attachment-open{font-size:10px;font-weight:700;margin-top:3px;text-decoration:underline}
 .atd-composer{border-top:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;align-items:flex-end}
 .atd-composer textarea{flex:1;resize:none;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12.5px;font-family:inherit;max-height:100px;min-height:38px}
 .atd-composer textarea:focus{outline:none;border-color:var(--brand-mid)}
@@ -4522,6 +4527,33 @@ function _authFirebaseError(code){
         <div style="display:flex;gap:10px">
           <button id="vitreEnvioBtnEnviar" onclick="vitreOrcConfirmarEnvioWhatsApp()" style="flex:1;background:#25D366;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">Enviar agora</button>
           <button onclick="vitreOrcFecharModalEnvio()" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fase E.2.48B — envio do orçamento comercial OFICIAL do ERP pelo
+         Atendimentos. Modal dedicado (nunca reaproveita #vitreEnvioModal —
+         são dois fluxos de dados diferentes, ver Fase E.2.48 Decisão 1),
+         mas segue o MESMO padrão visual/UX já homologado (mensagem
+         editável, resumo, nome do arquivo, nunca envia ao abrir). -->
+    <div id="atdOrcOficialEnvioModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:4000;align-items:center;justify-content:center">
+      <div style="background:var(--card);border-radius:16px;padding:24px;width:92%;max-width:520px;max-height:90vh;overflow-y:auto">
+        <div style="font-size:15px;font-weight:800;margin-bottom:4px">📄 Enviar orçamento pelo WhatsApp</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:16px">O PDF oficial do orçamento (o mesmo que o ERP gera/imprime) será enviado pela conversa já vinculada — o cliente recebe direto, sem abrir WhatsApp Web.</div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Orçamento</div>
+        <div id="atdOrcOficialEnvioNumero" style="font-size:13px;font-weight:700;margin-bottom:14px">—</div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Mensagem (editável)</div>
+        <textarea id="atdOrcOficialEnvioMensagem" rows="4" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical;margin-bottom:14px">Segue o orçamento conforme conversamos.</textarea>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:16px">📎 Anexo: <span id="atdOrcOficialEnvioNomeArquivo" style="font-weight:700">gerando…</span> <span id="atdOrcOficialEnvioTamanho" style="color:var(--muted)"></span></div>
+
+        <div id="atdOrcOficialEnvioErro" style="display:none;color:#DC2626;font-size:11px;font-weight:700;margin-bottom:12px"></div>
+
+        <div style="display:flex;gap:10px">
+          <button id="atdOrcOficialEnvioBtnEnviar" onclick="atdConfirmarEnvioOrcamentoOficial()" style="flex:1;background:#25D366;color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer" disabled>Gerando PDF…</button>
+          <button onclick="atdFecharModalEnvioOrcamentoOficial()" style="background:var(--surface);border:1.5px solid var(--border);border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer">Cancelar</button>
         </div>
       </div>
     </div>
@@ -36768,6 +36800,26 @@ function atdMsgListenerInit(atendimentoId){
   }, function(e){ console.error('[Atendimentos] thread listener falhou:', e); });
 }
 
+// Fase E.2.48B — attachments outbound enviados pelo próprio ERP (inbound
+// do cliente fica para E.2.49, ver webhook). `m.attachments` já existe no
+// schema desde sempre (sempre []); só passa a ser renderizado agora.
+// Nunca lê/expõe storagePath no client — só nome/tamanho/tipo, já
+// persistidos na própria mensagem; a URL real é sempre obtida sob
+// demanda (atdAbrirAnexo → Cloud Function atdObterUrlAnexo), nunca salva.
+function atdAnexoHtml(m){
+  var atts = m.attachments;
+  if(!atts || !atts.length) return '';
+  return atts.map(function(a){
+    var tamanhoTxt = (typeof a.size==='number' && a.size>0) ? Math.round(a.size/1024)+' KB' : '';
+    var icone = (a.mimeType==='application/pdf') ? '📄' : (a.mimeType && a.mimeType.indexOf('image/')===0) ? '🖼️' : '📎';
+    return '<div class="atd-msg-attachment" onclick="atdAbrirAnexo(\''+cfgEsc(m.atendimentoId||'')+'\',\''+cfgEsc(m.id)+'\')">'
+      + '<div class="atd-msg-attachment-row">'+icone+' <span class="atd-msg-attachment-name">'+cfgEsc(a.name||'documento')+'</span></div>'
+      + (tamanhoTxt ? '<div class="atd-msg-attachment-size">'+tamanhoTxt+'</div>' : '')
+      + '<div class="atd-msg-attachment-open">Abrir documento</div>'
+      + '</div>';
+  }).join('');
+}
+
 function atdRenderMsgs(lista){
   var wrap = document.getElementById('atdThreadMsgs'); if(!wrap) return;
   if(!lista.length){ wrap.innerHTML = '<div class="atd-empty">Nenhuma mensagem ainda.</div>'; return; }
@@ -36777,11 +36829,30 @@ function atdRenderMsgs(lista){
     var retryBtn = falhou ? '<button type="button" class="atd-retry-btn" onclick="atdRetentar(\''+cfgEsc(m.id)+'\', this)">🔄 Tentar novamente</button>' : '';
     return '<div class="atd-msg '+cls+(falhou?' atd-msg-failed':'')+'">'
       + cfgEsc(m.text||'')
+      + atdAnexoHtml(m)
       + '<div class="atd-msg-meta">'+cfgEsc(m.actorName||'')+' · '+atdFmtHora(m.createdAt)+'</div>'
       + retryBtn
       + '</div>';
   }).join('');
   wrap.scrollTop = wrap.scrollHeight;
+}
+
+/**
+ * atdAbrirAnexo — obtém uma signed URL sob demanda (nunca persistida,
+ * nunca lida do client) e abre numa nova aba. O client só manda
+ * atendimentoId+messageId — nunca um storagePath livre (item 10 do pedido).
+ */
+function atdAbrirAnexo(atendimentoId, messageId){
+  if(!atendimentoId || !messageId) return;
+  firebase.functions().httpsCallable('atdObterUrlAnexo')({ atendimentoId: atendimentoId, messageId: messageId })
+    .then(function(result){
+      var r = result.data || {};
+      if(!r.url){ showToast('Não foi possível obter o link do anexo.', 'err'); return; }
+      window.open(r.url, '_blank');
+    })
+    .catch(function(e){
+      showToast('Erro ao abrir anexo: ' + ((e && e.message) || e), 'err');
+    });
 }
 
 function atdRetentar(messageId, btnEl){
@@ -36902,6 +36973,137 @@ function atdTogglePainelMobile(){
   var el = document.getElementById('atdColPainel'); if(el) el.classList.toggle('open');
 }
 
+// Fase E.2.48B — resolução do orçamento comercial OFICIAL vinculado a um
+// atendimento, objeto normalizado único usado pelo card e pelo modal de
+// envio. Vínculo EXPLÍCITO via atendimentos.orcamentoId (mesmo mecanismo
+// já usado por atdVincularOrcamento/orcEnvEditar) — nunca busca ambígua
+// por nome/telefone (item 3 do pedido da Fase E.2.48B). Retorna null
+// quando não há vínculo nenhum (nunca inventa um orçamento).
+function atdResolverOrcamentoVinculado(atendimentoId){
+  var atd = ATD_CACHE.find(function(a){ return a.id===atendimentoId; });
+  if(!atd || !atd.orcamentoId) return null;
+  var orcCompleto = (typeof _ORC_ENVIADOS_DATA!=='undefined') ? _ORC_ENVIADOS_DATA.find(function(o){ return o.id===atd.orcamentoId; }) : null;
+  // Cache leve (orcamentoNum/orcamentoTotal, gravado no próprio atd no
+  // momento da vinculação) serve de fallback só para exibição, nunca para
+  // decidir se pode enviar — enviar exige o orçamento REAL (com itens),
+  // mesma leitura usada pelo backend (atd_orcamento_send.ts).
+  var orcRef = (typeof atd.orcamentoNum!=='undefined') ? atd : (orcCompleto || {});
+  var _orcRefNorm = (typeof atd.orcamentoNum==='undefined') ? orcEnvNormalizar(orcRef) : null;
+  var numero = orcRef.orcamentoNum!=null ? orcRef.orcamentoNum : (_orcRefNorm ? (_orcRefNorm.num!=='—'?_orcRefNorm.num:null) : orcRef.num);
+  var total = typeof orcRef.orcamentoTotal==='number' ? orcRef.orcamentoTotal : (_orcRefNorm ? _orcRefNorm.valorFinal : orcRef.valorFinal);
+  var cliente = _orcRefNorm ? (_orcRefNorm.cliente!=='(sem nome)'?_orcRefNorm.cliente:null) : (orcRef.cliente || null);
+  var podeEnviar = !!(orcCompleto && orcCompleto.itens && orcCompleto.itens.length && typeof orcCompleto.valorFinal==='number' && orcCompleto.valorFinal>0);
+  return {
+    tipo: 'vr_oficial',
+    orcamentoId: atd.orcamentoId,
+    numero: numero || null,
+    cliente: cliente || null,
+    total: (typeof total==='number') ? total : null,
+    status: orcCompleto ? (orcCompleto.status||null) : null,
+    podeRevisar: true,
+    podeEnviar: podeEnviar
+  };
+}
+
+// ============================================================
+// Fase E.2.48B — modal de envio do orçamento comercial OFICIAL
+// ============================================================
+var ATD_ORC_ENVIO_ATENDIMENTO_ID = null;
+var ATD_ORC_ENVIO_ORC = null;
+var ATD_ORC_ENVIO_PDF = null; // {blob, fileName, mimeType} — gerado por generateErpQuotePdf
+var ATD_ORC_ENVIO_BUSY = false;
+
+function atdAbrirModalEnvioOrcamentoOficial(atendimentoId){
+  var vinc = atdResolverOrcamentoVinculado(atendimentoId);
+  if(!vinc || !vinc.podeEnviar){ showToast('Orçamento ainda não tem itens/valor suficientes para gerar o PDF oficial.', 'warn'); return; }
+  var orc = (typeof _ORC_ENVIADOS_DATA!=='undefined') ? _ORC_ENVIADOS_DATA.find(function(o){ return o.id===vinc.orcamentoId; }) : null;
+  if(!orc){ showToast('Orçamento não encontrado.', 'err'); return; }
+
+  ATD_ORC_ENVIO_ATENDIMENTO_ID = atendimentoId;
+  ATD_ORC_ENVIO_ORC = orc;
+  ATD_ORC_ENVIO_PDF = null;
+
+  document.getElementById('atdOrcOficialEnvioNumero').textContent = '#' + (vinc.numero || orc.num || orc.id);
+  document.getElementById('atdOrcOficialEnvioMensagem').value = 'Segue o orçamento conforme conversamos.';
+  document.getElementById('atdOrcOficialEnvioNomeArquivo').textContent = 'gerando…';
+  document.getElementById('atdOrcOficialEnvioTamanho').textContent = '';
+  var erroEl = document.getElementById('atdOrcOficialEnvioErro'); erroEl.style.display = 'none'; erroEl.textContent = '';
+  var btn = document.getElementById('atdOrcOficialEnvioBtnEnviar');
+  btn.disabled = true; btn.textContent = 'Gerando PDF…';
+  document.getElementById('atdOrcOficialEnvioModal').style.display = 'flex';
+
+  // PDF gerado ao abrir o modal (preview de metadados — nome/tamanho),
+  // NUNCA enviado automaticamente (item 5 do pedido: "NÃO enviar ao abrir
+  // o modal"). Mesma fonte oficial homologada na Fase E.2.48A.
+  generateErpQuotePdf(orc).then(function(pdf){
+    if(ATD_ORC_ENVIO_ATENDIMENTO_ID !== atendimentoId) return; // modal fechado/trocado entretanto
+    ATD_ORC_ENVIO_PDF = pdf;
+    document.getElementById('atdOrcOficialEnvioNomeArquivo').textContent = pdf.fileName;
+    document.getElementById('atdOrcOficialEnvioTamanho').textContent = '(' + (pdf.blob.size/1024).toFixed(0) + ' KB)';
+    btn.disabled = false; btn.textContent = 'Enviar pelo WhatsApp';
+  }).catch(function(e){
+    if(ATD_ORC_ENVIO_ATENDIMENTO_ID !== atendimentoId) return;
+    erroEl.textContent = '❌ Não foi possível gerar o PDF: ' + ((e && e.message) || e);
+    erroEl.style.display = '';
+    document.getElementById('atdOrcOficialEnvioNomeArquivo').textContent = '—';
+    btn.disabled = true; btn.textContent = 'Falha ao gerar PDF';
+  });
+}
+
+function atdFecharModalEnvioOrcamentoOficial(){
+  document.getElementById('atdOrcOficialEnvioModal').style.display = 'none';
+  ATD_ORC_ENVIO_ATENDIMENTO_ID = null;
+  ATD_ORC_ENVIO_ORC = null;
+  ATD_ORC_ENVIO_PDF = null;
+}
+
+/**
+ * atdConfirmarEnvioOrcamentoOficial — só chamado pelo clique explícito no
+ * botão "Enviar pelo WhatsApp"; nunca por nenhum outro caminho. requestId
+ * novo a cada tentativa (double-click trava aqui; uma nova tentativa real
+ * após falha gera um requestId novo de propósito, mesmo padrão já
+ * homologado em vitreOrcConfirmarEnvioWhatsApp).
+ */
+function atdConfirmarEnvioOrcamentoOficial(){
+  if(ATD_ORC_ENVIO_BUSY) return;
+  if(!ATD_ORC_ENVIO_PDF || !ATD_ORC_ENVIO_ORC || !ATD_ORC_ENVIO_ATENDIMENTO_ID){ showToast('PDF ainda não está pronto.', 'warn'); return; }
+  var mensagem = document.getElementById('atdOrcOficialEnvioMensagem').value.trim();
+  if(!mensagem){ showToast('A mensagem não pode ficar vazia.', 'err'); return; }
+
+  ATD_ORC_ENVIO_BUSY = true;
+  var btn = document.getElementById('atdOrcOficialEnvioBtnEnviar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  var erroEl = document.getElementById('atdOrcOficialEnvioErro'); erroEl.style.display = 'none';
+
+  var atendimentoId = ATD_ORC_ENVIO_ATENDIMENTO_ID;
+  var orcamentoId = ATD_ORC_ENVIO_ORC.id;
+  var pdf = ATD_ORC_ENVIO_PDF;
+  var requestId = 'atd_orc_envio_' + orcamentoId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+  blobToBase64(pdf.blob).then(function(b64){
+    return firebase.functions().httpsCallable('atdEnviarOrcamentoOficial')({
+      atendimentoId: atendimentoId,
+      orcamentoId: orcamentoId,
+      pdfBase64: b64,
+      fileName: pdf.fileName,
+      message: mensagem,
+      requestId: requestId,
+    });
+  }).then(function(result){
+    var r = result.data || {};
+    if(!r.sent){ throw new Error(r.errorCode || 'Falha desconhecida no envio.'); }
+    showToast(r.jaProcessado ? 'Este orçamento já havia sido enviado.' : 'Orçamento enviado pelo WhatsApp com sucesso!', 'ok');
+    atdFecharModalEnvioOrcamentoOficial();
+  }).catch(function(e){
+    var msg = (e && e.message) || 'Erro ao enviar.';
+    erroEl.textContent = '❌ Não foi possível enviar: ' + msg + ' — nada foi marcado como enviado, pode tentar de novo.';
+    erroEl.style.display = '';
+  }).finally(function(){
+    ATD_ORC_ENVIO_BUSY = false;
+    btn.disabled = false; btn.textContent = 'Enviar pelo WhatsApp';
+  });
+}
+
 function atdRenderPainel(atd){
   var wrap = document.getElementById('atdColPainel'); if(!wrap) return;
   var classifLabel = {catalogo:'Catálogo', recompra:'Recompra', projeto_sob_medida:'Projeto sob medida', nao_classificado:'Não classificado'}[atd.classificacao] || 'Não classificado';
@@ -36984,23 +37186,30 @@ function atdRenderPainel(atd){
   html += atd.clienteId ? '<button onclick="cliOpenDetalhe(\''+atd.clienteId+'\')">👤 Abrir cliente</button>' : '<button id="atdBtnCliente_'+atd.id+'" onclick="atdCriarOuAbrirCliente(\''+atd.id+'\')">➕ Criar/Abrir cliente</button>';
   html += atd.leadId ? '<button onclick="crmOpenCard(\''+atd.leadId+'\')">🤝 Abrir oportunidade</button>' : '<button id="atdBtnOportunidade_'+atd.id+'" onclick="atdCriarOuAbrirOportunidade(\''+atd.id+'\')">➕ Criar/Abrir oportunidade</button>';
   if(atd.orcamentoId){
-    // RODADA 9, FECHAMENTO — número/valor podem já estar no cache (recém
-    // vinculado nesta sessão) ou precisar de fallback no array global de
-    // orçamentos enviados (após reload — o vínculo em si já persiste
-    // independente disso, ver atdVincularOrcamentoAposSalvar).
-    var orcRef = (typeof atd.orcamentoNum!=='undefined') ? atd
-      : (typeof _ORC_ENVIADOS_DATA!=='undefined' ? _ORC_ENVIADOS_DATA.find(function(o){ return o.id===atd.orcamentoId; }) : null) || {};
-    // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — o fallback
-    // (após reload, sem cache de sessão) lê orcRef.num/.valorFinal crus —
-    // para ValerIA, o botão "Abrir orçamento" perdia número e valor.
-    // orcEnvNormalizar() reutilizado só no caminho de fallback (o cache
-    // orcamentoNum/orcamentoTotal já são valores prontos, não um orçamento cru).
-    var _orcRefNorm = (typeof atd.orcamentoNum==='undefined') ? orcEnvNormalizar(orcRef) : null;
-    var orcNumVal = orcRef.orcamentoNum!=null ? orcRef.orcamentoNum : (_orcRefNorm ? (_orcRefNorm.num!=='—'?_orcRefNorm.num:null) : orcRef.num);
-    var orcTotVal = typeof orcRef.orcamentoTotal==='number' ? orcRef.orcamentoTotal : (_orcRefNorm ? _orcRefNorm.valorFinal : orcRef.valorFinal);
-    var orcNum = orcNumVal ? '#'+orcNumVal : '';
-    var orcVal = (typeof orcTotVal==='number') ? ' — R$ '+orcTotVal.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
-    html += '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')">📝 Abrir orçamento '+orcNum+orcVal+'</button>';
+    // Fase E.2.48B — card do orçamento comercial oficial vinculado
+    // (atdResolverOrcamentoVinculado, vínculo explícito via
+    // atendimentos.orcamentoId — nunca busca ambígua por nome/telefone).
+    var _orcVinc = atdResolverOrcamentoVinculado(atd.id);
+    if(_orcVinc){
+      var _orcNumTxt = _orcVinc.numero ? String(_orcVinc.numero) : '—';
+      var _orcTotTxt = (typeof _orcVinc.total==='number') ? 'R$ '+_orcVinc.total.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+      var _orcCliTxt = _orcVinc.cliente || '—';
+      html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:4px">'
+        + '<div style="font-weight:800;font-size:12.5px;margin-bottom:4px">🧾 Orçamento '+cfgEsc(_orcNumTxt)+'</div>'
+        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:2px">Cliente: '+cfgEsc(_orcCliTxt)+'</div>'
+        + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Total: '+cfgEsc(_orcTotTxt)+'</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        + '<button onclick="orcEnvEditar(\''+atd.orcamentoId+'\')" style="flex:1;min-width:110px;text-align:center">✏️ Revisar orçamento</button>'
+        + (_orcVinc.podeEnviar
+            ? '<button onclick="atdAbrirModalEnvioOrcamentoOficial(\''+atd.id+'\')" style="flex:1;min-width:110px;text-align:center;background:#25D366;color:#fff;border-color:#25D366">📄 Enviar orçamento</button>'
+            : '<button disabled title="Orçamento ainda não tem itens/valor suficientes para gerar o PDF oficial" style="flex:1;min-width:110px;text-align:center;opacity:.5;cursor:not-allowed">📄 Enviar orçamento</button>')
+        + '</div></div>';
+    } else {
+      // Vínculo existe (atd.orcamentoId) mas o orçamento não foi encontrado
+      // no array — nunca esconde o problema atrás de um botão que falharia
+      // silenciosamente ao clicar.
+      html += '<div style="background:var(--surface);border:1px solid #DC2626;border-radius:10px;padding:10px 12px;margin-bottom:4px;font-size:11.5px;color:#DC2626">⚠️ Orçamento vinculado não encontrado (id: '+cfgEsc(atd.orcamentoId)+').</div>';
+    }
   } else {
     html += '<button onclick="atdRevisarCriarOrcamento(\''+atd.id+'\')">📝 Revisar e criar orçamento</button>';
   }
