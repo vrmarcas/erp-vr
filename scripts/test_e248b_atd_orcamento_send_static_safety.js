@@ -148,7 +148,11 @@ console.log('\n== chatvolt_attachment_send.ts — extração preserva o comporta
 
 console.log('\n== functions/src/index.ts — exportação ==');
 {
-  assert(INDEX_TS.includes('export { atdEnviarOrcamentoOficial, atdObterUrlAnexo } from "./atd_orcamento_send"'), 'atdEnviarOrcamentoOficial e atdObterUrlAnexo são exportadas em index.ts');
+  // Checa cada nome individualmente (não a linha exata) — a Fase E.2.48C
+  // legitimamente adiciona atdEnviarAnexoManual ao mesmo bloco de export.
+  const idxExportBlock = INDEX_TS.indexOf('from "./atd_orcamento_send"');
+  const exportBlock = INDEX_TS.slice(Math.max(0, idxExportBlock - 200), idxExportBlock);
+  assert(exportBlock.includes('atdEnviarOrcamentoOficial') && exportBlock.includes('atdObterUrlAnexo'), 'atdEnviarOrcamentoOficial e atdObterUrlAnexo são exportadas em index.ts');
 }
 
 console.log('\n== Escopo — functions-valeria/ e gates ValerIA V2 intocados ==');

@@ -100,7 +100,8 @@ export {
 export { sendVitreQuoteToConversation } from "./vitre_quote_send";
 
 // ── Envio do orçamento comercial oficial do ERP pelo Atendimentos (Fase E.2.48B, 2026-09-23) ──
-export { atdEnviarOrcamentoOficial, atdObterUrlAnexo } from "./atd_orcamento_send";
+// ── Upload manual de arquivo no composer de Atendimentos (Fase E.2.48C, 2026-09-23) ──
+export { atdEnviarOrcamentoOficial, atdObterUrlAnexo, atdEnviarAnexoManual } from "./atd_orcamento_send";
 
 // ── Valéria (Chatvolt chatbot) ────────────────────────────────────────────────
 // Fase 0/1 Valéria×ChatVolt (2026-08-09): das 10 Functions v1 deste módulo,

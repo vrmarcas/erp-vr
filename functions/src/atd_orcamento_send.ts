@@ -268,3 +268,206 @@ export const atdObterUrlAnexo = functions.https.onCall(async (data: { atendiment
   const [url] = await file.getSignedUrl({ action: "read", expires: Date.now() + 10 * 60 * 1000 }); // 10min — só o necessário para o clique abrir
   return { url, name: attachment.name || "documento.pdf", mimeType: attachment.mimeType || "application/pdf" };
 });
+
+// ============================================================
+// Fase E.2.48C (2026-09-23) — upload manual de arquivo no composer
+// ============================================================
+// Reusa a MESMA infraestrutura de atdEnviarOrcamentoOficial (upload+signed
+// URL, envio com attachment, idempotência, auditoria genérica) — nunca
+// duplica. Diferença: não depende de nenhum orçamento vinculado, aceita
+// qualquer arquivo dentro dos tipos permitidos (item 1 do pedido), texto
+// da mensagem é sempre opcional (o arquivo sozinho já é um envio válido —
+// item 13).
+const STORAGE_PREFIX_ANEXO = "atendimentos_anexos";
+const MAX_ANEXO_BYTES = 8 * 1024 * 1024; // mesmo limite já usado para o orçamento oficial/Vitre.
+
+// MIME permitido → extensões válidas correspondentes (item 1/8 do pedido).
+// Nunca aceita um MIME fora desta lista; nunca aceita extensão que não
+// bate com o MIME declarado (ex.: .exe disfarçado de application/pdf nunca
+// passa, porque ".exe" não está em nenhuma lista de extensões válidas).
+const ANEXO_MIME_EXTENSOES: Record<string, string[]> = {
+  "application/pdf": ["pdf"],
+  "image/jpeg": ["jpg", "jpeg"],
+  "image/png": ["png"],
+};
+
+/**
+ * Sanitiza fileName (item 8 do pedido): remove qualquer componente de
+ * diretório (nunca confia em barra/contrabarra vinda do client — só o
+ * nome do arquivo em si é usado), bloqueia path traversal (`..`), nomes
+ * vazios, e exige que a extensão bata com o MIME declarado. Caracteres
+ * fora de um allowlist seguro (letras/números/espaço/._-) são substituídos
+ * por `_`. Retorna `null` quando o arquivo deve ser rejeitado.
+ */
+function sanitizeAnexoFileName(fileNameCru: string, mimeType: string): string | null {
+  const extensoesValidas = ANEXO_MIME_EXTENSOES[mimeType];
+  if (!extensoesValidas) return null;
+  const cru = String(fileNameCru || "");
+  // Item 8 do pedido — bloqueia path traversal EXPLICITAMENTE no valor
+  // original recebido (rejeita, nunca só normaliza/reescreve em silêncio),
+  // antes mesmo de extrair o último componente de path.
+  if (cru.includes("..")) return null;
+  // Só o último componente de path — nunca aceita diretórios vindos do client.
+  const base = cru.split(/[/\\]/).pop() || "";
+  const trimmed = base.trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/\.([a-zA-Z0-9]+)$/);
+  const ext = m ? m[1].toLowerCase() : "";
+  if (!ext || !extensoesValidas.includes(ext)) return null;
+  const namePart = trimmed.slice(0, trimmed.length - ext.length - 1);
+  const safeNamePart = namePart.replace(/[^a-zA-Z0-9_\-. ]/g, "_").trim().slice(0, 120);
+  if (!safeNamePart) return null;
+  return `${safeNamePart}.${ext}`;
+}
+
+interface SendAnexoManualInput {
+  atendimentoId: string;
+  fileBase64: string;
+  fileName: string;
+  mimeType: string;
+  message: string;
+  requestId: string;
+}
+
+interface SendAnexoManualResult {
+  sent: boolean;
+  providerMessageId: string | null;
+  attachmentSent: boolean;
+  errorCode: string | null;
+  jaProcessado?: boolean;
+}
+
+function failAnexo(errorCode: string): SendAnexoManualResult {
+  return { sent: false, providerMessageId: null, attachmentSent: false, errorCode };
+}
+
+/**
+ * atdEnviarAnexoManual — envio real de um arquivo enviado manualmente pelo
+ * vendedor (PDF/JPG/JPEG/PNG) pela conversa de Atendimentos. Mesma ordem
+ * segura já homologada: idempotência → validar atendimento → validar
+ * MIME/filename → decodificar/validar tamanho → upload+signed URL →
+ * ChatVolt → só com sucesso real persiste mensagem+attachment+auditoria.
+ */
+export const atdEnviarAnexoManual = functions
+  .runWith({ secrets: ["CHATVOLT_API_KEY"], timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (data: Partial<SendAnexoManualInput>, context): Promise<SendAnexoManualResult> => {
+    const caller = await getCallerVerificado(context);
+    requireRole(caller, ["comercial"], "enviar anexo manual pelo WhatsApp em Atendimentos");
+
+    const atendimentoId = String(data?.atendimentoId || "").trim();
+    const mimeType = String(data?.mimeType || "").trim();
+    const fileNameCru = String(data?.fileName || "").trim();
+    // Item 13 — mensagem é sempre OPCIONAL aqui: esta function só existe
+    // para envio de arquivo, então "somente arquivo, sem texto" é o caso
+    // normal, nunca bloqueado. "nem texto nem arquivo" é impossível de
+    // acontecer por este caminho, porque fileBase64 é obrigatório abaixo.
+    const message = String(data?.message || "").trim();
+    const fileBase64 = String(data?.fileBase64 || "");
+    const requestId = String(data?.requestId || "").trim();
+
+    if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório.");
+    if (!mimeType) throw new functions.https.HttpsError("invalid-argument", "mimeType obrigatório.");
+    if (!fileNameCru) throw new functions.https.HttpsError("invalid-argument", "fileName obrigatório.");
+    if (!fileBase64) throw new functions.https.HttpsError("invalid-argument", "fileBase64 obrigatório.");
+    if (!requestId) throw new functions.https.HttpsError("invalid-argument", "requestId obrigatório.");
+
+    if (!ANEXO_MIME_EXTENSOES[mimeType]) return failAnexo("MIME_NAO_PERMITIDO");
+    const fileName = sanitizeAnexoFileName(fileNameCru, mimeType);
+    if (!fileName) return failAnexo("FILENAME_INVALIDO");
+
+    // 1. Idempotência (item 14 do pedido) — chave distinta das outras duas
+    // functions de envio (nunca vitre_quote_send/atd_orcamento_send colidem).
+    const idemKey = `atd_anexo_manual:${atendimentoId}:${requestId}`;
+    const acquired = await acquireIdem(COL_IDEM, idemKey);
+    if (!acquired) return { sent: true, providerMessageId: null, attachmentSent: true, errorCode: null, jaProcessado: true };
+
+    const db = admin.firestore();
+
+    // 2. validar atendimento (item 5 do pedido — inclui "validar conversationId",
+    // que aqui é sempre derivado do atendimento, nunca aceito do client).
+    const atdRef = db.collection(COL_ATD).doc(atendimentoId);
+    const atdSnap = await atdRef.get();
+    if (!atdSnap.exists) return failAnexo("ATENDIMENTO_NAO_ENCONTRADO");
+    const atd = atdSnap.data()!;
+
+    // 3. decodificar/validar tamanho.
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = Buffer.from(fileBase64, "base64");
+    } catch {
+      return failAnexo("ARQUIVO_BASE64_INVALIDO");
+    }
+    if (fileBuffer.length === 0) return failAnexo("ARQUIVO_VAZIO");
+    if (fileBuffer.length > MAX_ANEXO_BYTES) return failAnexo("ARQUIVO_MUITO_GRANDE");
+
+    // 4/5. upload + signed URL — path específico por tentativa (item 7 do
+    // pedido): nunca sobrescreve um anexo manual anterior, cada envio tem
+    // seu próprio diretório (timestamp+requestId), diferente do path
+    // determinístico do orçamento oficial (que sobrescreve de propósito).
+    const storagePath = `${STORAGE_PREFIX_ANEXO}/${atendimentoId}/${Date.now()}_${requestId}/${fileName}`;
+    let fileUrl: string;
+    try {
+      fileUrl = await uploadFileAndSign(storagePath, fileBuffer, mimeType, fileName);
+    } catch (e) {
+      console.error("[atd_orcamento_send] falha no upload/assinatura do anexo manual:", (e as Error).message);
+      return failAnexo("UPLOAD_FAILED");
+    }
+
+    // 6. enviar ChatVolt — só segue com sucesso REAL confirmado.
+    const conversationId = (atd.providerConversationId as string | undefined) || atendimentoId;
+    const sendResult = await sendChatvoltMessageWithAttachment(conversationId, message, {
+      url: fileUrl,
+      name: fileName,
+      mimeType,
+      size: fileBuffer.length,
+    });
+    if (!sendResult.ok || !sendResult.providerMessageId) {
+      console.error("[atd_orcamento_send] falha no envio ChatVolt (anexo manual):", sendResult.error);
+      // Item 10 do pedido — upload já aconteceu (fica no Storage para
+      // diagnóstico), mas NADA é persistido como enviado.
+      return failAnexo("CHATVOLT_SEND_FAILED");
+    }
+
+    // 7. só agora, com tudo confirmado, persiste mensagem + attachment.
+    const nome = await nomeStaff(caller.uid);
+    const now = Date.now();
+    const msgRef = atdRef.collection(SUB_MSG).doc(sendResult.providerMessageId);
+    await msgRef.set({
+      id: msgRef.id,
+      atendimentoId,
+      providerMessageId: sendResult.providerMessageId,
+      idempotencyKey: requestId,
+      actorType: "human",
+      actorId: caller.uid,
+      actorName: nome,
+      text: message,
+      attachments: [
+        {
+          name: fileName,
+          mimeType,
+          size: fileBuffer.length,
+          storagePath,
+          providerMessageId: sendResult.providerMessageId,
+        },
+      ],
+      deliveryStatus: "sent",
+      provider: "chatvolt",
+      createdAt: now,
+    });
+    await atdRef.set({ ultimaMensagem: message || ("📎 " + fileName), ultimaInteracaoEm: now, updatedAt: now }, { merge: true });
+
+    // 8. auditoria genérica (item 12 do pedido) — nunca vitre_audit_log.
+    await writeAudit(COL_AUDIT, "enviar_anexo_whatsapp", caller.uid, caller.role, {
+      atendimentoId,
+      conversationId,
+      providerMessageId: sendResult.providerMessageId,
+      fileName,
+      mimeType,
+      size: fileBuffer.length,
+      attachmentSent: true,
+      enviadoPor: nome,
+      sentAt: now,
+    });
+
+    return { sent: true, providerMessageId: sendResult.providerMessageId, attachmentSent: true, errorCode: null };
+  });

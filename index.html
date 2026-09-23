@@ -621,11 +621,20 @@ code { background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:10px; f
 .atd-msg-attachment-name{word-break:break-all}
 .atd-msg-attachment-size{font-size:10px;opacity:.75;margin-top:1px}
 .atd-msg-attachment-open{font-size:10px;font-weight:700;margin-top:3px;text-decoration:underline}
+.atd-msg-attachment-thumb-img{display:block;max-width:220px;max-height:220px;border-radius:6px;margin-top:6px;object-fit:cover}
+.atd-composer-anexo-preview{display:none;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--border);background:var(--bg)}
+.atd-composer-anexo-thumb{width:38px;height:38px;object-fit:cover;border-radius:6px;flex-shrink:0}
+.atd-composer-anexo-icone{font-size:22px;flex-shrink:0}
+.atd-composer-anexo-info{flex:1;min-width:0}
+.atd-composer-anexo-nome{font-size:11.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atd-composer-anexo-tamanho{font-size:10px;color:var(--muted)}
+.atd-composer-anexo-remover{background:none;border:none;color:var(--danger);font-weight:800;cursor:pointer;font-size:15px;padding:4px 8px;flex-shrink:0}
 .atd-composer{border-top:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;align-items:flex-end}
 .atd-composer textarea{flex:1;resize:none;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12.5px;font-family:inherit;max-height:100px;min-height:38px}
 .atd-composer textarea:focus{outline:none;border-color:var(--brand-mid)}
 .atd-composer button{background:var(--brand-mid);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:12px;cursor:pointer;flex-shrink:0}
 .atd-composer button:disabled{opacity:.5;cursor:not-allowed}
+#atdBtnAnexar{background:var(--surface);color:var(--text);border:1px solid var(--border);padding:8px 11px;font-size:15px}
 .atd-badge-modo{font-size:9.5px;font-weight:800;padding:3px 8px;border-radius:20px}
 .atd-badge-valeria{background:#EDE9FE;color:#5B21B6}
 .atd-badge-humano{background:#DBEAFE;color:#1E40AF}
@@ -5271,7 +5280,11 @@ function _authFirebaseError(code){
             <div id="atdHandoffBanner" style="display:none;background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;padding:8px 12px;text-align:center">⚠️ Precisa de atendimento humano</div>
             <div id="atdPagamentoBanner" style="display:none;background:#FEF3C7;color:#92400E;font-weight:700;font-size:12px;padding:8px 12px;text-align:center">⏳ Aguardando confirmação de pagamento</div>
             <div class="atd-thread-msgs" id="atdThreadMsgs"></div>
+            <!-- Fase E.2.48C — preview do anexo selecionado, antes do envio (nunca envia sozinho). -->
+            <div class="atd-composer-anexo-preview" id="atdComposerAnexoPreview" style="display:none"></div>
             <div class="atd-composer" id="atdComposer">
+              <input type="file" id="atdComposerFileInput" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" style="display:none" onchange="atdComposerAnexoSelecionado(this)">
+              <button type="button" id="atdBtnAnexar" onclick="atdComposerAnexarClique()" title="Anexar arquivo (PDF, JPG, PNG)">📎</button>
               <textarea id="atdComposerInput" rows="1" placeholder="Simular mensagem do cliente…" onkeydown="atdComposerKeydown(event)"></textarea>
               <button id="atdBtnEnviar" onclick="atdEnviar()">Enviar</button>
             </div>
@@ -36401,6 +36414,11 @@ var ATD_SELECTED_ID = null;
 var ATD_FILTRO = 'todos';
 var ATD_SENDING = false;
 var ATD_BUSY = false;
+// Fase E.2.48C — anexo manual selecionado no composer, ainda não enviado
+// (null = nenhum). {base64, name, type, size, isImage, previewUrl}.
+var ATD_COMPOSER_ANEXO = null;
+var ATD_ANEXO_MIME_EXT = { 'application/pdf': ['pdf'], 'image/jpeg': ['jpg','jpeg'], 'image/png': ['png'] };
+var ATD_ANEXO_MAX_BYTES = 8 * 1024 * 1024;
 var ATD_ORC_PENDENTE_ID = null; // Sprint P1.3 — orçamento Valéria aguardando confirmação de pagamento (thread atualmente aberta)
 // RODADA 9, Bloco H — briefing estruturado (produto/medidas/material/prazo
 // etc.) extraído pela ValerIA durante a conversa, ver atdBriefingListenerInit.
@@ -36811,8 +36829,14 @@ function atdAnexoHtml(m){
   if(!atts || !atts.length) return '';
   return atts.map(function(a){
     var tamanhoTxt = (typeof a.size==='number' && a.size>0) ? Math.round(a.size/1024)+' KB' : '';
-    var icone = (a.mimeType==='application/pdf') ? '📄' : (a.mimeType && a.mimeType.indexOf('image/')===0) ? '🖼️' : '📎';
-    return '<div class="atd-msg-attachment" onclick="atdAbrirAnexo(\''+cfgEsc(m.atendimentoId||'')+'\',\''+cfgEsc(m.id)+'\')">'
+    var isImage = !!(a.mimeType && a.mimeType.indexOf('image/')===0);
+    var icone = (a.mimeType==='application/pdf') ? '📄' : (isImage ? '🖼️' : '📎');
+    // Fase E.2.48C — imagens ganham um thumbnail real, carregado sob
+    // demanda DEPOIS da renderização (atdCarregarThumbsAnexos), via a
+    // MESMA signed URL de curta duração já usada por "Abrir documento" —
+    // nunca uma URL persistida/embutida aqui.
+    var thumbAttrs = isImage ? ' data-atd-thumb-atendimento="'+cfgEsc(m.atendimentoId||'')+'" data-atd-thumb-message="'+cfgEsc(m.id)+'"' : '';
+    return '<div class="atd-msg-attachment" onclick="atdAbrirAnexo(\''+cfgEsc(m.atendimentoId||'')+'\',\''+cfgEsc(m.id)+'\')"'+thumbAttrs+'>'
       + '<div class="atd-msg-attachment-row">'+icone+' <span class="atd-msg-attachment-name">'+cfgEsc(a.name||'documento')+'</span></div>'
       + (tamanhoTxt ? '<div class="atd-msg-attachment-size">'+tamanhoTxt+'</div>' : '')
       + '<div class="atd-msg-attachment-open">Abrir documento</div>'
@@ -36835,6 +36859,34 @@ function atdRenderMsgs(lista){
       + '</div>';
   }).join('');
   wrap.scrollTop = wrap.scrollHeight;
+  if(typeof atdCarregarThumbsAnexos === 'function') atdCarregarThumbsAnexos();
+}
+
+/**
+ * atdCarregarThumbsAnexos — carrega, sob demanda, uma imagem real para
+ * cada attachment de imagem já renderizado (nunca bloqueia a renderização
+ * da thread em si; falha silenciosamente — "Abrir documento" continua
+ * funcionando mesmo se o thumbnail não carregar).
+ */
+function atdCarregarThumbsAnexos(){
+  var els = document.querySelectorAll('[data-atd-thumb-message]');
+  els.forEach(function(el){
+    if(el.getAttribute('data-atd-thumb-carregado')==='1') return;
+    el.setAttribute('data-atd-thumb-carregado', '1');
+    var atendimentoId = el.getAttribute('data-atd-thumb-atendimento');
+    var messageId = el.getAttribute('data-atd-thumb-message');
+    firebase.functions().httpsCallable('atdObterUrlAnexo')({ atendimentoId: atendimentoId, messageId: messageId })
+      .then(function(result){
+        var r = result.data || {};
+        if(!r.url) return;
+        var img = document.createElement('img');
+        img.src = r.url;
+        img.className = 'atd-msg-attachment-thumb-img';
+        var rowEl = el.querySelector('.atd-msg-attachment-row');
+        if(rowEl) rowEl.insertAdjacentElement('afterend', img);
+      })
+      .catch(function(){ /* thumbnail é só um extra visual — nunca quebra o restante da thread */ });
+  });
 }
 
 /**
@@ -36885,9 +36937,21 @@ function atdEnviar(){
   if(ATD_SENDING || !ATD_SELECTED_ID) return;
   var input = document.getElementById('atdComposerInput');
   var texto = (input.value||'').trim();
-  if(!texto) return;
+  var anexo = ATD_COMPOSER_ANEXO;
+  // Fase E.2.48C, item 13 — bloqueia SÓ quando não há nem texto nem anexo;
+  // "somente arquivo, sem texto" é um envio válido.
+  if(!texto && !anexo) return;
   var atd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
   if(!atd) return;
+
+  if(anexo){
+    // Envio de anexo manual só existe no modo humano (envio real outbound
+    // via ChatVolt) — nunca reaproveita atdSimularMensagemCliente, que
+    // finge ser o CLIENTE, um propósito de teste completamente diferente.
+    if(atd.modoAtendimento!=='humano'){ showToast('Assuma o atendimento para enviar arquivos.', 'warn'); return; }
+    atdEnviarComAnexo(texto, anexo);
+    return;
+  }
 
   var btn = document.getElementById('atdBtnEnviar');
   ATD_SENDING = true; if(btn) btn.disabled = true; input.disabled = true;
@@ -36910,6 +36974,95 @@ function atdEnviar(){
       input.disabled = !!(atualAtd && atualAtd.status==='resolvido');
       input.focus();
     });
+}
+
+/**
+ * atdEnviarComAnexo — envio real de anexo manual (Fase E.2.48C). Mesma
+ * disciplina de atdConfirmarEnvioOrcamentoOficial: requestId novo a cada
+ * tentativa, botão travado durante o envio, erro nunca fecha/limpa o
+ * anexo selecionado (humano pode tentar de novo sem re-selecionar o arquivo).
+ */
+function atdEnviarComAnexo(texto, anexo){
+  var input = document.getElementById('atdComposerInput');
+  var btn = document.getElementById('atdBtnEnviar');
+  ATD_SENDING = true; if(btn) btn.disabled = true; input.disabled = true;
+  var requestId = atdGerarRequestId();
+
+  firebase.functions().httpsCallable('atdEnviarAnexoManual')({
+    atendimentoId: ATD_SELECTED_ID,
+    fileBase64: anexo.base64,
+    fileName: anexo.name,
+    mimeType: anexo.type,
+    message: texto,
+    requestId: requestId,
+  }).then(function(result){
+    var r = result.data || {};
+    if(!r.sent){ throw new Error(r.errorCode || 'Falha desconhecida no envio.'); }
+    input.value = '';
+    atdComposerRemoverAnexo();
+    showToast(r.jaProcessado ? 'Este arquivo já havia sido enviado.' : 'Arquivo enviado pelo WhatsApp com sucesso!', 'ok');
+  }).catch(function(e){
+    showToast('Não foi possível enviar o arquivo: ' + ((e && e.message) || e) + ' — pode tentar de novo.', 'err');
+  }).finally(function(){
+    ATD_SENDING = false; if(btn) btn.disabled = false;
+    var atualAtd = ATD_CACHE.find(function(a){ return a.id===ATD_SELECTED_ID; });
+    input.disabled = !!(atualAtd && atualAtd.status==='resolvido');
+    input.focus();
+  });
+}
+
+// ============================================================
+// Fase E.2.48C — seleção/preview/remoção do anexo manual no composer
+// ============================================================
+function atdComposerAnexarClique(){
+  if(ATD_SENDING) return;
+  var input = document.getElementById('atdComposerFileInput');
+  if(input) input.click();
+}
+
+function atdComposerAnexoSelecionado(inputEl){
+  var file = inputEl.files && inputEl.files[0];
+  inputEl.value = ''; // permite selecionar o MESMO arquivo de novo depois de remover
+  if(!file) return;
+
+  var extsValidas = ATD_ANEXO_MIME_EXT[file.type];
+  if(!extsValidas){ showToast('Tipo de arquivo não permitido. Use PDF, JPG ou PNG.', 'err'); return; }
+  var ext = (file.name.split('.').pop()||'').toLowerCase();
+  if(extsValidas.indexOf(ext)<0){ showToast('A extensão do arquivo não corresponde ao tipo declarado ('+file.type+').', 'err'); return; }
+  if(file.size===0){ showToast('Arquivo vazio.', 'err'); return; }
+  if(file.size > ATD_ANEXO_MAX_BYTES){ showToast('Arquivo maior que 8MB — escolha um arquivo menor.', 'err'); return; }
+
+  var reader = new FileReader();
+  reader.onloadend = function(){
+    var base64 = String(reader.result||'').split(',')[1] || '';
+    var isImage = file.type.indexOf('image/')===0;
+    ATD_COMPOSER_ANEXO = {
+      base64: base64, name: file.name, type: file.type, size: file.size, isImage: isImage,
+      previewUrl: isImage ? ('data:'+file.type+';base64,'+base64) : null,
+    };
+    atdRenderComposerAnexoPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function atdComposerRemoverAnexo(){
+  ATD_COMPOSER_ANEXO = null;
+  atdRenderComposerAnexoPreview();
+}
+
+function atdRenderComposerAnexoPreview(){
+  var wrap = document.getElementById('atdComposerAnexoPreview');
+  if(!wrap) return;
+  var a = ATD_COMPOSER_ANEXO;
+  if(!a){ wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  var tamanhoTxt = Math.round(a.size/1024) + ' KB';
+  var thumbOuIcone = a.isImage
+    ? '<img src="'+a.previewUrl+'" class="atd-composer-anexo-thumb">'
+    : '<span class="atd-composer-anexo-icone">📄</span>';
+  wrap.innerHTML = thumbOuIcone
+    + '<div class="atd-composer-anexo-info"><div class="atd-composer-anexo-nome">'+cfgEsc(a.name)+'</div><div class="atd-composer-anexo-tamanho">'+tamanhoTxt+'</div></div>'
+    + '<button type="button" class="atd-composer-anexo-remover" onclick="atdComposerRemoverAnexo()" title="Remover">✕</button>';
+  wrap.style.display = 'flex';
 }
 
 function atdErroAmigavel(e){
