@@ -1,4 +1,11 @@
+// PROD_MUTATING_TEST
 /**
+ * ⚠️  ESTE SCRIPT ALTERA PRODUÇÃO ⚠️
+ * Chama `atdSolicitarHumanoValeria` real (Cloud Function em produção) para
+ * o `atendimentoId` passado por CLI — cria um handoff real. Exige
+ * `ALLOW_PROD_MUTATION=1` no ambiente (ver scripts/_prod_mutation_guard.js).
+ * NUNCA deve ser executado por um sweep/varredura genérica.
+ *
  * _smoke_handoff_automatico_2026-08-23.js — verificação manual em produção.
  *
  * Simula exatamente o que a ValerIA faria ao chamar a nova Tool
@@ -14,6 +21,9 @@
 'use strict';
 const { getProdApp } = require('./_prod_admin_credential');
 const https = require('https');
+const { requireAllowProdMutation } = require('./_prod_mutation_guard');
+
+requireAllowProdMutation(__filename);
 
 async function main() {
   const atdId = process.argv[2];

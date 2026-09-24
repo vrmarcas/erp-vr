@@ -1,4 +1,11 @@
+// PROD_MUTATING_TEST
 /**
+ * ⚠️  ESTE SCRIPT ALTERA PRODUÇÃO ⚠️
+ * Liga/desliga `erp_vr/erp_config.valeriaV2Enabled` em Firestore de
+ * produção real. Exige `ALLOW_PROD_MUTATION=1` no ambiente (ver
+ * scripts/_prod_mutation_guard.js). NUNCA deve ser executado por um
+ * sweep/varredura genérica de `scripts/test_*.js`.
+ *
  * test_http_fase_e1_2_2026-09-20.js — ValerIA 2.0, Fase E.1.2.
  *
  * Bateria HTTP MÍNIMA pós-hardening, contra as Tools deployadas reais:
@@ -15,6 +22,9 @@
 'use strict';
 const { execSync } = require('child_process');
 const { getProdApp } = require('./_prod_admin_credential');
+const { requireAllowProdMutation, installEmergencyRestoreOnSignal } = require('./_prod_mutation_guard');
+
+requireAllowProdMutation(__filename);
 
 const BASE = 'https://us-central1-erp-vrmarcas.cloudfunctions.net';
 const URL_UPDATE_QUAL = `${BASE}/valeriaUpdateCatalogQualification`;
@@ -50,6 +60,8 @@ async function setV2Flag(db, value) {
 async function main() {
   const SECRET = getSecret();
   const db = getProdApp().firestore();
+
+  installEmergencyRestoreOnSignal(() => setV2Flag(db, false), __filename);
 
   const agentsDoc = await db.collection('erp_vr').doc('valeria_authorized_agents').get();
   const agent = agentsDoc.data().agents[0];

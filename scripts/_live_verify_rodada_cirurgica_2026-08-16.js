@@ -1,4 +1,11 @@
+// PROD_MUTATING_TEST
 /**
+ * ⚠️  ESTE SCRIPT ALTERA PRODUÇÃO ⚠️
+ * Grava em `kb_os`/`orcamentos` reais (fixture descartável `isTest`, com
+ * autocleanup ao final). Exige `ALLOW_PROD_MUTATION=1` no ambiente (ver
+ * scripts/_prod_mutation_guard.js). NUNCA deve ser executado por um
+ * sweep/varredura genérica.
+ *
  * _live_verify_rodada_cirurgica_2026-08-16.js
  *
  * Verificação AO VIVO (Firestore de produção real, erp-vrmarcas) dos itens
@@ -30,6 +37,10 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { requireAllowProdMutation } = require('./_prod_mutation_guard');
+
+requireAllowProdMutation(__filename);
+
 const { getProdApp } = require('./_prod_admin_credential.js');
 const db = getProdApp().firestore();
 const COL = 'erp_vr';
