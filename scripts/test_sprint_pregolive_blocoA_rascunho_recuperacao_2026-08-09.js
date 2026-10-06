@@ -23,6 +23,7 @@
  * Uso: node scripts/test_sprint_pregolive_blocoA_rascunho_recuperacao_2026-08-09.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

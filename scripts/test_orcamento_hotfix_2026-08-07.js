@@ -13,6 +13,7 @@
  */
 
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 
 let passed = 0, failed = 0;
 function test(desc, got, expected) {

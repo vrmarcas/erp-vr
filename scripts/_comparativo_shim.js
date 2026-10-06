@@ -19,5 +19,5 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 vm.runInThisContext('var ORC_REGRA_COMPARATIVO_ATUAL = 2;');
-['_orcItemEntraNaOperacao', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcRegistroComparativoPendente', '_orcEntraNaOperacaoDoRegistro']
+['_orcItemEntraNaOperacao', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcRegistroComparativoPendente', '_orcEntraNaOperacaoDoRegistro', 'orcPecasHerdarEspessura', 'orcSincronizarEspPecasHerdadas', 'orcPctBR']
   .forEach(function (n) { if (typeof global[n] !== 'function') vm.runInThisContext(extractFn(n)); });

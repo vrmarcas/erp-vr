@@ -157,7 +157,7 @@ function rodarCenario(opts) {
   var pecas = [
     { qty: 1, larg: 50, alt: 40, esp: '3', origem: 'AUTOMATICA' },   // 0,20 m²
     { qty: 1, larg: 30, alt: 30, esp: '3', origem: 'AUTOMATICA' },   // 0,09 m²
-    { qty: 1, larg: 20, alt: 20, esp: '4', origem: 'AUTOMATICA' }    // 0,04 m²
+    { qty: 1, larg: 20, alt: 20, esp: '4', espOverride: '4', origem: 'AUTOMATICA' }    // 0,04 m²
   ];
   var planArea = 50*40 + 30*30 + 20*20; // cm², soma de todas as peças
   var r = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, planArea: planArea, pecas: pecas }] });
@@ -180,7 +180,7 @@ function rodarCenario(opts) {
     var pecas = [
       { qty: 1, larg: 50, alt: 40, esp: '3', origem: 'AUTOMATICA' },
       { qty: 1, larg: 30, alt: 30, esp: '3', origem: 'AUTOMATICA' },
-      { qty: 1, larg: 20, alt: 20, esp: String(esp), origem: 'AUTOMATICA' }
+      { qty: 1, larg: 20, alt: 20, esp: String(esp), espOverride: String(esp), origem: 'AUTOMATICA' }
     ];
     var planArea = 50*40 + 30*30 + 20*20;
     return rodarCenario({ materiaisCatalogo: materiaisCom5mm, itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, planArea: planArea, pecas: pecas }] });
@@ -220,7 +220,7 @@ function rodarCenario(opts) {
 {
   var pecas = [
     { qty: 1, larg: 50, alt: 40, esp: '3', origem: 'AUTOMATICA' },
-    { qty: 1, larg: 20, alt: 20, esp: '4', origem: 'AUTOMATICA' }
+    { qty: 1, larg: 20, alt: 20, esp: '4', espOverride: '4', origem: 'AUTOMATICA' }
   ];
   var planArea = 50*40 + 20*20;
   var cenarioOpts = { itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, planArea: planArea, pecas: pecas }] };
@@ -328,7 +328,7 @@ function rodarCenario(opts) {
     itens: [
       { idx: '1', qty: 3, matKey: 'cfg_0', espItem: 3, planArea: 15000, pecas: [
         { qty: 1, larg: 100, alt: 100, esp: '3', origem: 'AUTOMATICA' },
-        { qty: 1, larg: 50, alt: 100, esp: '4', origem: 'AUTOMATICA' }
+        { qty: 1, larg: 50, alt: 100, esp: '4', espOverride: '4', origem: 'AUTOMATICA' }
       ] }
     ],
     itemExtras: { '1': { instalacao: 45, acabamento: 0, outros: 0 } }

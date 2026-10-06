@@ -75,6 +75,7 @@ function extractFunction(src, name) {
 }
 
 const FN_NAMES = [
+  'orcPctBR',
   'orcRegistroComparativoPendente',
   'orcComparativoPendente', 'orcComparativoPendenteDOM', 'orcTextoValorCliente', '_orcItemEntraNaOperacao',
   'orcDistribuirParcelas', 'orcMotorComercial', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',

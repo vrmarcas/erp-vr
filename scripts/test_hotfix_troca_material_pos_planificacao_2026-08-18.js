@@ -261,12 +261,12 @@ function simularTrocaDeMaterialSemReabrir(_els, idx, novoEspMm) {
   var areaAposTroca = 0; try { areaAposTroca = JSON.parse(_els.oir_1.dataset.planPecas).reduce(function(s,p){return s+p.larg*p.alt*p.qty;},0); } catch(e){}
   testePerto('A2. área (geometria) também converge — Lateral/Frente-Fundo recalculadas com a nova espessura', areaAposTroca, areaPlan(pecasDireto2mm), 0.5);
 
-  // Contraprova: sem a correção desta rodada (peça legada sem espOverride,
-  // geometria travada), o resultado ficaria preso perto do custo de 4mm.
+  // Regra de 2026-10-06: peça SEM espOverride (herança) acompanha a espessura do item.
+  // Peça legada sem o campo recebe a espessura do item em vez de ficar presa no custo de 4mm.
   var custoDireto4mm = parseBRL(rodarCenario([{ idx: '1', qty: 1, matKey: matKeyPara(4), espItem: 4, pecas: planificarCaixa(4) }]).oi_custo_1.textContent);
   var pecasLegadoSemFix = pecasPlanificadasEm4mm.map(function(p){ var p2=Object.assign({},p); delete p2.espOverride; return p2; });
   var custoLegadoSemFix = parseBRL(rodarCenario([{ idx: '1', qty: 1, matKey: matKeyPara(2), espItem: 2, pecas: pecasLegadoSemFix }]).oi_custo_1.textContent);
-  ok('A3. (contraprova) peça legada SEM espOverride cai no fallback antigo e replica o bug histórico (preso perto do custo de 4mm, não do de 2mm)', Math.abs(custoLegadoSemFix - custoDireto4mm) < 1.0 && Math.abs(custoLegadoSemFix - custoDireto) > 5);
+  ok('A3. peça SEM espOverride acompanha a espessura do item (2mm): custo = criar direto em 2mm (regra de 2026-10-06; substitui o antigo "preso em 4mm")', Math.abs(custoLegadoSemFix - custoDireto) < 1.0 && Math.abs(custoLegadoSemFix - custoDireto4mm) > 5);
 }
 
 // ══════════════════════════════════════════════════════════════════════

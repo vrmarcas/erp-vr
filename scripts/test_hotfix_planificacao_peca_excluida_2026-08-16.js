@@ -29,6 +29,7 @@
  * Uso: node scripts/test_hotfix_planificacao_peca_excluida_2026-08-16.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

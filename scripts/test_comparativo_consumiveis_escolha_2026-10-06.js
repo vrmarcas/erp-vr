@@ -41,13 +41,13 @@ function extractFn(name) {
 var FN_NAMES = [
   'orcProdutoNomeResolvido','cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos',
-  '_orcItemEntraNaOperacao', 'orcRegistroComparativoPendente', '_orcEntraNaOperacaoDoRegistro', 'orcEnvNormalizar', 'orcPecasHerdarEspessura', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcItensDistribuidosDeOrc', 'orcMontarPayloadVitreParaOS', '_planReconcilePieces', '_planSeedFromPersisted', '_planPieceSlug', '_planBuildAllPecas', 'osProjecaoOperacionalItem'];
+  '_orcItemEntraNaOperacao', 'orcRegistroComparativoPendente', '_orcEntraNaOperacaoDoRegistro', 'orcEnvNormalizar', 'orcPecasHerdarEspessura', 'orcSincronizarEspPecasHerdadas', 'orcPctBR', 'orcMontarBlocosPagamento', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcItensDistribuidosDeOrc', 'orcMontarPayloadVitreParaOS', '_planReconcilePieces', '_planSeedFromPersisted', '_planPieceSlug', '_planBuildAllPecas', 'osProjecaoOperacionalItem'];
 var src = [
   'var ORC_REGRA_COMPARATIVO_ATUAL = 2;',
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { orcRecalc: orcRecalc, orcColetarItensDistribuidos: orcColetarItensDistribuidos, ' +
   '_planReconcilePieces: _planReconcilePieces, _planSeedFromPersisted: _planSeedFromPersisted, ' +
-  '_planBuildAllPecas: _planBuildAllPecas, osProjecaoOperacionalItem: osProjecaoOperacionalItem, _orcItemEntraNaOperacao: _orcItemEntraNaOperacao, orcComparativoPendente: orcComparativoPendente, orcTextoValorCliente: orcTextoValorCliente, orcMontarBlocosPagamento: orcMontarBlocosPagamento, orcBloqueioComparativoPendente: orcBloqueioComparativoPendente, orcItensDistribuidosDeOrc: orcItensDistribuidosDeOrc, orcMontarPayloadVitreParaOS: orcMontarPayloadVitreParaOS, orcRegistroComparativoPendente: orcRegistroComparativoPendente, _orcEntraNaOperacaoDoRegistro: _orcEntraNaOperacaoDoRegistro, orcEnvNormalizar: orcEnvNormalizar, orcPecasHerdarEspessura: orcPecasHerdarEspessura };'
+  '_planBuildAllPecas: _planBuildAllPecas, osProjecaoOperacionalItem: osProjecaoOperacionalItem, _orcItemEntraNaOperacao: _orcItemEntraNaOperacao, orcComparativoPendente: orcComparativoPendente, orcTextoValorCliente: orcTextoValorCliente, orcMontarBlocosPagamento: orcMontarBlocosPagamento, orcBloqueioComparativoPendente: orcBloqueioComparativoPendente, orcItensDistribuidosDeOrc: orcItensDistribuidosDeOrc, orcMontarPayloadVitreParaOS: orcMontarPayloadVitreParaOS, orcRegistroComparativoPendente: orcRegistroComparativoPendente, _orcEntraNaOperacaoDoRegistro: _orcEntraNaOperacaoDoRegistro, orcEnvNormalizar: orcEnvNormalizar, orcPecasHerdarEspessura: orcPecasHerdarEspessura, orcSincronizarEspPecasHerdadas: orcSincronizarEspPecasHerdadas, orcPctBR: orcPctBR };'
 ].join('\n\n');
 var modPath = path.join(__dirname, '_comparativo_escolha_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
@@ -304,6 +304,7 @@ ok('C15g. OS/Vitre filtram pelo registro (regra nova: só escolha confirmada)', 
 var orcRegistroComparativoPendente = mod.orcRegistroComparativoPendente;
 var _orcEntraNaOperacaoDoRegistro = mod._orcEntraNaOperacaoDoRegistro;
 var orcEnvNormalizar = mod.orcEnvNormalizar;
+var orcPctBR = mod.orcPctBR;
 function _regGrupo(regra, confA, confB, valorFinal, extras) {
   var itens = [
     { mat: 'Acrílico Cristal 2mm', espMm: 2, total: 'R$ 100,00', grupoOpcao: { grupoId: 'g1', selecionada: true, escolhaConfirmada: confA } },
@@ -377,10 +378,48 @@ test('F3. peça MANUAL mantém a espessura própria (2mm)', PEC_B[2].esp, '2');
 test('F4. consumíveis da peça herdada são preservados (adesivo/gravação)', [PEC_B[0].adesivoNormal, PEC_B[0].gravacao], [true, 20]);
 test('F5. sem espessura válida nada muda', orcPecasHerdarEspessura(PEC_ORIG, ''), JSON.stringify(JSON.parse(PEC_ORIG)));
 var srcIdx2 = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-ok('F6. orcMatChanged re-carimba peças herdadas SOMENTE em linhas de grupo comparativo', /ORC_ITEM_OPCOES\[idx\] && ORC_ITEM_OPCOES\[idx\]\.grupoId\) \{\s*var _rowCmp/.test(srcIdx2) && /orcPecasHerdarEspessura\(_rowCmp\.dataset\.planPecas/.test(srcIdx2));
+ok('F6. espessura herdada NÃO é mais restrita a grupo: orcMatChanged não re-carimba por grupo (centralizado em orcRecalc)', !/_rowCmp/.test(srcIdx2) && /orcSincronizarEspPecasHerdadas\(\)/.test(srcIdx2));
 ok('F7. duplicação também chama o helper (cópia já nasce com a espessura certa quando o material muda)', /orcPecasHerdarEspessura\(rowNovo\.dataset\.planPecas/.test(srcIdx2));
 // G — Step 3: rótulo de três estados
 ok('G1. Step 3: sem comparativo → "ORÇAMENTO TOTAL"; pendente → "PRÉVIA INTERNA"; escolhido → "opção escolhida pelo cliente"', /ORÇAMENTO TOTAL/.test(srcIdx2) && /PRÉVIA INTERNA — opção em edição \(não é escolha do cliente\)/.test(srcIdx2) && /ORÇAMENTO — opção escolhida pelo cliente/.test(srcIdx2));
+
+// H — espessura herdada em orçamento NORMAL (sem comparativo) e save/reopen
+var orcSincronizarEspPecasHerdadas = mod.orcSincronizarEspPecasHerdadas;
+function pecasDe(r) { return JSON.parse(r.oir_1.dataset.planPecas); }
+var PN = [{ nome: 'Tampa', qty: 1, larg: 40, alt: 30, esp: '2', origem: 'AUTOMATICA' }, { nome: 'Base', qty: 1, larg: 40, alt: 30, esp: '2', origem: 'AUTOMATICA' }];
+var rH1 = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: PN }], materiaisCatalogo: MATS });
+test('H1. orçamento normal 2mm→3mm: peças automáticas passam para 3mm', pecasDe(rH1).map(function (p) { return p.esp; }), ['3', '3']);
+var PM = [{ nome: 'Tampa', qty: 1, larg: 40, alt: 30, esp: '2', origem: 'AUTOMATICA' }, { nome: 'Manual', qty: 1, larg: 10, alt: 10, esp: '4', origem: 'MANUAL' }];
+var rH2 = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: PM }], materiaisCatalogo: MATS });
+test('H2. peça MANUAL 4mm permanece 4mm (a automática vai a 3mm)', pecasDe(rH2).map(function (p) { return p.esp; }), ['3', '4']);
+var PO = [{ nome: 'Tampa', qty: 1, larg: 40, alt: 30, esp: '5', espOverride: 5, origem: 'AUTOMATICA' }];
+var rH3 = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: PO }], materiaisCatalogo: MATS });
+test('H3. peça com espOverride explícito permanece no override (5mm, espOverride 5)', [pecasDe(rH3)[0].esp, pecasDe(rH3)[0].espOverride], ['5', 5]);
+// H4 — save/reopen: o estado salvo, reaberto e recalculado, não muda de novo
+var salvo = rH1.oir_1.dataset.planPecas;
+var rH4 = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: JSON.parse(salvo) }], materiaisCatalogo: MATS });
+test('H4. save/reopen: reabrir o salvo (3mm) mantém o resultado idêntico', rH4.oir_1.dataset.planPecas, salvo);
+var rH4b = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: JSON.parse(salvo) }], materiaisCatalogo: MATS });
+test('H4b. recalcular duas vezes não altera o snapshot (idempotente)', rH4b.oir_1.dataset.planPecas, salvo);
+// H5 — histórico: sessão legada nunca é tocada
+window._orcSessaoRegraComparativo = 'legado';
+var rH5 = rodarCenario({ itens: [{ idx: '1', qty: 1, matKey: 'cfg_0', espItem: 3, pecas: PN }], materiaisCatalogo: MATS });
+test('H5. orçamento histórico (sessão legada) NÃO é re-carimbado: snapshot 2mm preservado', pecasDe(rH5).map(function (p) { return p.esp; }), ['2', '2']);
+window._orcSessaoRegraComparativo = undefined;
+var srcIdxH = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+ok('H6. sincronização roda no início de orcRecalc (toda linha, qualquer orçamento novo)', /function orcRecalc\(\) \{\n  orcSincronizarEspPecasHerdadas\(\);/.test(srcIdxH));
+ok('H7. sessão de orçamento antigo é definida ANTES de reconstruir as linhas (orcEnvEditar)', srcIdxH.indexOf("window._orcSessaoRegraComparativo = (o.regraComparativo === ORC_REGRA_COMPARATIVO_ATUAL)") < srcIdxH.indexOf("orcItemCount=0;\n      if(typeof ORC_ITEM_EXTRAS"));
+
+// P — Pix em pt-BR nos dois estados; texto histórico preservado
+var CP = { pxPct: 3.99, pixTotal: 306.22, parcela: { nParc: 3, valorParcela: 106.31, totalCents: 31895 } };
+var txtConf = orcMontarBlocosPagamento(CP, false, 0, '', FMT, false, false).map(function (b) { return b.texto; }).join('|');
+var txtPend = orcMontarBlocosPagamento(CP, false, 0, '', FMT, true, false).map(function (b) { return b.texto; }).join('|');
+var txtHist = orcMontarBlocosPagamento(CP, false, 0, '', FMT, false, true).map(function (b) { return b.texto; }).join('|');
+ok('P1. confirmado: Pix em pt-BR "3,99%" (sem "3.99")', /3,99% de desconto pagando/.test(txtConf) && !/3\.99/.test(txtConf));
+ok('P2. pendente: Pix em pt-BR "3,99%" (mesma formatação)', /3,99% de desconto no pagamento/.test(txtPend));
+ok('P3. histórico (formatoAntigo): texto antigo preservado "3.99%"', /3\.99% de desconto pagando/.test(txtHist));
+ok('P4. matemática intocada: valor com PIX continua R$ 306,22', /valor com PIX: R\$ 306,22/.test(txtConf));
+test('P5. orcPctBR: 5,14 e 5 em pt-BR', [orcPctBR(5.14), orcPctBR(5)], ['5,14', '5']);
 
 console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
 try { fs.unlinkSync(modPath); } catch (e) {}

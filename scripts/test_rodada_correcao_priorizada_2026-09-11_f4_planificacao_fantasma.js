@@ -37,6 +37,7 @@
  * Uso: node scripts/test_rodada_correcao_priorizada_2026-09-11_f4_planificacao_fantasma.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

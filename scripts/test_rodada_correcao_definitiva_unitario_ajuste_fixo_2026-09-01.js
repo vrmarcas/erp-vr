@@ -31,6 +31,7 @@
  * Uso: node scripts/test_rodada_correcao_definitiva_unitario_ajuste_fixo_2026-09-01.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

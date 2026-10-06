@@ -21,6 +21,7 @@
  * Uso: node scripts/test_estabilizacao_2026-09-09_bloco10_ajuste_escopo.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 
