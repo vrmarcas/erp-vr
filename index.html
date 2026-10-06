@@ -29219,6 +29219,25 @@ var _ORC_ENVIADOS_DATA = [];
 // enviados; filtrar isTest aqui protege de uma vez Orçamentos Enviados,
 // Dashboard Comercial e Dashboard principal (todos leem por aqui).
 function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return !_isTestRecord(o); }); }
+// Após conflito de gravação: a tela do orçamento aberto volta a refletir o que a
+// nuvem tem (escolha não persistida some dos badges/rótulo/total). Alinhamento por
+// ordem: linhas VR da tela ↔ itens VR do registro (Vitre é cumulativo, fora das linhas).
+function orcReidratarGruposDoServidor(lista) {
+  var sid = (typeof window !== 'undefined') ? window._orcSessaoAtualId : null;
+  if (!sid || !Array.isArray(lista) || typeof ORC_ITEM_OPCOES === 'undefined') return;
+  var srv = lista.find(function (x) { return x && x.id === sid; });
+  if (!srv) return;
+  var itensVR = (srv.itens || []).filter(function (it) { return it && it.tipoItem !== 'vitre_catalogo'; });
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#orcItemBody tr[data-idx]'));
+  rows.forEach(function (row, i) {
+    var idx = row.dataset.idx;
+    var it = itensVR[i];
+    if (it && it.grupoOpcao) ORC_ITEM_OPCOES[idx] = JSON.parse(JSON.stringify(it.grupoOpcao));
+    else delete ORC_ITEM_OPCOES[idx];
+  });
+  if (typeof orcRecalc === 'function') orcRecalc();
+}
+
 function orcSetEnviados(arr){
   _ORC_ENVIADOS_DATA=arr; // otimista — mantém a tela responsiva, igual ao comportamento anterior
   if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'nuvem-nao-pronta'});
@@ -29229,6 +29248,9 @@ function orcSetEnviados(arr){
     // que não foi persistida.
     if (r && r.ok === false && typeof r.reason === 'string' && r.reason.indexOf('conflito') === 0 && Array.isArray(r.serverData)) {
       _ORC_ENVIADOS_DATA = r.serverData;
+      // A tela também precisa refletir a nuvem: reidrata os grupos de opções do
+      // orçamento aberto (rótulo, badges e total dependem de ORC_ITEM_OPCOES).
+      try { orcReidratarGruposDoServidor(r.serverData); } catch (e) {}
       try { if (typeof orcEnviadosRender === 'function') orcEnviadosRender(); } catch (e) {}
     }
     return r;
