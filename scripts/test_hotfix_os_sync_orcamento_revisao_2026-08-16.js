@@ -43,6 +43,7 @@ function extractFn(name) {
 }
 
 var FN_NAMES = [
+  '_orcItemEntraNaOperacao',
   'orcProdutoNomeResolvido','osProjecaoOperacionalItem', 'osItemMateriaisResumo', '_orcSincronizarOSVinculada'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + ', getKB_OS: function(){ return KB_OS; }};';
 var modPath = path.join(__dirname, '_hotfix_os_sync_extracted.tmp.js');

@@ -56,6 +56,7 @@ console.log('\n=== Rodada planificação/OS/prazo 2026-08-16 — TESTES A-G ===\
 console.log('-- TESTE A: 6 automáticas → excluir 1 → adicionar manual → continua 6 efetivas → fechar/reabrir --');
 {
   const src = [
+    extractFn('_orcItemEntraNaOperacao'),
     extractFn('_planReconcilePieces'),
     extractFn('_planSeedFromPersisted'),
     extractFn('_planPieceSlug'),
@@ -224,6 +225,7 @@ console.log('\n-- TESTE E: editar orçamento antes de iniciar produção → mes
     'function renderOsTable(){}',
     'function syncSidebarBadges(){}',
     'var _currentSession = {user:"vendedor.teste"};',
+    extractFn('_orcItemEntraNaOperacao'),
     extractFn('_orcSincronizarOSVinculada'),
     'module.exports = { _orcSincronizarOSVinculada };',
   ].join('\n\n');

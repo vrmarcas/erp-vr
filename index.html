@@ -9912,6 +9912,20 @@ function orcOpcaoSelecionar(idx) {
   if (typeof orcAutoLaserSeNecessario==='function') orcAutoLaserSeNecessario();
 }
 
+// BLOCO B (comparativo) — "escolhida pelo cliente" ≠ "selecionada" (estado
+// interno de cálculo/UI). Só `escolhaConfirmada` (ação explícita do
+// vendedor após a resposta do cliente) autoriza OS, financeiro, payload
+// Vitre e qualquer efeito colateral de produção. Item cumulativo (sem
+// grupo) sempre entra. Registro LEGADO sem o campo `escolhaConfirmada`
+// (salvo antes do Bloco 8) cai no `selecionada` salvo — nunca migra
+// histórico automaticamente (Bloco F).
+function _orcItemEntraNaOperacao(it) {
+  var op = it && it.grupoOpcao;
+  if (!op) return true;
+  if (typeof op.escolhaConfirmada === 'boolean') return op.escolhaConfirmada;
+  return !!op.selecionada;
+}
+
 // Atualiza os selects de material em linhas já existentes do orçamento (corrige race condition com Firebase)
 function orcRefreshMatSelects() {
   if(!orcItemCount) return;
@@ -10789,14 +10803,14 @@ function _orcSincronizarOSVinculada(orc) {
   // opção escolhida (`selecionada:true`) — as alternativas apresentadas
   // e não escolhidas NUNCA geram/atualizam a OS.
   var novosItensOS = (orc.itens || [])
-    .filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; })
+    .filter(function(it){ return _orcItemEntraNaOperacao(it); })
     .map(function(it) {
       return (typeof osProjecaoOperacionalItem === 'function') ? osProjecaoOperacionalItem(it) : it;
     });
   // RODADA 5 — usa o mesmo `orc.itens` FILTRADO (nunca o [0] cru): sem
   // isso, se a opção não-escolhida viesse primeiro no array, o rótulo de
   // material da OS mostraria a alternativa errada (achado desta rodada).
-  var _itensOrigFiltrados = (orc.itens || []).filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; });
+  var _itensOrigFiltrados = (orc.itens || []).filter(function(it){ return _orcItemEntraNaOperacao(it); });
   var novoMatLabel = (_itensOrigFiltrados.length && typeof osItemMateriaisResumo === 'function')
     ? osItemMateriaisResumo(_itensOrigFiltrados[0]) : os.material;
   // RODADA FUNCIONAL 2026-09-17, Bloco 4 — fallback it.larg/it.alt (legado)
@@ -12036,14 +12050,21 @@ function orcRecalc() {
       // soma consumível de peça no total real (ver comentário no topo do
       // forEach).
       _pecasPlanRaw.forEach(function(p){
-        if (!_contaItem) return;
+        // BLOCO A (comparativo) — o acumulador LOCAL (*ItemLocal → *Own) é
+        // sempre preenchido, mesmo para opção não escolhida: é o que
+        // precifica a PRÓPRIA linha (PASS 2/3, preço informativo). Só os
+        // acumuladores GLOBAIS (*PecasTotal → total real do pedido) são
+        // gated por `_contaItem`. Antes o `return` cedo zerava o consumível
+        // da alternativa inteira (sumia do preço dela), enquanto a opção
+        // selecionada continuava com o consumível — "some numa opção sim,
+        // noutra não".
         var _areaPecaCm2 = (parseFloat(p.larg)||0)*(parseFloat(p.alt)||0)*(parseFloat(p.qty)||1)*qty;
         // RODADA 8 — Adesivo normal e Adesivo branco não são mais
         // mutuamente exclusivos: os dois `if` independentes (nunca
         // else-if) permitem que a mesma peça some as DUAS parcelas.
         var _adesPeca = _planPecaAdesivos(p);
-        if (_adesPeca.normal) { adhPecasTotal += _areaPecaCm2*adhPrecoCm2; _adhItemLocal += _areaPecaCm2*adhPrecoCm2; }
-        if (_adesPeca.branco) { adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2; _adhbItemLocal += _areaPecaCm2*adhbPrecoCm2; }
+        if (_adesPeca.normal) { _adhItemLocal += _areaPecaCm2*adhPrecoCm2; if (_contaItem) adhPecasTotal += _areaPecaCm2*adhPrecoCm2; }
+        if (_adesPeca.branco) { _adhbItemLocal += _areaPecaCm2*adhbPrecoCm2; if (_contaItem) adhbPecasTotal += _areaPecaCm2*adhbPrecoCm2; }
         // RODADA DE CORREÇÃO PRIORIZADA (2026-09-11), F5 — valor em R$
         // informado na peça é o custo POR UNIDADE do item (mesma semântica
         // de material/Adesivo/Adh.Branco logo acima, todos multiplicados
@@ -12058,9 +12079,14 @@ function orcRecalc() {
         // resto do motor: valor por unidade × qty do item. A regra
         // comercial "custo × 2 (venda)" (ver oc_imp/UI "custo × 2 (venda)")
         // continua intacta — só a escala por quantidade estava faltando.
-        gravacaoPecasTotal += (parseFloat(p.gravacao)||0)*qty; _gravacaoItemLocal += (parseFloat(p.gravacao)||0)*qty;
-        sprayPecasTotal    += (parseFloat(p.spray)||0)*qty;    _sprayItemLocal    += (parseFloat(p.spray)||0)*qty;
-        extraPecasTotal    += (parseFloat(p.extra)||0)*qty;    _extraItemLocal    += (parseFloat(p.extra)||0)*qty;
+        _gravacaoItemLocal += (parseFloat(p.gravacao)||0)*qty;
+        _sprayItemLocal    += (parseFloat(p.spray)||0)*qty;
+        _extraItemLocal    += (parseFloat(p.extra)||0)*qty;
+        if (_contaItem) {
+          gravacaoPecasTotal += (parseFloat(p.gravacao)||0)*qty;
+          sprayPecasTotal    += (parseFloat(p.spray)||0)*qty;
+          extraPecasTotal    += (parseFloat(p.extra)||0)*qty;
+        }
       });
     }
     const matCost = (baseAreaM2 * priceM2 + planManualMatCost + _deltaEspecificoPecas) * qty;
@@ -12443,7 +12469,11 @@ function orcRecalc() {
     if (_opBadgeEl) {
       var _opBadge = (typeof ORC_ITEM_OPCOES!=='undefined') && ORC_ITEM_OPCOES[item.idx];
       if (!_opBadge) { _opBadgeEl.innerHTML = ''; }
-      else if (_opBadge.selecionada) { _opBadgeEl.innerHTML = '<span style="font-size:9px;font-weight:800;color:#16A34A;white-space:nowrap">✓ Opção escolhida</span>'; }
+      else if (_opBadge.escolhaConfirmada) { _opBadgeEl.innerHTML = '<span style="font-size:9px;font-weight:800;color:#16A34A;white-space:nowrap">✓ Escolhida pelo cliente</span>'; }
+      // Bloco B — `selecionada` sem `escolhaConfirmada` é só estado interno
+      // (cálculo/edição): nunca pode aparecer como "escolhida" ao vendedor
+      // nem ao cliente. Mostra rótulo neutro + ação explícita.
+      else if (_opBadge.selecionada) { _opBadgeEl.innerHTML = '<span style="font-size:9px;font-weight:700;color:var(--muted);white-space:nowrap">Opção ativa (cálculo) · aguarda cliente</span>'; }
       else { _opBadgeEl.innerHTML = '<button onclick="orcOpcaoSelecionar(\''+item.idx+'\')" style="font-size:9px;padding:1px 6px;border:1px solid var(--brand-mid);border-radius:8px;background:none;color:var(--brand-mid);cursor:pointer;white-space:nowrap">Marcar escolhida</button>'; }
     }
   });
@@ -31311,7 +31341,7 @@ function orcEnvGerarOS(){
   // financeiro. Ponto único de filtro: tudo a jusante (payload Vitre,
   // material/medidas/qty agregados, checklist, as duas gravações — local e
   // Firestore) deriva deste mesmo array `itens`.
-  var itens=(o.itens||[]).filter(function(it){ return !it.grupoOpcao || it.grupoOpcao.selecionada; });
+  var itens=(o.itens||[]).filter(function(it){ return _orcItemEntraNaOperacao(it); });
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): se
   // o pedido tem itens do catálogo Vitre, eles são classificados (estoque
   // pronto/produzir/ficha pendente) por uma Cloud Function dedicada DEPOIS
