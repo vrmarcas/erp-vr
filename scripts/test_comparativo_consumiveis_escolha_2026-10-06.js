@@ -447,6 +447,30 @@ orcSetEnviados_ctx.orcSetEnviados(_Klocal).then(function () {
 
 ok('K4. fonte: orcSetEnviados reconcilia com serverData em qualquer conflito', /reason\.indexOf\('conflito'\) === 0 && Array\.isArray\(r\.serverData\)/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
 
+// L — conflito: a tela (ORC_ITEM_OPCOES) é reidratada a partir do registro do servidor
+(function () {
+  var fnSrc = extractFn('orcReidratarGruposDoServidor');
+  var ctx = { console: console, window: { _orcSessaoAtualId: 'ORC-L' }, ORC_ITEM_OPCOES: {}, orcRecalc: function () { ctx._recalc = (ctx._recalc || 0) + 1; }, _recalc: 0 };
+  ctx.document = { querySelectorAll: function () { return [{ dataset: { idx: '1' } }, { dataset: { idx: '2' } }]; } };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(fnSrc, ctx);
+  // tela: escolha B confirmada (rejeitada pela nuvem)
+  ctx.ORC_ITEM_OPCOES['1'] = { grupoId: 'g', selecionada: false, escolhaConfirmada: false };
+  ctx.ORC_ITEM_OPCOES['2'] = { grupoId: 'g', selecionada: true, escolhaConfirmada: true };
+  var servidor = [{ id: 'ORC-L', itens: [
+    { mat: 'A', grupoOpcao: { grupoId: 'g', selecionada: true, escolhaConfirmada: false } },
+    { mat: 'B', grupoOpcao: { grupoId: 'g', selecionada: false, escolhaConfirmada: false } },
+    { tipoItem: 'vitre_catalogo', sku: 'V-1' }
+  ] }];
+  ctx.orcReidratarGruposDoServidor(servidor);
+  ok('L1. após conflito a tela reidrata A/B do servidor: nenhuma escolha confirmada permanece', ctx.ORC_ITEM_OPCOES['2'].escolhaConfirmada === false && ctx.ORC_ITEM_OPCOES['1'].selecionada === true);
+  ok('L2. alinhamento ignora o item Vitre (cumulativo, fora das linhas) e recalcula a tela', ctx._recalc === 1 && Object.keys(ctx.ORC_ITEM_OPCOES).length === 2);
+  ctx.window._orcSessaoAtualId = 'OUTRO';
+  ctx.ORC_ITEM_OPCOES['1'] = { grupoId: 'x', selecionada: true, escolhaConfirmada: true };
+  ctx.orcReidratarGruposDoServidor(servidor);
+  ok('L3. sessão de outro orçamento não é tocada', ctx.ORC_ITEM_OPCOES['1'].grupoId === 'x');
+})();
+
 // Resumo só depois das asserções assíncronas (K1–K3) — evita contar a menos.
 setTimeout(function () {
   console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
