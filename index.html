@@ -29222,7 +29222,17 @@ function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return 
 function orcSetEnviados(arr){
   _ORC_ENVIADOS_DATA=arr; // otimista — mantém a tela responsiva, igual ao comportamento anterior
   if(typeof _cloudSave!=='function'||!_cloudReady) return Promise.resolve({ok:false, reason:'nuvem-nao-pronta'});
-  return _orcamentosSalvarComMerge(arr, 0);
+  return _orcamentosSalvarComMerge(arr, 0).then(function(r){
+    // BLOCO C/D (2026-10-06) — a memória é otimista. Se a nuvem recusou a gravação
+    // (qualquer conflito), a memória volta a ser a verdade do servidor: nenhum gate
+    // (financeiro, OS) pode operar sobre uma alteração — ex.: escolha do comparativo —
+    // que não foi persistida.
+    if (r && r.ok === false && typeof r.reason === 'string' && r.reason.indexOf('conflito') === 0 && Array.isArray(r.serverData)) {
+      _ORC_ENVIADOS_DATA = r.serverData;
+      try { if (typeof orcEnviadosRender === 'function') orcEnviadosRender(); } catch (e) {}
+    }
+    return r;
+  });
 }
 
 // HOTFIX OPERACIONAL 2026-08-12, P0.5 — achado real em produção: orcamentos
