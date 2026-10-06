@@ -421,6 +421,35 @@ ok('P3. histórico (formatoAntigo): texto antigo preservado "3.99%"', /3\.99% de
 ok('P4. matemática intocada: valor com PIX continua R$ 306,22', /valor com PIX: R\$ 306,22/.test(txtConf));
 test('P5. orcPctBR: 5,14 e 5 em pt-BR', [orcPctBR(5.14), orcPctBR(5)], ['5,14', '5']);
 
-console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
-try { fs.unlinkSync(modPath); } catch (e) {}
-process.exit(failed ? 1 : 0);
+// K — salvamento recusado pela nuvem (conflito): memória volta à verdade do servidor
+var orcSetEnviados_ctx = null;
+(function () {
+  var fnSrc = extractFn('orcSetEnviados');
+  var ctx = { console: console, _ORC_ENVIADOS_DATA: null, _cloudReady: true, _cloudSave: function () {}, orcEnviadosRender: function () {}, _orcamentosSalvarComMerge: null };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(fnSrc, ctx);
+  orcSetEnviados_ctx = ctx;
+})();
+var _regPend = function (conf) { return { id: 'ORC-K', regraComparativo: 2, valorFinal: conf ? 318.95 : null, valorPendenteComparativo: conf ? undefined : true,
+  itens: [{ mat: 'Acrílico Cristal 3mm', grupoOpcao: { grupoId: 'g', selecionada: true, escolhaConfirmada: conf } }] }; };
+var _Kservidor = [_regPend(false)];          // verdade da nuvem: escolha NÃO persistida
+var _Klocal = [_regPend(true)];              // memória otimista: escolha que a nuvem recusou
+var _Kok = [{ id: 'ORC-K2', valorFinal: 100 }];
+orcSetEnviados_ctx._orcamentosSalvarComMerge = function () { return Promise.resolve({ ok: false, reason: 'conflito', serverData: _Kservidor }); };
+orcSetEnviados_ctx.orcSetEnviados(_Klocal).then(function () {
+  ok('K1. conflito na nuvem: memória volta à versão do servidor (escolha não persistida some)', orcSetEnviados_ctx._ORC_ENVIADOS_DATA === _Kservidor);
+  ok('K2. após o conflito, o registro na memória é pendente (gate financeiro/OS bloqueia)', orcRegistroComparativoPendente(orcSetEnviados_ctx._ORC_ENVIADOS_DATA[0]) === true);
+  orcSetEnviados_ctx._orcamentosSalvarComMerge = function () { return Promise.resolve({ ok: true }); };
+  return orcSetEnviados_ctx.orcSetEnviados(_Kok);
+}).then(function () {
+  ok('K3. gravação aceita: memória fica com a lista gravada (caminho de conflito não interfere)', orcSetEnviados_ctx._ORC_ENVIADOS_DATA === _Kok);
+});
+
+ok('K4. fonte: orcSetEnviados reconcilia com serverData em qualquer conflito', /reason\.indexOf\('conflito'\) === 0 && Array\.isArray\(r\.serverData\)/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
+
+// Resumo só depois das asserções assíncronas (K1–K3) — evita contar a menos.
+setTimeout(function () {
+  console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
+  try { fs.unlinkSync(modPath); } catch (e) {}
+  process.exit(failed ? 1 : 0);
+}, 50);
