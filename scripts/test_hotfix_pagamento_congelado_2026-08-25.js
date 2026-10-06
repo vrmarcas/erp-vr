@@ -54,6 +54,7 @@
  * Uso: node "scripts/test_hotfix_pagamento_congelado_2026-08-25.js"
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

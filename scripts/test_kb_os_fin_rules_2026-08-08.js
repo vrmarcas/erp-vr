@@ -19,6 +19,7 @@
  * Pré-requisito: Emulators rodando (demo-erp-homolog) — Auth :9099, Firestore :8080.
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || 'localhost:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || 'localhost:9099';
 const http = require('http');

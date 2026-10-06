@@ -47,6 +47,7 @@
  * Uso: node scripts/test_e248a_orc_montar_html.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -74,6 +75,7 @@ function extractFunction(src, name) {
 }
 
 const FN_NAMES = [
+  'orcComparativoPendente', 'orcComparativoPendenteDOM', 'orcTextoValorCliente', '_orcItemEntraNaOperacao',
   'orcDistribuirParcelas', 'orcMotorComercial', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
   'orcCondicaoLabelPorTipo', 'orcItemDescricaoComercial', 'osItemMateriaisResumo',
   'orcItensDistribuidosDeOrc', 'orcCondPagamentoDeOrc', 'orcPrazoTextoDeOrc', 'orcMontarHtmlOrcamento',
@@ -254,9 +256,16 @@ console.log('\n== TESTE B — FIDELIDADE DO ORÇAMENTO REVISADO (ORC-000163 comp
   assert(html.includes('Acrílico Cristal 10mm') && html.includes('Acrílico Cristal 12mm') && html.includes('Acrílico Cristal 15mm'), 'as 3 opções de espessura aparecem, agora também com espMm persistido');
   assert(html.includes('— OU —'), 'separador "OU" entre as 3 opções do mesmo grupoOpcaoId');
   assert(html.includes('ESCOLHA UMA DAS OPÇÕES ABAIXO') || /escolha uma das op/i.test(html), 'cabeçalho do bloco comparativo aparece');
-  assert(/Parcelamento/.test(html) && /3x/.test(html) && /869,05/.test(html), 'bloco de parcelamento (3x de R$ 869,05) idêntico ao PDF oficial');
-  assert(/Desconto PIX/.test(html) && /5\.14% de desconto/.test(html) && /2\.473,16/.test(html), 'bloco de desconto PIX (5,14%, valor com PIX R$ 2.473,16) idêntico ao PDF oficial');
-  assert(html.includes('R$ 2.607,17'), 'Total Geral idêntico ao PDF oficial (R$ 2.607,17)');
+  // BLOCO C/D (2026-10-06) — fixture com grupo de opções SEM escolha confirmada
+  // (escolhaConfirmada:false) é estado PENDENTE: o PDF não mostra valor de opção
+  // interna. Mudança de comportamento intencional — ver a variante confirmada abaixo.
+  assert(/Parcelamento/.test(html) && /em até 3x sem juros/.test(html) && !/869,05/.test(html), 'PENDENTE: parcelamento genérico, sem valor da parcela da opção interna');
+  assert(/Desconto PIX/.test(html) && /5,14% de desconto no pagamento à vista via PIX/.test(html) && !/2\.473,16/.test(html), 'PENDENTE: Pix só informa percentual, sem valor');
+  assert(!html.includes('R$ 2.607,17') && /aguardando sua escolha/.test(html), 'PENDENTE: Total Geral genérico, sem o valor da opção interna');
+  const htmlEscolhida = makeCtx().orcMontarHtmlOrcamento(Object.assign(orcFixtureRevisado(), { itens: orcFixtureRevisado().itens.map((it, i) => Object.assign({}, it, { grupoOpcao: Object.assign({}, it.grupoOpcao, { escolhaConfirmada: i === 0 }) })) }));
+  assert(/869,05/.test(htmlEscolhida), 'CONFIRMADA: parcelamento volta com valor (869,05)');
+  assert(/2\.473,16/.test(htmlEscolhida), 'CONFIRMADA: Pix volta com valor (2.473,16)');
+  assert(htmlEscolhida.includes('R$ 2.607,17'), 'CONFIRMADA: Total Geral volta com o valor real (R$ 2.607,17)');
   assert(html.includes('CNPJ 37.855.285/0001-52'), 'rodapé com CNPJ oficial');
   assert(html.includes('Georgia'), 'tema Vitre aplicado (orc.marca==="vitre", mesmo do pedido real)');
 }

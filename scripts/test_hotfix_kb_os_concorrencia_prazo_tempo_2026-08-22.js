@@ -33,6 +33,7 @@
  * Uso: node scripts/test_hotfix_kb_os_concorrencia_prazo_tempo_2026-08-22.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

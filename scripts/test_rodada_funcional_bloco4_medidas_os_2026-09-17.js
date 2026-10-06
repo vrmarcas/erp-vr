@@ -13,6 +13,7 @@
  * esses 4 testes existentes.
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

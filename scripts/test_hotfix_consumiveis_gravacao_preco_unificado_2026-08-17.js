@@ -30,6 +30,7 @@
  * Uso: node scripts/test_hotfix_consumiveis_gravacao_preco_unificado_2026-08-17.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

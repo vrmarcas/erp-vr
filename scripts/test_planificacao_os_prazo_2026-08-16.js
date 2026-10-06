@@ -16,6 +16,7 @@
  * Uso: node scripts/test_planificacao_os_prazo_2026-08-16.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

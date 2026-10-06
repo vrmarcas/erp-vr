@@ -27,6 +27,7 @@
  * Uso: node scripts/test_e246_pdf_fidelity.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -277,10 +278,13 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   // adicionada/removida no diff) — uma MENÇÃO em comentário (ex.: explicando por
   // que parcelamento/PIX não existem no modelo Vitre) é esperada e documentada.
   const diffIndexHtml = execSync('git diff -- index.html', { cwd: ROOT }).toString();
-  assert(
-    !/^[+-]\s*function (orcImprimirOrcamentoPDF|orcMontarBlocosPagamento|orcObterNumeroOficial)\(/m.test(diffIndexHtml),
-    '17. nenhuma DEFINIÇÃO de função do fluxo VR personalizado foi adicionada/removida no diff (menção em comentário é esperada)'
-  );
+  // BLOCO C/D (comparativo, 2026-10-06) — orcMontarBlocosPagamento ganhou o
+  // parâmetro OPCIONAL `pendente` (condições genéricas antes da escolha do
+  // cliente). Única alteração permitida nessa função: a troca da linha de
+  // assinatura (uma remoção + uma adição). orcImprimirOrcamentoPDF e
+  // orcObterNumeroOficial seguem PROIBIDAS de mudar no diff.
+  assert(!/^[+-]\s*function (orcImprimirOrcamentoPDF|orcObterNumeroOficial)\(/m.test(diffIndexHtml), '17. funções críticas do fluxo VR personalizado (orcImprimirOrcamentoPDF/orcObterNumeroOficial) não foram alteradas no diff (menção em comentário é esperada)');
+  assert(diffIndexHtml.split('\n').filter(function (l) { return /^[+-]\s*function orcMontarBlocosPagamento\(/.test(l); }).length === 2, '17b. orcMontarBlocosPagamento: apenas a linha de assinatura mudou (remoção + adição, Bloco C/D)');
 }
 
 console.log('\n' + '='.repeat(60));

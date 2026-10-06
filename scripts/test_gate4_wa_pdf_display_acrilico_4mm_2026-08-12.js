@@ -24,6 +24,7 @@
  * Uso: node scripts/test_gate4_wa_pdf_display_acrilico_4mm_2026-08-12.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

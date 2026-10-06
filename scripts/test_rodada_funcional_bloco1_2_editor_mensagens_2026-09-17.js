@@ -21,6 +21,7 @@
  * Uso: node scripts/test_rodada_funcional_bloco1_2_editor_mensagens_2026-09-17.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

@@ -12,6 +12,7 @@
  * Uso: node scripts/test_comparativo_consumiveis_escolha_2026-10-06.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 
@@ -40,12 +41,12 @@ function extractFn(name) {
 var FN_NAMES = [
   'orcProdutoNomeResolvido','cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos',
-  '_orcItemEntraNaOperacao', '_planReconcilePieces', '_planSeedFromPersisted', '_planPieceSlug', '_planBuildAllPecas', 'osProjecaoOperacionalItem'];
+  '_orcItemEntraNaOperacao', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcItensDistribuidosDeOrc', 'orcMontarPayloadVitreParaOS', '_planReconcilePieces', '_planSeedFromPersisted', '_planPieceSlug', '_planBuildAllPecas', 'osProjecaoOperacionalItem'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { orcRecalc: orcRecalc, orcColetarItensDistribuidos: orcColetarItensDistribuidos, ' +
   '_planReconcilePieces: _planReconcilePieces, _planSeedFromPersisted: _planSeedFromPersisted, ' +
-  '_planBuildAllPecas: _planBuildAllPecas, osProjecaoOperacionalItem: osProjecaoOperacionalItem, _orcItemEntraNaOperacao: _orcItemEntraNaOperacao };'
+  '_planBuildAllPecas: _planBuildAllPecas, osProjecaoOperacionalItem: osProjecaoOperacionalItem, _orcItemEntraNaOperacao: _orcItemEntraNaOperacao, orcComparativoPendente: orcComparativoPendente, orcTextoValorCliente: orcTextoValorCliente, orcMontarBlocosPagamento: orcMontarBlocosPagamento, orcBloqueioComparativoPendente: orcBloqueioComparativoPendente, orcItensDistribuidosDeOrc: orcItensDistribuidosDeOrc, orcMontarPayloadVitreParaOS: orcMontarPayloadVitreParaOS };'
 ].join('\n\n');
 var modPath = path.join(__dirname, '_comparativo_escolha_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
@@ -138,6 +139,7 @@ function rodarCenario(opts) {
 }
 
 var ADH = 0.0056;
+var fs2 = fs;
 var _orcItemEntraNaOperacao = mod._orcItemEntraNaOperacao;
 var MATS = [
   { nome: 'Acrílico Cristal 2mm', custo: 100, comp: 200, larg: 100, rsm2: 100, esp: 2 },
@@ -205,6 +207,95 @@ ok('T5b. Item cumulativo (sem grupo) sempre entra',
 // Bloco F — registro legado (sem escolhaConfirmada) mantém o comportamento salvo.
 ok('T6. Registro legado sem escolhaConfirmada preserva o selecionada salvo (sem migração)',
   _orcItemEntraNaOperacao({ grupoOpcao: { grupoId: 'g', selecionada: true } }) === true);
+
+// ══════════════════════════════════════════════════════════════════════
+// BLOCO C/D/E — estado "aguardando escolha" (WhatsApp/PDF/Preview/financeiro/OS/Vitre)
+// ══════════════════════════════════════════════════════════════════════
+global.cfgLoad = function () { return {}; };
+var _toasts = [];
+global.showToast = function (m) { _toasts.push(m); };
+var orcComparativoPendente = mod.orcComparativoPendente, orcTextoValorCliente = mod.orcTextoValorCliente, orcMontarBlocosPagamento = mod.orcMontarBlocosPagamento, orcBloqueioComparativoPendente = mod.orcBloqueioComparativoPendente, orcItensDistribuidosDeOrc = mod.orcItensDistribuidosDeOrc, orcMontarPayloadVitreParaOS = mod.orcMontarPayloadVitreParaOS;
+function test(desc, got, expected) { var g = JSON.stringify(got), e = JSON.stringify(expected); ok(desc, g === e); if (g !== e) console.log('       esperado : ' + e + '\n       obtido   : ' + g); }
+var GRP = 'g1';
+var opA = function (conf) { return { grupoId: GRP, selecionada: true, escolhaConfirmada: conf }; };
+var opB = function (conf) { return { grupoId: GRP, selecionada: false, escolhaConfirmada: conf }; };
+var CONT = { pxPct: 5.14, pixTotal: 208.69, parcela: { nParc: 3, valorParcela: 73.33, totalCents: 22000 } };
+var FMT = function (v) { return 'R$ ' + v.toFixed(2).replace('.', ','); };
+
+// 1–4 — estado do comparativo
+ok('C1. A selecionada internamente, SEM escolha confirmada → pendente', orcComparativoPendente([{ grupoOpcao: opA(false) }, { grupoOpcao: opB(false) }]) === true);
+ok('C2. B selecionada internamente, SEM escolha confirmada → pendente', orcComparativoPendente([{ grupoOpcao: opB(false) }, { grupoOpcao: { grupoId: GRP, selecionada: true, escolhaConfirmada: false } }]) === true);
+ok('C3. escolha confirmada da A → não pendente', orcComparativoPendente([{ grupoOpcao: opA(true) }, { grupoOpcao: opB(false) }]) === false);
+ok('C4. escolha confirmada da B → não pendente', orcComparativoPendente([{ grupoOpcao: opA(false) }, { grupoOpcao: opB(true) }]) === false);
+// 11 — registro antigo sem escolhaConfirmada: nunca pendente (fallback, sem migração)
+ok('C11. registro legado sem escolhaConfirmada NÃO fica pendente', orcComparativoPendente([{ grupoOpcao: { grupoId: GRP, selecionada: true } }]) === false);
+ok('C11b. item cumulativo (sem grupo) NÃO fica pendente', orcComparativoPendente([{}]) === false);
+
+// 5 — WhatsApp/PDF/Preview: bloco de pagamento antes da escolha é genérico
+var blocosPend = orcMontarBlocosPagamento(CONT, false, 0, '', FMT, true);
+var txtPend = blocosPend.map(function (b) { return b.texto; }).join(' | ');
+ok('C5a. WhatsApp/PDF antes da escolha: Parcelamento genérico (sem valor da parcela)', /em até 3x sem juros/.test(txtPend) && !/R\$/.test(txtPend));
+ok('C5b. antes da escolha: Pix só informa percentual (sem valor do Pix)', /5,14% de desconto no pagamento à vista via PIX/.test(txtPend) && !/208/.test(txtPend));
+ok('C5c. antes da escolha: nenhum R$ em nenhum bloco de pagamento', !/R\$|\d+,\d\d(?!%)/.test(txtPend.replace(/5,14%/g, '')));
+// 6 — PDF/Preview: valor total antes da escolha é texto genérico
+var valorPend = orcTextoValorCliente(true, 'R$ 220,00');
+ok('C6a. Valor total antes da escolha não mostra número de opção', valorPend.indexOf('R$') < 0 && /aguardando sua escolha/.test(valorPend));
+ok('C6b. Valor total depois da escolha usa o valor real', orcTextoValorCliente(false, 'R$ 220,00') === 'R$ 220,00');
+// 7 — depois da escolha: parcela/Pix específicos continuam aparecendo (sem regressão)
+var blocosOk = orcMontarBlocosPagamento(CONT, false, 0, '', FMT, false);
+var txtOk = blocosOk.map(function (b) { return b.texto; }).join(' | ');
+ok('C7a. depois da escolha: parcela específica (R$ 73,33) volta a aparecer', /3x de R\$ 73,33 sem juros/.test(txtOk));
+ok('C7b. depois da escolha: Pix específico (R$ 208,69) volta a aparecer', /valor com PIX: R\$ 208,69/.test(txtOk));
+
+// PDF — itens não são redistribuídos pela soma da opção interna (vazamento A→B)
+var ORC_PEND = { valorFinal: 999, itens: [
+  { qty: 1, total: 'R$ 100,00', mat: 'Cristal', espMm: 2, grupoOpcao: opA(false) },
+  { qty: 1, total: 'R$ 150,00', mat: 'Cristal', espMm: 3, grupoOpcao: opB(false) }] };
+var itensPend = orcItensDistribuidosDeOrc(ORC_PEND, 999);
+var totB = itensPend.filter(function (x) { return x.grupoOpcaoId; })[1].total;
+testePerto('C8a. PDF pendente: opção B mostra o PRÓPRIO total (150), não o escalado pela A', totB, 150, 0.01);
+var ORC_OK = JSON.parse(JSON.stringify(ORC_PEND)); ORC_OK.itens[0].grupoOpcao = opA(true); ORC_OK.itens[1].grupoOpcao = opB(false);
+var itensOk = orcItensDistribuidosDeOrc(ORC_OK, 999);
+ok('C8b. depois da escolha (A confirmada): total escalado continua coerente com o total geral (A = 999)', Math.abs(itensOk.filter(function (x) { return x.grupoOpcaoId; })[0].total - 999) < 0.01);
+
+// 10 — financeiro/OS antes e depois da escolha (gate)
+_toasts = [];
+ok('C10a. financeiro/OS ANTES da escolha: gate bloqueia', orcBloqueioComparativoPendente(ORC_PEND) === true && _toasts.length === 1);
+ok('C10b. financeiro/OS DEPOIS da escolha: gate libera', orcBloqueioComparativoPendente(ORC_OK) === false);
+ok('C10c. legado sem campo: gate libera', orcBloqueioComparativoPendente({ itens: [{ grupoOpcao: { grupoId: GRP, selecionada: true } }] }) === false);
+
+// 9 — OS: só a opção confirmada entra na OS/financeiro (filtro único)
+var osAntes = ORC_PEND.itens.filter(_orcItemEntraNaOperacao);
+var osDepois = ORC_OK.itens.filter(_orcItemEntraNaOperacao);
+ok('C9a. OS ANTES da escolha: nenhuma opção interna entra', osAntes.length === 0);
+test('C9b. OS DEPOIS da escolha (A): só A entra', osDepois.map(function (x) { return x.mat + x.espMm; }), ['Cristal2']);
+
+// 10 (Vitre) — antes e depois
+var VIT = [{ tipoItem: 'vitre_catalogo', sku: 'V-1', qty: 2, grupoOpcao: opB(false) }];
+var vitAntes = orcMontarPayloadVitreParaOS(VIT.filter(_orcItemEntraNaOperacao));
+var vitDepois = orcMontarPayloadVitreParaOS([{ tipoItem: 'vitre_catalogo', sku: 'V-1', qty: 2, grupoOpcao: opB(true) }].filter(_orcItemEntraNaOperacao));
+test('C12a. Vitre ANTES da escolha: payload vazio', vitAntes, []);
+test('C12b. Vitre DEPOIS da escolha da B: payload só com a B', vitDepois, [{ sku: 'V-1', qtd: 2 }]);
+
+// 13/14 — duplicação e exclusão: já cobertos por T1–T3 (consumíveis); reafirma na presença de escolha
+// C13 — duplicação com consumíveis: a cópia carrega adesivo + gravação×2
+// (diferença real vs. a mesma linha sem consumíveis = 1200cm²×0,0056 + 2×20)
+var rBSem = rodarCenario({ itens: [{ idx: '2', qty: 1, matKey: 'cfg_1', espItem: 3, prod: 'Placa 3mm', pecas: caixaPecas({}) }], materiaisCatalogo: MATS });
+testePerto('C13. duplicação: consumíveis da cópia somam adesivo + gravação×2 (≈ R$46,72)', parseBRL(rB.oi_tot_2.textContent) - parseBRL(rBSem.oi_tot_2.textContent), 1200 * ADH + 40, 0.05);
+// C14 — exclusão: remover B não altera A (preço e adesivo)
+testePerto('C14a. exclusão: preço de A permanece igual ao standalone', parseBRL(rSemB.oi_tot_1.textContent), parseBRL(rA.oi_tot_1.textContent), 0.02);
+testePerto('C14b. exclusão: adesivo de A permanece (1200cm²)', parseBRL(rSemB.ocv_adh.textContent), 1200 * ADH, 0.01);
+
+// Fiação: WhatsApp / PDF / Preview / financeiro / OS / Vitre leem o MESMO estado
+var htmlSrc = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+function corpo(nome) { var i = htmlSrc.indexOf('function ' + nome + '('); var b = htmlSrc.indexOf('{', i); var d = 0, j = b; for (; j < htmlSrc.length; j++) { if (htmlSrc[j] === '{') d++; else if (htmlSrc[j] === '}') { d--; if (d === 0) break; } } return htmlSrc.slice(i, j + 1); }
+ok('C15a. WhatsApp usa o estado pendente no valor e nos blocos', /_pendWA/.test(corpo('orcEnviarOrcamentoWA')) && /orcTextoValorCliente\(_pendWA/.test(corpo('orcEnviarOrcamentoWA')));
+ok('C15b. PDF usa o estado pendente no total e nos blocos', /_pendPDF/.test(corpo('orcMontarHtmlOrcamento')) && /orcTextoValorCliente\(true/.test(corpo('orcMontarHtmlOrcamento')));
+ok('C15c. Preview (desconto) bloqueia valores antes da escolha', /orcComparativoPendenteDOM\(\)/.test(corpo('orcDescCondPreview')));
+ok('C15d. financeiro (registro de situação) passa pelo gate', /orcBloqueioComparativoPendente/.test(corpo('orcRegistrarSituacaoFinanceira')));
+ok('C15e. confirmação de pagamento passa pelo gate', /orcBloqueioComparativoPendente/.test(corpo('orcEnvConfirmarPgto')));
+ok('C15f. geração de OS passa pelo gate', /orcBloqueioComparativoPendente/.test(corpo('orcEnvGerarOS')));
+ok('C15g. OS/Vitre filtram só a escolha confirmada', /_orcItemEntraNaOperacao/.test(corpo('orcEnvGerarOS')) && /_orcItemEntraNaOperacao/.test(corpo('_orcSincronizarOSVinculada')));
 
 console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
 try { fs.unlinkSync(modPath); } catch (e) {}

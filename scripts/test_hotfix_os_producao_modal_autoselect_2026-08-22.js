@@ -19,6 +19,7 @@
  * Uso: node scripts/test_hotfix_os_producao_modal_autoselect_2026-08-22.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

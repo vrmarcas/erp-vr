@@ -12,6 +12,7 @@
  * Uso: node scripts/test_hotfix_p0_2_whatsapp_pdf_2026-08-12.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 
@@ -62,7 +63,7 @@ ok('2d. totalCartaoWA do WhatsApp vem de _condWA2 (orcCalcCondicoesPagamento/orc
 // exatamente totalExibido (nunca a base PIX), e {ofertas} (que carrega
 // "*Desconto PIX:*" quando ativo) vem DEPOIS, nunca substituindo.
 ok('2e. PIX no WhatsApp é sempre uma linha SEPARADA ("Desconto PIX"), nunca substitui o "VALOR TOTAL"',
-  /valor:\s*totalExibido/.test(waSrc) && /ofertas:\s*extrasStr/.test(waSrc) && /Desconto PIX/.test(html) && /VALOR TOTAL:\s*\{valor\}\*\{ofertas\}/.test(html));
+  /valor:\s*orcTextoValorCliente\(_pendWA,\s*totalExibido\)/.test(waSrc) && /ofertas:\s*extrasStr/.test(waSrc) && /Desconto PIX/.test(html) && /VALOR TOTAL:\s*\{valor\}\*\{ofertas\}/.test(html));
 
 // ── 3. window._orcCalc.finalPrice (usado por ambos) é sempre o preço Cartão — nunca recebe valor PIX em nenhuma atribuição do arquivo ──
 // (a atribuição "= {}" de orcResetFormularioVR é um reset legítimo, não um payload concorrente — só as atribuições COM CONTEÚDO contam.)

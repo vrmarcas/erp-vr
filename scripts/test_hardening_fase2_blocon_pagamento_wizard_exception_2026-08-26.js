@@ -24,6 +24,7 @@
  * Uso: node "scripts/test_hardening_fase2_blocon_pagamento_wizard_exception_2026-08-26.js"
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

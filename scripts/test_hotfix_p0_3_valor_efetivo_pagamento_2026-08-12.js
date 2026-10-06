@@ -19,6 +19,7 @@
  * Uso: node scripts/test_hotfix_p0_3_valor_efetivo_pagamento_2026-08-12.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

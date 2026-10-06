@@ -22,6 +22,7 @@
  * Uso: node scripts/test_sprint_posauditoria_p1_6_p1_7_todas_os_filtros_kpis_2026-08-09.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

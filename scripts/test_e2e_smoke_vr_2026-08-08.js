@@ -27,6 +27,7 @@
  * Uso: node scripts/test_e2e_smoke_vr_2026-08-08.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

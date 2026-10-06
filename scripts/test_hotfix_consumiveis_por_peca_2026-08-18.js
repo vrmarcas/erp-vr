@@ -13,6 +13,7 @@
  * Uso: node scripts/test_hotfix_consumiveis_por_peca_2026-08-18.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

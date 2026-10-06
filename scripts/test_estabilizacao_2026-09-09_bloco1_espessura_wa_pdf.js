@@ -20,6 +20,7 @@
  * Uso: node scripts/test_estabilizacao_2026-09-09_bloco1_espessura_wa_pdf.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 

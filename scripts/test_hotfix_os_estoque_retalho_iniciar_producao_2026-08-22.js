@@ -33,6 +33,7 @@
  * Uso: node scripts/test_hotfix_os_estoque_retalho_iniciar_producao_2026-08-22.js
  */
 'use strict';
+require(require('path').join(__dirname, '_comparativo_shim.js'));
 const fs = require('fs');
 const path = require('path');
 
