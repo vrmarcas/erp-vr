@@ -471,6 +471,50 @@ ok('K4. fonte: orcSetEnviados reconcilia com serverData em qualquer conflito', /
   ok('L3. sessão de outro orçamento não é tocada', ctx.ORC_ITEM_OPCOES['1'].grupoId === 'x');
 })();
 
+// M — feedback de salvamento: sucesso só depois da confirmação real da nuvem
+(function () {
+  var toasts = [];
+  var ctx = { console: console, showToast: function (m, k) { toasts.push((k || '') + ':' + m); } };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(extractFn('orcFeedbackSalvamento'), ctx);
+  var sucesso = function (t) { return t.filter(function (x) { return /^ok:.*(salvo!|atualizado!)/.test(x); }).length; };
+  var p = function (r) { toasts.length = 0; return ctx.orcFeedbackSalvamento(Promise.resolve(r), 7, true); };
+  p({ ok: true }).then(function () {
+    ok('M1. save aceito: toast de sucesso aparece UMA vez', sucesso(toasts) === 1);
+    return p({ ok: false, reason: 'conflito', serverData: [] });
+  }).then(function () {
+    ok('M2. save com conflito: NENHUM toast de sucesso', sucesso(toasts) === 0);
+    return p({ ok: false, reason: 'conflito-persistente' });
+  }).then(function () {
+    ok('M3. conflito persistente: nenhum sucesso (o merge já avisa o conflito)', sucesso(toasts) === 0);
+    return p({ ok: false, reason: 'nuvem-nao-pronta' });
+  }).then(function () {
+    ok('M3b. rejeição genérica (não é conflito): nenhum sucesso e erro explícito', sucesso(toasts) === 0 && toasts.some(function (x) { return x.indexOf('err:') === 0; }));
+    return p({ ok: true });
+  }).then(function () {
+    ok('M4. nova tentativa aceita após o conflito: sucesso aparece', sucesso(toasts) === 1);
+  });
+})();
+ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promessa real)', /orcFeedbackSalvamento\(_pSalvarOrc, num, !!orcExistente\);/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')) && !/showToast\(\(orcExistente\?'Orçamento #'\+num\+' atualizado!'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
+
+// N — OS: vínculo conhecido no primeiro write; base/memória de kb_os voltam à nuvem
+(function () {
+  var src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  ok('N1. criação da OS: grupoPedidoId entra no primeiro write (pedido com Vitre)', /grupoPedidoId:\(_vitreItensPayload\.length\?newId:undefined\)/.test(src));
+  ok('N2. após o vínculo CR e após o vínculo Vitre, a base de kb_os é atualizada (orcRefrescarKbOsDoServidor)', /_vincularCrPromise\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)/.test(src) && /\}\)\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)\.then\(function\(\)\{ return resultado; \}\)/.test(src));
+  var ctx = { console: console, _COL: 'erp_vr', _cloudLastPayload: {}, KB_OS: {}, _KB_OS_FIN_CACHE: {}, _kbMergeFinCache: function () {}, kbRender: function () {} };
+  var srvKb = JSON.stringify({ 'os1': { id: 'os1', num: '1', material: 'Acrílico Cristal 3mm', grupoPedidoId: 'os1', vitreOsRef: 'vx1' } });
+  var srvFin = JSON.stringify({ 'os1': { cr: [] } });
+  ctx._db = { collection: function () { return { doc: function (d) { return { get: function () { return Promise.resolve({ exists: true, data: function () { return { data: d === 'kb_os' ? srvKb : srvFin }; } }); } }; } }; } };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(extractFn('orcRefrescarKbOsDoServidor'), ctx);
+  ctx.KB_OS = { os1: { id: 'os1', num: '1', material: 'stale' } };
+  ctx.orcRefrescarKbOsDoServidor().then(function () {
+    ok('N3. refresh: memória de kb_os = nuvem (vínculos gravados aparecem, nada local some)', ctx.KB_OS.os1.grupoPedidoId === 'os1' && ctx.KB_OS.os1.vitreOsRef === 'vx1');
+    ok('N4. refresh: base de kb_os = nuvem (próximo save compara com a versão real)', ctx._cloudLastPayload.kb_os === srvKb);
+  });
+})();
+
 // Resumo só depois das asserções assíncronas (K1–K3) — evita contar a menos.
 setTimeout(function () {
   console.log('\n RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)\n');
