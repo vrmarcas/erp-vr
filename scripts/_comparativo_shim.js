@@ -18,5 +18,6 @@ function extractFn(name) {
   for (; i < html.length; i++) { if (html[i] === '{') depth++; else if (html[i] === '}') { depth--; if (depth === 0) break; } }
   return html.slice(start, i + 1);
 }
-['_orcItemEntraNaOperacao', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente']
+vm.runInThisContext('var ORC_REGRA_COMPARATIVO_ATUAL = 2;');
+['_orcItemEntraNaOperacao', 'orcComparativoPendente', 'orcTextoValorCliente', 'orcComparativoPendenteDOM', 'orcBloqueioComparativoPendente', 'orcRegistroComparativoPendente', '_orcEntraNaOperacaoDoRegistro']
   .forEach(function (n) { if (typeof global[n] !== 'function') vm.runInThisContext(extractFn(n)); });

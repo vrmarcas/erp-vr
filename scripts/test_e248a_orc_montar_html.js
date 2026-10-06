@@ -75,6 +75,7 @@ function extractFunction(src, name) {
 }
 
 const FN_NAMES = [
+  'orcRegistroComparativoPendente',
   'orcComparativoPendente', 'orcComparativoPendenteDOM', 'orcTextoValorCliente', '_orcItemEntraNaOperacao',
   'orcDistribuirParcelas', 'orcMotorComercial', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
   'orcCondicaoLabelPorTipo', 'orcItemDescricaoComercial', 'osItemMateriaisResumo',
@@ -82,7 +83,7 @@ const FN_NAMES = [
 ];
 const FN_BODIES = {};
 FN_NAMES.forEach((n) => { FN_BODIES[n] = extractFunction(INDEX_HTML, n); });
-const COMBINED_SRC = FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
+const COMBINED_SRC = 'var ORC_REGRA_COMPARATIVO_ATUAL = 2;\n' + FN_NAMES.map((n) => FN_BODIES[n]).join('\n\n');
 
 const CFG_PARCELAMENTO = [
   { parcelas: 1, taxa: 3.05 }, { parcelas: 2, taxa: 4.24 }, { parcelas: 3, taxa: 5.14 },
@@ -256,16 +257,23 @@ console.log('\n== TESTE B — FIDELIDADE DO ORÇAMENTO REVISADO (ORC-000163 comp
   assert(html.includes('Acrílico Cristal 10mm') && html.includes('Acrílico Cristal 12mm') && html.includes('Acrílico Cristal 15mm'), 'as 3 opções de espessura aparecem, agora também com espMm persistido');
   assert(html.includes('— OU —'), 'separador "OU" entre as 3 opções do mesmo grupoOpcaoId');
   assert(html.includes('ESCOLHA UMA DAS OPÇÕES ABAIXO') || /escolha uma das op/i.test(html), 'cabeçalho do bloco comparativo aparece');
-  // BLOCO C/D (2026-10-06) — fixture com grupo de opções SEM escolha confirmada
-  // (escolhaConfirmada:false) é estado PENDENTE: o PDF não mostra valor de opção
-  // interna. Mudança de comportamento intencional — ver a variante confirmada abaixo.
-  assert(/Parcelamento/.test(html) && /em até 3x sem juros/.test(html) && !/869,05/.test(html), 'PENDENTE: parcelamento genérico, sem valor da parcela da opção interna');
-  assert(/Desconto PIX/.test(html) && /5,14% de desconto no pagamento à vista via PIX/.test(html) && !/2\.473,16/.test(html), 'PENDENTE: Pix só informa percentual, sem valor');
-  assert(!html.includes('R$ 2.607,17') && /aguardando sua escolha/.test(html), 'PENDENTE: Total Geral genérico, sem o valor da opção interna');
-  const htmlEscolhida = makeCtx().orcMontarHtmlOrcamento(Object.assign(orcFixtureRevisado(), { itens: orcFixtureRevisado().itens.map((it, i) => Object.assign({}, it, { grupoOpcao: Object.assign({}, it.grupoOpcao, { escolhaConfirmada: i === 0 }) })) }));
-  assert(/869,05/.test(htmlEscolhida), 'CONFIRMADA: parcelamento volta com valor (869,05)');
-  assert(/2\.473,16/.test(htmlEscolhida), 'CONFIRMADA: Pix volta com valor (2.473,16)');
-  assert(htmlEscolhida.includes('R$ 2.607,17'), 'CONFIRMADA: Total Geral volta com o valor real (R$ 2.607,17)');
+  // HISTÓRICO (2026-10-06): ORC-000163 é um registro ANTERIOR à regra nova
+  // (sem `regraComparativo`). Reimpressão preserva o comportamento histórico,
+  // com os valores que o cliente recebeu.
+  assert(/Parcelamento/.test(html) && /3x/.test(html) && /869,05/.test(html), 'histórico: bloco de parcelamento (3x de R$ 869,05) idêntico ao PDF oficial');
+  assert(/Desconto PIX/.test(html) && /5\.14% de desconto/.test(html) && /2\.473,16/.test(html), 'histórico: bloco de desconto PIX (5,14%, valor com PIX R$ 2.473,16) idêntico ao PDF oficial');
+  assert(html.includes('R$ 2.607,17'), 'histórico: Total Geral idêntico ao PDF oficial (R$ 2.607,17)');
+  // REGISTRO NOVO com comparativo pendente (regraComparativo 2, sem valor definitivo):
+  // condições genéricas, sem valor de opção interna.
+  const htmlNovoPend = makeCtx().orcMontarHtmlOrcamento(Object.assign(orcFixtureRevisado(), { regraComparativo: 2, valorBase: null, valorFinal: null, valorPendenteComparativo: true }));
+  assert(/em até 3x sem juros/.test(htmlNovoPend) && !/869,05/.test(htmlNovoPend), 'novo pendente: parcelamento genérico, sem valor da opção interna');
+  assert(/5,14% de desconto no pagamento à vista via PIX/.test(htmlNovoPend) && !/2\.473,16/.test(htmlNovoPend), 'novo pendente: Pix só informa percentual');
+  assert(!htmlNovoPend.includes('R$ 2.607,17') && /aguardando sua escolha/.test(htmlNovoPend), 'novo pendente: Total Geral genérico, sem valor definitivo');
+  // REGISTRO NOVO com escolha confirmada (1ª opção): valores específicos voltam.
+  const htmlNovoEscolhido = makeCtx().orcMontarHtmlOrcamento(Object.assign(orcFixtureRevisado(), { regraComparativo: 2, itens: orcFixtureRevisado().itens.map((it, i) => Object.assign({}, it, { grupoOpcao: Object.assign({}, it.grupoOpcao, { escolhaConfirmada: i === 0 }) })) }));
+  assert(/869,05/.test(htmlNovoEscolhido), 'novo confirmado: parcelamento volta com valor (869,05)');
+  assert(/2\.473,16/.test(htmlNovoEscolhido), 'novo confirmado: Pix volta com valor (2.473,16)');
+  assert(htmlNovoEscolhido.includes('R$ 2.607,17'), 'novo confirmado: Total Geral volta com o valor real (R$ 2.607,17)');
   assert(html.includes('CNPJ 37.855.285/0001-52'), 'rodapé com CNPJ oficial');
   assert(html.includes('Georgia'), 'tema Vitre aplicado (orc.marca==="vitre", mesmo do pedido real)');
 }

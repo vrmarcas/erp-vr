@@ -277,7 +277,9 @@ console.log('\n== Parte 5 — checagens estáticas (fonte única de verdade + de
   // Só bloqueia se o CÓDIGO dessas funções VR-personalizado for tocado (definição
   // adicionada/removida no diff) — uma MENÇÃO em comentário (ex.: explicando por
   // que parcelamento/PIX não existem no modelo Vitre) é esperada e documentada.
-  const diffIndexHtml = execSync('git diff -- index.html', { cwd: ROOT }).toString();
+  // Base da fase (ab1e617, último commit antes do comparativo). Comparar contra o
+  // índice deixava a guarda vazia assim que as mudanças eram commitadas.
+  const diffIndexHtml = execSync('git diff ab1e617 -- index.html', { cwd: ROOT }).toString();
   // BLOCO C/D (comparativo, 2026-10-06) — orcMontarBlocosPagamento ganhou o
   // parâmetro OPCIONAL `pendente` (condições genéricas antes da escolha do
   // cliente). Única alteração permitida nessa função: a troca da linha de

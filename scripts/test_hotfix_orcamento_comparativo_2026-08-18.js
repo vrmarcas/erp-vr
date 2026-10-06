@@ -204,10 +204,10 @@ function rodarCenario(opts) {
   ok('I3. "Caixa 4mm" (não escolhida) NUNCA entra na OS', itensFiltrados.every(function(i){return i.prod!=='Caixa 4mm';}));
 
   var gerarOSSrc = extractFn('orcEnvGerarOS');
-  ok('I4. orcEnvGerarOS() usa o helper _orcItemEntraNaOperacao (BLOCO B: escolha confirmada, nunca selecionada interna)', /_orcItemEntraNaOperacao\(it\)/.test(gerarOSSrc));
+  ok('I4. orcEnvGerarOS() usa o helper _orcEntraNaOperacaoDoRegistro (BLOCO B: registro com escolha confirmada, nunca selecionada interna)', /_orcEntraNaOperacaoDoRegistro\(/.test(gerarOSSrc));
 
   var syncOSSrc = extractFn('_orcSincronizarOSVinculada');
-  ok('I5. _orcSincronizarOSVinculada() (edição pós-OS) usa o MESMO helper', /_orcItemEntraNaOperacao\(it\)/.test(syncOSSrc));
+  ok('I5. _orcSincronizarOSVinculada() (edição pós-OS) usa o MESMO helper', /_orcEntraNaOperacaoDoRegistro\(/.test(syncOSSrc));
 
   var seguro = mod.osProjecaoOperacionalItem(itensFiltrados[0]);
   test('I6. Item que chega na OS ainda é a projeção operacional de sempre (whitelist, sem custo)', seguro.prod, 'Caixa 3mm');

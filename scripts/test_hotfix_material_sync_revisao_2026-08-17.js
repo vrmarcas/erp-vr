@@ -73,7 +73,7 @@ console.log('\n=== HOTFIX 2026-08-17 — os.material não duplica espessuras em 
   // nunca do já projetado — continua verdadeira.
   ok('1a. novoMatLabel deriva do item BRUTO do orçamento (filtrado por grupo, nunca já projetado)', /osItemMateriaisResumo\(_itensOrigFiltrados\[0\]\)/.test(src));
   ok('1b. novoMatLabel NÃO deriva mais de novosItensOS[0] (item já projetado — causa raiz do bug)', !/osItemMateriaisResumo\(novosItensOS\[0\]\)/.test(src));
-  ok('1c. o filtro de grupo de opções (RODADA 5) é aplicado ANTES de extrair o item[0] (nunca uma opção não-escolhida)', /_itensOrigFiltrados\s*=\s*\(orc\.itens \|\| \[\]\)\.filter/.test(src));
+  ok('1c. o filtro de grupo de opções (RODADA 5) é aplicado ANTES de extrair o item[0] (nunca uma opção não-escolhida)', /_itensOrigFiltrados\s*=\s*(\(orc\.itens \|\| \[\]\)\.filter|_orcEntraNaOperacaoDoRegistro\(orc\))/.test(src));
 }
 
 // ── 2. osItemMateriaisResumo(): extraída e EXECUTADA de verdade — prova
