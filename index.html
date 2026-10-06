@@ -9831,6 +9831,22 @@ function orcPecasHerdarEspessura(planPecasJson, espNovo) {
   return JSON.stringify(pecas);
 }
 
+// ESPESSURA HERDADA (2026-10-06) — em QUALQUER linha: peça automática/herdada (sem
+// espOverride, não manual) acompanha a espessura atual do item. Peça manual e peça
+// com override permanecem. Orçamento antigo (sessão 'legado') NUNCA é tocado: snapshot
+// histórico preservado.
+function orcSincronizarEspPecasHerdadas() {
+  if (typeof window !== 'undefined' && window._orcSessaoRegraComparativo === 'legado') return;
+  if (typeof document === 'undefined' || !document || !document.querySelectorAll) return; // sem DOM (ex.: cálculo isolado)
+  document.querySelectorAll('#orcItemBody tr').forEach(function (row) {
+    var idx = row.dataset.idx;
+    if (!idx || !row.dataset.planPecas) return;
+    var esp = (document.getElementById('oi_esp_' + idx) || {}).value;
+    var nova = orcPecasHerdarEspessura(row.dataset.planPecas, esp);
+    if (nova !== row.dataset.planPecas) row.dataset.planPecas = nova;
+  });
+}
+
 function orcDuplicarItemComoOpcao(idxOrig) {
   var rowOrig = document.getElementById('oir_'+idxOrig);
   if (!rowOrig) return;
@@ -11539,13 +11555,6 @@ function orcMatChanged(idx) {
   // dependem da espessura) ANTES de recalcular o preço, para que
   // orcRecalc() já leia a área correta na mesma passada — nunca regenera
   // a planificação do zero (ver comentário da função acima).
-  // COMPARATIVO (2026-10-06): a alternativa troca a espessura do item — as peças
-  // herdadas dela seguem essa espessura (só linhas de grupo comparativo; orçamento
-  // normal não muda).
-  if (typeof ORC_ITEM_OPCOES !== 'undefined' && ORC_ITEM_OPCOES[idx] && ORC_ITEM_OPCOES[idx].grupoId) {
-    var _rowCmp = document.getElementById('oir_' + idx);
-    if (_rowCmp && _rowCmp.dataset.planPecas) _rowCmp.dataset.planPecas = orcPecasHerdarEspessura(_rowCmp.dataset.planPecas, espEl ? espEl.value : '');
-  }
   _planResincronizarPecasHerdadas(idx);
   orcRecalc();
 }
@@ -12024,6 +12033,7 @@ function orcItemCalcularTotal(item) {
 }
 
 function orcRecalc() {
+  orcSincronizarEspPecasHerdadas();
   // Lê overhead, impostos e vrml do Config salvo (não mais do Step 3)
   var _cfgFin = (_cfgData&&_cfgData.financeiro)||{};
   const overhead = (_cfgFin.overhead!=null ? _cfgFin.overhead : (parseFloat((document.getElementById('cfgOverhead')||{}).value)||41.16)) / 100;
@@ -27810,7 +27820,7 @@ async function orcEnviarOrcamentoWA() {
   // este trecho só formata cada bloco em markdown do WhatsApp.
   var condData = document.getElementById('orcDescCondData')?.value||'';
   var _pendWA = orcComparativoPendenteDOM();
-  var _blocosPagamentoWA = orcMontarBlocosPagamento(_condWA2, dcOnWA, dcPctWA, condData, fmtBRLWA, _pendWA);
+  var _blocosPagamentoWA = orcMontarBlocosPagamento(_condWA2, dcOnWA, dcPctWA, condData, fmtBRLWA, _pendWA, typeof window !== 'undefined' && window._orcSessaoRegraComparativo === 'legado');
   var _porTipoWA = {};
   _blocosPagamentoWA.forEach(function(b){ _porTipoWA[b.tipo] = '*'+b.label+':* '+b.texto; });
   var cartaoStr = _porTipoWA.cartao || '', ofertaStr = _porTipoWA.oferta_especial || '', pixStr = _porTipoWA.pix || '';
@@ -28654,7 +28664,7 @@ function orcMontarHtmlOrcamento(orc) {
 
   var _condPDF = orcCondPagamentoDeOrc(orc);
   var _iconesBlocoPagamentoPDF = { cartao: '💳', pix: '⚡', oferta_especial: '🏷️' };
-  var _blocosPagamentoPDF = orcMontarBlocosPagamento(_condPDF, _condPDF.dcOn, _condPDF.dcPct, orc.dcData||'', function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }, _pendPDF);
+  var _blocosPagamentoPDF = orcMontarBlocosPagamento(_condPDF, _condPDF.dcOn, _condPDF.dcPct, orc.dcData||'', function(v){ return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }, _pendPDF, orc.regraComparativo !== 2);
   var condPagamentoHtml = '';
   if(_blocosPagamentoPDF.length){
     var _linhas = _blocosPagamentoPDF.map(function(b){
@@ -29116,7 +29126,10 @@ function orcRefreshFinalPrice() {
   var base = c.finalPrice||0;
   var tot  = document.getElementById('orcRsmTotal');
   var orig = document.getElementById('orcRsmOriginal');
-  if(!tot||!base) return;
+  if(!tot) return;
+  // Valor zero (ex.: orçamento recém-zerado): zera o resumo em vez de manter texto antigo.
+  if(!base){ if(orig) orig.style.display='none'; tot.textContent='R$0,00'; tot.style.fontSize=''; tot.style.color='var(--brand-mid)'; return; }
+  tot.style.fontSize='';
   var cond = orcLerCondicoesPagamentoDOM();
   var nParc = cond.nParc;
   // GO-LIVE FINAL 2026-08-12, seção 5-6 — sincroniza a sugestão de PIX
@@ -29125,6 +29138,18 @@ function orcRefreshFinalPrice() {
   // (relê cond depois, para pegar o valor já sincronizado).
   if (typeof orcPixSincronizarSugestao === 'function') orcPixSincronizarSugestao(nParc);
   cond = orcLerCondicoesPagamentoDOM();
+  // BLOCO C/D (2026-10-06) — comparativo sem escolha confirmada: o resumo que a tela
+  // mostra ao vendedor e o que o cliente verá ("O cliente verá", Pix) não pode trazer
+  // valor de opção interna. Condições genéricas; cálculo interno intocado.
+  if (typeof orcComparativoPendenteDOM === 'function' && orcComparativoPendenteDOM()) {
+    if (orig) orig.style.display = 'none';
+    tot.textContent = 'aguardando escolha do cliente'; tot.style.color = '#78350F'; tot.style.fontSize = '13px';
+    var _cliP = document.getElementById('orcParcClientePreview');
+    if (_cliP) _cliP.innerHTML = '👁️ <strong>O cliente verá:</strong> ' + (nParc > 1 ? 'parcelável em até <strong>' + nParc + 'x</strong> sem juros' : 'pagamento no cartão sem juros') + ' (valor após a escolha do cliente)';
+    var _pixP = document.getElementById('orcPixDiscPreview');
+    if (_pixP) _pixP.innerHTML = cond.pxPct ? '⚡ <strong>' + orcPctBR(cond.pxPct) + '%</strong> de desconto no pagamento à vista via PIX' : '<em style="color:#aaa;font-size:11px">Sem desconto PIX configurado.</em>';
+    return;
+  }
   var hasDescCond = cond.dcOn && cond.dcPct>0;
   var baseAposCond = hasDescCond ? base*(1-cond.dcPct/100) : base;
   var motor = orcMotorComercial(baseAposCond, { pix: cond.pxPct, nParcAtual: nParc });
@@ -30941,6 +30966,9 @@ function orcEnvEditar(id) {
   // dinamicamente em orcEnvVerDetalhe) — sem o guard, .style em null quebrava
   // a navegação inteira. Mesmo padrão if(el) já usado no resto da função.
   var _envModal = document.getElementById('orcEnvModal'); if(_envModal) _envModal.style.display='none';
+  // COMPATIBILIDADE (2026-10-06): definida ANTES de reconstruir as linhas. Orçamento
+  // sem regraComparativo fica para sempre na regra histórica (re-salvar não migra).
+  window._orcSessaoRegraComparativo = (o.regraComparativo === ORC_REGRA_COMPARATIVO_ATUAL) ? ORC_REGRA_COMPARATIVO_ATUAL : 'legado';
   if(o.osRef) showToast('Atenção: este orçamento já tem uma OS gerada — editar os itens aqui NÃO atualiza a OS/financeiro já criados.','warn');
   // Navegar para a aba de orçamento
   nav('orcamento');
@@ -31239,7 +31267,6 @@ function orcEnvEditar(id) {
     // Idempotência: liga esta sessão do wizard ao orçamento existente —
     // orcSalvarOrcamento() vai atualizar o mesmo registro, nunca duplicar.
     window._orcSessaoAtualId = o.id;
-    window._orcSessaoRegraComparativo = (o.regraComparativo === ORC_REGRA_COMPARATIVO_ATUAL) ? ORC_REGRA_COMPARATIVO_ATUAL : 'legado';
     if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
     showToast('Orçamento #'+o.num+' carregado para edição','ok');
     } catch(_eHidratacao) {
@@ -32213,7 +32240,10 @@ function orcOrdemBlocosPagamento() {
 // própria marcação visual (WhatsApp: markdown `*label:*`; PDF: HTML com
 // ícone), mas o CONTEÚDO (o que é dito, os números, a ordem, a presença)
 // é decidido aqui, uma única vez.
-function orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL, pendente) {
+// Percentual em pt-BR (3,99 → "3,99"; 5 → "5"). Só formatação.
+function orcPctBR(v) { return Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 2 }); }
+// formatoAntigo=true: preserva o texto histórico ("3.99%") de orçamento antigo.
+function orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL, pendente, formatoAntigo) {
   var porTipo = {};
   // BLOCO C/D — pendente (comparativo sem escolha confirmada): condições
   // GENÉRICAS, sem nenhum valor de parcela/Pix/desconto de uma opção
@@ -32224,7 +32254,7 @@ function orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL, pendente)
       porTipo.cartao = { tipo: 'cartao', label: 'Parcelamento', texto: 'em até ' + cond.parcela.nParc + 'x sem juros' };
     }
     if (cond && cond.pxPct > 0) {
-      porTipo.pix = { tipo: 'pix', label: 'Desconto PIX', texto: String(cond.pxPct).replace('.', ',') + '% de desconto no pagamento à vista via PIX' };
+      porTipo.pix = { tipo: 'pix', label: 'Desconto PIX', texto: orcPctBR(cond.pxPct) + '% de desconto no pagamento à vista via PIX' };
     }
     return orcOrdemBlocosPagamento().map(function (t) { return porTipo[t]; }).filter(Boolean);
   }
@@ -32236,7 +32266,7 @@ function orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL, pendente)
     porTipo.oferta_especial = { tipo: 'oferta_especial', label: 'Oferta especial', texto: dcPct + '% de desconto já aplicado no valor acima' + (dataFmt ? ' — válido para fechamento até ' + dataFmt + '. Após essa data, o valor retorna ao normal.' : '.') };
   }
   if (cond && cond.pxPct > 0) {
-    porTipo.pix = { tipo: 'pix', label: 'Desconto PIX', texto: cond.pxPct + '% de desconto pagando à vista via PIX (valor com PIX: ' + fmtBRL(cond.pixTotal) + ').' };
+    porTipo.pix = { tipo: 'pix', label: 'Desconto PIX', texto: (formatoAntigo ? cond.pxPct : orcPctBR(cond.pxPct)) + '% de desconto pagando à vista via PIX (valor com PIX: ' + fmtBRL(cond.pixTotal) + ').' };
   }
   return orcOrdemBlocosPagamento().map(function (t) { return porTipo[t]; }).filter(Boolean);
 }
