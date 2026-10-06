@@ -59,7 +59,12 @@ var FN_NAMES = [
   // MICRO-RODADA 2026-09-10 — fonte canônica compartilhada entre WhatsApp
   // e PDF (ver test_micro_rodada_2026-09-10_pdf_alinhado_mensagens.js).
   'cfgEsc', 'orcOrdemBlocosPagamento', 'orcMontarBlocosPagamento',
-  'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF'
+  'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF',
+  // Fase E.2.48A (ef90ebb): o PDF oficial passou a ser montado por orcMontarHtmlOrcamento.
+  'orcMontarHtmlOrcamento',
+  'orcPrazoTextoDeOrc',
+  'orcItensDistribuidosDeOrc',
+  'orcCondPagamentoDeOrc'
 ];
 var _msgPlaceholdersSrc = (function(){
   var marker = 'var MSG_TEMPLATES_PLACEHOLDERS = {';
@@ -110,7 +115,9 @@ global.CFG_DEFAULT = { parcelamento: [{ parcelas: 1, taxa: 0 }, { parcelas: 2, t
 global.cfgLoad = function () { return JSON.parse(JSON.stringify(global.CFG_DEFAULT)); };
 
 var mod = require(modPath);
-global.orcSalvarOrcamento = async function () { return { num: '999999', id: 'ORC-TEST-GATE4' }; };
+// Orçamento salvo = mesmo pedido descrito no cabeçalho (base 40,41; PIX 5,14%; 3x; prazo 5–6).
+// O PDF oficial é montado a partir do registro salvo (orcMontarHtmlOrcamento).
+global.orcSalvarOrcamento = async function () { return { id: 'ORC-TEST-GATE4', num: '999999', cliente: 'Cliente Gate4', tel: '11988887777', email: '', vendedor: 'Ronaldo Silva', marca: 'vr', produto: 'Display em Acrílico Cristal 4mm', valorBase: 40.41, valorFinal: 42.6, descCond: 0, dcData: '', descPix: 5.14, parcelas: 3, prazoDias: '5', prazoDiasMax: '6', validadeDias: 10, status: 'aguardando', dataSalvo: '06/10/2026 10:00', obs: '', itens: [{ tipoItem: 'personalizado_vr', prod: 'Display', qty: '1', larg: '', alt: '', planLarg: '', planAlt: '', planProf: '', matKey: 'cfg_0', mat: 'Acrílico Cristal 4mm', espMm: 4, det: '', unit: 'R$42,60', total: 'R$42,60', pieces: [] }] }; };
 global.orcSalvarHistoricoCliente = function () {};
 
 function resetFixture() {

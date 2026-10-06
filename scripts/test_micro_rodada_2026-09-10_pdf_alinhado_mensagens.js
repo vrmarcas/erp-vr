@@ -66,7 +66,11 @@ var FN_NAMES = [
   'orcLerCondicoesPagamentoDOM', 'orcCalcCondicoesPagamento',
   'orcCondicaoLabelPorTipo', 'orcCondicaoPagamentoAtual',
   'cfgEsc',
-  'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF'
+  'orcEnviarOrcamentoWA', 'orcImprimirOrcamentoPDF',
+  'orcMontarHtmlOrcamento',
+  'orcPrazoTextoDeOrc',
+  'orcItensDistribuidosDeOrc',
+  'orcCondPagamentoDeOrc'
 ];
 var src = [
   extractVarBlock('MSG_TEMPLATES_PLACEHOLDERS'),
@@ -117,7 +121,18 @@ global.cfgLoad = function () {
 };
 
 var mod = require(modPath);
-global.orcSalvarOrcamento = async function () { return { num: '000200', id: 'ORC-000200' }; };
+// O salvamento real persiste o estado do formulário (vendedor, validade, prazo,
+// desconto, PIX, parcelas). O PDF oficial é montado do pedido salvo (orcMontarHtmlOrcamento).
+global.orcSalvarOrcamento = async function () {
+  var v = function (id) { return _elements[id] ? _elements[id].value : ''; };
+  var cond = _elements.orcDescCondToggle && _elements.orcDescCondToggle.checked;
+  return { id: 'ORC-000200', num: '000200', cliente: v('orcClientNome'), tel: v('orcClientTel'), vendedor: v('orcClientVendedor'),
+    marca: 'vr', valorBase: window._orcCalc.finalPrice, valorFinal: window._orcCalc.finalPrice,
+    descCond: cond ? (parseFloat(v('orcDescCond')) || 0) : 0, dcData: cond ? v('orcDescCondData') : '',
+    descPix: parseFloat(v('orcPixDiscPct')) || 0, parcelas: parseInt(_elements.orcParcSel.value, 10) || 3,
+    prazoDias: v('orcPrazoDias'), prazoDiasMax: v('orcPrazoDiasMax'), validadeDias: parseInt(v('orcValidadeDias'), 10) || undefined,
+    status: 'aguardando', dataSalvo: '06/10/2026 10:00', obs: '', produto: 'Placa ACM',
+    itens: [{ tipoItem: 'personalizado_vr', prod: 'Placa ACM', qty: '1', mat: 'ACM 3mm', espMm: 3, unit: 'R$ 1.000,00', total: 'R$ 1.000,00', pieces: [] }] }; };
 
 function resetFixture(opts) {
   opts = opts || {};

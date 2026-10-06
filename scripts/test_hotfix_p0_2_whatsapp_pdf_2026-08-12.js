@@ -38,7 +38,8 @@ ok('1a. orcColetarItensDistribuidos() lê matOptSel.dataset.nome (nome limpo, se
 ok('1b. orcColetarItensDistribuidos() não usa mais ".options[matEl.selectedIndex].text" direto para a descrição do item', !/var matLbl\s*=\s*matEl\s*\?\s*matEl\.options\[matEl\.selectedIndex\]\.text/.test(coletarSrc));
 
 // ── 2. PDF e WhatsApp usam a MESMA fonte (orcColetarItensDistribuidos) e o MESMO finalPrice (Cartão) ──
-var pdfSrc = extractFn('orcImprimirOrcamentoPDF');
+// Fase E.2.48A (ef90ebb): o PDF é montado por orcMontarHtmlOrcamento.
+var pdfSrc = extractFn('orcMontarHtmlOrcamento');
 var waSrc  = extractFn('orcEnviarOrcamentoWA');
 // HOTFIX OPERACIONAL 2026-08-12, Gate 4 — achado real: baseEfetiva/baseEfetivaWA
 // (window._orcCalc.finalPrice) é o preço SEM a taxa de parcelamento, que
@@ -50,9 +51,9 @@ var waSrc  = extractFn('orcEnviarOrcamentoWA');
 // totalCartaoWA — o mesmo baseEfetiva(WA) passado por orcCalcCondicoesPagamento
 // (→ orcMotorComercial), que soma de volta a taxa de parcelamento — nunca a
 // base crua. Ver 5c/5d abaixo para a prova numérica (R$42,60, não R$40,41).
-ok('2a. PDF chama orcColetarItensDistribuidos(totalCartaoPDF) — total já com taxa de cartão, nunca a base PIX', /orcColetarItensDistribuidos\(totalCartaoPDF\)/.test(pdfSrc));
+ok('2a. PDF distribui os itens com o total de cartão (orcItensDistribuidosDeOrc(orc, totalCartaoPDF)) — nunca a base PIX', /orcItensDistribuidosDeOrc\(orc,\s*totalCartaoPDF\)/.test(pdfSrc));
 ok('2b. WhatsApp chama orcColetarItensDistribuidos(totalCartaoWA) — mesma regra, nunca um cálculo próprio divergente', /orcColetarItensDistribuidos\(totalCartaoWA/.test(waSrc));
-ok('2c. totalCartaoPDF do PDF vem de _condPDF (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoPDF\s*=\s*\(\(_condPDF\.parcela/.test(pdfSrc));
+ok('2c. totalCartaoPDF do PDF é o valor de cartão persistido (orc.valorFinal) — nunca a base PIX crua', /var totalCartaoPDF\s*=\s*orc\.valorFinal\b/.test(pdfSrc));
 ok('2d. totalCartaoWA do WhatsApp vem de _condWA2 (orcCalcCondicoesPagamento/orcMotorComercial) — nunca a base PIX crua', /var totalCartaoWA\s*=\s*\(\(_condWA2\.parcela/.test(waSrc));
 // RODADA ESTABILIZAÇÃO 2026-09-04, BLOCO 4 — orcEnviarOrcamentoWA() não
 // monta mais a mensagem por concatenação de string direto (a asserção
@@ -71,7 +72,7 @@ var finalPriceAssigns = (html.match(/window\._orcCalc\s*=\s*\{[^}]+\}/g) || []);
 ok('3. Única atribuição de window._orcCalc com payload real é a de orcRecalc() (totalCost/finalPrice/matTotal/...) — nenhuma atribuição alternativa que poderia injetar um valor PIX', finalPriceAssigns.length === 1 && /finalPrice/.test(finalPriceAssigns[0]));
 
 // ── 4. Prazo: os dois canais chamam a MESMA função ao vivo, sem hardcode ──
-ok('4a. PDF lê o prazo via orcGetPrazoTexto() (nunca hardcoded)', /orcGetPrazoTexto\(\)/.test(pdfSrc));
+ok('4a. PDF lê o prazo do pedido (orcPrazoTextoDeOrc(orc)) — nunca hardcoded', /orcPrazoTextoDeOrc\(orc\)/.test(pdfSrc));
 ok('4b. WhatsApp lê o prazo via orcGetPrazoTexto() (nunca hardcoded)', /orcGetPrazoTexto\(\)/.test(waSrc));
 var prazoSrc = extractFn('orcGetPrazoTexto');
 ok('4c. orcGetPrazoTexto() lê ao vivo de #orcPrazoDias/#orcPrazoDiasMax/#orcPrazoEntrega — sem literal fixo de dias', /getElementById\('orcPrazoDias'\)/.test(prazoSrc) && !/return\s*'2 dias/.test(prazoSrc));

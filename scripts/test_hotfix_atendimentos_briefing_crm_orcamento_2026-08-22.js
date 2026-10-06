@@ -64,11 +64,13 @@ function extractFn(name) {
 // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — atdRenderPainel()
 // passou a normalizar o fallback de orçamento via orcEnvNormalizar() (schema
 // legado × ValerIA), nunca reimplementada.
-var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdRevisarCriarOrcamento', 'orcEnvNormalizar'];
+var FN_NAMES = ['atdBriefingHtml', 'atdRenderPainel', 'atdRevisarCriarOrcamento', 'orcEnvNormalizar',
+  'atdResolverOrcamentoVinculado'
+];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 
-var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+var src = 'var ATD_VALERIA_ORC_CACHE = null;\nvar ATD_VALERIA_ORC_ATENDIMENTO_ID = null;\n' + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_atd_briefing_crm_orc_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 
@@ -145,11 +147,13 @@ console.log('\n=== RODADA 9, Blocos G/H/I — briefing estruturado + CRM/orçame
   reset();
   global.ATD_CACHE = [{ id: 'atd2', nome: 'Cliente Vinculado', clienteId: 'cli123', leadId: 'lead456', orcamentoId: 'orc789', classificacao: 'catalogo', marca: 'vitre' }];
   global.ATD_BRIEFING_CACHE = null;
+  // Orçamento vinculado de verdade: existe na lista de orçamentos (senão o painel mostra o aviso "não encontrado", por design).
+  global._ORC_ENVIADOS_DATA = [{ id: 'orc789', num: '3', valorFinal: 150, itens: [{ prod: 'Placa', total: 'R$150,00' }], status: 'aguardando' }];
   mod.atdRenderPainel(global.ATD_CACHE[0]);
   var out = _els.atdColPainel.innerHTML;
   assertTrue(/Abrir cliente/.test(out) && !/Criar\/Abrir cliente/.test(out), '13. com clienteId já vinculado: botão vira "Abrir" (nunca oferece criar de novo — nunca duplica)');
   assertTrue(/Abrir oportunidade/.test(out) && !/Criar\/Abrir oportunidade/.test(out), '14. com leadId já vinculado: botão vira "Abrir"');
-  assertTrue(/Abrir orçamento/.test(out) && !/Revisar e criar/.test(out), '15. com orcamentoId já vinculado: botão vira "Abrir orçamento"');
+  assertTrue(/Revisar orçamento/.test(out) && !/Revisar e criar/.test(out), '15. com orcamentoId já vinculado: botão "Revisar orçamento" (abre o existente; nunca cria de novo — rótulo atual desde a Fase E.2.48B)');
 })();
 
 // RODADA 9, FECHAMENTO (2026-08-23) — atdCriarOuAbrirLead() foi removida:

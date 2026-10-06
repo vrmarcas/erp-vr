@@ -49,11 +49,13 @@ function extractFn(name) {
 // passou a normalizar o fallback de orçamento via orcEnvNormalizar() (schema
 // legado × ValerIA), nunca reimplementada.
 var FN_NAMES = [
-  'orcProdutoNomeResolvido','atdRenderPainel', 'atdBriefingHtml', 'atdCriarOuAbrirCliente', 'atdCriarOuAbrirOportunidade', 'atdRevisarCriarOrcamento', 'atdVincularOrcamentoAposSalvar', 'orcSalvarOrcamento', 'atdErroAmigavel', '_atdBtnBusy', 'orcEnvNormalizar'];
+  'orcProdutoNomeResolvido','atdRenderPainel', 'atdBriefingHtml', 'atdCriarOuAbrirCliente', 'atdCriarOuAbrirOportunidade', 'atdRevisarCriarOrcamento', 'atdVincularOrcamentoAposSalvar', 'orcSalvarOrcamento', 'atdErroAmigavel', '_atdBtnBusy', 'orcEnvNormalizar',
+  'atdResolverOrcamentoVinculado'
+];
 global.window = global;
 global.cfgEsc = function (v) { return v == null ? '' : String(v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
 
-var src = 'var ATD_ACAO_EM_VOO = {};\n\n' + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
+var src = 'var ATD_ACAO_EM_VOO = {};\nvar ATD_VALERIA_ORC_CACHE = null;\nvar ATD_VALERIA_ORC_ATENDIMENTO_ID = null;\n\n' + FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {' + FN_NAMES.join(',') + '};';
 var modPath = path.join(__dirname, '_atd_botoes_acao_extracted.tmp.js');
 fs.writeFileSync(modPath, src);
 
@@ -224,9 +226,12 @@ assertTrue(_toasts.some(function (t) { return /#42/.test(t.msg); }), '23. toast 
 (function () {
   reset();
   var atd = { id: 'atd11', orcamentoId: 'orc_1', orcamentoNum: '7', orcamentoTotal: 199.9 };
+  // Em produção o painel renderiza um atendimento do cache (ATD_CACHE); o teste precisa do mesmo.
+  global.ATD_CACHE = [atd];
   mod.atdRenderPainel(atd);
   var out = _els.atdColPainel.innerHTML;
-  assertTrue(/#7/.test(out) && /199,90/.test(out), '24. painel mostra "Orçamento #N — R$X" quando o vínculo já existe (achado explícito do pedido)');
+  // Formato atual do painel (Fase E.2.48B, 3a49e61): "🧾 Orçamento N" + "Total: R$ X".
+assertTrue(/Orçamento\s*#?7\b/.test(out) && /Total: R\$\s*199,90/.test(out), '24. painel mostra o número e o total do orçamento vinculado ("Orçamento 7" / "Total: R$ 199,90") quando o vínculo já existe');
 })();
 
 // ── atdRenderPainel: após reload (sem cache local), busca fallback em _ORC_ENVIADOS_DATA ──
@@ -234,9 +239,10 @@ assertTrue(_toasts.some(function (t) { return /#42/.test(t.msg); }), '23. toast 
   reset();
   var atd = { id: 'atd12', orcamentoId: 'orc_2' }; // sem orcamentoNum/orcamentoTotal — simula reload
   global._ORC_ENVIADOS_DATA = [{ id: 'orc_2', num: '9', valorFinal: 88.0 }];
+  global.ATD_CACHE = [atd];
   mod.atdRenderPainel(atd);
   var out = _els.atdColPainel.innerHTML;
-  assertTrue(/#9/.test(out) && /88,00/.test(out), '25. após reload, o número/valor do orçamento são recuperados do array global — o vínculo em si (botão funcionando) não depende disso');
+  assertTrue(/Orçamento\s*#?9\b/.test(out) && /Total: R\$\s*88,00/.test(out), '25. após reload, o número/valor do orçamento são recuperados do array global — o vínculo em si (botão funcionando) não depende disso');
 })();
 
 // ── orcSalvarOrcamento(): hook aditivo — nunca refatora _orcSalvarOrcamentoImpl ──

@@ -85,13 +85,14 @@ console.log('='.repeat(72) + '\n');
   assertFalse('4. orcEnviarOrcamentoWA() nunca condiciona a linha de PIX a "!dcOn" escondendo-a (PIX é sempre alternativa)',
     /pxOnWA[\s\S]{0,40}!dcOnWA/.test(srcWA));
 
-  var srcPDF = extractFn('orcImprimirOrcamentoPDF');
+  // Fase E.2.48A (ef90ebb): o PDF é montado por orcMontarHtmlOrcamento; os logos vêm dos tokens de tema.
+  var srcPDF = extractFn('orcMontarHtmlOrcamento');
   assertFalse('5. orcImprimirOrcamentoPDF() nunca mais escreve o texto "(parcelas com acréscimo)"',
     /parcelas com acr[eé]scimo/i.test(srcPDF));
-  assertTrue('6. orcImprimirOrcamentoPDF() logo VR Marcas está maior (height >= 70px, era 52px)',
-    /vr-marcas-logo\.png[\s\S]{0,100}height:(7[0-9]|[8-9][0-9])px/.test(srcPDF));
-  assertTrue('7. orcImprimirOrcamentoPDF() logo Vitre está maior (height >= 55px, era 40px)',
-    /vitre-logo\.png[\s\S]{0,100}height:(5[5-9]|[6-9][0-9])px/.test(srcPDF));
+  assertTrue('6. PDF: logo VR Marcas está maior (logoHeight >= 70px, era 52px)',
+    /vr-marcas-logo\.png[\s\S]{0,80}logoHeight:\s*(7[0-9]|[8-9][0-9])\b/.test(srcPDF));
+  assertTrue('7. PDF: logo Vitre está maior (logoHeight >= 55px, era 40px)',
+    /vitre-logo\.png[\s\S]{0,80}logoHeight:\s*(5[5-9]|[6-9][0-9])\b/.test(srcPDF));
 }
 
 // ── 8-9. orcToggleParc() pré-seleciona 3x por padrão ─────────────────────

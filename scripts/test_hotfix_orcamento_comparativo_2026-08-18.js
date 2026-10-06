@@ -165,8 +165,9 @@ function rodarCenario(opts) {
   ok('G4. Opção 2mm (não escolhida) mostra preço informativo próprio (>0)', custo2mm > 0);
   ok('G5. Opção 4mm (não escolhida) mostra preço informativo próprio (>0)', custo4mm > 0);
 
-  var pdfSrc = extractFn('orcImprimirOrcamentoPDF');
-  ok('G6. PDF agrupa itens do mesmo grupoOpcaoId em bloco "Escolha uma das opções"', /Escolha uma das opções abaixo/.test(pdfSrc));
+  // Fase E.2.48A (ef90ebb): o PDF é montado por orcMontarHtmlOrcamento.
+  var pdfSrc = extractFn('orcMontarHtmlOrcamento');
+  ok('G6. PDF agrupa itens do mesmo grupoOpcaoId em bloco do template orcamentoComparativo', /msgResolverTemplate\('orcamentoComparativo'/.test(pdfSrc) && /_gruposRenderizadosPDF\[item\.grupoOpcaoId\]/.test(pdfSrc));
   ok('G7. PDF separa as opções do grupo com "OU" (nunca soma)', /— OU —/.test(pdfSrc));
 }
 

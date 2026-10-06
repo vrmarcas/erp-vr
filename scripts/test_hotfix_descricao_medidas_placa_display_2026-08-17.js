@@ -115,10 +115,11 @@ console.log('\n=== RODADA CIRÚRGICA 2026-08-17 (2/2) — medidas na descrição
 // TESTE C/G — CONSISTÊNCIA ENTRE CANAIS (PDF, WhatsApp, mesma fonte)
 // ══════════════════════════════════════════════════════════════════════
 {
-  var pdfSrc = extractFn('orcImprimirOrcamentoPDF');
+  // Fase E.2.48A (ef90ebb): o PDF é montado por orcMontarHtmlOrcamento (orcImprimirOrcamentoPDF só abre a janela).
+  var pdfSrc = extractFn('orcMontarHtmlOrcamento');
   var waSrc = extractFn('orcEnviarOrcamentoWA');
   var coletarSrc = extractFn('orcColetarItensDistribuidos');
-  ok('C1. PDF usa orcColetarItensDistribuidos (fonte única)', /orcColetarItensDistribuidos\(/.test(pdfSrc));
+  ok('C1. PDF usa a distribuição de itens do pedido salvo (orcItensDistribuidosDeOrc, mesma regra de escala)', /orcItensDistribuidosDeOrc\(/.test(pdfSrc));
   ok('C2. WhatsApp usa orcColetarItensDistribuidos (a MESMA fonte, não uma cópia própria)', /orcColetarItensDistribuidos\(/.test(waSrc));
   ok('C3. orcColetarItensDistribuidos usa a função canônica de descrição (não monta string solta)', /orcItemDescricaoComercial\(item\)/.test(coletarSrc));
   ok('C4. PDF não tem lógica própria de montagem de "desc" (nenhum "item.prod" solto fora da fonte única)', !/var desc\s*=\s*item\.prod/.test(pdfSrc));
