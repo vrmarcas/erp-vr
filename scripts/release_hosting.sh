@@ -14,6 +14,9 @@
 # Fluxo (cada etapa aborta o script se falhar — nenhuma é decorativa):
 #   1. working tree limpa (nada de não commitado, .claude/launch.json incluso)
 #   2. branch = master, sincronizada com origin/master (nada pra push/pull)
+#   2b. prepara dependências versionadas: npm ci (lockfile) + npm run build em
+#       functions/ e functions-valeria/ — o mesmo preparo que o predeploy do projeto
+#       já declara. Necessário porque lib/ e node_modules/ são ignorados pelo git.
 #   3. suíte de testes leves (auto-detectada, sem emulador) passa 100%
 #   4. firebase deploy --only hosting
 #   5. busca a URL real de produção (com cache-busting, sem cache de CDN)
@@ -91,6 +94,18 @@ if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
   abortar "master local não está sincronizada com origin/master (falta push ou falta pull)."
 fi
 verde "OK — master local == origin/master ($LOCAL_SHA)."
+
+# ── 2b — preparo reprodutível de dependências ───────────────────────────
+# lib/ (build TS) e node_modules/ não são versionados. Num checkout limpo, a
+# suíte depende deles. Instalação pelo lockfile (npm ci) + build oficial do
+# projeto. Sem lockfile = aborta (instalação não determinística).
+etapa "2b" "Preparando dependências versionadas (npm ci + build)..."
+for d in functions functions-valeria; do
+  [ -f "$d/package-lock.json" ] || abortar "$d/package-lock.json ausente — instalação não determinística."
+  ( cd "$d" && npm ci --no-audit --no-fund ) || abortar "npm ci falhou em $d."
+  ( cd "$d" && npm run build ) || abortar "build falhou em $d."
+done
+verde "OK — dependências instaladas pelo lockfile e builds gerados."
 
 # ── 3/6 — testes ─────────────────────────────────────────────────────────
 etapa "3/6" "Rodando testes..."
