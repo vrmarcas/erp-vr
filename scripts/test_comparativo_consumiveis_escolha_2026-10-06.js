@@ -495,7 +495,7 @@ ok('K4. fonte: orcSetEnviados reconcilia com serverData em qualquer conflito', /
     ok('M4. nova tentativa aceita após o conflito: sucesso aparece', sucesso(toasts) === 1);
   });
 })();
-ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promessa real)', /orcFeedbackSalvamento\(_pSalvarOrc, num, !!orcExistente\);/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')) && !/showToast\(\(orcExistente\?'Orçamento #'\+num\+' atualizado!'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
+ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promessa real)', /orcFeedbackSalvamento\(_pSalvarOrc, num, !!orcExistente, orc\.cliente\);/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')) && !/showToast\(\(orcExistente\?'Orçamento #'\+num\+' atualizado!'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
 
 // N — OS: vínculo conhecido no primeiro write; base/memória de kb_os voltam à nuvem
 (function () {
@@ -514,6 +514,25 @@ ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promes
     ok('N4. refresh: base de kb_os = nuvem (próximo save compara com a versão real)', ctx._cloudLastPayload.kb_os === srvKb);
   });
 })();
+
+// O — auditoria orc_saved só após gravação confirmada
+(function () {
+  var audit = [];
+  var ctx = { console: console, showToast: function () {}, secAuditLog: function (ev, msg) { audit.push(ev + ':' + msg); } };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(extractFn('orcFeedbackSalvamento'), ctx);
+  var p = function (r) { audit.length = 0; return ctx.orcFeedbackSalvamento(Promise.resolve(r), 9, false, 'Cliente X'); };
+  p({ ok: true }).then(function () {
+    ok('O1. save confirmado: orc_saved é registrado uma vez, com o cliente', audit.length === 1 && audit[0] === 'orc_saved:Orçamento #9 salvo — cliente: Cliente X');
+    return p({ ok: false, reason: 'conflito', serverData: [] });
+  }).then(function () {
+    ok('O2. save com conflito: NENHUM orc_saved', audit.length === 0);
+    return p({ ok: false, reason: 'nuvem-nao-pronta' });
+  }).then(function () {
+    ok('O3. save rejeitado: NENHUM orc_saved', audit.length === 0);
+  });
+})();
+ok('O4. orc_saved não é mais registrado de forma síncrona no salvamento', !/secAuditLog\('orc_saved'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').split('function orcFeedbackSalvamento')[0].slice(-400)) && (fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').match(/secAuditLog\('orc_saved'/g) || []).length === 1);
 
 // Resumo só depois das asserções assíncronas (K1–K3) — evita contar a menos.
 setTimeout(function () {

@@ -29763,10 +29763,15 @@ function orcGetValidadeDias(){
 var _orcSalvarEmVoo = null;
 // FEEDBACK DE SALVAMENTO (2026-10-06) — sucesso só depois da confirmação real da
 // nuvem. Conflito/rejeição: nenhum toast de sucesso (o merge já avisa o conflito).
-function orcFeedbackSalvamento(pSalvar, num, existente) {
+function orcFeedbackSalvamento(pSalvar, num, existente, cliente) {
   var msgOk = (existente ? 'Orçamento #' + num + ' atualizado!' : 'Orçamento #' + num + ' salvo!') + ' Veja em "Orçamentos Enviados".';
   return Promise.resolve(pSalvar).then(function (r) {
-    if (r && (r.ok || r.unchanged)) { showToast(msgOk, 'ok'); return true; }
+    if (r && (r.ok || r.unchanged)) {
+      showToast(msgOk, 'ok');
+      // Auditoria só após gravação confirmada (nunca em tentativa conflitada/rejeitada).
+      if (typeof secAuditLog === 'function') secAuditLog('orc_saved', 'Orçamento #' + num + ' salvo — cliente: ' + cliente);
+      return true;
+    }
     if (r && typeof r.reason === 'string' && r.reason.indexOf('conflito') === 0) return false;
     showToast('Não foi possível salvar o orçamento #' + num + ' — nenhuma alteração foi confirmada. Tente novamente.', 'err');
     return false;
@@ -30247,8 +30252,7 @@ async function _orcSalvarOrcamentoImpl() {
     var _crmLeadCriadoAgora = crmUpsertLeadPorOrcamento(orc, num);
     if (_crmLeadCriadoAgora) orcSetEnviados(lista); // persiste orc.crmLeadId gravado no upsert
   }
-  if(typeof secAuditLog==='function') secAuditLog('orc_saved','Orçamento #'+num+' salvo — cliente: '+orc.cliente);
-  orcFeedbackSalvamento(_pSalvarOrc, num, !!orcExistente);
+  orcFeedbackSalvamento(_pSalvarOrc, num, !!orcExistente, orc.cliente);
   if(!orcExistente){
     // Libera a reserva — o PRÓXIMO orçamento (Novo Orçamento) deve gerar a
     // sua própria, nunca reaproveitar o número deste que acabou de salvar.
