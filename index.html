@@ -30342,27 +30342,55 @@ function orcAvancarParaItens() {
   }
   orcStep(2);
 }
+// HOTFIX CIRÚRGICO 2026-10-09 (P0) — normaliza telefone para comparação:
+// além de remover tudo que não é dígito, remove o DDI "55" quando presente
+// (ex.: "+55 11 98765-4321" e "11987654321" são o MESMO telefone, mas só
+// batiam antes se digitados IDENTICAMENTE). Só remove o "55" quando o
+// restante ainda tem DDD+número completo (10-11 dígitos), para nunca
+// confundir um "55" que já FAÇA PARTE do número real (DDD 55 = fronteira
+// RS/SC, número sem DDI).
+function _clienteTelNormalizado(tel) {
+  var d = String(tel||'').replace(/\D/g,'');
+  if (d.length >= 12 && d.length <= 13 && d.indexOf('55') === 0) d = d.slice(2);
+  return d;
+}
 // ── Auto-salva cliente no cadastro ao enviar orçamento ─────────────────────
 function orcAutoSalvarCliente(orc) {
   var nome = (orc.cliente||'').trim();
   if(!nome || nome==='(não informado)' || nome==='Cliente') return;
-  // Upsert: busca por nome OU telefone OU email (evita duplicatas da Valéria)
-  var _telNorm = (orc.tel||'').replace(/\D/g,'');
+  // Upsert: busca por CPF/CNPJ OU telefone OU email OU nome (evita
+  // duplicatas da Valéria). HOTFIX CIRÚRGICO 2026-10-09 (P0) — CPF/CNPJ
+  // (identificador mais forte) agora também entra na busca, e telefone usa
+  // _clienteTelNormalizado() (tolera "+55"/DDI); nenhum critério existente
+  // foi removido, só reforçado — nome continua funcionando como sempre
+  // para clientes sem outro identificador ainda cadastrado.
+  var _docNorm = (orc.clienteDoc||'').replace(/\D/g,'');
+  var _telNorm = _clienteTelNormalizado(orc.tel);
   var _emailNorm = (orc.email||'').toLowerCase().trim();
   var existe = CLIENTES_DATA.find(function(c){
-    if((c.nome||'').toLowerCase().trim() === nome.toLowerCase()) return true;
-    if(_telNorm && _telNorm.length >= 8 && (c.tel||'').replace(/\D/g,'') === _telNorm) return true;
+    if(_docNorm && _docNorm.length >= 11 && (c.doc||'').replace(/\D/g,'') === _docNorm) return true;
+    if(_telNorm && _telNorm.length >= 8 && _clienteTelNormalizado(c.tel) === _telNorm) return true;
     if(_emailNorm && _emailNorm.indexOf('@') > 0 && (c.email||'').toLowerCase().trim() === _emailNorm) return true;
+    if((c.nome||'').toLowerCase().trim() === nome.toLowerCase()) return true;
     return false;
   });
   if(existe) {
     // Atualiza dados se tiver campos vazios
-    if(!existe.tel && orc.tel) existe.tel = orc.tel;
-    if(!existe.email && orc.email) existe.email = orc.email;
+    var _clienteAtualizado = false;
+    if(!existe.tel && orc.tel) { existe.tel = orc.tel; _clienteAtualizado = true; }
+    if(!existe.email && orc.email) { existe.email = orc.email; _clienteAtualizado = true; }
+    if(!existe.doc && orc.clienteDoc) { existe.doc = orc.clienteDoc; _clienteAtualizado = true; }
+    // HOTFIX CIRÚRGICO 2026-10-09 (P0) — bug real reproduzido em produção:
+    // esta atualização só mudava CLIENTES_DATA em memória, nunca persistia
+    // (faltava este _cloudSave). Ao abrir um orçamento NOVO em outra
+    // sessão/aba, CLIENTES_DATA vinha do Firestore ainda com o campo
+    // vazio — o autocomplete selecionava o cliente certo, mas o telefone
+    // nunca tinha sido realmente salvo para ele preencher.
+    if(_clienteAtualizado && typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
     return;
   }
   // Cria novo cliente a partir dos dados do orçamento
-  var doc  = (document.getElementById('orcClientDoc')||{}).value||'';
+  var doc  = orc.clienteDoc || (document.getElementById('orcClientDoc')||{}).value||'';
   var cid  = (document.getElementById('orcClientCidade')||{}).value||'—';
   var tipo = (document.getElementById('orcTipoClienteSel')||{}).value||'pj';
   var marca= orc.marca||'vr';
@@ -30386,16 +30414,27 @@ function orcAutoSalvarCliente(orc) {
 
 
 function orcLinkClienteOrcamento(orc) {
+  // HOTFIX CIRÚRGICO 2026-10-09 (P0) — mesmos critérios/ordem de
+  // orcAutoSalvarCliente() (CPF/CNPJ > telefone normalizado > email >
+  // nome), nunca duas lógicas de matching divergentes para o mesmo
+  // conceito de "mesmo cliente".
+  var _docNormLink = (orc.clienteDoc||'').replace(/\D/g,'');
+  var _telNormLink = _clienteTelNormalizado(orc.tel);
   var cli = CLIENTES_DATA.find(function(c){
+    var doc = _docNormLink && _docNormLink.length>=11 && (c.doc||'').replace(/\D/g,'')===_docNormLink;
+    var tel = _telNormLink && _telNormLink.length>=8 && _clienteTelNormalizado(c.tel)===_telNormLink;
+    var em = orc.email&&c.email && c.email.toLowerCase().trim()===orc.email.toLowerCase().trim();
     var nm = c.nome&&orc.cliente && c.nome.toLowerCase().trim()===orc.cliente.toLowerCase().trim();
-    var tel= orc.tel&&c.tel && c.tel.replace(/\D/g,'')===orc.tel.replace(/\D/g,'');
-    var em = orc.email&&c.email && c.email.toLowerCase()===orc.email.toLowerCase();
-    return nm||tel||em;
+    return doc||tel||em||nm;
   });
   if(!cli) return;
   if(!cli.orcamentos) cli.orcamentos = [];
   cli.orcamentos.unshift({id:orc.id,num:orc.num,data:orc.dataSalvo,valor:orc.valorFinal,produto:orc.produto});
   cli.ultimoPedido = new Date().toLocaleDateString('pt-BR');
+  // HOTFIX CIRÚRGICO 2026-10-09 (P0) — mesmo motivo do fix em
+  // orcAutoSalvarCliente(): sem persistir, o histórico de orçamentos e
+  // ultimoPedido do cliente ficava só em memória desta aba/sessão.
+  if(typeof _cloudSave==='function') _cloudSave('clientes', CLIENTES_DATA);
 }
 
 function orcAtualizarBadgeEnviados() {
