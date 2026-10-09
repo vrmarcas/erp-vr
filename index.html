@@ -39394,8 +39394,21 @@ function _planPieceSlug(nome) {
 function _planReconcilePieces(freshPieces, defaultEspMm) {
   var prevByKey = {};
   (_planEditPieces||[]).forEach(function(p){ if(p&&p.id) prevByKey[p.id]=p; });
+  // HOTFIX CIRÚRGICO 2026-10-09 (P0) — duas peças automáticas com o MESMO
+  // nome (ex.: duas peças "Lateral" de pares diferentes da geometria)
+  // colidiam no mesmo id ('auto_'+slug), e prevByKey (objeto JS comum) só
+  // guardava a ÚLTIMA processada — a reconciliação seguinte (disparada por
+  // "+ Adicionar Peça", qualquer edição, ou recálculo) então aplicava o
+  // _deleted de UMA peça às DUAS. Desambigua por ordem de OCORRÊNCIA
+  // dentro do array da receita: a 1ª ocorrência de cada nome mantém o id
+  // de sempre (compatível com qualquer item já persistido antes desta
+  // correção), a 2ª vira 'auto_<slug>_2', a 3ª 'auto_<slug>_3' etc. — nunca
+  // pelo índice bruto do array, que mudaria a cada exclusão/edição.
+  var _seenFresh = {};
   return (freshPieces||[]).map(function(pc){
-    var id = 'auto_' + _planPieceSlug(pc.nome);
+    var _slug = _planPieceSlug(pc.nome);
+    _seenFresh[_slug] = (_seenFresh[_slug]||0) + 1;
+    var id = 'auto_' + _slug + (_seenFresh[_slug] > 1 ? '_' + _seenFresh[_slug] : '');
     var prev = prevByKey[id];
     // RODADA 7 — override real vem SEMPRE da peça FRESCA da receita
     // (pc.esp), NUNCA de `prev`: era exatamente essa "memória" que
@@ -39440,8 +39453,16 @@ function _planHidratarDireto(planPecasJson, defaultEspMm) {
   if(!persisted || !persisted.length) return null;
   var autos = persisted.filter(function(p){ return p && p.origem==='AUTOMATICA'; });
   if(!autos.length) return null;
+  // HOTFIX CIRÚRGICO 2026-10-09 (P0) — reusa o id JÁ gravado na peça
+  // persistida (todo item automático sempre teve um `id` desde a Rodada
+  // 2026-08-16, só não era lido de volta aqui) em vez de recalcular por
+  // ordem de ocorrência sobre a lista FILTRADA (sem as excluídas) — essa
+  // lista não tem mais as mesmas posições relativas do array original da
+  // receita, então recalcular aqui podia atribuir o id errado quando duas
+  // peças tinham o mesmo nome e uma delas já havia sido excluída. Fallback
+  // por slug só para snapshot legado (anterior a essa gravação de `id`).
   return autos.map(function(saved){
-    var id = 'auto_' + _planPieceSlug(saved.nome);
+    var id = saved.id || ('auto_' + _planPieceSlug(saved.nome));
     var _espOverride = (saved.espOverride!=null && saved.espOverride!=='') ? String(saved.espOverride) : ((saved.esp!=null && saved.esp!=='') ? String(saved.esp) : '');
     var _adesSaved = _planPecaAdesivos(saved);
     return {
@@ -39457,11 +39478,26 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
   var persisted;
   try { persisted = JSON.parse(planPecasJson||'[]'); } catch(e) { return null; }
   if(!persisted || !persisted.length) return null;
+  // HOTFIX CIRÚRGICO 2026-10-09 (P0) — mesmo problema e mesma correção de
+  // _planReconcilePieces(): duas peças automáticas de MESMO nome (ex. duas
+  // "Lateral") colidiam no mesmo id ('auto_'+slug), fazendo byId[id] ficar
+  // só com a ÚLTIMA processada e as DUAS peças frescas lerem o mesmo
+  // `saved` (reabrir um item assim duplicava as dimensões de uma Lateral
+  // na outra, ou fazia a sobrevivente parecer excluída). O lado persistido
+  // já carrega o `id` que lhe foi atribuído quando foi gravado — reusa-o
+  // direto (fallback por slug só para snapshot legado); o lado fresco
+  // (sempre o array COMPLETO e determinístico da receita, nunca filtrado)
+  // recebe o mesmo id que _planReconcilePieces() atribuiria à mesma
+  // posição: a 1ª ocorrência de cada nome mantém o id de sempre, a 2ª
+  // vira 'auto_<slug>_2' etc.
   var byId = {};
   persisted.filter(function(p){ return p && p.origem==='AUTOMATICA'; })
-    .forEach(function(p){ byId['auto_'+_planPieceSlug(p.nome)] = p; });
+    .forEach(function(p){ byId[p.id || ('auto_'+_planPieceSlug(p.nome))] = p; });
+  var _seenFresh = {};
   return (freshPieces||[]).map(function(pc){
-    var id = 'auto_' + _planPieceSlug(pc.nome);
+    var _slug = _planPieceSlug(pc.nome);
+    _seenFresh[_slug] = (_seenFresh[_slug]||0) + 1;
+    var id = 'auto_' + _slug + (_seenFresh[_slug] > 1 ? '_' + _seenFresh[_slug] : '');
     var saved = byId[id];
     // RODADA 7 — mesma regra de _planReconcilePieces: override vem da
     // peça FRESCA da receita (pc.esp), nunca do valor persistido
