@@ -28426,7 +28426,7 @@ function orcColetarItensDistribuidos(baseEfetiva){
     // WhatsApp) — mesma origem de dados (item.pecasPlan), formatação
     // própria, escapada com cfgEsc (nome da peça é texto livre do usuário).
     var pecasAdicionaisHtml = '';
-    if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function') {
+    if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function' && orcMostrarPecasAdicionais()) {
       var _matsCatalogoPdf = (typeof _cfgMateriaisReais === 'function') ? _cfgMateriaisReais() : null;
       pecasAdicionaisHtml = '<div style="margin-top:4px;font-size:11px;color:var(--muted,#6b7280)"><strong>Peças adicionais:</strong><ul style="margin:2px 0 0;padding-left:16px">'
         + item.pecasPlan.map(function(p){
@@ -28510,7 +28510,7 @@ function orcItensDistribuidosDeOrc(orc, totalCartaoPDF) {
     if (_pProf > 0) _medidasArr.push(_fmtDim(_pProf) + ' altura');
     var medidasStr = _medidasArr.length ? _medidasArr.join(' × ') : ((item.larg && item.alt) ? (item.larg+'×'+item.alt+'cm') : '');
     var pecasAdicionaisHtml = '';
-    if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function') {
+    if (item.pecasPlan && item.pecasPlan.length > 1 && typeof cfgEsc === 'function' && orcMostrarPecasAdicionais()) {
       var _matsCatalogoPdf = (typeof _cfgMateriaisReais === 'function') ? _cfgMateriaisReais() : null;
       pecasAdicionaisHtml = '<div style="margin-top:4px;font-size:11px;color:var(--muted,#6b7280)"><strong>Peças adicionais:</strong><ul style="margin:2px 0 0;padding-left:16px">'
         + item.pecasPlan.map(function(p){
@@ -32336,6 +32336,27 @@ function orcOrdemBlocosPagamento() {
   var presentes = tipos.filter(function (t) { return texto.indexOf('{' + t + '}') >= 0; });
   if (presentes.length === 0) return ['cartao', 'oferta_especial', 'pix'];
   return presentes.sort(function (a, b) { return texto.indexOf('{' + a + '}') - texto.indexOf('{' + b + '}'); });
+}
+// HOTFIX CIRÚRGICO 2026-10-09 — fonte canônica única de visibilidade de
+// "Peças adicionais" (composição técnica/planificação) no comercial.
+// Mesmo padrão de orcOrdemBlocosPagamento() acima: deriva a decisão da
+// presença literal do placeholder {pecas_adicionais} no MESMO template
+// 'orcamentoItemLinha' (salvo/padrão) que msgResolverTemplate() já usa
+// para o WhatsApp — nunca uma segunda config paralela. Achado real: o
+// WhatsApp já respeitava isso (msgResolverTemplate ignora silenciosamente
+// um placeholder que não existe mais no texto configurado), mas o PDF
+// (orcColetarItensDistribuidos/orcItensDistribuidosDeOrc) nunca consultava
+// template nenhum — sempre renderizava a lista técnica de peças quando
+// havia mais de uma, incondicionalmente. Template default tem o
+// placeholder → true (comportamento de sempre, para quem nunca editou o
+// template); vendedor que removeu {pecas_adicionais} do template para
+// tirar a lista do WhatsApp agora tira também do PDF, com a MESMA config.
+function orcMostrarPecasAdicionais() {
+  var cfg = (typeof cfgLoad === 'function') ? cfgLoad() : {};
+  var custom = cfg.mensagensAutomaticas && cfg.mensagensAutomaticas.orcamentoItemLinha;
+  var texto = (custom && custom.texto) ? custom.texto : (typeof msgTemplatesDefault === 'function' ? msgTemplatesDefault().orcamentoItemLinha : '');
+  texto = texto || '';
+  return texto.indexOf('{pecas_adicionais}') >= 0;
 }
 // orcMontarBlocosPagamento(cond, dcOn, dcPct, condData, fmtBRL) — decide
 // QUAIS blocos existem (mesmo gating de sempre: parcela>1x, desconto
