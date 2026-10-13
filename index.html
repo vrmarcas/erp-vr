@@ -13520,12 +13520,29 @@ function orcAutoLaser(silencioso){
       if(r.ok) totalSeg += r.tempoFinal;
     }
   });
+  var el = document.getElementById('om_laser');
   if(totalSeg <= 0){
-    if(!silencioso) showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn');
+    // HOTFIX CIRÚRGICO 2026-10-13 (P0) — achado real em produção: excluir o
+    // único item VR de um orçamento deixava "Custos gerais
+    // (máquinas/montagem/deslocamento)" com um resíduo (ex. R$1,83) mesmo
+    // com 0 itens VR. Causa raiz: esta função só escrevia em #om_laser
+    // quando totalSeg>0 — ao remover o último item (ou item sem dimensão
+    // ainda), totalSeg volta a 0 e a função retornava sem NUNCA zerar
+    // #om_laser, deixando o valor antigo (minutos de um item que não
+    // existe mais) preso no DOM e relido por orcRecalc() (maqTotal) a
+    // cada recálculo. Só a chamada SILENCIOSA (disparada automaticamente
+    // por orcAddItem/orcRemItem/edição de dimensão — nunca o clique manual
+    // no botão "Auto") agora zera de fato; o clique manual continua só
+    // avisando, sem apagar um valor que o vendedor possa ter ajustado à
+    // mão antes de preencher as dimensões do item atual.
+    if(silencioso){
+      if(el && parseFloat(el.value)!==0){ el.value = 0; orcRecalc(); }
+    } else {
+      showToast('Informe as dimensões (Larg × Alt) dos itens primeiro.','warn');
+    }
     return;
   }
   var totalMin = Math.ceil(totalSeg/60);
-  var el = document.getElementById('om_laser');
   if(el){ el.value = totalMin; orcRecalc(); }
   if(!silencioso) showToast('Laser: '+totalMin+'min ('+totalSeg.toFixed(0)+'s)','ok');
 }
