@@ -68,7 +68,13 @@ function extractFn(name) {
 
 var FN_NAMES = [
   'orcProdutoNomeResolvido','cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
-  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos'];
+  '_matResolverPrecoFamiliaEspessura', '_planPecaEspOverride', '_planPecaAdesivos', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos',
+  // HOTFIX CIRÚRGICO 2026-10-09 — orcColetarItensDistribuidos() passou a
+  // consultar orcMostrarPecasAdicionais() (gate de "Peças adicionais" no
+  // PDF); precisa estar extraída aqui também, senão é ReferenceError ao
+  // chamar a função sob teste. msgTemplatesDefault é a dependência dela
+  // (fallback do template default quando não há config customizada).
+  'orcMostrarPecasAdicionais', 'msgTemplatesDefault'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { orcRecalc: orcRecalc, orcColetarItensDistribuidos: orcColetarItensDistribuidos, _matResolverPrecoFamiliaEspessura: _matResolverPrecoFamiliaEspessura };'
