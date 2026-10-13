@@ -51,6 +51,27 @@ function extractFn(name) {
   if (depth !== 0) throw new Error('Chaves desbalanceadas extraindo ' + name);
   return html.slice(start, i + 1);
 }
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — orcRecalc() passou a depender de
+// ORC_MAQ_OPS/cfgMaqOperInfo()/_orcMaqInfo() (Config→Máquinas canônica).
+// Este harness já define seu PRÓPRIO cfgLoad()/_cfgData LOCAL dentro do
+// módulo extraído (nunca via global.cfgLoad) — a cfgMaqOperInfo injetada
+// pela shim global não conseguiria ver essas locais, então as 3 entradas
+// têm que ser extraídas AQUI TAMBÉM (module-scoped), exatamente como
+// orcRecalc/orcItemAplicarAjuste já são.
+function extractVarDecl(name) {
+  const marker = 'var ' + name + ' = ';
+  const start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  let depth = 0, i = start + marker.length, end = -1;
+  for (; i < html.length; i++) {
+    const c = html[i];
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+    else if (c === ';' && depth === 0) { end = i; break; }
+  }
+  if (end < 0) throw new Error('Fim de ' + name + ' não encontrado');
+  return html.slice(start, end + 1);
+}
 
 const src = [
   'var document = global.__DOC__;',
@@ -72,6 +93,9 @@ const src = [
   'function orcProdutoNomeResolvido(idx) { return "Item "+idx; }',
   'function cfgEsc(s) { return s; }',
   'function showToast() {}',
+  extractVarDecl('ORC_MAQ_OPS'),
+  extractFn('cfgMaqOperInfo'),
+  extractFn('_orcMaqInfo'),
   extractFn('orcItemAplicarAjuste'),
   extractFn('orcRecalc'),
   'module.exports = { orcRecalc: orcRecalc };'

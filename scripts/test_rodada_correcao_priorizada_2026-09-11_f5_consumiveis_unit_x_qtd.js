@@ -72,6 +72,25 @@ function extractFn(name) {
   if (depth !== 0) throw new Error('Chaves desbalanceadas extraindo ' + name);
   return html.slice(start, i + 1);
 }
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo motivo/fix já aplicado em
+// test_rodada_correcao_priorizada_2026-09-11_f3_fechamento_centavos.js e
+// test_rodada_estabilizacao_2026-09-10_preco_por_item.js: orcRecalc() agora
+// depende de ORC_MAQ_OPS/cfgMaqOperInfo()/_orcMaqInfo(), e este harness tem
+// seu PRÓPRIO cfgLoad()/_cfgData module-scoped (nunca via global.cfgLoad).
+function extractVarDecl(name) {
+  const marker = 'var ' + name + ' = ';
+  const start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  let depth = 0, i = start + marker.length, end = -1;
+  for (; i < html.length; i++) {
+    const c = html[i];
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+    else if (c === ';' && depth === 0) { end = i; break; }
+  }
+  if (end < 0) throw new Error('Fim de ' + name + ' não encontrado');
+  return html.slice(start, end + 1);
+}
 
 const src = [
   'var document = global.__DOC__;',
@@ -93,6 +112,9 @@ const src = [
   'function orcProdutoNomeResolvido(idx) { return "Item "+idx; }',
   'function cfgEsc(s) { return s; }',
   'function showToast() {}',
+  extractVarDecl('ORC_MAQ_OPS'),
+  extractFn('cfgMaqOperInfo'),
+  extractFn('_orcMaqInfo'),
   extractFn('orcItemAplicarAjuste'),
   extractFn('orcRecalc'),
   'module.exports = { orcRecalc: orcRecalc };'

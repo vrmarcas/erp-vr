@@ -2201,6 +2201,12 @@ function _cloudLoadAll() {
           _cloudSave('erp_config', _cfgData);
           return; // próximo disparo do watch já vem com os ids persistidos
         }
+        // Mesmo backfill para máquinas (Bloco C 2026-10-13) — necessário
+        // antes do vínculo operação→máquina poder referenciar qualquer uma.
+        if (!fromCache && _cfgBackfillMaquinaIds(_cfgData.maquinas)) {
+          _cloudSave('erp_config', _cfgData);
+          return;
+        }
         var pg=document.getElementById('cfgPg1');
         if(pg && pg.offsetParent!==null) { try{ cfgRenderTables(); }catch(e){} }
         try{ if(typeof orcRefreshMatSelects==='function') orcRefreshMatSelects(); }catch(e){}
@@ -3619,12 +3625,13 @@ function _authFirebaseError(code){
                     </div>
                   </div>
                   <div class="section-lbl">Máquinas (minutos)</div>
-                  <div class="cost-row"><div class="cost-name">⚡ Laser</div><div class="cost-unit">×R$0,10/min</div><input class="cost-inp" type="number" id="om_laser" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_laser">R$0,00</div><button onclick="orcAutoLaser()" title="Calcular automaticamente por espessura do material" style="background:var(--brand-mid);color:#fff;border:none;border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:2px;white-space:nowrap">Auto</button></div>
-                  <div class="cost-row"><div class="cost-name">📐 Dobra</div><div class="cost-unit">×R$0,01/min</div><input class="cost-inp" type="number" id="om_dobra" value="0"  min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_dobra">R$0,00</div></div>
-                  <div class="cost-row"><div class="cost-name">✨ Politrix</div><div class="cost-unit">×R$0,02/min</div><input class="cost-inp" type="number" id="om_pol" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_pol">R$0,00</div></div>
-                  <div class="cost-row"><div class="cost-name">☀️ UV</div><div class="cost-unit">×R$0,002/min</div><input class="cost-inp" type="number" id="om_uv" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_uv">R$0,00</div></div>
-                  <div class="cost-row"><div class="cost-name">🔧 Lixadeira</div><div class="cost-unit">×R$0,005/min</div><input class="cost-inp" type="number" id="om_lixa" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_lixa">R$0,00</div></div>
-                  <div class="cost-row"><div class="cost-name">🔩 Tupia</div><div class="cost-unit">×R$0,01/min</div><input class="cost-inp" type="number" id="om_tupia" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_tupia">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">⚡ Laser</div><div class="cost-unit" id="ocu_laser">—</div><input class="cost-inp" type="number" id="om_laser" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_laser">R$0,00</div><button onclick="orcAutoLaser()" title="Calcular automaticamente por espessura do material" style="background:var(--brand-mid);color:#fff;border:none;border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:2px;white-space:nowrap">Auto</button></div>
+                  <div class="cost-row"><div class="cost-name">📐 Dobra</div><div class="cost-unit" id="ocu_dobra">—</div><input class="cost-inp" type="number" id="om_dobra" value="0"  min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_dobra">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">✨ Politrix</div><div class="cost-unit" id="ocu_pol">—</div><input class="cost-inp" type="number" id="om_pol" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_pol">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">☀️ UV</div><div class="cost-unit" id="ocu_uv">—</div><input class="cost-inp" type="number" id="om_uv" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_uv">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">🔧 Lixadeira</div><div class="cost-unit" id="ocu_lixa">—</div><input class="cost-inp" type="number" id="om_lixa" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_lixa">R$0,00</div></div>
+                  <div class="cost-row"><div class="cost-name">🔩 Tupia</div><div class="cost-unit" id="ocu_tupia">—</div><input class="cost-inp" type="number" id="om_tupia" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_tupia">R$0,00</div></div>
+                  <div id="orcMaqAlertaSemCusto" style="display:none;margin-top:6px;padding:6px 9px;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:7px;font-size:10px;font-weight:700;color:#92400E;line-height:1.5"></div>
                 </div>
                 <!-- RODADA 6 — "Consumíveis" globais do orçamento saem da UI: passam
                      a ser configurados por PEÇA na planificação (botão ⚙️ na coluna
@@ -6332,6 +6339,19 @@ function _authFirebaseError(code){
             <div style="text-align:right;margin-top:12px">
               <button class="topbar-btn" onclick="cfgSalvar()">💾 Salvar Alterações</button>
             </div>
+          </div>
+
+          <!-- Vínculo Operação → Máquina (RODADA CIRÚRGICA 2026-10-13, Bloco C) -->
+          <div class="card" style="margin-top:14px">
+            <div class="card-h">
+              <div class="card-h-left">🔗 Vínculo de Operação → Máquina</div>
+              <span style="font-size:11px;color:var(--muted)">Define qual máquina cadastrada acima cobra o custo de cada operação do orçamento</span>
+            </div>
+            <table class="table" id="maqOpTable">
+              <thead><tr><th>Operação (orçamento)</th><th>Máquina vinculada</th><th>Custo/min derivado</th><th>Setup</th></tr></thead>
+              <tbody id="maqOpBody"></tbody>
+            </table>
+            <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5">⚠️ Só máquinas com Unidade = <b>hora</b> podem ser vinculadas (custo/min = custo/hora ÷ 60). Operação sem máquina vinculada, ou vinculada a uma máquina com Custo R$0 ou Unidade ≠ hora, cobra <b>R$0,00</b> — nunca uma taxa oculta.</div>
           </div>
 
           <!-- Velocidades do Laser -->
@@ -12103,6 +12123,19 @@ function orcItemCalcularTotal(item) {
   };
 }
 
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo princípio do snapshot de
+// preço de Adesivo (window._orcAdhPrecoSnapshot): um orçamento ANTIGO
+// reaberto para edição precisa recalcular com a taxa de máquina
+// EFETIVAMENTE usada quando foi salvo, nunca com a config vigente agora
+// (senão mudar Config reescreveria silenciosamente o custo de pedidos já
+// fechados). orcEnvEditar() restaura window._orcMaqInfoSnapshot a partir do
+// parametros.maqInfoSnapshot gravado no momento do save; um orçamento NOVO
+// nunca tem esse snapshot e sempre lê a Config vigente via cfgMaqOperInfo().
+function _orcMaqInfo(opKey) {
+  var snap = (typeof window!=='undefined' && window._orcMaqInfoSnapshot) || null;
+  if (snap && snap[opKey]) return snap[opKey];
+  return cfgMaqOperInfo(opKey);
+}
 function orcRecalc() {
   orcSincronizarEspPecasHerdadas();
   // Lê overhead, impostos e vrml do Config salvo (não mais do Step 3)
@@ -12122,16 +12155,46 @@ function orcRecalc() {
   var vrInfo = document.getElementById('orcVrmlInfo');
   if(vrInfo) vrInfo.textContent = (vrml*100).toFixed(2)+'%';
 
-  // máquinas
-  const laser  = (parseFloat(document.getElementById('om_laser')?.value)||0) * 0.10;
-  const dobra  = (parseFloat(document.getElementById('om_dobra')?.value)||0) * 0.01;
-  const pol    = (parseFloat(document.getElementById('om_pol')?.value)||0)   * 0.02;
-  const uv     = (parseFloat(document.getElementById('om_uv')?.value)||0)    * 0.002;
-  const lixa   = (parseFloat(document.getElementById('om_lixa')?.value)||0)  * 0.005;
-  const tupia  = (parseFloat(document.getElementById('om_tupia')?.value)||0) * 0.01;
+  // máquinas — RODADA CIRÚRGICA 2026-10-13, Bloco C: taxa vem SEMPRE de
+  // cfgMaqOperInfo()/_orcMaqInfo() (Config. Orçamento → Máquinas, vínculo
+  // operação→máquina), nunca mais de uma constante literal aqui. Operação
+  // sem máquina vinculada e precificada custa R$0,00 — nunca um fallback
+  // oculto (decisão explícita do usuário: eliminar de vez a taxa escondida).
+  // Setup é cobrado 1x por operação em uso neste orçamento (minutos>0),
+  // nunca multiplicado pelos minutos — mesma granularidade das demais
+  // parcelas globais do pedido (Montagem/Deslocamento).
+  var _maqOpsCalc = {};
+  var _maqAlertaOps = [];
+  ORC_MAQ_OPS.forEach(function(op){
+    var min = parseFloat(document.getElementById('om_'+op.key)?.value)||0;
+    var info = _orcMaqInfo(op.key);
+    var custo = min>0 ? (min*info.custoMin + info.setup) : 0;
+    _maqOpsCalc[op.key] = { min:min, custo:custo, info:info };
+    if (min>0 && !info.ok) _maqAlertaOps.push(op.label.replace(/^\S+\s/,''));
+    var ocuEl = document.getElementById('ocu_'+op.key);
+    if (ocuEl) {
+      if (info.ok) ocuEl.textContent = '×R$'+info.custoMin.toFixed(4).replace('.',',')+'/min'+(info.setup>0?' +R$'+info.setup.toFixed(2).replace('.',',')+' setup':'');
+      else if (info.motivo==='nao_vinculada') ocuEl.textContent = '⚠️ sem máquina vinculada';
+      else if (info.motivo==='unidade_incompativel') ocuEl.textContent = '⚠️ unidade ≠ hora';
+      else ocuEl.textContent = '⚠️ sem custo configurado';
+    }
+  });
+  const laser=_maqOpsCalc.laser.custo, dobra=_maqOpsCalc.dobra.custo, pol=_maqOpsCalc.pol.custo,
+        uv=_maqOpsCalc.uv.custo, lixa=_maqOpsCalc.lixa.custo, tupia=_maqOpsCalc.tupia.custo;
   const maqTotal = laser+dobra+pol+uv+lixa+tupia;
+  window._orcMaqOpsCalc = _maqOpsCalc; // consumido pelo modal de Custos e pelo alerta pré-envio
   orcSetV('ocv_laser',laser); orcSetV('ocv_dobra',dobra); orcSetV('ocv_pol',pol);
   orcSetV('ocv_uv',uv); orcSetV('ocv_lixa',lixa); orcSetV('ocv_tupia',tupia);
+  var _alertaMaqEl = document.getElementById('orcMaqAlertaSemCusto');
+  if (_alertaMaqEl) {
+    if (_maqAlertaOps.length) {
+      _alertaMaqEl.style.display = 'block';
+      _alertaMaqEl.textContent = '⚠️ Máquina sem custo configurado para: ' + _maqAlertaOps.join(', ') + '. O preço final NÃO está contabilizando essa(s) operação(ões) — configure em Config. Orçamento → Máquinas antes de enviar.';
+    } else {
+      _alertaMaqEl.style.display = 'none';
+      _alertaMaqEl.textContent = '';
+    }
+  }
 
   // Adesivo/Adh. Branco por peça (Rodada 5) — resolução do preço/cm² tem
   // que vir ANTES do PASS1 porque o delta de adesivo por peça agora é
@@ -13163,21 +13226,24 @@ function orcItemExtras(ri) {
   +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:2px 5px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
   +'<button onclick="orcSalvarPreset()" style="padding:2px 6px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
   +'</div></div>'
-  +[['⚡','Laser','×R$0,10/min','m_laser',true],
-    ['📐','Dobra','×R$0,01/min','m_dobra',false],
-    ['✨','Politrix','×R$0,02/min','m_pol',false],
-    ['☀️','UV','×R$0,002/min','m_uv',false],
-    ['🔧','Lixadeira','×R$0,005/min','m_lixa',false],
-    ['🔩','Tupia','×R$0,01/min','m_tupia',false]
+  +[['⚡','Laser','m_laser','laser',true],
+    ['📐','Dobra','m_dobra','dobra',false],
+    ['✨','Politrix','m_pol','pol',false],
+    ['☀️','UV','m_uv','uv',false],
+    ['🔧','Lixadeira','m_lixa','lixa',false],
+    ['🔩','Tupia','m_tupia','tupia',false]
   ].map(function(r){
-    var curVal = g(r[3].replace('m_','om_'));
+    var curVal = g(r[2].replace('m_','om_'));
+    // RODADA CIRÚRGICA 2026-10-13, Bloco C — taxa exibida aqui não é mais
+    // literal: vem de cfgMaqOperInfo(), a MESMA fonte canônica do motor
+    // (orcRecalc). id="rate_<op>" é preenchido ao vivo por orcExtrasCalcMaq().
     return '<div style="'+ROW+'">'
       +'<span style="font-size:12px;width:16px">'+r[0]+'</span>'
       +'<span style="'+RNAME+'">'+r[1]+'</span>'
-      +'<span style="'+RRATE+'">'+r[2]+'</span>'
-      +'<input type="number" id="'+r[3]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
+      +'<span id="rate_'+r[3]+'" style="'+RRATE+'">—</span>'
+      +'<input type="number" id="'+r[2]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
       +(r[4]?'<span id="m_laserManualTag" style="display:none;font-size:8px;color:#DC2626;font-weight:800">✏️MANUAL</span>':'')
-      +'<span id="'+r[3]+'_v" style="'+RVAL+'">R$0,00</span>'
+      +'<span id="'+r[2]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
   }).join('')
   +'</div>'
@@ -13245,13 +13311,27 @@ function orcItemExtras(ri) {
 }
 
 // Helpers do modal de custos
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — era a SEGUNDA cópia hardcoded das
+// mesmas taxas de orcRecalc (duplicidade real: as duas tinham que ser
+// mantidas manualmente em sincronia). Agora lê _orcMaqInfo()/cfgMaqOperInfo()
+// — fonte única — e mostra o breakdown completo (taxa/min, setup, total),
+// igual ao que orcRecalc() grava em ocv_*/ocu_*.
 function orcExtrasCalcMaq(){
-  var rates={m_laser:0.10,m_dobra:0.01,m_pol:0.02,m_uv:0.002,m_lixa:0.005,m_tupia:0.01};
-  Object.keys(rates).forEach(function(k){
+  var idByKey={laser:'m_laser',dobra:'m_dobra',pol:'m_pol',uv:'m_uv',lixa:'m_lixa',tupia:'m_tupia'};
+  Object.keys(idByKey).forEach(function(op){
+    var k=idByKey[op];
     var v=parseFloat((document.getElementById(k)||{}).value)||0;
-    var val=v*rates[k];
+    var info=(typeof _orcMaqInfo==='function') ? _orcMaqInfo(op) : {ok:false,motivo:'nao_vinculada',custoMin:0,setup:0};
+    var val = v>0 ? (v*info.custoMin + info.setup) : 0;
     var el=document.getElementById(k+'_v');
     if(el) el.textContent='R$'+val.toFixed(2).replace('.',',');
+    var rateEl=document.getElementById('rate_'+op);
+    if(rateEl){
+      if(info.ok) rateEl.textContent='×R$'+info.custoMin.toFixed(4).replace('.',',')+'/min'+(info.setup>0?' +setup R$'+info.setup.toFixed(2).replace('.',','):'');
+      else if(info.motivo==='nao_vinculada') rateEl.textContent='⚠️ sem máquina';
+      else if(info.motivo==='unidade_incompativel') rateEl.textContent='⚠️ unidade≠hora';
+      else rateEl.textContent='⚠️ sem custo';
+    }
   });
   // Só corte
   var sc=!!(document.getElementById('m_soCorte')||{}).checked;
@@ -25773,6 +25853,10 @@ function orcResetFormularioVR(){
   // snapshot de preço de Adesivo do orçamento anterior editado nesta
   // sessão; volta a usar a config vigente (ver orcRecalc).
   window._orcAdhPrecoSnapshot = null;
+  // Bloco C (2026-10-13) — mesmo reset, agora para o snapshot de taxa de
+  // máquina: novo orçamento sempre lê a Config vigente, nunca herda o
+  // congelamento do orçamento anterior editado nesta sessão.
+  window._orcMaqInfoSnapshot = null;
   var descTipo=document.getElementById('orcDescTipo'); if(descTipo) descTipo.value='pct';
   var acresTipo=document.getElementById('orcAcresTipo'); if(acresTipo) acresTipo.value='pct';
   var soCorte=document.getElementById('orcSoCorte'); if(soCorte) soCorte.checked=false;
@@ -29957,6 +30041,21 @@ function orcFeedbackSalvamento(pSalvar, num, existente, cliente) {
 
 function orcSalvarOrcamento() {
   if(_orcSalvarEmVoo) return _orcSalvarEmVoo;
+  // RODADA CIRÚRGICA 2026-10-13, Bloco C — decisão explícita do usuário:
+  // nunca bloquear o salvamento (preferência já existente de não travar o
+  // vendedor), mas alertar de forma visível, no momento exato de concluir,
+  // se alguma operação de máquina REALMENTE usada neste pedido (minutos>0)
+  // ainda não tem custo configurado em Config→Máquinas — orcRecalc() já
+  // populou window._orcMaqOpsCalc com o motivo de cada operação.
+  (function(){
+    var calc = window._orcMaqOpsCalc || {};
+    var semCusto = (typeof ORC_MAQ_OPS!=='undefined' ? ORC_MAQ_OPS : []).filter(function(op){
+      return calc[op.key] && calc[op.key].min>0 && !calc[op.key].info.ok;
+    }).map(function(op){ return op.label.replace(/^\S+\s/,''); });
+    if (semCusto.length && typeof showToast==='function') {
+      showToast('⚠️ Orçamento salvo SEM custo de máquina configurado para: '+semCusto.join(', ')+'. Confira Config→Máquinas.', 'warn');
+    }
+  })();
   var _p = _orcSalvarOrcamentoImpl();
   // RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2, Ação 3: quando este
   // orçamento nasceu de "Revisar e criar orçamento" (Atendimentos), vincula
@@ -30246,6 +30345,19 @@ async function _orcSalvarOrcamentoImpl() {
     // orcEnvEditar (restaura em window._orcAdhPrecoSnapshot) e orcRecalc.
     adesivoPrecoCm2: (function(){ var f=(typeof cfgLoad==='function'?(cfgLoad().financeiro||{}):{}); return typeof f.adesivoPrecoCm2==='number'?f.adesivoPrecoCm2:0.0056; })(),
     adesivoBrancoPrecoCm2: (function(){ var f=(typeof cfgLoad==='function'?(cfgLoad().financeiro||{}):{}); return typeof f.adesivoBrancoPrecoCm2==='number'?f.adesivoBrancoPrecoCm2:0.0011; })(),
+    // RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo princípio acima, agora
+    // para a taxa de máquina de cada operação: congela o que cfgMaqOperInfo()
+    // retornou PARA CADA OPERAÇÃO no momento deste save (não só os minutos
+    // om_laser etc, que já eram salvos) — ver orcEnvEditar (restaura em
+    // window._orcMaqInfoSnapshot) e _orcMaqInfo() em orcRecalc. Sem isto,
+    // reabrir um orçamento antigo depois de uma mudança em Config→Máquinas
+    // recalcularia o custo de máquina com a taxa NOVA, reescrevendo
+    // silenciosamente o custo de um pedido já fechado.
+    maqInfoSnapshot: (function(){
+      var snap = {};
+      ORC_MAQ_OPS.forEach(function(op){ snap[op.key] = (typeof _orcMaqInfo==='function') ? _orcMaqInfo(op.key) : null; });
+      return snap;
+    })(),
     oc_imp: _gv('oc_imp'), oc_spray: _gv('oc_spray'), oc_extra: _gv('oc_extra'),
     orcDesc: _gv('orcDesc'), orcDescTipo: (document.getElementById('orcDescTipo')||{}).value||'pct',
     orcAcres: _gv('orcAcres'), orcAcresTipo: (document.getElementById('orcAcresTipo')||{}).value||'pct',
@@ -31466,6 +31578,12 @@ function orcEnvEditar(id) {
       window._orcAdhPrecoSnapshot = (typeof p.adesivoPrecoCm2==='number' || typeof p.adesivoBrancoPrecoCm2==='number')
         ? { adh: typeof p.adesivoPrecoCm2==='number'?p.adesivoPrecoCm2:null, adhb: typeof p.adesivoBrancoPrecoCm2==='number'?p.adesivoBrancoPrecoCm2:null }
         : null;
+      // RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo princípio: um orçamento
+      // antigo (sem maqInfoSnapshot, salvo antes desta rodada) nunca ganha
+      // um snapshot inventado — fica null e orcRecalc() lê a Config vigente
+      // (comportamento idêntico ao de antes desta rodada, quando também não
+      // havia nenhuma distinção entre "vigente" e "congelado").
+      window._orcMaqInfoSnapshot = (p.maqInfoSnapshot && typeof p.maqInfoSnapshot==='object') ? p.maqInfoSnapshot : null;
       setV('oc_imp', p.oc_imp); setV('oc_spray', p.oc_spray); setV('oc_extra', p.oc_extra);
       setV('orcDesc', p.orcDesc); setV('orcDescTipo', p.orcDescTipo);
       setV('orcAcres', p.orcAcres); setV('orcAcresTipo', p.orcAcresTipo);
@@ -32332,7 +32450,13 @@ var CFG_DEFAULT = {
     { nome:'Instalação em altura', unidade:'hora', valor:120.00, obs:'' },
     { nome:'Arte / Criação', unidade:'hora', valor:90.00, obs:'' },
     { nome:'Acabamento', unidade:'m²', valor:15.00, obs:'' }
-  ]
+  ],
+  // RODADA CIRÚRGICA 2026-10-13, Bloco C — vínculo explícito operação→máquina
+  // do motor de orçamento (om_laser/om_dobra/om_pol/om_uv/om_lixa/om_tupia).
+  // Nunca inventa um vínculo: todos nascem null (sem máquina configurada
+  // sobrecarregando nenhuma operação) até o usuário escolher explicitamente
+  // em Config. Orçamento → Máquinas — ver cfgMaqOperInfo()/orcRecalc().
+  maquinasOperacoes: { laser:null, dobra:null, pol:null, uv:null, lixa:null, tupia:null }
 };
 
 // ============================================================
@@ -32731,6 +32855,22 @@ function _cfgBackfillMaterialIds(arr) {
   });
   return changed;
 }
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo padrão de id estável acima,
+// agora para máquinas: hoje cfgCell/cfgDelRow('maq', idx, ...) identificam
+// uma máquina só pela posição no array, então excluir uma máquina do meio
+// da lista desloca o índice de todas as seguintes. O vínculo operação→
+// máquina (maquinasOperacoes) não pode referenciar uma posição instável —
+// precisa de um id que sobrevive a reordenação/exclusão de outras linhas.
+function _cfgNewMaquinaId() {
+  return 'maq_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+function _cfgBackfillMaquinaIds(arr) {
+  var changed = false;
+  (arr || []).forEach(function (m) {
+    if (m && !m.id) { m.id = _cfgNewMaquinaId(); changed = true; }
+  });
+  return changed;
+}
 // HOTFIX 2026-08-13 — rsm2 (R$/m²) é um campo DERIVADO de custo/área e
 // nunca deve ser tratado como fonte de verdade: antes desta correção, só
 // era recalculado quando um snapshot do cloud chegava (nos 3 pontos de
@@ -32752,6 +32892,12 @@ function cfgLoad() {
       _cfgData.maquinas = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinas));
     if(!Array.isArray(_cfgData.maodeobra) || !_cfgData.maodeobra.length)
       _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
+    // Bloco C (2026-10-13) — garante o objeto de vínculo operação→máquina
+    // mesmo em config antiga (pré-rodada) que nunca teve esse campo: nunca
+    // inventa um vínculo, só garante a chave presente com todas as
+    // operações null (idêntico ao estado inicial do CFG_DEFAULT).
+    if(!_cfgData.maquinasOperacoes || typeof _cfgData.maquinasOperacoes!=='object')
+      _cfgData.maquinasOperacoes = JSON.parse(JSON.stringify(CFG_DEFAULT.maquinasOperacoes));
     return _cfgData;
   }
   return JSON.parse(JSON.stringify(CFG_DEFAULT));
@@ -33442,6 +33588,7 @@ function cfgRenderTables() {
   // Máquinas
   var qb=document.getElementById('maqBody'); if(qb){ qb.innerHTML='';
     d.maquinas.forEach(function(r,i){ qb.insertAdjacentHTML('beforeend', cfgRowMaq(i,r)); }); }
+  if(typeof cfgRenderMaqOp==='function') cfgRenderMaqOp();
   // Mão de obra
   var ob=document.getElementById('mobBody'); if(ob){ ob.innerHTML='';
     d.maodeobra.forEach(function(r,i){ ob.insertAdjacentHTML('beforeend', cfgRowMob(i,r)); }); }
@@ -33492,6 +33639,82 @@ function cfgCalcM2(i){
 function cfgRowMaq(i,r){ return '<tr id="maqR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'maq\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'maq\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='hora'?' selected':'')+'>hora</option><option'+(r.unidade==='un'?' selected':'')+'>un</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.custo+'" oninput="cfgCell(\'maq\','+i+',\'custo\',+this.value)"></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:70px;font-size:12px;text-align:right" value="'+(r.setup||0)+'" oninput="cfgCell(\'maq\','+i+',\'setup\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'maq\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'maq\','+i+')">✕</button></td></tr>'; }
 function cfgRowMob(i,r){ return '<tr id="mobR'+i+'"><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.nome)+'" oninput="cfgCell(\'mob\','+i+',\'nome\',this.value)"></td><td><select style="border:none;background:transparent;font-size:12px" onchange="cfgCell(\'mob\','+i+',\'unidade\',this.value)"><option'+(r.unidade==='hora'?' selected':'')+'>hora</option><option'+(r.unidade==='m²'?' selected':'')+'>m²</option><option'+(r.unidade==='un'?' selected':'')+'>un</option></select></td><td><input type="number" step="0.01" style="border:none;background:transparent;width:80px;font-size:12px;text-align:right" value="'+r.valor+'" oninput="cfgCell(\'mob\','+i+',\'valor\',+this.value)"></td><td><input style="border:none;background:transparent;width:100%;font-size:12px" value="'+cfgEsc(r.obs||'')+'" oninput="cfgCell(\'mob\','+i+',\'obs\',this.value)"></td><td><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px" onclick="cfgDelRow(\'mob\','+i+')">✕</button></td></tr>'; }
 
+// ── RODADA CIRÚRGICA 2026-10-13, Bloco C — vínculo canônico operação→máquina ──
+// As 6 operações do motor de orçamento (campos GLOBAIS om_laser/om_dobra/
+// om_pol/om_uv/om_lixa/om_tupia, ver orcRecalc) nunca tiveram, até aqui,
+// NENHUMA ligação real com o cadastro de "Config. Orçamento → Máquinas" —
+// o custo sempre veio de constantes hardcoded (R$0,10/min Laser, R$0,01/min
+// Dobra, etc.), duplicadas em orcRecalc() e em orcExtrasCalcMaq(). Esta
+// lista + cfgMaqOperInfo() passam a ser a ÚNICA fonte de taxa — nenhuma
+// outra função deve ler r.custo de uma máquina ou multiplicar minutos por
+// um número literal fora daqui.
+var ORC_MAQ_OPS = [
+  { key:'laser', label:'⚡ Laser' },
+  { key:'dobra', label:'📐 Dobra' },
+  { key:'pol',   label:'✨ Politriz' },
+  { key:'uv',    label:'☀️ UV' },
+  { key:'lixa',  label:'🔧 Lixadeira' },
+  { key:'tupia', label:'🔩 Tupia' }
+];
+// Decisão explícita do usuário (2026-10-13): NUNCA um fallback hardcoded
+// "legado" enquanto uma operação não tiver máquina vinculada e precificada
+// — custo=0 e motivo explícito, sempre, para a UI poder alertar em vez de
+// esconder. unidade!=='hora' é tratada como vínculo incompatível (a
+// conversão hora→minuto, custo/60, só faz sentido para máquinas por hora;
+// m²/un não têm como virar uma taxa por minuto sem inventar uma regra nova).
+function cfgMaqOperInfo(opKey) {
+  var cfg = (typeof cfgLoad==='function') ? cfgLoad() : (_cfgData||{});
+  var map = cfg.maquinasOperacoes || {};
+  var mid = map[opKey];
+  var maq = mid ? (cfg.maquinas||[]).filter(function(m){ return m.id===mid; })[0] : null;
+  if (!maq) return { ok:false, motivo:'nao_vinculada', nome:null, custoMin:0, setup:0, unidade:null };
+  if (maq.unidade !== 'hora') return { ok:false, motivo:'unidade_incompativel', nome:maq.nome, custoMin:0, setup:parseFloat(maq.setup)||0, unidade:maq.unidade };
+  var custoHora = parseFloat(maq.custo)||0;
+  var setup = parseFloat(maq.setup)||0;
+  if (!(custoHora > 0)) return { ok:false, motivo:'sem_custo', nome:maq.nome, custoMin:0, setup:setup, unidade:'hora' };
+  return { ok:true, motivo:null, nome:maq.nome, custoMin:custoHora/60, setup:setup, unidade:'hora' };
+}
+function cfgSetOperacaoMaquina(opKey, maquinaId) {
+  if(!_cfgData) _cfgData = cfgLoad();
+  if(!_cfgData.maquinasOperacoes || typeof _cfgData.maquinasOperacoes!=='object') _cfgData.maquinasOperacoes = {};
+  _cfgData.maquinasOperacoes[opKey] = maquinaId || null;
+  cfgRenderMaqOp();
+  cfgSave(_cfgData);
+}
+function cfgRenderMaqOp() {
+  var body = document.getElementById('maqOpBody');
+  if (!body) return;
+  if (!_cfgData) _cfgData = cfgLoad();
+  var maquinas = _cfgData.maquinas || [];
+  var map = _cfgData.maquinasOperacoes || {};
+  body.innerHTML = ORC_MAQ_OPS.map(function (op) {
+    var selecionada = map[op.key] || '';
+    var opts = '<option value="">— nenhuma vinculada —</option>' + maquinas.map(function (m) {
+      var sel = (m.id && m.id === selecionada) ? ' selected' : '';
+      return '<option value="' + cfgEsc(m.id || '') + '"' + sel + '>' + cfgEsc(m.nome) + ' (' + cfgEsc(m.unidade) + ')</option>';
+    }).join('');
+    var info = cfgMaqOperInfo(op.key);
+    var taxaTxt, setupTxt;
+    if (info.ok) {
+      taxaTxt = '<span style="color:var(--text)">R$' + info.custoMin.toFixed(4).replace('.', ',') + '/min</span>';
+      setupTxt = 'R$' + info.setup.toFixed(2).replace('.', ',');
+    } else if (info.motivo === 'nao_vinculada') {
+      taxaTxt = '<span style="color:var(--muted);font-weight:700">⚠️ sem máquina vinculada</span>';
+      setupTxt = '—';
+    } else if (info.motivo === 'unidade_incompativel') {
+      taxaTxt = '<span style="color:#DC2626;font-weight:700">⚠️ unidade "' + cfgEsc(info.unidade) + '" ≠ hora</span>';
+      setupTxt = '—';
+    } else {
+      taxaTxt = '<span style="color:#DC2626;font-weight:700">⚠️ máquina sem custo configurado</span>';
+      setupTxt = 'R$' + info.setup.toFixed(2).replace('.', ',');
+    }
+    return '<tr><td>' + op.label + '</td>'
+      + '<td><select style="border:none;background:transparent;font-size:12px;width:100%" onchange="cfgSetOperacaoMaquina(\'' + op.key + '\',this.value)">' + opts + '</select></td>'
+      + '<td style="font-size:12px">' + taxaTxt + '</td>'
+      + '<td style="font-size:12px;text-align:right">' + setupTxt + '</td></tr>';
+  }).join('');
+}
+
 function cfgEsc(s){ return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 // Hash simples e não-reversível (djb2) — usado para "pricingVersion" no
@@ -33524,7 +33747,7 @@ function cfgAddRow(tableId, tipo) {
   if(!Array.isArray(_cfgData.maodeobra)) _cfgData.maodeobra = JSON.parse(JSON.stringify(CFG_DEFAULT.maodeobra));
   var arr = tipo==='mat'?_cfgData.materiais : tipo==='maq'?_cfgData.maquinas : _cfgData.maodeobra;
   if(tipo==='mat'){ arr.push({id:_cfgNewMaterialId(),nome:'Novo material',unidade:'m²',custo:0,obs:''}); }
-  else if(tipo==='maq'){ arr.push({nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
+  else if(tipo==='maq'){ arr.push({id:_cfgNewMaquinaId(),nome:'Nova máquina',unidade:'m²',custo:0,setup:0,obs:''}); }
   else if(tipo==='mob'){ arr.push({nome:'Novo serviço',unidade:'hora',valor:0,obs:''}); }
   var _idxAdicionado = arr.length - 1;
   cfgRenderTables();

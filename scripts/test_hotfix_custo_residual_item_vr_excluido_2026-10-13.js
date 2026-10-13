@@ -56,8 +56,25 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['orcFmt', 'orcSetV', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcRemItem', 'orcAutoLaser', 'orcAutoLaserSeNecessario', 'orcVitreItensPedidoTotal'];
+function extractVarDecl(name) {
+  var marker = 'var ' + name + ' = ';
+  var start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  var end = html.indexOf(';', start);
+  return html.slice(start, end + 1);
+}
+
+// RODADA CIRÚRGICA 2026-10-13, BLOCO C — orcRecalc() agora lê a taxa de
+// máquina de cfgMaqOperInfo()/_orcMaqInfo() (Config canônica) em vez de um
+// literal hardcoded; estas 3 entradas precisam ser extraídas junto para o
+// motor funcionar no harness, e o stub de cfgLoad() abaixo passa a
+// configurar+vincular uma máquina "Laser" com a MESMA taxa efetiva de
+// antes (R$6/h = R$0,10/min) — preserva os números originais deste teste
+// (que são sobre o BUG de resíduo, não sobre a taxa em si) sem reintroduzir
+// nenhum hardcode no motor.
+var FN_NAMES = ['orcFmt', 'orcSetV', 'orcGetItemExtrasTotal', 'orcRecalc', 'orcRemItem', 'orcAutoLaser', 'orcAutoLaserSeNecessario', 'orcVitreItensPedidoTotal', 'cfgMaqOperInfo', '_orcMaqInfo'];
 var src = [
+  extractVarDecl('ORC_MAQ_OPS'),
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { orcRecalc: orcRecalc, orcRemItem: orcRemItem, orcAutoLaser: orcAutoLaser, orcAutoLaserSeNecessario: orcAutoLaserSeNecessario };'
 ].join('\n\n');
@@ -132,7 +149,7 @@ function montarCenario() {
     }
   };
   global._cfgData = { financeiro: { overhead: 0, vrml: 0, impostos: 0 } };
-  global.cfgLoad = function () { return { materiais: materiaisCatalogo, financeiro: {} }; };
+  global.cfgLoad = function () { return { materiais: materiaisCatalogo, financeiro: {}, maquinas: [{ id: 'maqLaserTest', nome: 'Laser Test', unidade: 'hora', custo: 6, setup: 0 }], maquinasOperacoes: { laser: 'maqLaserTest', dobra: null, pol: null, uv: null, lixa: null, tupia: null } }; };
   global._matGetRsm2 = function () { return 100; };
   global.ORC_ITEM_EXTRAS = {};
   global.ORC_ITEM_AJUSTES = {};
@@ -213,7 +230,7 @@ function montarCenarioDoisItens(omLaserInicial) {
     }
   };
   global._cfgData = { financeiro: { overhead: 0, vrml: 0, impostos: 0 } };
-  global.cfgLoad = function () { return { materiais: materiaisCatalogo, financeiro: {} }; };
+  global.cfgLoad = function () { return { materiais: materiaisCatalogo, financeiro: {}, maquinas: [{ id: 'maqLaserTest', nome: 'Laser Test', unidade: 'hora', custo: 6, setup: 0 }], maquinasOperacoes: { laser: 'maqLaserTest', dobra: null, pol: null, uv: null, lixa: null, tupia: null } }; };
   global._matGetRsm2 = function () { return 100; };
   global.ORC_ITEM_EXTRAS = {};
   global.ORC_ITEM_AJUSTES = {};

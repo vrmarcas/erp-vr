@@ -51,6 +51,26 @@ function extractFn(name) {
   if (depth !== 0) throw new Error('Chaves desbalanceadas extraindo ' + name);
   return html.slice(start, i + 1);
 }
+// RODADA CIRÚRGICA 2026-10-13, Bloco C — mesmo motivo/fix de
+// test_rodada_correcao_priorizada_2026-09-11_f3_fechamento_centavos.js:
+// orcRecalc() agora depende de ORC_MAQ_OPS/cfgMaqOperInfo()/_orcMaqInfo()
+// (Config→Máquinas canônica); este harness tem seu PRÓPRIO cfgLoad()/
+// _cfgData module-scoped (nunca via global.cfgLoad), então as 3 entradas
+// precisam ser extraídas AQUI também para resolver para o cfgLoad certo.
+function extractVarDecl(name) {
+  var marker = 'var ' + name + ' = ';
+  var start = html.indexOf(marker);
+  if (start < 0) throw new Error('Variável ' + name + ' não encontrada — teste desatualizado?');
+  var depth = 0, i = start + marker.length, end = -1;
+  for (; i < html.length; i++) {
+    var c = html[i];
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth--;
+    else if (c === ';' && depth === 0) { end = i; break; }
+  }
+  if (end < 0) throw new Error('Fim de ' + name + ' não encontrado');
+  return html.slice(start, end + 1);
+}
 
 var src = [
   'var document = global.__DOC__;',
@@ -72,6 +92,9 @@ var src = [
   'function orcProdutoNomeResolvido(idx) { return "Item "+idx; }',
   'function cfgEsc(s) { return s; }',
   'function showToast() {}',
+  extractVarDecl('ORC_MAQ_OPS'),
+  extractFn('cfgMaqOperInfo'),
+  extractFn('_orcMaqInfo'),
   extractFn('orcItemAplicarAjuste'),
   extractFn('orcRecalc'),
   'module.exports = { orcRecalc: orcRecalc };'
