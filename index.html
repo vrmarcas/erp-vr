@@ -7975,6 +7975,77 @@ function _authFirebaseError(code){
   </div>
 </div>
 
+<!-- MODAL: Editor completo de Conta a Pagar — RODADA CIRÚRGICA 2026-10-13
+     (Bloco B). Compartilhado por "Editar só esta" (modo 'unica': edita o
+     lançamento individual em FIN_CP, inclusive Vencimento) e "Editar esta
+     e próximas" (modo 'futuras': edita o TEMPLATE em FIN_CP_RECORRENCIAS
+     via finCPEditarFuturas() já existente — nunca Valor nessa modalidade,
+     mesma regra já estabelecida em finCPEditarFuturasUI antes desta
+     rodada: recorrência variável não tem valor fixo por definição). -->
+<div class="gen-overlay" id="finCPEditOverlay" onclick="if(event.target===this)finCPEditOverlayClose()">
+  <div class="gen-modal" style="width:520px">
+    <div class="gen-modal-hdr" style="background:linear-gradient(135deg,#DC2626,#EF4444);border-radius:16px 16px 0 0">
+      <div class="gen-modal-title" style="color:#fff" id="finCPEditTitulo">✏️ Editar Conta a Pagar</div>
+      <button class="gen-close" onclick="finCPEditOverlayClose()" style="color:#fff;background:rgba(255,255,255,.15)">✕</button>
+    </div>
+    <div class="gen-modal-body">
+      <div id="finCPEditAvisoSerie" style="display:none;background:var(--bg2);border-left:3px solid #DC2626;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--muted)">
+        Isso encerra a série atual e cria uma nova a partir desta competência. Competências já pagas e o histórico nunca são alterados.
+      </div>
+      <div class="fg">
+        <label>Fornecedor / Despesa</label>
+        <input type="text" id="finCPEditForn" placeholder="Ex: Energia Elétrica">
+      </div>
+      <div class="fg">
+        <label>Descrição</label>
+        <input type="text" id="finCPEditDesc" placeholder="Ex: Salário do Paulo — Julho">
+      </div>
+      <div class="fg2">
+        <div class="fg">
+          <label>Categoria</label>
+          <select id="finCPEditCat">
+            <optgroup label="── CUSTO (CMV)">
+              <option value="Matéria-Prima">🪵 Matéria-Prima</option>
+              <option value="Mão de Obra Direta">🔧 Mão de Obra Direta</option>
+            </optgroup>
+            <optgroup label="── DESPESA">
+              <option value="Pessoal Admin">👥 Pessoal Admin</option>
+              <option value="Operacional">⚙️ Operacional</option>
+              <option value="Impostos">🏛️ Impostos</option>
+              <option value="Empréstimos">🏦 Empréstimos</option>
+              <option value="Outros">📌 Outros</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="fg" id="finCPEditValorWrap">
+          <label>Valor (R$)</label>
+          <input type="number" id="finCPEditValor" min="0" step="0.01" placeholder="0,00">
+        </div>
+      </div>
+      <div class="fg" id="finCPEditVencWrap">
+        <label>Vencimento</label>
+        <input type="date" id="finCPEditVenc">
+      </div>
+      <div class="fg" id="finCPEditDiaWrap">
+        <label>Dia do vencimento (esta e as próximas competências)</label>
+        <input type="number" id="finCPEditDia" min="1" max="28" placeholder="1–28">
+      </div>
+      <div class="fg" id="finCPEditCompWrap">
+        <label>Competência</label>
+        <input type="text" id="finCPEditComp" disabled style="opacity:.7">
+      </div>
+      <div class="fg" id="finCPEditObsWrap">
+        <label>Observação</label>
+        <textarea id="finCPEditObs" rows="2" placeholder="Anotações internas sobre este lançamento..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="topbar-btn ghost" style="flex:1;padding:10px" onclick="finCPEditOverlayClose()">Cancelar</button>
+        <button class="gen-submit" style="flex:2;background:linear-gradient(135deg,#DC2626,#EF4444)" onclick="finCPEditSalvar(this)">💾 Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- MODAL: Novo Cartão -->
 <div class="gen-overlay" id="finCartaoOverlay" onclick="if(event.target===this)document.getElementById('finCartaoOverlay').classList.remove('open')">
@@ -21407,47 +21478,136 @@ function finCPEncerrarRecorrenciaUI(recorrenciaId) {
     showToast('Recorrência encerrada — ocorrências já geradas foram preservadas','ok');
   });
 }
-// SPRINT DE CORREÇÃO PÓS-AUDITORIA, P1.9 — "Editar só esta": muda campos
-// não-financeiros de UMA competência específica (descrição/fornecedor),
-// sem tocar a recorrência-mãe nem o valor já informado/pendente. Nunca
-// permite editar uma competência já paga (histórico imutável).
-function finCPEditarUnicaUI(cpId) {
-  var r = FIN_CP.find(function(x){return x.id===cpId;}); if(!r) return;
-  if(r.status==='pago'){ showToast('Não é possível editar uma competência já paga.','warn'); return; }
-  var novaDesc = prompt('Descrição (só esta competência):', r.descricao||''); if(novaDesc===null) return;
-  var novoForn = prompt('Fornecedor (só esta competência):', r.fornecedor||''); if(novoForn===null) return;
-  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
-  r.descricao = novaDesc.trim();
-  r.fornecedor = novoForn.trim() || null;
-  var p = _finSaveCP();
-  (p && typeof p.then==='function' ? p : Promise.resolve()).then(function(){
-    finCPRender();
-    showToast('Competência atualizada — só este mês, a série continua igual.','ok');
-  });
+// RODADA CIRÚRGICA 2026-10-13 (Bloco B) — guard centralizado de "conta já
+// paga": antes disso, cada função de edição repetia seu próprio `if
+// (status==='pago')`, cada uma com uma mensagem diferente. Única fonte da
+// mensagem (section 14 do pedido): lançamentos pagos são histórico
+// imutável — correção passa pelo fluxo canônico de estorno
+// (finCPEstornar) antes de qualquer edição de campo financeiro sensível.
+function finCPBloqueadaPorPagamento(r) {
+  if (!r || r.status !== 'pago') return false;
+  showToast('Este lançamento já foi pago. Faça estorno/correção antes de alterar.', 'warn');
+  return true;
 }
-// "Editar esta e próximas": encerra a série antiga na competência
-// anterior e cria uma nova a partir daqui (finCPEditarFuturas já
-// implementa isso — nunca toca competências já pagas nem o histórico).
-// Só pede os campos que fazem sentido para a série inteira (nunca valor
-// — recorrência variável nunca tem valor fixo por definição).
+// Editor completo de Conta a Pagar (SPRINT DE CORREÇÃO PÓS-AUDITORIA,
+// P1.9, upgradeado nesta rodada de dois prompt() — só descrição/
+// fornecedor — para um modal real com TODOS os campos aplicáveis,
+// inclusive Vencimento, que antes não existia em lugar nenhum da UI de
+// edição). "Editar só esta" edita o registro INDIVIDUAL em FIN_CP
+// (nunca toca a recorrência-mãe nem outras ocorrências); "Editar esta e
+// próximas" reaproveita a função pura já existente finCPEditarFuturas()
+// (nunca duplicada) — encerra a série antiga na competência anterior e
+// cria uma nova a partir daqui, nunca tocando competências já pagas nem
+// o histórico. Nenhuma das duas modalidades jamais edita uma conta já
+// paga (guard centralizado acima) nem cria um lançamento novo/duplicado
+// — sempre mutação in-place do registro (modo 'unica') ou chamada à
+// função de série já auditada (modo 'futuras').
+var _finCPEditState = null;
+function finCPEditModoAplicar() {
+  var modo = _finCPEditState && _finCPEditState.modo;
+  var isFuturas = modo === 'futuras';
+  document.getElementById('finCPEditAvisoSerie').style.display = isFuturas ? 'block' : 'none';
+  document.getElementById('finCPEditValorWrap').style.display = isFuturas ? 'none' : '';
+  document.getElementById('finCPEditVencWrap').style.display = isFuturas ? 'none' : '';
+  document.getElementById('finCPEditDiaWrap').style.display = isFuturas ? '' : 'none';
+  document.getElementById('finCPEditCompWrap').style.display = isFuturas ? 'none' : '';
+  document.getElementById('finCPEditObsWrap').style.display = isFuturas ? 'none' : '';
+}
+function finCPEditOverlayClose() { document.getElementById('finCPEditOverlay').classList.remove('open'); _finCPEditState = null; }
+function finCPEditarUnicaUI(cpId) {
+  var r = FIN_CP.find(function (x) { return x.id === cpId; }); if (!r) return;
+  if (finCPBloqueadaPorPagamento(r)) return;
+  _finCPEditState = { modo: 'unica', cpId: cpId };
+  document.getElementById('finCPEditTitulo').textContent = '✏️ Editar só esta competência';
+  document.getElementById('finCPEditForn').value = r.fornecedor || '';
+  document.getElementById('finCPEditDesc').value = r.descricao || '';
+  var catEl = document.getElementById('finCPEditCat'); if (catEl) catEl.value = r.categoria || 'Outros';
+  document.getElementById('finCPEditValor').value = r.valor != null ? r.valor : '';
+  // r.vencimento é "DD/MM/AAAA" (schema FIN_CP) — <input type=date> exige "AAAA-MM-DD".
+  var vp = String(r.vencimento || '').split('/');
+  document.getElementById('finCPEditVenc').value = vp.length === 3 ? (vp[2] + '-' + vp[1] + '-' + vp[0]) : '';
+  document.getElementById('finCPEditComp').value = r.competencia || '—';
+  document.getElementById('finCPEditObs').value = r.observacao || '';
+  finCPEditModoAplicar();
+  document.getElementById('finCPEditOverlay').classList.add('open');
+}
 function finCPEditarFuturasUI(recorrenciaId, apartirCompetencia) {
-  var rec = FIN_CP_RECORRENCIAS.find(function(x){return x.id===recorrenciaId;});
-  if(!rec){ showToast('Recorrência não encontrada.','warn'); return; }
-  if(!apartirCompetencia){ showToast('Competência de referência não encontrada.','warn'); return; }
-  if(!confirm('Isso encerra a série atual e cria uma nova a partir desta competência. Competências já pagas e o histórico nunca são alterados. Continuar?')) return;
-  var novaDesc = prompt('Descrição (esta e as próximas competências):', rec.descricao||''); if(novaDesc===null) return;
-  var novoForn = prompt('Fornecedor (esta e as próximas):', rec.fornecedor||''); if(novoForn===null) return;
-  var novaCat = prompt('Categoria (esta e as próximas):', rec.categoria||''); if(novaCat===null) return;
-  var novoDia = prompt('Dia de vencimento, 1-28 (esta e as próximas):', String(rec.diaVencimento||'')); if(novoDia===null) return;
-  var diaNum = parseInt(novoDia,10);
-  if(!novaDesc.trim()){ showToast('Descrição não pode ficar vazia.','warn'); return; }
-  if(isNaN(diaNum)||diaNum<1||diaNum>28){ showToast('Dia de vencimento inválido — use um número de 1 a 28.','warn'); return; }
-  var novosValores = { descricao: novaDesc.trim(), fornecedor: novoForn.trim()||'', categoria: novaCat.trim()||rec.categoria, diaVencimento: diaNum };
-  var res = finCPEditarFuturas(recorrenciaId, apartirCompetencia, novosValores);
-  if(!res.ok){ showToast(res.erro||'Não foi possível editar a série','warn'); return; }
-  Promise.all([_finSaveCP(), _finSaveCPRecorrencias()].map(function(p){ return p&&p.then?p:Promise.resolve(); })).then(function(){
-    finCPRender();
-    showToast('Série atualizada a partir desta competência — pagas e histórico preservados.','ok');
+  var rec = FIN_CP_RECORRENCIAS.find(function (x) { return x.id === recorrenciaId; });
+  if (!rec) { showToast('Recorrência não encontrada.', 'warn'); return; }
+  if (!apartirCompetencia) { showToast('Competência de referência não encontrada.', 'warn'); return; }
+  _finCPEditState = { modo: 'futuras', recorrenciaId: recorrenciaId, apartirCompetencia: apartirCompetencia };
+  document.getElementById('finCPEditTitulo').textContent = '✏️ Editar esta e as próximas competências';
+  document.getElementById('finCPEditForn').value = rec.fornecedor || '';
+  document.getElementById('finCPEditDesc').value = rec.descricao || '';
+  var catEl2 = document.getElementById('finCPEditCat'); if (catEl2) catEl2.value = rec.categoria || 'Outros';
+  document.getElementById('finCPEditDia').value = rec.diaVencimento || '';
+  finCPEditModoAplicar();
+  document.getElementById('finCPEditOverlay').classList.add('open');
+}
+var _finCPEditSalvando = false;
+function finCPEditSalvar(btnEl) {
+  if (_finCPEditSalvando || !_finCPEditState) return;
+  var desc = (document.getElementById('finCPEditDesc') || {}).value || '';
+  var forn = (document.getElementById('finCPEditForn') || {}).value || '';
+  var cat = (document.getElementById('finCPEditCat') || {}).value || 'Outros';
+  if (!desc.trim()) { showToast('Descrição não pode ficar vazia.', 'warn'); return; }
+
+  if (_finCPEditState.modo === 'unica') {
+    var r = FIN_CP.find(function (x) { return x.id === _finCPEditState.cpId; });
+    if (!r) { showToast('Lançamento não encontrado — pode ter sido removido.', 'warn'); finCPEditOverlayClose(); return; }
+    if (finCPBloqueadaPorPagamento(r)) { finCPEditOverlayClose(); return; }
+    var valorRaw = (document.getElementById('finCPEditValor') || {}).value;
+    var vencRaw = (document.getElementById('finCPEditVenc') || {}).value || '';
+    if (!vencRaw) { showToast('Informe o vencimento.', 'warn'); return; }
+    if (valorRaw !== '' && valorRaw != null && !(parseFloat(valorRaw) > 0)) { showToast('Informe um valor maior que zero (ou deixe em branco para continuar "a informar").', 'warn'); return; }
+    var vp2 = vencRaw.split('-'); var vencNovo = vp2[2] + '/' + vp2[1] + '/' + vp2[0];
+    var antes = { descricao: r.descricao, fornecedor: r.fornecedor, categoria: r.categoria, valor: r.valor, vencimento: r.vencimento };
+    r.descricao = desc.trim();
+    r.fornecedor = forn.trim() || null;
+    r.categoria = cat;
+    // Valor é OPCIONAL aqui: uma competência de recorrência variável ainda
+    // "a informar" (valor null / valorPendente=true — ver finCPInformarValor)
+    // continua podendo ter descrição/fornecedor/categoria/vencimento
+    // editados sem exigir o valor — campo deixado em branco não mexe em
+    // valor/valorPendente. Quando preenchido, grava e marca valorPendente
+    // = false, exatamente a mesma regra que finCPInformarValor() já usa
+    // (nunca duas lógicas divergentes para "informar o valor").
+    if (valorRaw !== '' && valorRaw != null) {
+      r.valor = parseFloat(valorRaw);
+      r.valorPendente = false;
+    }
+    r.vencimento = vencNovo;
+    r.observacao = (document.getElementById('finCPEditObs') || {}).value || '';
+    _finCPEditSalvando = true;
+    var _liberarU = _btnBusy(btnEl, 'Salvando…');
+    secAuditLog('fin_cp_editar_unica', 'CP ' + r.id + ' (' + r.descricao + '): vencimento ' + (antes.vencimento || '—') + ' → ' + r.vencimento + ', valor R$' + (antes.valor || 0).toFixed(2) + ' → R$' + (r.valor || 0).toFixed(2));
+    var pU = _finSaveCP();
+    finCPEditOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
+    (pU && typeof pU.then === 'function' ? pU : Promise.resolve()).then(function () {
+      _finCPEditSalvando = false; if (_liberarU) _liberarU();
+      showToast('Competência atualizada — só este mês, a série continua igual.', 'ok');
+    });
+    return;
+  }
+
+  // modo 'futuras'
+  var diaNum = parseInt((document.getElementById('finCPEditDia') || {}).value, 10);
+  if (isNaN(diaNum) || diaNum < 1 || diaNum > 28) { showToast('Dia de vencimento inválido — use um número de 1 a 28.', 'warn'); return; }
+  var novosValores = { descricao: desc.trim(), fornecedor: forn.trim() || '', categoria: cat, diaVencimento: diaNum };
+  _finCPEditSalvando = true;
+  var _liberarF = _btnBusy(btnEl, 'Salvando…');
+  var res = finCPEditarFuturas(_finCPEditState.recorrenciaId, _finCPEditState.apartirCompetencia, novosValores);
+  if (!res.ok) {
+    _finCPEditSalvando = false; if (_liberarF) _liberarF();
+    showToast(res.erro || 'Não foi possível editar a série', 'warn');
+    return;
+  }
+  secAuditLog('fin_cp_editar_futuras', 'Série ' + _finCPEditState.recorrenciaId + ' a partir de ' + _finCPEditState.apartirCompetencia + ': "' + novosValores.descricao + '", dia ' + novosValores.diaVencimento + ' (nova série ' + res.novaRecorrenciaId + ')');
+  var pF = Promise.all([_finSaveCP(), _finSaveCPRecorrencias()].map(function (p) { return p && p.then ? p : Promise.resolve(); }));
+  finCPEditOverlayClose(); finCPRender(); finDashKPIs(); finDonutRender();
+  pF.then(function () {
+    _finCPEditSalvando = false; if (_liberarF) _liberarF();
+    showToast('Série atualizada a partir desta competência — pagas e histórico preservados.', 'ok');
   });
 }
 // Bloco N — UI de "Informar valor" (recorrência variável). Reaproveita o
