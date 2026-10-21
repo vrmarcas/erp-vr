@@ -160,6 +160,116 @@ console.log('\n=== Atendimentos — Cloud Functions reais (Emulator) ===\n');
     assertEq(doc.data().status, 'resolvido');
   });
 
+  // ── Rodada "resolvido reabre com nova mensagem" (2026-10-21) ───────────────
+  // Bug relatado: atendimento resolvido nunca mais recebia resposta da
+  // Valéria, mesmo com nova mensagem do cliente — causa raiz real:
+  // atdResolverAtendimento nunca restaurava modoAtendimento quando o
+  // atendimento tinha sido assumido por um humano antes de ser resolvido.
+  // Testes 11a-11e cobrem a reabertura automática ao chegar nova mensagem.
+
+  await test('11a. nova mensagem em atendimento resolvido+Valéria: reabre, modoAtendimento continua valeria, histórico preservado', async function () {
+    // atdId está resolvido desde o teste 11, com modoAtendimento="valeria" desde o teste 10.
+    var docAntes = await db.collection('atendimentos').doc(atdId).get();
+    assertEq(docAntes.data().status, 'resolvido', 'pré-condição: atendimento ainda resolvido');
+
+    var r = await atdSimularMensagemCliente.run(
+      { atendimentoId: atdId, texto: 'Oi, ainda estou aqui!', requestId: reqId() },
+      ctx(UID.master, 'master')
+    );
+    assertEq(r.ok, false, 'sem CHATVOLT_API_KEY o envio falha graciosamente, mas a reabertura já aconteceu antes');
+
+    var docDepois = await db.collection('atendimentos').doc(atdId).get();
+    var d = docDepois.data();
+    assertEq(d.status, 'aberto', 'reabriu: status saiu de resolvido');
+    assertEq(d.modoAtendimento, 'valeria', 'continua elegível para a Valéria (nunca precisou mudar)');
+
+    var msgs = await db.collection('atendimentos').doc(atdId).collection('mensagens').orderBy('createdAt', 'asc').get();
+    var sistemaReabertura = msgs.docs.map(function (x) { return x.data(); }).filter(function (m) {
+      return m.actorType === 'system' && /reabert/i.test(m.text || '');
+    });
+    assertEq(sistemaReabertura.length, 1, 'uma única mensagem de sistema de reabertura gravada (histórico preservado, não apagado)');
+  });
+
+  await test('11b. Assumir → Resolver (sem Devolver) → nova mensagem: reabre devolvendo para a Valéria (sem trava)', async function () {
+    var rc = await atdCriarConversaTeste.run({ nomeClienteSimulado: 'Cliente Humano Sem Trava' }, ctx(UID.master, 'master'));
+    var id = rc.id;
+    await atdAssumirAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+    await atdResolverAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+
+    var docAntes = await db.collection('atendimentos').doc(id).get();
+    var dAntes = docAntes.data();
+    assertEq(dAntes.status, 'resolvido');
+    assertEq(dAntes.modoAtendimento, 'humano', 'achado do bug: Resolver sozinho nunca restaurou modoAtendimento');
+
+    await atdSimularMensagemCliente.run({ atendimentoId: id, texto: 'Alô, continuo precisando de ajuda', requestId: reqId() }, ctx(UID.master, 'master'));
+
+    var docDepois = await db.collection('atendimentos').doc(id).get();
+    var d = docDepois.data();
+    assertEq(d.status, 'aberto', 'reabriu');
+    assertEq(d.modoAtendimento, 'valeria', 'sem trava explícita, nunca trata "ter sido humano no passado" como motivo para travar a IA para sempre');
+    assertEq(d.responsavelUid, null, 'ownership humana anterior é limpa na reabertura');
+
+    await limparAtendimento(id);
+  });
+
+  await test('11c. Assumir → Resolver + trava explícita → nova mensagem: reabre status, mas RESPEITA a trava (continua humano)', async function () {
+    var rc = await atdCriarConversaTeste.run({ nomeClienteSimulado: 'Cliente Humano Com Trava' }, ctx(UID.master, 'master'));
+    var id = rc.id;
+    await atdAssumirAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+    await atdResolverAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+    // Trava manual persistente — nenhum fluxo do produto seta isso hoje
+    // (reservado para uma trava futura); simula aqui para provar que a
+    // reabertura automática já a respeita desde já.
+    await db.collection('atendimentos').doc(id).set({ travaHumanaPermanente: true }, { merge: true });
+
+    await atdSimularMensagemCliente.run({ atendimentoId: id, texto: 'Mensagem nova sobre atendimento travado', requestId: reqId() }, ctx(UID.master, 'master'));
+
+    var doc = await db.collection('atendimentos').doc(id).get();
+    var d = doc.data();
+    assertEq(d.status, 'aberto', 'reabre o status mesmo com a trava (a trava é só sobre ownership/IA, não sobre o atendimento ficar "fechado")');
+    assertEq(d.modoAtendimento, 'humano', 'a trava explícita NUNCA é ignorada — IA não volta sozinha');
+    assertEq(d.responsavelUid, UID.comercial, 'ownership do humano é preservada quando há trava');
+
+    await limparAtendimento(id);
+  });
+
+  await test('11d. duas mensagens novas em sequência sobre atendimento resolvido: só uma reabertura, sem duplicidade', async function () {
+    var rc = await atdCriarConversaTeste.run({ nomeClienteSimulado: 'Cliente Duas Mensagens' }, ctx(UID.master, 'master'));
+    var id = rc.id;
+    await atdResolverAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+
+    // Duas mensagens "quase simultâneas" — dispara as duas chamadas em
+    // paralelo (mesmo padrão de concorrência real de dois webhooks quase
+    // ao mesmo tempo) para provar que a reabertura não duplica.
+    await Promise.all([
+      atdSimularMensagemCliente.run({ atendimentoId: id, texto: 'Mensagem 1', requestId: reqId() }, ctx(UID.master, 'master')),
+      atdSimularMensagemCliente.run({ atendimentoId: id, texto: 'Mensagem 2', requestId: reqId() }, ctx(UID.master, 'master')),
+    ]);
+
+    var doc = await db.collection('atendimentos').doc(id).get();
+    assertEq(doc.data().status, 'aberto', 'reabriu uma única vez');
+
+    var msgs = await db.collection('atendimentos').doc(id).collection('mensagens').get();
+    var sistemaReabertura = msgs.docs.map(function (x) { return x.data(); }).filter(function (m) {
+      return m.actorType === 'system' && /reabert/i.test(m.text || '');
+    });
+    assertEq(sistemaReabertura.length, 1, 'nunca duas mensagens de sistema de reabertura para o mesmo evento de reabertura');
+
+    await limparAtendimento(id);
+  });
+
+  await test('11e. atendimento resolvido sem nenhuma mensagem nova: nunca reabre sozinho (nenhum processo espontâneo)', async function () {
+    var rc = await atdCriarConversaTeste.run({ nomeClienteSimulado: 'Cliente Fica Resolvido' }, ctx(UID.master, 'master'));
+    var id = rc.id;
+    await atdResolverAtendimento.run({ atendimentoId: id }, ctx(UID.comercial, 'comercial'));
+    var antes = await db.collection('atendimentos').doc(id).get();
+    assertEq(antes.data().status, 'resolvido');
+    // Nenhuma chamada nova — só relê o doc para provar que nada o reabre sozinho.
+    var depois = await db.collection('atendimentos').doc(id).get();
+    assertEq(depois.data().status, 'resolvido', 'sem nova mensagem, continua resolvido para sempre (nenhum processo espontâneo)');
+    await limparAtendimento(id);
+  });
+
   await test('12. atdLimparConversaTeste: produção é negado (não é comercial nem master)', async function () {
     await assertThrows(function () {
       return atdLimparConversaTeste.run({ atendimentoId: atdId }, ctx(UID.producao, 'producao'));

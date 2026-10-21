@@ -47,6 +47,10 @@ const provider: AIProvider = new ChatVoltProvider();
 // channel: 'erp_web' | 'whatsapp_meta' | 'instagram' | 'site'
 // modoAtendimento: 'valeria' | 'humano' | 'aguardando_humano'
 // status: 'aberto' | 'aguardando_cliente' | 'aguardando_humano' | 'resolvido'
+// travaHumanaPermanente: boolean, opcional — trava manual que sobrevive ao
+//   Resolver (nenhum fluxo seta hoje; reservado p/ uma trava futura). Sem
+//   ela, "resolvido + humano" reabre devolvendo a Valéria — ver
+//   decidirReaberturaAtendimento.
 // classificacao: 'catalogo' | 'recompra' | 'projeto_sob_medida' | 'nao_classificado'
 // marca: 'vitre' | 'vr' | 'misto' | 'indefinido'
 // actorType (mensagens): 'customer' | 'valeria' | 'human' | 'system'
@@ -294,6 +298,46 @@ async function setChatvoltAiEnabled(providerConversationId: string | null, enabl
   }
 }
 
+/**
+ * Rodada "resolvido reabre com nova mensagem" (2026-10-21) — achado real de
+ * auditoria: `atdResolverAtendimento` só grava `status:"resolvido"`, nunca
+ * restaura `modoAtendimento`/`isAiEnabled` quando o atendimento tinha sido
+ * assumido por um humano (fluxo normal Assumir→Resolver, sem o passo
+ * "Devolver para Valéria") — e nada no caminho de mensagem nova reavaliava
+ * nenhum dos dois campos. Resultado: a Valéria nunca mais respondia depois
+ * de um Resolver que seguiu um Assumir. Esta função pura decide, a partir
+ * do estado atual do atendimento, se uma mensagem de entrada GENUÍNA do
+ * cliente deve reabrir o atendimento e com qual `modoAtendimento`
+ * resultante — nunca toca no próprio `atdResolverAtendimento`, que
+ * continua só encerrando a conversa atual (reabertura é um efeito da NOVA
+ * mensagem, não do Resolver).
+ *
+ * `travaHumanaPermanente` — campo novo (nunca setado por nenhum fluxo
+ * hoje, reservado para uma trava manual futura que sobreviva ao Resolver).
+ * Sem essa trava, "resolvido + humano" reabre devolvendo a elegibilidade
+ * para a Valéria (mesmo efeito de "Devolver para Valéria", só que
+ * automático) — nunca trata "ter sido humano no passado" como motivo para
+ * a IA nunca mais responder. Gêmea desta função em
+ * functions-valeria/src/webhook.ts (mesmo nome, sem cross-import entre os
+ * dois codebases — mesma disciplina de setChatvoltAiEnabled).
+ */
+function decidirReaberturaAtendimento(
+  atd: { status?: string | null; modoAtendimento?: string | null; travaHumanaPermanente?: boolean | null },
+  isInboundCustomerMessage: boolean
+): { reabrir: boolean; patch: Record<string, unknown>; reativarIA: boolean } {
+  if (!isInboundCustomerMessage || atd.status !== "resolvido") {
+    return { reabrir: false, patch: {}, reativarIA: false };
+  }
+  const patch: Record<string, unknown> = { status: "aberto" };
+  const eraHumanoSemTrava = atd.modoAtendimento === "humano" && atd.travaHumanaPermanente !== true;
+  if (eraHumanoSemTrava) {
+    patch.modoAtendimento = "valeria";
+    patch.responsavelUid = null;
+    patch.responsavelNome = null;
+  }
+  return { reabrir: true, patch, reativarIA: eraHumanoSemTrava };
+}
+
 async function nomeStaff(uid: string): Promise<string> {
   try {
     const doc = await db().collection("erp_vr_usuarios").doc(uid).get();
@@ -382,8 +426,54 @@ export const atdSimularMensagemCliente = functions
       return { ok: true, jaProcessado: true };
     }
 
-    const msgRef = snap.ref.collection(SUB_MSG).doc();
     const now = Date.now();
+
+    // Rodada "resolvido reabre com nova mensagem" (2026-10-21) — chegar
+    // aqui, depois do acquireIdem acima, já É por definição uma nova
+    // mensagem de entrada do cliente (nunca reprocessa a mesma mensagem
+    // duas vezes). Se o atendimento estava resolvido, reabre ANTES do
+    // early-return de modo humano logo abaixo — nunca deixa o
+    // modoAtendimento travado sobreviver indefinidamente a um Resolver.
+    // Transação dedicada com leitura FRESCA (mesmo padrão do gêmeo em
+    // functions-valeria/src/webhook.ts): duas mensagens novas quase
+    // simultâneas sobre o mesmo atendimento resolvido nunca podem gerar
+    // duas reaberturas/duas mensagens de sistema (achado real do teste de
+    // concorrência — a versão sem transação duplicava a mensagem de
+    // sistema). Só entra na transação quando o snapshot já lido indica
+    // "resolvido" — evita o custo da transação no caminho comum.
+    let modoAtendimentoEfetivo = atd.modoAtendimento as string | undefined;
+    if (atd.status === "resolvido") {
+      const reabertura = await db().runTransaction(async (tx) => {
+        const freshSnap = await tx.get(snap.ref);
+        const freshAtd = (freshSnap.data() ?? {}) as Record<string, unknown>;
+        const decisao = decidirReaberturaAtendimento(
+          {
+            status: freshAtd.status as string | null,
+            modoAtendimento: freshAtd.modoAtendimento as string | null,
+            travaHumanaPermanente: freshAtd.travaHumanaPermanente as boolean | null,
+          },
+          true
+        );
+        if (!decisao.reabrir) return { reabrir: false, patch: {} as Record<string, unknown>, reativarIA: false };
+        tx.set(snap.ref, { ...decisao.patch, updatedAt: now }, { merge: true });
+        const sysReaberturaRef = snap.ref.collection(SUB_MSG).doc();
+        tx.set(sysReaberturaRef, {
+          id: sysReaberturaRef.id, atendimentoId, providerMessageId: null, idempotencyKey: null,
+          actorType: "system", actorId: null, actorName: "Sistema",
+          text: "Atendimento reaberto automaticamente — nova mensagem do cliente após resolução.",
+          attachments: [], deliveryStatus: "sent", provider: "erp", createdAt: now,
+        });
+        return decisao;
+      });
+      if (reabertura.reabrir && reabertura.reativarIA) {
+        await setChatvoltAiEnabled((atd.providerConversationId as string | null) ?? atendimentoId, true);
+      }
+      if (reabertura.reabrir) {
+        modoAtendimentoEfetivo = (reabertura.patch.modoAtendimento as string | undefined) ?? modoAtendimentoEfetivo;
+      }
+    }
+
+    const msgRef = snap.ref.collection(SUB_MSG).doc();
     await msgRef.set({
       id: msgRef.id,
       atendimentoId,
@@ -401,7 +491,9 @@ export const atdSimularMensagemCliente = functions
     await snap.ref.set({ ultimaMensagem: texto, ultimaInteracaoEm: now, updatedAt: now }, { merge: true });
 
     // Modo humano: não aciona a Valéria — humano responde pelo composer.
-    if (atd.modoAtendimento === "humano") {
+    // Usa o modo EFETIVO (pós-reabertura acima), nunca o atd.modoAtendimento
+    // stale lido antes do patch de reabertura.
+    if (modoAtendimentoEfetivo === "humano") {
       return { ok: true, jaProcessado: false, resposta: null };
     }
 

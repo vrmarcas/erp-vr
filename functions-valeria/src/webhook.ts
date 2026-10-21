@@ -250,6 +250,69 @@ export async function processarAnexosInbound(
 }
 
 /**
+ * Rodada "resolvido reabre com nova mensagem" (2026-10-21) — achado real de
+ * auditoria: `atdResolverAtendimento` (functions/src/atendimentos.ts) só
+ * grava `status:"resolvido"`, nunca restaura `modoAtendimento`/
+ * `isAiEnabled` quando o atendimento tinha sido assumido por um humano
+ * (fluxo normal Assumir→Resolver, sem o passo "Devolver para Valéria") —
+ * e nada no caminho de mensagem nova reavaliava nenhum dos dois campos.
+ * Resultado: a Valéria nunca mais respondia depois de um Resolver que
+ * seguiu um Assumir. Esta função pura decide, a partir do estado atual do
+ * atendimento, se uma mensagem de entrada GENUÍNA do cliente deve reabrir
+ * o atendimento e, se sim, com qual `modoAtendimento` resultante — nunca
+ * toca no próprio `atdResolverAtendimento`, que continua só encerrando a
+ * conversa atual (regra de negócio: reabertura é um efeito da NOVA
+ * mensagem, não do Resolver).
+ *
+ * `travaHumanaPermanente` — campo novo (nunca setado por nenhum fluxo
+ * hoje, reservado para uma trava manual futura que sobreviva ao Resolver).
+ * Sem essa trava, "resolvido + humano" reabre devolvendo a elegibilidade
+ * para a Valéria (mesmo efeito de "Devolver para Valéria", só que
+ * automático) — nunca trata "ter sido humano no passado" como motivo para
+ * a IA nunca mais responder. Gêmea desta função em
+ * functions/src/atendimentos.ts (mesmo nome, sem cross-import entre os
+ * dois codebases — mesma disciplina de `setChatvoltAiEnabled`).
+ */
+export function decidirReaberturaAtendimento(
+  atd: { status?: string | null; modoAtendimento?: string | null; travaHumanaPermanente?: boolean | null },
+  isInboundCustomerMessage: boolean
+): { reabrir: boolean; patch: Record<string, unknown>; reativarIA: boolean } {
+  if (!isInboundCustomerMessage || atd.status !== "resolvido") {
+    return { reabrir: false, patch: {}, reativarIA: false };
+  }
+  const patch: Record<string, unknown> = { status: "aberto" };
+  const eraHumanoSemTrava = atd.modoAtendimento === "humano" && atd.travaHumanaPermanente !== true;
+  if (eraHumanoSemTrava) {
+    patch.modoAtendimento = "valeria";
+    patch.responsavelUid = null;
+    patch.responsavelNome = null;
+  }
+  return { reabrir: true, patch, reativarIA: eraHumanoSemTrava };
+}
+
+/**
+ * Best-effort, mesmo padrão/endpoint de
+ * `functions/src/atendimentos.ts:setChatvoltAiEnabled` (sem import
+ * cross-package — só chamada de rede). Usado pelo reopen automático acima
+ * para religar a IA de verdade no canal (WhatsApp real) quando a
+ * reabertura devolve o atendimento para a Valéria.
+ */
+async function setChatvoltAiEnabledWebhook(conversationId: string, enabled: boolean): Promise<void> {
+  const apiKey = process.env.CHATVOLT_API_KEY;
+  if (!apiKey) return;
+  try {
+    await fetch(`https://app.chatvolt.ai/api/conversations/${conversationId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ isAiEnabled: enabled }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (e) {
+    console.error("[webhook.setChatvoltAiEnabledWebhook] falha (não bloqueia reabertura):", (e as Error).message);
+  }
+}
+
+/**
  * Sprint P1.2b (achado real de E2E) — o webhook só passou a existir no
  * MEIO de conversas reais já em andamento (Tools sempre funcionaram,
  * technicalBriefing nunca ficou incompleto — só o espelho ERP/mensagens
@@ -390,6 +453,11 @@ async function upsertAtendimentoWhatsApp(params: {
   permiteCriar: boolean;
   providerMessageId: string | null;
   anexosMeta: AnexoMeta[];
+  // Rodada "resolvido reabre com nova mensagem" (2026-10-21) — true só para
+  // mensagem de ENTRADA genuína do cliente (nunca eco do próprio backend,
+  // nunca mensagem de saída). Única coisa capaz de reabrir um atendimento
+  // resolvido — ver decidirReaberturaAtendimento.
+  isInboundCustomerMessage: boolean;
 }): Promise<{ isNovo: boolean; atd: FirebaseFirestore.DocumentData } | null> {
   const admin = (await import("firebase-admin")).default;
   const db = admin.firestore();
@@ -479,6 +547,44 @@ async function upsertAtendimentoWhatsApp(params: {
     patch.historyBackfillCount = ((atd.historyBackfillCount as number) || 0) + sync.novasMensagens;
     if (!atd.historyBackfilledAt) patch.historyBackfilledAt = now;
   }
+
+  // Reabertura automática (rodada "resolvido reabre com nova mensagem",
+  // 2026-10-21) — transação dedicada com leitura FRESCA do status: duas
+  // mensagens novas quase simultâneas sobre o mesmo atendimento resolvido
+  // nunca devem gerar duas reaberturas/duas mensagens de sistema (achado
+  // do teste de idempotência). Só entra na transação quando o snapshot já
+  // lido indica `resolvido` — evita o custo da transação no caminho comum.
+  let reaberturaResult: { aplicada: boolean; reativarIA: boolean; patch: Record<string, unknown> } =
+    { aplicada: false, reativarIA: false, patch: {} };
+  if (params.isInboundCustomerMessage && atd.status === "resolvido") {
+    reaberturaResult = await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(ref);
+      const freshAtd = (freshSnap.data() ?? {}) as Record<string, unknown>;
+      const decisao = decidirReaberturaAtendimento(
+        {
+          status: freshAtd.status as string | null,
+          modoAtendimento: freshAtd.modoAtendimento as string | null,
+          travaHumanaPermanente: freshAtd.travaHumanaPermanente as boolean | null,
+        },
+        params.isInboundCustomerMessage
+      );
+      if (!decisao.reabrir) return { aplicada: false, reativarIA: false, patch: {} as Record<string, unknown> };
+      tx.set(ref, { ...decisao.patch, updatedAt: now }, { merge: true });
+      const sysRef = ref.collection("mensagens").doc();
+      tx.set(sysRef, {
+        id: sysRef.id, atendimentoId: params.conversationId, providerMessageId: null, idempotencyKey: null,
+        actorType: "system", actorId: null, actorName: "Sistema",
+        text: "Atendimento reaberto automaticamente — nova mensagem do cliente após resolução.",
+        attachments: [], deliveryStatus: "sent", provider: "erp", createdAt: now,
+      });
+      return { aplicada: true, reativarIA: decisao.reativarIA, patch: decisao.patch };
+    });
+  }
+  if (reaberturaResult.aplicada) Object.assign(patch, reaberturaResult.patch);
+  if (reaberturaResult.reativarIA) {
+    await setChatvoltAiEnabledWebhook((atd.providerConversationId as string | null) ?? params.conversationId, true);
+  }
+
   await ref.set(patch, { merge: true });
   return { isNovo: false, atd: { ...atd, ...patch } };
 }
@@ -850,6 +956,10 @@ export const valeriaWebhookChatvolt = RUN_OPTS.https.onRequest(async (req, res) 
             permiteCriar: direcao === "entrada" && !!mensagemCliente,
             providerMessageId: explicitMsgId ?? null,
             anexosMeta: anexos,
+            // Nunca reabre por eco do próprio backend (active pilot) nem
+            // por mensagem de saída — só mensagem de entrada genuína do
+            // cliente é capaz de reabrir um atendimento resolvido.
+            isInboundCustomerMessage: direcao === "entrada" && !!mensagemCliente && !isBackendEcho,
           });
           if (resultado && direcao === "entrada" && mensagemCliente) {
             const { atd } = resultado;
