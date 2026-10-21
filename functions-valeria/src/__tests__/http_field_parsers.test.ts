@@ -14,6 +14,7 @@ import {
   parseOptionalCustomDimensions,
   parseOptionalDeliveryData,
   parseOptionalStringArray,
+  parseOptionalCategoryQualificationSignals,
 } from "../http_field_parsers";
 
 describe("parseOptionalString", () => {
@@ -219,5 +220,57 @@ describe("parseOptionalStringArray", () => {
   });
   test("JSON inválido → FieldParseError", () => {
     expect(() => parseOptionalStringArray("personalization", "[not json")).toThrow(FieldParseError);
+  });
+});
+
+describe("parseOptionalCategoryQualificationSignals — rodada 'qualificação comercial' (2026-10-21)", () => {
+  test("undefined/null → null", () => {
+    expect(parseOptionalCategoryQualificationSignals("categoryQualificationSignals", undefined)).toBeNull();
+    expect(parseOptionalCategoryQualificationSignals("categoryQualificationSignals", null)).toBeNull();
+  });
+  test("objeto nativo com todos os campos", () => {
+    const out = parseOptionalCategoryQualificationSignals("categoryQualificationSignals", {
+      finalidadeUso: "guardar lembrancinhas",
+      temTampa: true,
+      tampaModelo: "tampa de correr",
+      modeloReferencia: "sem_modelo",
+      arquivoRecebido: false,
+      arquivoEhProdutivo: null,
+      conteudoDesejado: "logo + telefone",
+      temArte: false,
+      catalogoReferenciaOferecido: true,
+    });
+    expect(out).toEqual({
+      finalidadeUso: "guardar lembrancinhas",
+      temTampa: true,
+      tampaModelo: "tampa de correr",
+      modeloReferencia: "sem_modelo",
+      arquivoRecebido: false,
+      arquivoEhProdutivo: null,
+      conteudoDesejado: "logo + telefone",
+      temArte: false,
+      catalogoReferenciaOferecido: true,
+    });
+  });
+  test("string JSON equivalente ao objeto nativo (mesmo contrato dos demais parsers)", () => {
+    const nativo = parseOptionalCategoryQualificationSignals("categoryQualificationSignals", { temTampa: true });
+    const viaString = parseOptionalCategoryQualificationSignals("categoryQualificationSignals", '{"temTampa":true}');
+    expect(viaString).toEqual(nativo);
+  });
+  test("só os campos presentes aparecem na saída — nunca inventa campo ausente como null", () => {
+    const out = parseOptionalCategoryQualificationSignals("categoryQualificationSignals", { modeloReferencia: "troféu dourado" });
+    expect(out).toEqual({ modeloReferencia: "troféu dourado" });
+    expect(Object.keys(out!)).toEqual(["modeloReferencia"]);
+  });
+  test("rejeita booleano em campo string (tampaModelo)", () => {
+    expect(() => parseOptionalCategoryQualificationSignals("categoryQualificationSignals", { tampaModelo: true })).not.toThrow();
+    // tampaModelo não é string -> parseOptionalString devolve null silenciosamente (mesmo contrato de parseOptionalString para tipo errado)
+    expect(parseOptionalCategoryQualificationSignals("categoryQualificationSignals", { tampaModelo: true })).toEqual({ tampaModelo: null });
+  });
+  test("rejeita valor não-objeto (array)", () => {
+    expect(() => parseOptionalCategoryQualificationSignals("categoryQualificationSignals", ["a"])).toThrow(FieldParseError);
+  });
+  test("JSON inválido → FieldParseError", () => {
+    expect(() => parseOptionalCategoryQualificationSignals("categoryQualificationSignals", "{not json")).toThrow(FieldParseError);
   });
 });

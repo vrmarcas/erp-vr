@@ -115,6 +115,15 @@ const CAMPOS_OPCIONAIS: (keyof BriefingData)[] = ["acabamento", "referencia", "o
  * ainda (ex.: antes do cliente escolher um produto), cai no fallback
  * genérico — preserva 100% o comportamento de catálogo/Vitre/
  * classificação, que nunca passam por technical_briefing.
+ *
+ * Rodada "qualificação comercial" (2026-10-21) — troféu NUNCA tem
+ * `productId` (de propósito, nunca aciona receita/hardcode legado — ver
+ * technical_briefing.ts), mas AINDA tem `categoriaComercial==="trofeu"`
+ * assim que a conversa entra em ROUTED_TO_CUSTOM. Sem este `||`, troféu
+ * cairia sempre no fallback genérico de BriefingData (nunca escrito pelo
+ * fluxo V2) e `buscar_contexto_da_conversa` nunca refletiria o estado
+ * real do troféu. Caixa/placa não mudam de comportamento (sempre tinham
+ * productId quando chegavam aqui).
  */
 export function computeQuoteReadiness(
   briefing: BriefingData | null,
@@ -130,7 +139,7 @@ export function computeQuoteReadiness(
   let missingRequiredFields: string[];
   let optionalFields: string[];
 
-  if (technicalBriefing && technicalBriefing.productId) {
+  if (technicalBriefing && (technicalBriefing.productId || technicalBriefing.categoriaComercial)) {
     const tr = computeTechnicalReadiness(technicalBriefing);
     missingRequiredFields = tr.missingRequiredFields;
     optionalFields = [];
@@ -360,7 +369,11 @@ function nextCommercialActionCore(params: {
   }
 
   const b = params.briefing;
-  const temProdutoTecnico = !!params.technicalBriefing?.productId;
+  // Rodada "qualificação comercial" — troféu nunca tem productId (ver nota
+  // em computeQuoteReadiness acima), mas já tem categoriaComercial assim
+  // que entra em ROUTED_TO_CUSTOM — sem o `||`, cairia em classify_demand
+  // (produto "ainda não identificado") mesmo já sabendo que é um troféu.
+  const temProdutoTecnico = !!params.technicalBriefing?.productId || !!params.technicalBriefing?.categoriaComercial;
   if (!temProdutoTecnico && !isPreenchido(b?.produto)) {
     return {
       nextAction: "classify_demand", missingFields: ["produto"], reason: "Produto ainda não identificado — classificar antes de pedir medidas.",

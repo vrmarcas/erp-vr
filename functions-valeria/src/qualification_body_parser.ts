@@ -25,7 +25,9 @@ import {
   parseOptionalCustomDimensions,
   parseOptionalDeliveryData,
   parseOptionalStringArray,
+  parseOptionalCategoryQualificationSignals,
 } from "./http_field_parsers";
+import type { CategoryQualificationSignals } from "./custom_briefing_patch";
 
 export interface ParsedQualificationBody {
   categoria: string | null;
@@ -41,6 +43,8 @@ export interface ParsedQualificationBody {
   personalization: string[] | undefined;
   desiredDeadline: string | null;
   deliveryData: { cidade?: string | null; observacoes?: string | null } | null;
+  /** Rodada "qualificação comercial" (2026-10-21) — ver custom_briefing_patch.ts. */
+  categoryQualificationSignals: CategoryQualificationSignals | null;
 }
 
 /** Pode lançar FieldParseError (http_field_parsers.ts) — o handler converte em resposta 400. */
@@ -59,5 +63,6 @@ export function parseUpdateQualificationBody(body: Record<string, unknown>): Par
     personalization: parseOptionalStringArray("personalization", body["personalization"]),
     desiredDeadline: parseOptionalString(body["desiredDeadline"]),
     deliveryData: parseOptionalDeliveryData("deliveryData", body["deliveryData"]),
+    categoryQualificationSignals: parseOptionalCategoryQualificationSignals("categoryQualificationSignals", body["categoryQualificationSignals"]),
   };
 }

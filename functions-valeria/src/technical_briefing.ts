@@ -32,6 +32,21 @@ export interface TechnicalDimensions {
   profundidadeMm: number | null; // P — só produtos dim3d
 }
 
+/**
+ * Rodada "qualificação comercial" (2026-10-21) — até aqui, TODO produto
+ * personalizado (caixa/troféu/placa) era tratado com o MESMO conjunto
+ * fixo de 7 campos geométricos, mesmo quando isso não fazia sentido
+ * (troféu não tem receita/geometria — recipes.ts não tem nenhuma entrada
+ * para ele, de propósito, para nunca acionar o hardcode legado "Troféu
+ * GoJovem" no fluxo V2). `categoriaComercial` é o campo que finalmente
+ * distingue isso — setado UMA vez, no primeiro seed do briefing
+ * (catalog_tools.ts, a partir da `categoria` já extraída pelo LLM/
+ * resolveProductMatch), nunca inferido de outra forma. Ausente/undefined
+ * (briefings antigos, antes desta rodada) é tratado como "caixa" —
+ * preserva 100% o comportamento geométrico já existente, zero regressão.
+ */
+export type CategoriaComercial = "caixa" | "trofeu" | "placa";
+
 export interface TechnicalBriefing {
   productId: string | null; // = nome da receita (PLAN_RECIPES) hoje — ver nota em recipes.ts sobre não usar erp_plan_produtos
   recipeVersion: number;    // fixo em 1 enquanto não houver versionamento de receita embutida
@@ -39,6 +54,44 @@ export interface TechnicalBriefing {
   quantity: number | null;
   materialId: string | null;  // = matKey (cfg_N)
   thicknessMm: number | null; // esp
+  /** Rodada "qualificação comercial" — ver CategoriaComercial acima. */
+  categoriaComercial?: CategoriaComercial | null;
+  /** Caixa — "pra que você vai usar essa caixa?" (orienta espessura/tampa/acabamento). */
+  finalidadeUso?: string | null;
+  /** Caixa — true/false explícito; null = ainda não perguntado. */
+  temTampa?: boolean | null;
+  /** Caixa — só relevante quando temTampa===true. */
+  tampaModelo?: string | null;
+  /**
+   * Troféu/placa — descrição do modelo/referência que o cliente já tem em
+   * mente, OU "sem_modelo" quando o cliente explicitamente não tem
+   * nenhuma referência (nunca inventado — só gravado quando o cliente diz
+   * de fato que não tem modelo, para então oferecer o catálogo em vez de
+   * ficar perguntando em loop).
+   */
+  modeloReferencia?: string | null;
+  /** Troféu/placa — cliente mandou alguma imagem/arquivo como referência. */
+  arquivoRecebido?: boolean | null;
+  /**
+   * Troféu/placa — true só quando CONFIRMADO que o arquivo é pronto para
+   * produção (vetor/arte final); false quando é só referência visual
+   * (ex.: imagem gerada por IA, foto de catálogo concorrente — nunca
+   * assumido como produtivo automaticamente). null = ainda não perguntado/
+   * confirmado.
+   */
+  arquivoEhProdutivo?: boolean | null;
+  /** Placa sem arte pronta — o que o cliente quer que apareça na peça (texto/logo/telefone/QR/etc., livre). */
+  conteudoDesejado?: string | null;
+  /** Placa — true quando o cliente já tem arte pronta; false quando não tem (então pede conteudoDesejado); null = ainda não perguntado. */
+  temArte?: boolean | null;
+  /**
+   * Troféu/placa — true quando já oferecemos o catálogo de referência
+   * (catalog_comercial.ts) nesta conversa, mesmo que o cliente não tenha
+   * modelo nenhum — evita ficar perguntando "tem modelo?" para sempre
+   * quando a resposta já foi "não" e o catálogo (com ou sem link ainda)
+   * já foi oferecido.
+   */
+  catalogoReferenciaOferecido?: boolean | null;
   /**
    * Sprint P0.4 — consumíveis que afetam preço (Bloco C), rastreados aqui
    * para que technicalBriefingFingerprint() detecte mudança neles também
@@ -133,6 +186,16 @@ export function emptyTechnicalBriefing(): TechnicalBriefing {
     baseProductId: null,
     baseProductSku: null,
     isTest: null,
+    categoriaComercial: null,
+    finalidadeUso: null,
+    temTampa: null,
+    tampaModelo: null,
+    modeloReferencia: null,
+    arquivoRecebido: null,
+    arquivoEhProdutivo: null,
+    conteudoDesejado: null,
+    temArte: null,
+    catalogoReferenciaOferecido: null,
     confirmedFields: [],
     missingRequiredFields: [...CAMPO_ORDEM],
   };
@@ -258,6 +321,18 @@ export function computeTechnicalReadiness(b: TechnicalBriefing): {
   const reconhecido = !!b.productId && PLAN_BUILTIN_NAMES.includes(b.productId);
   const rec = b.productId ? resolveRecipe(b.productId) : null;
 
+  // Troféu nunca tem receita/geometria (de propósito — ver nota de
+  // CategoriaComercial acima) — nunca exige largura/espessura/material
+  // para CÁLCULO DE PREÇO automático (isso sempre segue humano/handoff,
+  // igual já era antes desta rodada). Preço continua sem mudança nenhuma
+  // para caixa/placa (mesmos 7 campos geométricos de sempre) — só troféu
+  // sai do bloqueio de pricing que nunca fazia sentido para ele.
+  if (b.categoriaComercial === "trofeu") {
+    const missing: string[] = [];
+    if (!b.quantity || b.quantity <= 0) missing.push("quantity");
+    return { ready: false, missingRequiredFields: missing, reconhecido: false };
+  }
+
   const missing: string[] = [];
   if (!b.productId) missing.push("productId");
   if (!(b.dimensions.larguraMm && b.dimensions.larguraMm > 0)) missing.push("larguraMm");
@@ -268,6 +343,75 @@ export function computeTechnicalReadiness(b: TechnicalBriefing): {
   if (!(b.quantity && b.quantity > 0)) missing.push("quantity");
 
   return { ready: missing.length === 0, missingRequiredFields: missing, reconhecido };
+}
+
+/**
+ * Rodada "qualificação comercial" (2026-10-21) — camada NOVA, separada de
+ * `computeTechnicalReadiness` de propósito: a readiness acima só decide
+ * "posso calcular preço automaticamente" (nunca mudou de comportamento
+ * nesta rodada, exceto o caso trófeu acima, que já era sempre
+ * handoff/humano). Esta função decide "o que a ValerIA deve perguntar
+ * AGORA, em que ordem, por tipo de produto" — nunca pergunta tudo de uma
+ * vez, nunca repete o que já foi respondido (mesma disciplina de
+ * mergeTechnicalBriefing: um campo `null` significa "ainda não
+ * perguntado/respondido", nunca "não se aplica").
+ *
+ * Retorna só CHAVES de campo (strings) — nunca um `NextAction` (esse tipo
+ * vive em qualification_engine.ts; manter este módulo sem essa
+ * dependência, como já era antes). `qualification_engine.ts` traduz a
+ * chave para o `nextAction`/`questionContext` que o LLM recebe.
+ */
+export function computeQualificationGaps(b: TechnicalBriefing): {
+  category: CategoriaComercial;
+  missingQualificationFields: string[];
+  nextField: string | null;
+} {
+  const category: CategoriaComercial = b.categoriaComercial ?? "caixa";
+
+  if (category === "trofeu") {
+    const ordem: string[] = [];
+    if (b.modeloReferencia == null) {
+      ordem.push("modeloReferencia"); // nunca perguntado ainda
+    } else if (b.modeloReferencia === "sem_modelo" && !b.catalogoReferenciaOferecido) {
+      ordem.push("catalogoReferenciaOferecido"); // cliente já disse que não tem — oferecer catálogo
+    }
+    if (b.arquivoRecebido === true && b.arquivoEhProdutivo == null) ordem.push("arquivoEhProdutivo");
+    if (!(b.quantity && b.quantity > 0)) ordem.push("quantity");
+    return { category, missingQualificationFields: ordem, nextField: ordem[0] ?? null };
+  }
+
+  if (category === "placa") {
+    const rec = b.productId ? resolveRecipe(b.productId) : null;
+    const ordem: string[] = [];
+    if (!(b.dimensions.larguraMm && b.dimensions.larguraMm > 0)) ordem.push("larguraMm");
+    if (!(b.dimensions.alturaMm && b.dimensions.alturaMm > 0)) ordem.push("alturaMm");
+    if (rec?.dim3d && !(b.dimensions.profundidadeMm && b.dimensions.profundidadeMm > 0)) ordem.push("profundidadeMm");
+    if (b.temArte == null) ordem.push("temArte");
+    else if (b.temArte === true) {
+      if (b.arquivoRecebido !== true) ordem.push("arquivoRecebido"); // pede o arquivo em si
+      else if (b.arquivoEhProdutivo == null) ordem.push("arquivoEhProdutivo"); // confirma se é produtivo
+    } else if (!b.conteudoDesejado) {
+      ordem.push("conteudoDesejado");
+    }
+    if (!(b.thicknessMm && b.thicknessMm > 0)) ordem.push("thicknessMm");
+    if (!b.materialId) ordem.push("materialId");
+    if (!(b.quantity && b.quantity > 0)) ordem.push("quantity");
+    return { category, missingQualificationFields: ordem, nextField: ordem[0] ?? null };
+  }
+
+  // caixa (default — inclui briefings antigos sem categoriaComercial setado)
+  const rec = b.productId ? resolveRecipe(b.productId) : null;
+  const ordem: string[] = [];
+  if (!(b.dimensions.larguraMm && b.dimensions.larguraMm > 0)) ordem.push("larguraMm");
+  if (!(b.dimensions.alturaMm && b.dimensions.alturaMm > 0)) ordem.push("alturaMm");
+  if (rec?.dim3d && !(b.dimensions.profundidadeMm && b.dimensions.profundidadeMm > 0)) ordem.push("profundidadeMm");
+  if (!b.finalidadeUso) ordem.push("finalidadeUso");
+  if (!(b.thicknessMm && b.thicknessMm > 0)) ordem.push("thicknessMm");
+  if (!b.materialId) ordem.push("materialId");
+  if (b.temTampa == null) ordem.push("temTampa");
+  else if (b.temTampa === true && !b.tampaModelo) ordem.push("tampaModelo");
+  if (!(b.quantity && b.quantity > 0)) ordem.push("quantity");
+  return { category, missingQualificationFields: ordem, nextField: ordem[0] ?? null };
 }
 
 /**

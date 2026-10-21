@@ -125,6 +125,23 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
     // quando o patch traz o campo explicitamente (nunca apaga uma marca de
     // teste já gravada por causa de um patch posterior que não a menciona).
     ...(patch.isTest !== undefined ? { isTest: patch.isTest } : {}),
+    // Rodada "qualificação comercial" (2026-10-21) — mesma disciplina de
+    // merge progressivo: só sobrescreve o que veio explicitamente no
+    // patch, nunca apaga um valor já confirmado com a ausência do campo
+    // num patch posterior. `categoriaComercial` nunca é trocado depois de
+    // setado uma vez (o produto não muda de categoria no meio da
+    // conversa) — mas aceitar undefined aqui já garante isso por
+    // construção (catalog_tools.ts só manda no primeiro seed).
+    ...(patch.categoriaComercial !== undefined ? { categoriaComercial: patch.categoriaComercial } : {}),
+    ...(patch.finalidadeUso !== undefined ? { finalidadeUso: patch.finalidadeUso } : {}),
+    ...(patch.temTampa !== undefined ? { temTampa: patch.temTampa } : {}),
+    ...(patch.tampaModelo !== undefined ? { tampaModelo: patch.tampaModelo } : {}),
+    ...(patch.modeloReferencia !== undefined ? { modeloReferencia: patch.modeloReferencia } : {}),
+    ...(patch.arquivoRecebido !== undefined ? { arquivoRecebido: patch.arquivoRecebido } : {}),
+    ...(patch.arquivoEhProdutivo !== undefined ? { arquivoEhProdutivo: patch.arquivoEhProdutivo } : {}),
+    ...(patch.conteudoDesejado !== undefined ? { conteudoDesejado: patch.conteudoDesejado } : {}),
+    ...(patch.temArte !== undefined ? { temArte: patch.temArte } : {}),
+    ...(patch.catalogoReferenciaOferecido !== undefined ? { catalogoReferenciaOferecido: patch.catalogoReferenciaOferecido } : {}),
     dimensions: {
       larguraMm: patchEfetivo.dimensions?.larguraMm !== undefined ? patchEfetivo.dimensions.larguraMm : atual.dimensions.larguraMm,
       alturaMm: patchEfetivo.dimensions?.alturaMm !== undefined ? patchEfetivo.dimensions.alturaMm : atual.dimensions.alturaMm,
@@ -133,7 +150,17 @@ export function mergeTechnicalBriefing(atual: TechnicalBriefing, patch: Partial<
   };
   const readiness = computeTechnicalReadiness(out);
   out.missingRequiredFields = readiness.missingRequiredFields;
-  out.confirmedFields = (["productId", "larguraMm", "alturaMm", "profundidadeMm", "quantity", "materialId", "thicknessMm"] as const)
-    .filter((f) => !readiness.missingRequiredFields.includes(f));
+  // Rodada "qualificação comercial" — troféu nunca tem os campos
+  // geométricos (readiness.missingRequiredFields só fala de "quantity"
+  // para ele, ver computeTechnicalReadiness), então o conjunto CANDIDATO
+  // a "confirmado" também precisa ser por categoria — senão
+  // largura/altura/material/espessura (nunca perguntados para troféu)
+  // apareceriam como "confirmados" só por nunca estarem na lista de
+  // faltantes.
+  const camposCandidatos: readonly string[] =
+    out.categoriaComercial === "trofeu"
+      ? (["quantity"] as const)
+      : (["productId", "larguraMm", "alturaMm", "profundidadeMm", "quantity", "materialId", "thicknessMm"] as const);
+  out.confirmedFields = camposCandidatos.filter((f) => !readiness.missingRequiredFields.includes(f));
   return out;
 }

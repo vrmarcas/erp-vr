@@ -13,7 +13,28 @@
  * technical_briefing.ts:151-159 — um bug real de outra sprint).
  */
 import { parseDimensionLengthMm } from "./technical_briefing";
-import type { TechnicalBriefing } from "./technical_briefing";
+import type { CategoriaComercial, TechnicalBriefing } from "./technical_briefing";
+
+/**
+ * Rodada "qualificação comercial" (2026-10-21) — sinais category-specific
+ * extraídos pelo LLM (nunca decididos por ele) via o novo parâmetro
+ * opcional `categoryQualificationSignals` da Tool
+ * `valeria_update_catalog_qualification` (ver http_field_parsers.ts/
+ * qualification_body_parser.ts). Todos opcionais — ausência nunca apaga
+ * um valor já confirmado (mesma disciplina de todo o resto deste
+ * arquivo).
+ */
+export interface CategoryQualificationSignals {
+  finalidadeUso?: string | null;
+  temTampa?: boolean | null;
+  tampaModelo?: string | null;
+  modeloReferencia?: string | null;
+  arquivoRecebido?: boolean | null;
+  arquivoEhProdutivo?: boolean | null;
+  conteudoDesejado?: string | null;
+  temArte?: boolean | null;
+  catalogoReferenciaOferecido?: boolean | null;
+}
 
 export interface CustomBriefingPatchInput {
   baseCatalogGroupId: string | null;
@@ -27,6 +48,14 @@ export interface CustomBriefingPatchInput {
   thicknessMmAtual: number | null | undefined;
   /** Fase E.1.2 — derivado por catalog_tools.ts de atendimentos/{id}.isTeste, nunca inferido aqui. */
   isTest?: boolean | null;
+  /**
+   * Rodada "qualificação comercial" — setado UMA vez pelo chamador
+   * (catalog_tools.ts), nunca inferido aqui. `undefined` (briefing já
+   * existente, categoria já setada antes) nunca sobrescreve o que já
+   * estava gravado — ver mergeTechnicalBriefing.
+   */
+  categoriaComercial?: CategoriaComercial | null;
+  categorySignals?: CategoryQualificationSignals | null;
 }
 
 export function buildCustomTechnicalBriefingPatch(input: CustomBriefingPatchInput): Partial<TechnicalBriefing> {
@@ -35,10 +64,24 @@ export function buildCustomTechnicalBriefingPatch(input: CustomBriefingPatchInpu
     baseProductId: input.baseProductId,
     baseProductSku: input.baseProductSku,
     ...(input.isTest !== undefined ? { isTest: input.isTest } : {}),
+    ...(input.categoriaComercial !== undefined ? { categoriaComercial: input.categoriaComercial } : {}),
   };
 
   if (input.receitaProductId) patch.productId = input.receitaProductId;
   if (input.quantity) patch.quantity = input.quantity;
+
+  const sig = input.categorySignals;
+  if (sig) {
+    if (sig.finalidadeUso !== undefined) patch.finalidadeUso = sig.finalidadeUso;
+    if (sig.temTampa !== undefined) patch.temTampa = sig.temTampa;
+    if (sig.tampaModelo !== undefined) patch.tampaModelo = sig.tampaModelo;
+    if (sig.modeloReferencia !== undefined) patch.modeloReferencia = sig.modeloReferencia;
+    if (sig.arquivoRecebido !== undefined) patch.arquivoRecebido = sig.arquivoRecebido;
+    if (sig.arquivoEhProdutivo !== undefined) patch.arquivoEhProdutivo = sig.arquivoEhProdutivo;
+    if (sig.conteudoDesejado !== undefined) patch.conteudoDesejado = sig.conteudoDesejado;
+    if (sig.temArte !== undefined) patch.temArte = sig.temArte;
+    if (sig.catalogoReferenciaOferecido !== undefined) patch.catalogoReferenciaOferecido = sig.catalogoReferenciaOferecido;
+  }
 
   if (input.customDimensions) {
     // IMPORTANTE: parseDimensionLengthMm só aplica a conversão cm→mm (×10)

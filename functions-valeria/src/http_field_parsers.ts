@@ -144,6 +144,50 @@ export function parseOptionalDeliveryData(
 }
 
 /**
+ * Rodada "qualificação comercial" (2026-10-21) — shape de
+ * CategoryQualificationSignals (custom_briefing_patch.ts): sinais
+ * específicos de caixa/troféu/placa que o LLM extrai da mensagem do
+ * cliente. Todos os campos são opcionais e independentes — ausência de
+ * um campo específico nunca é erro, nunca apaga valor já confirmado
+ * (quem decide isso é mergeTechnicalBriefing, este parser só valida tipo).
+ */
+export function parseOptionalCategoryQualificationSignals(
+  field: string,
+  value: unknown
+): {
+  finalidadeUso?: string | null;
+  temTampa?: boolean | null;
+  tampaModelo?: string | null;
+  modeloReferencia?: string | null;
+  arquivoRecebido?: boolean | null;
+  arquivoEhProdutivo?: boolean | null;
+  conteudoDesejado?: string | null;
+  temArte?: boolean | null;
+  catalogoReferenciaOferecido?: boolean | null;
+} | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseJsonIfString(field, value);
+  if (parsed === null) return null;
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new FieldParseError(field, `${field}: esperado objeto com sinais de qualificação por categoria.`);
+  }
+  const obj = parsed as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (obj["finalidadeUso"] !== undefined) out.finalidadeUso = parseOptionalString(obj["finalidadeUso"]);
+  if (obj["temTampa"] !== undefined) out.temTampa = parseOptionalBoolean(`${field}.temTampa`, obj["temTampa"]);
+  if (obj["tampaModelo"] !== undefined) out.tampaModelo = parseOptionalString(obj["tampaModelo"]);
+  if (obj["modeloReferencia"] !== undefined) out.modeloReferencia = parseOptionalString(obj["modeloReferencia"]);
+  if (obj["arquivoRecebido"] !== undefined) out.arquivoRecebido = parseOptionalBoolean(`${field}.arquivoRecebido`, obj["arquivoRecebido"]);
+  if (obj["arquivoEhProdutivo"] !== undefined) out.arquivoEhProdutivo = parseOptionalBoolean(`${field}.arquivoEhProdutivo`, obj["arquivoEhProdutivo"]);
+  if (obj["conteudoDesejado"] !== undefined) out.conteudoDesejado = parseOptionalString(obj["conteudoDesejado"]);
+  if (obj["temArte"] !== undefined) out.temArte = parseOptionalBoolean(`${field}.temArte`, obj["temArte"]);
+  if (obj["catalogoReferenciaOferecido"] !== undefined) {
+    out.catalogoReferenciaOferecido = parseOptionalBoolean(`${field}.catalogoReferenciaOferecido`, obj["catalogoReferenciaOferecido"]);
+  }
+  return out;
+}
+
+/**
  * string[] | '["a","b"]' → string[]. Rejeita qualquer item que não seja
  * string (nunca aceita objetos dentro do array). `undefined` quando o
  * campo não veio — distinto de `[]`, que é "cliente confirmou zero itens".

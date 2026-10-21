@@ -33,7 +33,10 @@ import * as functions from "firebase-functions";
 import { pipeline } from "./pipeline";
 import { ok, err } from "./response";
 import { getActiveCatalogConfig, getAllActiveCatalogConfigs, catalogGroupsFromConfig, CatalogConfig } from "./catalog";
+import { getActiveCatalogComercialConfig } from "./catalog_comercial";
 import { isCatalogSendable } from "./catalog_validity";
+import { computeQualificationGaps } from "./technical_briefing";
+import type { CategoriaComercial } from "./technical_briefing";
 import {
   loadCatalogDraft,
   saveCatalogDraft,
@@ -87,6 +90,24 @@ const RUN_OPTS = functions.runWith({ secrets: SECRET_NAMES, timeoutSeconds: 30, 
  * __tests__/trofeu_v1_v2_isolation.test.ts para a prova.
  */
 const CATEGORIA_PARA_RECEITA: Record<string, string> = { caixas: "Caixa" };
+
+/**
+ * Rodada "qualificação comercial" (2026-10-21) — categoria comercial
+ * (CategoriaComercial, technical_briefing.ts) a partir da `categoria`
+ * (string livre que o LLM manda, igual já alimenta CATEGORIA_PARA_RECEITA
+ * acima). Independente do mapa de receita de propósito — "trofeus" NUNCA
+ * entra em CATEGORIA_PARA_RECEITA (isolamento do hardcode legado Troféu
+ * GoJovem, ver comentário logo acima), mas precisa de uma categoria
+ * comercial própria para a qualificação progressiva funcionar. Default
+ * "caixa" quando a categoria não é reconhecida — preserva o
+ * comportamento geométrico de sempre para qualquer categoria nova ainda
+ * não mapeada aqui (nunca quebra silenciosamente).
+ */
+function categoriaComercialDe(categoria: string | null): CategoriaComercial {
+  if (categoria === "trofeus") return "trofeu";
+  if (categoria === "placas") return "placa";
+  return "caixa";
+}
 
 /** Exportada na Fase E.2.35 (antes privada) — reusada por commercial_quote_orchestrator.ts, mesma implementação, nenhuma mudança de comportamento. */
 export async function loadVitreProduct(productId: string): Promise<V2EligibilityProductInput | null> {
@@ -166,6 +187,28 @@ export const valeriaGetCatalog = RUN_OPTS.https.onRequest(async (req, res) => {
 
     const config = await getActiveCatalogConfig(categoria);
     if (!config) {
+      // Rodada "qualificação comercial" (2026-10-21) — categoria não é um
+      // catálogo Vitre (SKU/preço fixo) — pode ser um catálogo de
+      // REFERÊNCIA (troféu, tampa de caixa, placa — catalog_comercial.ts),
+      // sem SKU nenhum, só um link para apresentar como referência visual.
+      // Mesmo contrato de disponibilidade/sendable, nunca inventa link.
+      const configComercial = await getActiveCatalogComercialConfig(categoria);
+      if (configComercial) {
+        const disponibilidadeComercial = buildCatalogAvailabilityPayload(configComercial, new Date());
+        res.json(
+          ok(
+            {
+              categoria,
+              disponivel: true,
+              ...disponibilidadeComercial,
+              mensagemPadrao: configComercial.mensagemPadrao ?? null,
+              grupos: [], // catálogo de referência não tem modelos/tamanhos/SKU estruturados
+            },
+            { communicableToCustomer: false, verified: true }
+          )
+        );
+        return;
+      }
       res.json(
         ok(
           { categoria, disponivel: false, catalogKnown: false, sendable: false, urlCatalogo: null, validUntil: null, grupos: [] },
@@ -447,10 +490,20 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
     // ── Transição determinística 2: personalizado → semeia o
     // TechnicalBriefing existente NESTA MESMA CHAMADA (seção 7 — mesmo
     // codebase, reuso direto, sem cadeia LLM→atualizar_briefing_tecnico).
+    // Rodada "qualificação comercial" (2026-10-21) — calculado fora do `if`
+    // abaixo para alimentar `computeNextAction` mesmo quando o briefing já
+    // existia de um turno anterior (ROUTED_TO_CUSTOM se repete turno a
+    // turno enquanto a qualificação não termina).
+    let technicalNextField: string | null = null;
+    let technicalCategoryAtual: CategoriaComercial | null = null;
+
     if (qualification.qualificationStatus === "ROUTED_TO_CUSTOM") {
       const receita = categoria ? CATEGORIA_PARA_RECEITA[categoria] : null;
       const groupCustom = findGroupOf(groups, draftAtualizado.baseCatalogGroupId);
       const atual = await loadTechnicalBriefing(ctx.conversationId);
+      // Setado só UMA vez (primeiro seed) — turnos seguintes mandam
+      // undefined e mergeTechnicalBriefing preserva o que já foi gravado.
+      const categoriaComercialParaPatch = atual.categoriaComercial == null ? categoriaComercialDe(categoria) : undefined;
       const patch = buildCustomTechnicalBriefingPatch({
         baseCatalogGroupId: draftAtualizado.baseCatalogGroupId,
         baseProductId: draftAtualizado.baseProductId,
@@ -461,10 +514,15 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
         espessuraPadraoMmDoGrupo: groupCustom?.espessuraPadraoMm ?? null,
         thicknessMmAtual: atual.thicknessMm,
         isTest: draftAtualizado.isTest,
+        categoriaComercial: categoriaComercialParaPatch,
+        categorySignals: parsedBody.categoryQualificationSignals,
       });
       const atualizado = mergeTechnicalBriefing(atual, patch);
       await saveTechnicalBriefing(ctx.conversationId, atualizado);
       persistence.technicalBriefingUpdated = true;
+      const gaps = computeQualificationGaps(atualizado);
+      technicalNextField = gaps.nextField;
+      technicalCategoryAtual = gaps.category;
       // A criação real do orçamento personalizado (draft_valeria) continua
       // sendo responsabilidade do pipeline já existente (orchestrator/
       // action_executor), acionado automaticamente na PRÓXIMA chamada de
@@ -479,6 +537,8 @@ export const valeriaUpdateCatalogQualification = RUN_OPTS.https.onRequest(async 
       suggestedOptionLabel: resolution.suggestedOption ? `${resolution.suggestedOption.tamanho} (${resolution.suggestedOption.larguraCm}x${resolution.suggestedOption.alturaCm}cm)` : null,
       groupName: groupOfDraft?.nome ?? null,
       catalogDraftCreatedThisCall: persistence.catalogDraftCreated,
+      technicalNextField,
+      technicalCategory: technicalCategoryAtual,
     });
 
     const output = buildQualificationOutput(draftAtualizado, qualification, next, persistence);

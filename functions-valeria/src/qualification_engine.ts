@@ -26,6 +26,7 @@
 import type { CatalogGroup, ResolutionType } from "./product_resolution";
 import type { CatalogDraft, QualificationStatus } from "./catalog_draft";
 import { evaluateValeriaV2ProductEligibility, V2EligibilityProductInput } from "./valeria_v2_eligibility";
+import type { CategoriaComercial } from "./technical_briefing";
 
 export type NextAction =
   | "ASK_MODEL"
@@ -33,6 +34,27 @@ export type NextAction =
   | "CONFIRM_CATALOG_OPTION"
   | "ASK_QUANTITY"
   | "CONTINUE_CUSTOM_TECHNICAL_BRIEFING" // conversa — backend já seedou o TechnicalBriefing nesta chamada, só falta perguntar o resto
+  /**
+   * Rodada "qualificação comercial" (2026-10-21) — antes, QUALQUER lacuna
+   * no personalizado (caixa/troféu/placa) virava o mesmo
+   * CONTINUE_CUSTOM_TECHNICAL_BRIEFING genérico, sem dizer qual pergunta
+   * fazer — a ValerIA ficava livre para pular etapa, perguntar tudo de
+   * uma vez, ou encaminhar cedo demais por falta de orientação. Estes
+   * valores vêm de computeQualificationGaps (technical_briefing.ts),
+   * traduzidos aqui — sempre UM campo por vez, nunca a lista inteira.
+   */
+  | "ASK_PURPOSE" // caixa — "pra que você vai usar essa caixa?"
+  | "ASK_THICKNESS" // caixa/placa — espessura, com orientação se o cliente não souber
+  | "ASK_MATERIAL" // caixa/placa — material
+  | "ASK_LID" // caixa — tem tampa?
+  | "ASK_LID_MODEL" // caixa — qual modelo/tipo de tampa
+  | "ASK_REFERENCE_MODEL" // troféu — "você já tem modelo/foto/referência?"
+  | "ASK_FOR_ART_FILE" // placa com arte — pedir o arquivo (PDF/vetor/imagem)
+  | "CONFIRM_FILE_IS_PRODUCTION_READY" // troféu/placa — arquivo recebido é pronto p/produção ou só referência?
+  | "OFFER_REFERENCE_CATALOG" // troféu/placa — sem modelo/arte — oferecer catálogo de referência
+  | "ASK_WALL_SPACE" // placa — espaço disponível, antes de medida exata
+  | "ASK_HAS_ART" // placa — já tem arte pronta?
+  | "ASK_ART_OR_CONTENT" // placa sem arte — o que colocar na peça (texto/logo/conteúdo)
   | "REQUEST_QUOTE_REVIEW" // backend JÁ criou o rascunho e JÁ acionou o handoff — LLM só avisa o cliente
   /**
    * Fase E.2.27 — dados comerciais completos (produto+tamanho+quantidade),
@@ -106,6 +128,65 @@ export interface NextActionContext {
   catalogDraftCreatedThisCall?: boolean;
   /** true quando o backend JÁ determinou (via computeTechnicalReadiness) que o personalizado está completo e acionou o pipeline existente. */
   customPipelineReadyThisCall?: boolean;
+  /**
+   * Rodada "qualificação comercial" (2026-10-21) — saída de
+   * computeQualificationGaps (technical_briefing.ts), já calculada pelo
+   * chamador (catalog_tools.ts) depois de seedar/atualizar o
+   * TechnicalBriefing nesta mesma chamada. Quando presente e a
+   * qualificação está ROUTED_TO_CUSTOM (ou QUALIFYING_CATALOG_UNMAPPED),
+   * substitui o CONTINUE_CUSTOM_TECHNICAL_BRIEFING genérico por uma
+   * pergunta específica — nunca a lista inteira de uma vez.
+   */
+  technicalNextField?: string | null;
+  technicalCategory?: CategoriaComercial | null;
+}
+
+/**
+ * Traduz UMA chave de campo (computeQualificationGaps) + categoria
+ * comercial no `nextAction`/`questionContext` que o LLM recebe. Pura,
+ * sem acesso a Firestore — só mapeamento. `larguraMm/alturaMm/
+ * profundidadeMm` mudam de nome conforme a categoria (placa pergunta
+ * "espaço disponível", nunca "medida", antes do cliente ter uma medida
+ * exata em mente — ver scripts/VALERIA_PROMPT_V2_CORPO_PARA_COLAR...md).
+ */
+export function mapTechnicalFieldToNextAction(
+  fieldKey: string,
+  category: CategoriaComercial
+): { nextAction: NextAction; questionContext: QuestionContext } {
+  switch (fieldKey) {
+    case "larguraMm":
+    case "alturaMm":
+    case "profundidadeMm":
+      return category === "placa"
+        ? { nextAction: "ASK_WALL_SPACE", questionContext: {} }
+        : { nextAction: "ASK_SIZE", questionContext: {} };
+    case "finalidadeUso":
+      return { nextAction: "ASK_PURPOSE", questionContext: {} };
+    case "thicknessMm":
+      return { nextAction: "ASK_THICKNESS", questionContext: {} };
+    case "materialId":
+      return { nextAction: "ASK_MATERIAL", questionContext: {} };
+    case "temTampa":
+      return { nextAction: "ASK_LID", questionContext: {} };
+    case "tampaModelo":
+      return { nextAction: "ASK_LID_MODEL", questionContext: {} };
+    case "modeloReferencia":
+      return { nextAction: "ASK_REFERENCE_MODEL", questionContext: {} };
+    case "catalogoReferenciaOferecido":
+      return { nextAction: "OFFER_REFERENCE_CATALOG", questionContext: {} };
+    case "temArte":
+      return { nextAction: "ASK_HAS_ART", questionContext: {} };
+    case "arquivoRecebido":
+      return { nextAction: "ASK_FOR_ART_FILE", questionContext: {} };
+    case "arquivoEhProdutivo":
+      return { nextAction: "CONFIRM_FILE_IS_PRODUCTION_READY", questionContext: {} };
+    case "conteudoDesejado":
+      return { nextAction: "ASK_ART_OR_CONTENT", questionContext: {} };
+    case "quantity":
+      return { nextAction: "ASK_QUANTITY", questionContext: {} };
+    default:
+      return { nextAction: "CONTINUE_CUSTOM_TECHNICAL_BRIEFING", questionContext: {} };
+  }
 }
 
 /**
@@ -128,16 +209,26 @@ export function computeNextAction(
         questionContext: { suggestedSizeLabel: context.suggestedOptionLabel ?? null, groupName: context.groupName ?? null },
       };
 
-    case "ROUTED_TO_CUSTOM":
+    case "ROUTED_TO_CUSTOM": {
       // Backend já seedou o TechnicalBriefing nesta mesma chamada (seção 7 —
       // reuso direto de technical_briefing_store.ts, mesmo codebase). Se
       // customPipelineReadyThisCall, o pipeline existente já foi acionado e
       // o próximo estado real chega via buscar_contexto_da_conversa — aqui
       // ainda respondemos como conversa em andamento (nunca handoff).
+      //
+      // Rodada "qualificação comercial" — quando o chamador já calculou
+      // qual é o PRÓXIMO campo específico (computeQualificationGaps),
+      // substitui o CONTINUE_CUSTOM_TECHNICAL_BRIEFING genérico por uma
+      // pergunta concreta, uma de cada vez, nunca a lista inteira.
+      if (context.technicalNextField) {
+        const mapped = mapTechnicalFieldToNextAction(context.technicalNextField, context.technicalCategory ?? "caixa");
+        return { nextAction: mapped.nextAction, questionContext: { ...mapped.questionContext, groupName: context.groupName ?? null } };
+      }
       return {
         nextAction: "CONTINUE_CUSTOM_TECHNICAL_BRIEFING",
         questionContext: { groupName: context.groupName ?? null },
       };
+    }
 
     case "READY_CATALOG_DRAFT":
       // Fase E.2.27 — REQUEST_QUOTE_REVIEW só pode ser emitido como ação
