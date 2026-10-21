@@ -218,11 +218,48 @@ function fakeDb(resultPromise, whereCalls) {
   // posteriores (E.2.43+) legitimamente alteram outros arquivos de
   // front/scripts; a garantia real (backend intocado) já é validada de
   // forma robusta logo abaixo, contra o diff de functions/functions-valeria.
-  const gitDiffFiles = execSync('git diff --name-only', { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
+  //
+  // DIFF_BASE_REF (opcional, via env E238_DIFF_BASE) — por padrão este
+  // bloco inteiro continua comparando contra o working tree não
+  // commitado (`git diff`, igual sempre foi: um check de pré-commit).
+  // Setar E238_DIFF_BASE=<sha> compara contra um commit específico
+  // (usado para auditar o diff de uma rodada já commitada).
+  const diffBaseRef = process.env.E238_DIFF_BASE || '';
+  const diffRange = diffBaseRef ? `${diffBaseRef}..HEAD` : '';
+
+  // Rodada "resolvido reabre com nova mensagem" (2026-10-21) — segunda
+  // evolução desta guarda (mesmo espírito da remoção documentada abaixo
+  // para functions/ na E.2.47): "functions-valeria/ nunca aparece no
+  // diff" deixou de ser verdade a partir desta rodada, que PRECISA mexer
+  // em functions-valeria/src/webhook.ts para corrigir um bug real
+  // (atendimento resolvido nunca reabria sozinho). A garantia que esta
+  // suíte (E.2.38 — ponte Atendimentos↔orçamento) de fato precisa
+  // preservar nunca foi "zero bytes de diff" — é "nenhuma linha EXISTENTE
+  // do fluxo comercial/gates/handoff ValerIA V2 foi removida ou alterada
+  // por engano enquanto se mexia em Atendimentos". Trocado por duas
+  // checagens mais precisas (nunca "qualquer alteração é permitida"):
+  //   1. só um arquivo específico, já revisado e documentado abaixo, pode
+  //      aparecer no diff de functions-valeria/ — qualquer outro arquivo
+  //      desse diretório (pipeline.ts, active_pilot_runner.ts,
+  //      shadow_runner.ts, confirmation_detector.ts, etc. — o próprio
+  //      fluxo comercial/gates) continua proibido de aparecer, como antes;
+  //   2. dentro desse arquivo, o diff precisa ser PURAMENTE ADITIVO —
+  //      nenhuma linha pré-existente pode ser removida/alterada (só
+  //      inserções de função nova) — ou seja, segue detectando qualquer
+  //      alteração real ao comportamento já existente do gate/pipeline,
+  //      só passa a permitir extensão aditiva revisada.
+  const ARQUIVOS_FUNCTIONS_VALERIA_PERMITIDOS_COM_DIFF = [
+    'functions-valeria/src/webhook.ts',
+    // Arquivo de teste novo (__tests__/) nunca é runtime do fluxo
+    // comercial/gates — só cobre decidirReaberturaAtendimento isolada.
+    'functions-valeria/src/__tests__/reabertura_apos_resolvido.test.ts',
+  ];
+  const gitDiffFiles = execSync(`git diff ${diffRange} --name-only`, { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
+  const arquivosValeriaNoDiff = gitDiffFiles.filter((f) => f.startsWith('functions-valeria/'));
   assert(
-    !gitDiffFiles.some((f) => f.startsWith('functions-valeria/')),
-    'nenhum arquivo de functions-valeria/ (gates ValerIA V2) aparece no diff atual',
-    'arquivos alterados: ' + JSON.stringify(gitDiffFiles)
+    arquivosValeriaNoDiff.every((f) => ARQUIVOS_FUNCTIONS_VALERIA_PERMITIDOS_COM_DIFF.includes(f)),
+    'só arquivo(s) explicitamente permitido(s) aparece(m) no diff de functions-valeria/ — qualquer outro arquivo do fluxo comercial/gates/handoff ValerIA V2 continua proibido',
+    'permitidos: ' + JSON.stringify(ARQUIVOS_FUNCTIONS_VALERIA_PERMITIDOS_COM_DIFF) + ' | encontrados: ' + JSON.stringify(arquivosValeriaNoDiff)
   );
   // (Removida a restrição "só vitre_quote_send.ts em functions/" — era um
   // snapshot do escopo transiente da Fase E.2.47. Fases seguintes
@@ -231,15 +268,22 @@ function fakeDb(resultPromise, whereCalls) {
   // suíte (E.2.38 — ponte Atendimentos↔orçamento) precisa preservar é só
   // functions-valeria/ intocado, já checado acima.)
 
-  // O que continua garantido: functions-valeria/ (gates/
-  // fluxo comercial ValerIA V2) permanece 100% intocado.
-  const diffOutput = execSync('git diff -- functions-valeria', { cwd: ROOT }).toString();
-  assert(diffOutput.trim() === '', 'diff de functions-valeria/ está vazio — fluxo comercial/gates/handoff ValerIA V2 intocados');
+  // O que continua garantido: dentro de functions-valeria/, o diff (se
+  // houver, restrito ao arquivo permitido acima) é puramente aditivo —
+  // nenhuma linha pré-existente do fluxo comercial/gates ValerIA V2 foi
+  // removida ou reescrita.
+  const diffOutput = execSync(`git diff ${diffRange} -- functions-valeria`, { cwd: ROOT }).toString();
+  const linhasRemovidasOuAlteradas = diffOutput.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+  assert(
+    linhasRemovidasOuAlteradas.length === 0,
+    'diff de functions-valeria/ é puramente aditivo — nenhuma linha existente do fluxo comercial/gates/handoff ValerIA V2 foi removida ou alterada, só extensão nova',
+    'linhas removidas/alteradas encontradas: ' + JSON.stringify(linhasRemovidasOuAlteradas.slice(0, 10))
+  );
 
   // atdAssumirAtendimento (takeover) é só backend TS, definido em functions/src/atendimentos.ts
   // (nunca em vitre_quote_send.ts) — confirmação adicional de que não foi tocado, via grep no
   // diff completo de functions/ + functions-valeria/ (já coberto por arquivo acima, explícito por nome).
-  const diffFunctionsCompleto = execSync('git diff -- functions functions-valeria', { cwd: ROOT }).toString();
+  const diffFunctionsCompleto = execSync(`git diff ${diffRange} -- functions functions-valeria`, { cwd: ROOT }).toString();
   assert(!diffFunctionsCompleto.includes('atdAssumirAtendimento'), 'atdAssumirAtendimento não aparece em nenhum diff — takeover humano intocado');
 
   const fnRenderPainel = extractFunction(INDEX_HTML, 'atdRenderPainel');
