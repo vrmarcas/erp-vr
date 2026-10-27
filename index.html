@@ -12661,6 +12661,16 @@ function orcRecalc() {
   // "Custos gerais do pedido" / "Ajuste do orçamento", logo abaixo) — a
   // soma continua batendo exatamente com o Total Geral, só que de forma
   // transparente em vez de escondida dentro de cada linha.
+  // RODADA CIRÚRGICA 2026-10-27 (arredondamento comercial) — acumula, em
+  // centavos, o quanto o TOTAL de cada linha muda ao consolidar o
+  // UNITÁRIO em 2 casas antes de multiplicar por qty (ver corpo do
+  // forEach abaixo) — only de itens que realmente contam no pedido
+  // (`conta!==false`, mesmo filtro de subtotalItensVenda/finalPrice logo
+  // abaixo). Sem isto, o TOTAL GERAL do pedido (finalPrice, calculado por
+  // agregados de custo ANTES deste PASS 3) continuaria carregando a
+  // fração de centavo escondida que este PASS 3 acabou de eliminar de
+  // cada linha — reaparecendo disfarçada como "Ajuste do orçamento".
+  var _consolidacaoComercialCents = 0;
   itemRows.forEach(function(item){
     if(item.tsRaw==null) return; // sem custo de material — mantém o placeholder ("—") já existente na linha
     // Fatia de tsRaw que genuinamente escala com qty (material+adesivo
@@ -12695,7 +12705,30 @@ function orcRecalc() {
     // — não reabrir módulo que passou sem evidência.
     var _gravSprayExtraOwn = item.gravSprayExtraOwn||0;
     var itemUnitFinal = item.qty>0 ? (_tsRawUnitario + _gravSprayExtraOwn)/item.qty : (_tsRawUnitario + _gravSprayExtraOwn);
+    // BUG CRÍTICO REAL (2026-10-27) — achado de produção: Display qty=2.000,
+    // unitário exibido R$47,00, SUBTOTAL exibido R$94.002,61. Causa raiz:
+    // `itemUnitFinal` acima é o preço comercial unitário de FATO (o que o
+    // vendedor define/vê), mas carregava toda a precisão de ponto flutuante
+    // (ex.: 47,001305...) — só a STRING exibida (.toFixed(2)) era
+    // arredondada; o TOTAL continuava sendo esse valor CRU × qty, expondo a
+    // fração de centavo oculta assim que qty crescia o suficiente para ela
+    // deixar de ser invisível (47,001305×2000 = 94.002,61, nunca 94.000,00).
+    // Regra do usuário: o PREÇO COMERCIAL UNITÁRIO precisa ser consolidado
+    // (arredondado) em 2 casas ANTES de o subtotal derivar dele — nunca o
+    // contrário. Cálculos técnicos intermediários (matCost/ts/ajuste em
+    // cents) continuam com a precisão que já tinham; só este é o ponto de
+    // consolidação comercial (fonte canônica única do unitário final).
+    var _itemUnitFinalBruto = itemUnitFinal;
+    if (item.qty > 0) itemUnitFinal = Math.round(itemUnitFinal * 100) / 100;
     var itemTotalFinal = itemUnitFinal * item.qty + (item.ajusteFixoPortionRS||0) + (item.extrasProprioMarkup||0);
+    // Mantém item.tsRaw CONSISTENTE com o unitário já consolidado — nunca
+    // uma conta paralela (subtotalItensVenda, logo abaixo, relê item.tsRaw
+    // e precisa bater exatamente com a soma das colunas "Total" exibidas).
+    item.tsRaw = itemTotalFinal - _gravSprayExtraOwn - (item.extrasProprioMarkup||0);
+    if (item.conta !== false) {
+      var _deltaConsolidacaoReais = (itemUnitFinal - _itemUnitFinalBruto) * item.qty;
+      _consolidacaoComercialCents += Math.round(_deltaConsolidacaoReais * 100);
+    }
     var eu=document.getElementById('oi_unit_'+item.idx); if(eu) eu.textContent='R$'+itemUnitFinal.toFixed(2).replace('.',',');
     var et=document.getElementById('oi_tot_'+item.idx);  if(et) et.textContent='R$'+itemTotalFinal.toFixed(2).replace('.',',');
     // RODADA 5 — badge/ação de grupo de opções na própria linha do item.
@@ -12713,6 +12746,19 @@ function orcRecalc() {
       else { _opBadgeEl.innerHTML = '<button onclick="orcOpcaoSelecionar(\''+item.idx+'\')" style="font-size:9px;padding:1px 6px;border:1px solid var(--brand-mid);border-radius:8px;background:none;color:var(--brand-mid);cursor:pointer;white-space:nowrap">Marcar escolhida</button>'; }
     }
   });
+  // RODADA CIRÚRGICA 2026-10-27 — propaga a consolidação comercial (ver
+  // PASS 3 acima) para o TOTAL GERAL do pedido. finalPriceVR/finalPrice
+  // foram calculados ANTES deste PASS 3, a partir de agregados de custo
+  // (nunca por linha) — sem este ajuste, o Total Geral continuaria
+  // carregando a fração de centavo que cada linha acabou de eliminar,
+  // reaparecendo escondida em "Ajuste do orçamento" (ver bloco logo
+  // abaixo) em vez de nunca ter existido, como o caso real exige
+  // (Display R$47,00 × 2.000 = R$94.000,00 no TOTAL, não R$94.002,61).
+  if (_consolidacaoComercialCents !== 0) {
+    var _consolidacaoComercialReais = _consolidacaoComercialCents / 100;
+    finalPriceVR += _consolidacaoComercialReais;
+    finalPrice += _consolidacaoComercialReais;
+  }
 
   // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — fechamento
   // transparente do pedido: "Subtotal dos itens" é a SOMA EXATA do que já
