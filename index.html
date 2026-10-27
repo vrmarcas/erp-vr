@@ -28659,11 +28659,27 @@ function orcColetarItensDistribuidos(baseEfetiva){
   // camada de pagamento) — mantém a mesma identidade algébrica que a
   // versão anterior já garantia (soma dos itens sempre fecha com
   // _totalParaDistribuir), agora sem redividir o pool por peso.
-  // BLOCO C/D — pendente (sem escolha confirmada): cada linha mostra o PRÓPRIO
-  // total, sem redistribuir pela soma das linhas da opção interna (vazaria
-  // o preço de uma alternativa para outra).
-  var _pendEsc = orcComparativoPendenteDOM();
-  var _escalaEfetiva = (!_pendEsc && _matTotalRaw>0) ? (_totalParaDistribuir/_matTotalRaw) : 1;
+  // RODADA CIRÚRGICA 2026-10-27 — BUG CRÍTICO real de produção: até esta
+  // rodada, o BLOCO C/D anterior zerava a escala (=1, preço CRU, sem
+  // cartão/PIX nem rateio de máquinas/montagem/deslocamento) sempre que
+  // havia QUALQUER grupo comparativo pendente no pedido — então o cliente
+  // via, por exemplo, R$280,14 na alternativa ANTES de escolher e
+  // R$302,36 na MESMA alternativa DEPOIS de confirmar a escolha (a
+  // diferença batia, centavo a centavo, com o próprio gross-up do cartão
+  // — ver orcMotorComercial). A premissa ("redistribuir pela soma das
+  // linhas vazaria preço de uma alternativa pra outra") não se sustenta:
+  // `_matTotalRaw`/`_totalParaDistribuir` já são filtrados por
+  // `_contaColeta` (=opcaoSelecionada, o estado de CÁLCULO que já existe
+  // ANTES de qualquer escolha do cliente — nunca `escolhaConfirmada`),
+  // exatamente como o ramo "não pendente" já fazia; `item.totRaw` de cada
+  // alternativa já é 100% próprio/independente (RODADA 5 — preço
+  // informativo sempre representativo, selecionada ou não). A MESMA escala
+  // uniforme já usada no pedido resolvido passa a ser usada também
+  // enquanto pendente — cada alternativa aparece, ANTES da escolha, com o
+  // preço comercial DEFINITIVO (cartão/PIX + rateio uniforme dos custos do
+  // pedido, máquinas inclusive), e esse preço NÃO muda quando a escolha é
+  // confirmada, porque a fórmula é idêntica nos dois momentos.
+  var _escalaEfetiva = _matTotalRaw>0 ? (_totalParaDistribuir/_matTotalRaw) : 1;
   return _itensDados.map(function(item){
     var itemTotal = item.totRaw * _escalaEfetiva;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
@@ -28756,9 +28772,11 @@ function orcItensDistribuidosDeOrc(orc, totalCartaoPDF) {
     });
   });
   var _totalParaDistribuir = totalCartaoPDF || 0;
-  // BLOCO C/D — mesma regra de orcColetarItensDistribuidos (ver lá).
-  var _pendEsc = orcRegistroComparativoPendente(orc);
-  var _escalaEfetiva = (!_pendEsc && _matTotalRaw>0) ? (_totalParaDistribuir/_matTotalRaw) : 1;
+  // RODADA CIRÚRGICA 2026-10-27 — mesma correção e mesmo motivo de
+  // orcColetarItensDistribuidos (ver lá): a escala uniforme (cartão/PIX +
+  // rateio dos custos do pedido) passa a ser aplicada também enquanto o
+  // comparativo está pendente, nunca mais zerada por `orcRegistroComparativoPendente`.
+  var _escalaEfetiva = _matTotalRaw>0 ? (_totalParaDistribuir/_matTotalRaw) : 1;
   return _itensDados.map(function(item){
     var itemTotal = item.totRaw * _escalaEfetiva;
     var itemUnit  = item.qty > 0 ? itemTotal / item.qty : itemTotal;
@@ -28882,7 +28900,14 @@ function orcMontarHtmlOrcamento(orc) {
   // sem juros), só reduzido pelo desconto condicional quando ativo —
   // EXATAMENTE o mesmo valor que o PDF sempre mostrou como "Total Geral"
   // (mesma fórmula, mesmos inputs, sem necessidade de recalcular aqui).
-  var totalCartaoPDF = orc.valorFinal || 0;
+  // RODADA CIRÚRGICA 2026-10-27 — comparativo ainda pendente: valorFinal é
+  // null por design (nunca pode parecer uma venda fechada para financeiro/
+  // dashboard — ver _orcSalvarOrcamentoImpl), mas o preço comercial da
+  // composição atualmente ativa já existe em `valorPrevia` (mesma fórmula,
+  // calculado sempre, nunca exposto a agregados financeiros). Usa esse
+  // fallback só aqui, só para a distribuição por item — o "Total Geral"
+  // exibido ao cliente continua "a definir" (ver _pendPDF/totalFmt abaixo).
+  var totalCartaoPDF = orc.valorFinal || orc.valorPrevia || 0;
   var totalFmt = totalCartaoPDF>0
     ? 'R$ '+totalCartaoPDF.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : (orc.valorBase ? 'R$ '+orc.valorBase.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—');
@@ -30400,6 +30425,17 @@ async function _orcSalvarOrcamentoImpl() {
     marca:     document.body.classList.contains('vitre') ? 'vitre' : 'vr',
     valorBase: _pendSalvarCmp ? null : c.finalPrice,
     valorFinal: _pendSalvarCmp ? null : afterDisc,
+    // RODADA CIRÚRGICA 2026-10-27 — `afterDisc` (preço comercial no cartão,
+    // já com gross-up/condição de pagamento) é calculado de qualquer jeito
+    // aqui em cima, pendente ou não — só NUNCA vira valorFinal/valorBase
+    // enquanto pendente (regra acima, intocada: financeiro/dashboard/CRM
+    // nunca podem tratar uma opção interna ainda não escolhida como venda
+    // real). `valorPrevia` é um campo PURAMENTE de apoio ao PDF/WhatsApp
+    // (ver orcItensDistribuidosDeOrc/totalCartaoPDF): permite distribuir o
+    // preço comercial correto (cartão + rateio de máquinas/montagem/
+    // deslocamento) em cada alternativa do comparativo ANTES da escolha,
+    // sem nunca ser lido por nenhum agregado financeiro (só valorFinal é).
+    valorPrevia: afterDisc,
     valorPendenteComparativo: _pendSalvarCmp ? true : undefined,
     regraComparativo: _regraSalvarCmp,
     descCond:  dcOn ? dcPct : 0,
@@ -39820,13 +39856,31 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
     // sem nenhum delta de correção. Receita customizada/snapshot com esp
     // própria por peça continua um override real, preservado.
     var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
+    // RODADA CIRÚRGICA 2026-10-27 — achado real: editar manualmente
+    // largura/altura de uma peça automática (ex.: Tampa 37×42 → 41×46) e
+    // depois disparar qualquer reconciliação não relacionada (clicar "+
+    // Adicionar Peça", excluir/adicionar outra peça, mexer em
+    // consumíveis — todas chamam planCalc()/_planReconcilePieces() de
+    // novo) revertia a peça para a dimensão BRUTA da receita, descartando
+    // a edição do vendedor em silêncio — `larg`/`alt` eram as ÚNICAS
+    // propriedades desta função que NUNCA liam de `prev`, ao contrário de
+    // esp/adesivo/gravação/spray/extra, todos já preservados. Mesmo
+    // padrão do espOverride acima, mas a origem do override aqui é a
+    // edição manual do próprio vendedor (`dimOverride`, setado por
+    // _planEditField ao digitar em largura/altura) — nunca a receita.
+    // Uma vez marcado, o override sobrevive a qualquer reconciliação
+    // seguinte (inclusão/exclusão de outra peça, consumíveis, etc.); só
+    // deixa de existir se a peça for excluída ou deixar de existir na
+    // receita (perde o `prev`, nasce de novo com a dimensão fresca).
+    var _dimOverride = !!(prev && prev.dimOverride);
     // RODADA 8 — Adesivo normal/branco independentes (ver _planPecaAdesivos).
     var _adesPrev = prev ? _planPecaAdesivos(prev) : _planPecaAdesivos(pc);
     return {
       id: id, nome: pc.nome, qty: pc.qty,
-      larg: Math.round(pc.larg*100)/100, alt: Math.round(pc.alt*100)/100,
+      larg: _dimOverride ? prev.larg : Math.round(pc.larg*100)/100,
+      alt:  _dimOverride ? prev.alt  : Math.round(pc.alt*100)/100,
       esp: _espOverride || defaultEspMm || '', tipo: pc.tipo||'',
-      espOverride: _espOverride,
+      espOverride: _espOverride, dimOverride: _dimOverride,
       adesivoNormal: _adesPrev.normal, adesivoBranco: _adesPrev.branco,
       // RODADA 6 — Gravação/Spray/Extra por peça (mesmo padrão do Adesivo
       // acima): preserva o valor em memória mesmo quando a receita fresca
@@ -39868,6 +39922,10 @@ function _planHidratarDireto(planPecasJson, defaultEspMm) {
     return {
       id: id, nome: saved.nome, qty: saved.qty, larg: saved.larg, alt: saved.alt,
       esp: _espOverride || defaultEspMm || '', espOverride: _espOverride, tipo: saved.tipo||'',
+      // RODADA CIRÚRGICA 2026-10-27 — mesmo motivo de _planSeedFromPersisted:
+      // propaga o dimOverride persistido para uma reconciliação futura
+      // dentro desta sessão continuar respeitando a dimensão manual.
+      dimOverride: !!saved.dimOverride,
       adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
       gravacao: saved.gravacao||0, spray: saved.spray||0, extra: saved.extra||0,
       _deleted: false
@@ -39917,6 +39975,12 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
       alt:  saved ? saved.alt  : Math.round(pc.alt*100)/100,
       esp:  _espOverride || defaultEspMm || '',
       espOverride: _espOverride,
+      // RODADA CIRÚRGICA 2026-10-27 — propaga o dimOverride persistido
+      // (ver _planReconcilePieces) para que uma 2ª reconciliação DENTRO
+      // desta mesma sessão de edição (ex.: reabrir o orçamento e clicar
+      // "+ Adicionar Peça" de novo) continue respeitando a dimensão
+      // manual já salva, em vez de recalculá-la da receita.
+      dimOverride: saved ? !!saved.dimOverride : false,
       tipo: pc.tipo||'',
       adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
       // RODADA 6 — restaura Gravação/Spray/Extra do snapshot persistido ao
@@ -40063,6 +40127,12 @@ function _planEditField(input) {
   var val   = field === 'qty' ? (parseInt(input.value)||1) : (parseFloat(input.value)||0);
   if (!_planEditPieces[pci]) return;
   _planEditPieces[pci][field] = val;
+  // RODADA CIRÚRGICA 2026-10-27 — edição manual de largura/altura marca a
+  // peça como `dimOverride` (ver _planReconcilePieces): sem isto, a
+  // próxima reconciliação (disparada por "+ Adicionar Peça", excluir
+  // outra peça, mexer em consumíveis etc.) revertia a dimensão editada de
+  // volta para o valor bruto da receita.
+  if (field === 'larg' || field === 'alt') _planEditPieces[pci].dimOverride = true;
   // Atualizar célula de área da linha
   var p = _planEditPieces[pci];
   var aEl = document.getElementById('planEditArea_'+pci);

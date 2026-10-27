@@ -248,13 +248,26 @@ var txtOk = blocosOk.map(function (b) { return b.texto; }).join(' | ');
 ok('C7a. depois da escolha: parcela específica (R$ 73,33) volta a aparecer', /3x de R\$ 73,33 sem juros/.test(txtOk));
 ok('C7b. depois da escolha: Pix específico (R$ 208,69) volta a aparecer', /valor com PIX: R\$ 208,69/.test(txtOk));
 
-// PDF — itens não são redistribuídos pela soma da opção interna (vazamento A→B)
+// PDF — RODADA CIRÚRGICA 2026-10-27: BUG CRÍTICO real de produção corrigido
+// (preço do comparativo mudava depois da escolha do cliente, ex. R$280,14→
+// R$302,36 — diferença batia centavo a centavo com o gross-up do cartão).
+// Causa raiz: antes desta rodada, o PDF/WhatsApp mostrava o total CRU (sem
+// cartão/PIX/rateio de máquinas) enquanto QUALQUER grupo do pedido estava
+// pendente, e só passava a aplicar a escala comercial completa depois da
+// escolha confirmada — cada alternativa trocava de preço na hora errada.
+// Agora a MESMA escala uniforme (cartão/PIX + rateio do pedido) já usada
+// no caso "não pendente" (ver C8b) é aplicada sempre, pendente ou não —
+// cada alternativa aparece, ANTES da escolha, com o preço comercial
+// definitivo, e esse preço NÃO muda quando a escolha é confirmada.
 var ORC_PEND = { regraComparativo: 2, valorFinal: 999, itens: [
   { qty: 1, total: 'R$ 100,00', mat: 'Cristal', espMm: 2, grupoOpcao: opA(false) },
   { qty: 1, total: 'R$ 150,00', mat: 'Cristal', espMm: 3, grupoOpcao: opB(false) }] };
 var itensPend = orcItensDistribuidosDeOrc(ORC_PEND, 999);
+var totA_pend = itensPend.filter(function (x) { return x.grupoOpcaoId; })[0].total;
 var totB = itensPend.filter(function (x) { return x.grupoOpcaoId; })[1].total;
-testePerto('C8a. PDF pendente: opção B mostra o PRÓPRIO total (150), não o escalado pela A', totB, 150, 0.01);
+// escala = totalCartaoPDF(999) / matTotalRaw(só a selecionada, A=100) = 9.99
+testePerto('C8a. PDF pendente: opção A (selecionada p/ cálculo) já mostra o preço comercial definitivo (999), igual ao depois da escolha (ver C8b)', totA_pend, 999, 0.01);
+testePerto('C8a2. PDF pendente: opção B também mostra preço comercial (escalado pela mesma taxa da composição ativa), nunca mais o cru sem cartão', totB, 1498.5, 0.01);
 var ORC_OK = JSON.parse(JSON.stringify(ORC_PEND)); ORC_OK.regraComparativo = 2; ORC_OK.itens[0].grupoOpcao = opA(true); ORC_OK.itens[1].grupoOpcao = opB(false);
 var itensOk = orcItensDistribuidosDeOrc(ORC_OK, 999);
 ok('C8b. depois da escolha (A confirmada): total escalado continua coerente com o total geral (A = 999)', Math.abs(itensOk.filter(function (x) { return x.grupoOpcaoId; })[0].total - 999) < 0.01);
