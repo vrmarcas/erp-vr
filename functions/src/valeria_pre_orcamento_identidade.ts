@@ -183,10 +183,19 @@ export async function completarClienteProvisorioCore(clienteProvisorioId: string
 // deploy. Import local e tardio de checkAuth evita qualquer custo em quem
 // só usa as funções Core acima (ex.: o script de verificação desta etapa).
 import * as functions from "firebase-functions";
+import { ERP_BRIDGE_SECRET_NAME } from "./erp_bridge_auth";
 
 function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", "*"); }
 
-export const valeriaConsultarClientePorTelefone = functions.https.onRequest(async (req, res) => {
+// Rodada "ajustes finais" (2026-10-28) — vínculo explícito do secret da
+// ponte via Secret Manager (mesmo mecanismo de META_ACCESS_TOKEN em
+// meta_webhook.ts), nunca Firestore. Só estas 2 Functions desta rodada
+// recebem este vínculo — as outras de `valeria.ts`/`valeria_vitre.ts`
+// (exceto as 2 compartilhadas, ajustadas à parte) nunca o têm, então
+// `process.env[ERP_BRIDGE_SECRET_NAME]` nem existe nelas.
+const BRIDGE_RUN_OPTS = functions.runWith({ secrets: [ERP_BRIDGE_SECRET_NAME] });
+
+export const valeriaConsultarClientePorTelefone = BRIDGE_RUN_OPTS.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   // Rodada "fechamento da publicação controlada" (2026-10-28): secret
@@ -201,7 +210,7 @@ export const valeriaConsultarClientePorTelefone = functions.https.onRequest(asyn
   res.json({ ok: true, ...r });
 });
 
-export const valeriaPrepararCadastroProvisorio = functions.https.onRequest(async (req, res) => {
+export const valeriaPrepararCadastroProvisorio = BRIDGE_RUN_OPTS.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   const { checkBridgeAuth } = await import("./erp_bridge_auth");

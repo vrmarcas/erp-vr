@@ -77,13 +77,14 @@ async function main() {
   // Secret Bearer para checkAuth (valeria.ts) — mesmo contrato real.
   const SECRET = "etapa9i_secret_sintetico_local";
   await fsWrite("valeria_config", { secret: SECRET });
-  // Rodada "fechamento da publicação controlada" (2026-10-28):
-  // valeriaConsultarClientePorTelefone/valeriaPrepararCadastroProvisorio
-  // agora exigem o secret DEDICADO da ponte (erp_bridge_auth.ts), nunca
-  // mais o administrativo acima — mesmo valor sintético aqui só para não
-  // reescrever cada cabeçalho deste script (não há distinção de
+  // Rodada "ajustes finais" (2026-10-28): valeriaConsultarClientePorTelefone/
+  // valeriaPrepararCadastroProvisorio agora exigem o secret DEDICADO da
+  // ponte via Secret Manager (erp_bridge_auth.ts::ERP_BRIDGE_SECRET_NAME),
+  // nunca mais Firestore — no Emulator (sem Secret Manager de verdade),
+  // isso é só uma env var de processo. Mesmo valor sintético aqui só para
+  // não reescrever cada cabeçalho deste script (não há distinção de
   // segurança a testar NESTE script, só correção de contrato).
-  await fsWrite("erp_bridge_config", { secret: SECRET });
+  process.env.ERP_BRIDGE_SECRET = SECRET;
 
   const {
     consultarClientePorTelefoneCore,

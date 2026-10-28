@@ -505,6 +505,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── valeria_pre_orcamentos_revisao: lock de revisão humana (Etapa 9I) ──
+    // Aditivo, rodada "ajustes finais" (2026-10-28) — preparado, NUNCA
+    // deployado ainda. Só leitura: a interface (preOrcValeriaRender) lê
+    // esta coleção direto do Firestore para mostrar o status da fila; a
+    // escrita continua exclusiva das Cloud Functions reais
+    // (vendedorAssumirRevisaoPreOrcamento/vendedorConcluirRevisaoPreOrcamento,
+    // via Admin SDK, que ignora Rules) — nunca um cliente escrevendo direto.
+    match /valeria_pre_orcamentos_revisao/{id} {
+      allow read:  if isComercial() || isMaster();
+      allow write: if false;
+    }
+
     // ── erp_vr_orcamentos: núcleo comercial do orçamento (sem custo/markup) ──
     // Ver subcoleção /interno abaixo para os dados sensíveis.
     match /erp_vr_orcamentos/{orcId} {

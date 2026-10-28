@@ -16,8 +16,16 @@ firestore.indexes.json
 # Código-fonte — nunca expor no Hosting
 functions/**
 functions-valeria/**
+functions_local_test_9l/**
 **/*.ts
 **/*.map
+
+# Achado real (rodada "ajustes finais", 2026-10-28) — rascunhos/PoC de
+# Firestore Rules que não seguem o padrão "firestore.rules" exato e por
+# isso escapavam dos padrões acima; nunca devem ser públicos.
+firestore.rules.final-proposal.txt
+*.rules
+*-rules-poc.json
 
 # Dados temporários / dev
 valeria_leads/
@@ -28,6 +36,20 @@ scripts/**
 
 # Identidade visual (arquivos de trabalho, não publicados diretamente — logos ficam em assets/brand/)
 Id visual - VR e Vitre/**
+
+# Cópias de sincronização (rodada "ajustes finais", 2026-10-28) — achado
+# real: um bug de sincronização (iCloud) cria arquivos duplicados com
+# espaço+número antes da extensão (ex.: "index 2.html"), que NÃO caem em
+# nenhum padrão acima e seriam publicados pelo Hosting hoje. Exclusão por
+# manifesto — nunca apagados do disco por este commit. Padrão genérico
+# (nunca casa com o nome real "index.html", só com as cópias) + os 4
+# nomes exatos já confirmados, para nunca depender só do padrão.
+*\ [0-9].html
+*\ [0-9][0-9].html
+index 2.html
+index 3.html
+index 4.html
+index 5.html
 
 # Documentação interna
 **/*.md

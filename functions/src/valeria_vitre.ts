@@ -34,6 +34,14 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { checkAuth } from "./valeria";
 import { acquireIdem, writeAudit } from "./auth_helper";
+import { ERP_BRIDGE_SECRET_NAME } from "./erp_bridge_auth";
+
+// Rodada "ajustes finais" (2026-10-28) — vínculo explícito do secret da
+// ponte via Secret Manager, SÓ nos 2 exports abaixo que a ponte chama
+// (valeriaVitreBuscarCatalogo/valeriaVitreCriarRascunho). Os outros 6
+// exports deste arquivo continuam só com `functions.https.onRequest`
+// puro (checkAuth antigo) — nunca recebem este secret vinculado.
+const BRIDGE_RUN_OPTS = functions.runWith({ secrets: [ERP_BRIDGE_SECRET_NAME] });
 // Ponte Central↔ERP (2026-10-28) — mesma trava de revisão humana usada
 // pelo resto do conjunto de módulos de pré-orçamento (Etapas 9I-9N):
 // nunca grava/edita um rascunho Vitre de origem Valéria depois que o
@@ -133,7 +141,7 @@ function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", 
 // 1. valeriaVitreBuscarCatalogo — busca por nome/sinônimo/categoria/uso/
 //    faixa de preço. GET ?q=&categoria=&precoMin=&precoMax=&limite=
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreBuscarCatalogo = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreBuscarCatalogo = BRIDGE_RUN_OPTS.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   // Rodada "fechamento da publicação controlada" (2026-10-28): este
@@ -253,7 +261,7 @@ export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req
 //    idempotente por requestId (fail-closed, sem retry automático além do
 //    já garantido pela idempotência).
 // ══════════════════════════════════════════════════════════════════════════
-export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, res) => {
+export const valeriaVitreCriarRascunho = BRIDGE_RUN_OPTS.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   // Mesma transição incremental de valeriaVitreBuscarCatalogo acima.

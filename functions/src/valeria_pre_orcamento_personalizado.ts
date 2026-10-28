@@ -26,6 +26,7 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { acquireIdem } from "./auth_helper";
 import { assertValeriaPodeEscrever } from "./valeria_pre_orcamento_revisao";
+import { ERP_BRIDGE_SECRET_NAME } from "./erp_bridge_auth";
 
 const COL = "erp_vr";
 const ORC_DOC = "orcamentos";
@@ -126,8 +127,10 @@ export async function criarRascunhoPersonalizadoCore(input: CriarRascunhoPersona
 function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", "*"); }
 
 // ── Wrapper HTTP (Bearer, mesmo padrão de valeria_vitre.ts) — registrado
-// em index.ts nesta rodada.
-export const valeriaCriarRascunhoPersonalizado = functions.https.onRequest(async (req, res) => {
+// em index.ts nesta rodada. Secret da ponte vinculado via Secret Manager
+// (rodada "ajustes finais", 2026-10-28) — ver erp_bridge_auth.ts.
+const BRIDGE_RUN_OPTS = functions.runWith({ secrets: [ERP_BRIDGE_SECRET_NAME] });
+export const valeriaCriarRascunhoPersonalizado = BRIDGE_RUN_OPTS.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   const { checkBridgeAuth } = await import("./erp_bridge_auth");
