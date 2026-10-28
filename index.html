@@ -31649,12 +31649,26 @@ function orcEnvAbrir(id) {
   }
 }
 
+// Etapa 9N — migrada para server-side (achado da auditoria de
+// escritores: esta era a operação de MAIOR risco em erp_vr/orcamentos,
+// sem nenhuma verificação de OS/pagamento antes). vendedorExcluirOrcamento
+// (onCall, functions/src/erp_orcamento_exclusao_segura.ts) bloqueia a
+// exclusão quando já existe OS gerada ou Conta a Receber associada —
+// nunca mais uma escrita direta client-side para esta operação.
 function orcEnvExcluir(id) {
-  var lista = orcGetEnviados().filter(function(o){ return o.id!==id; });
-  orcSetEnviados(lista);
-  orcEnviadosRender();
-  orcAtualizarBadgeEnviados();
-  showToast('Orçamento removido.','info');
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorExcluirOrcamento')({ orcId: id })
+    .then(function () {
+      // Atualização otimista local (mesmo padrão já usado em orcSetEnviados
+      // — "a memória é otimista") até a nuvem resincronizar via listener.
+      if (typeof _ORC_ENVIADOS_DATA !== 'undefined' && Array.isArray(_ORC_ENVIADOS_DATA)) {
+        _ORC_ENVIADOS_DATA = _ORC_ENVIADOS_DATA.filter(function (o) { return o.id !== id; });
+      }
+      orcEnviadosRender();
+      orcAtualizarBadgeEnviados();
+      showToast('Orçamento removido.', 'info');
+    })
+    .catch(function (e) { showToast('Falha ao excluir: ' + (e && e.message || e), 'err'); });
 }
 
 // ── Editar orçamento salvo: preenche o formulário e navega para o orçamento ──

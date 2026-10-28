@@ -1,0 +1,45 @@
+// firestore.9n-draft.rules — Etapa 9N (2026-10-28).
+//
+// RASCUNHO EXPLORATÓRIO, NUNCA A REGRA ATIVA DE PRODUÇÃO — testado SÓ no
+// Firestore Emulator, nunca publicado (ver instrução explícita da
+// etapa). Objetivo: verificar empiricamente se é possível, com uma
+// regra MINIMAMENTE invasiva, impedir uma escrita direta do cliente
+// que aprove/recuse um item `pre_orc_valeria` dentro do array
+// serializado de `erp_vr/orcamentos`, sem quebrar nenhum outro
+// escritor legítimo identificado na auditoria da Etapa 9N.
+//
+// Reaproveita literalmente as funções auxiliares e a regra real de
+// `erp_vr/orcamentos` (firestore.rules:106-197) — só adiciona UMA
+// condição extra à regra de write já existente, nunca reescreve a regra
+// inteira.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function userRole() { return request.auth.token.role; }
+    function isComercial() {
+      return isAuthenticated() && (
+        userRole() == 'comercial' || userRole() == 'master' || userRole() == 'admin'
+      );
+    }
+
+    match /erp_vr/{docId} {
+      // Regra real (firestore.rules:196-197), só adiciona a condição
+      // heurística abaixo para docId=='orcamentos'.
+      allow read: if isComercial() && docId == 'orcamentos';
+      allow write: if isComercial() && docId == 'orcamentos' && (
+        userRole() == 'master' || userRole() == 'admin' ||
+        // Heurística PoC: tenta impedir que o NOVO conteúdo marque um
+        // item de origem Valéria como aprovado/recusado via string
+        // matching sobre o JSON serializado (nunca um parse real — Rules
+        // não têm JSON.parse). DELIBERADAMENTE testada aqui para provar,
+        // com dados sintéticos, que essa heurística tem falso-positivo
+        // real (ver etapa9n_rules_poc_check.ts) — não é recomendada
+        // como proteção real, documentado no relatório final.
+        !(request.resource.data.data.matches('.*"status":\\s*"(aprovado|recusado)".*') &&
+          request.resource.data.data.matches('.*"status":\\s*"pre_orc_valeria".*') == false &&
+          request.resource.data.data.matches('.*pre_orc_valeria.*'))
+      );
+    }
+  }
+}
