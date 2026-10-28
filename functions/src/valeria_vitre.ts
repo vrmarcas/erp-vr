@@ -251,6 +251,14 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
   const body = req.body as {
     clienteNome?: string; itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>;
     descontoPct?: number; frete?: number; prazoValidadeDias?: number; requestId?: string;
+    // Etapa 9J (2026-10-27) — campos cadastrais opcionais, nunca inventados:
+    // só gravados quando o chamador (Central) efetivamente os confirmou.
+    // Mesmos nomes de vitreCriarOrcamento (vitre.ts) — o editor existente
+    // (vitreOrcAbrirRascunho, index.html) já lê exatamente esses campos;
+    // antes desta etapa, um rascunho criado pela Valéria sempre chegava ao
+    // vendedor com telefone/e-mail/cidade/documento em branco.
+    clienteTel?: string; clienteEmail?: string; clienteCidade?: string;
+    clienteDocumento?: string; clienteTipo?: "pf" | "pj";
   };
   const env = requireEnv(body as unknown as Record<string, unknown>);
   if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
@@ -295,10 +303,20 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
   const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
   const total = +(subtotal - valorDesconto + frete).toFixed(2);
 
+  // Etapa 9J — campos cadastrais opcionais (ver comentário no tipo do
+  // body acima): só incluídos quando o chamador efetivamente os enviou,
+  // nunca inventados aqui.
+  const clienteTel = body.clienteTel ? String(body.clienteTel).trim() : null;
+  const clienteEmail = body.clienteEmail ? String(body.clienteEmail).trim() : null;
+  const clienteCidade = body.clienteCidade ? String(body.clienteCidade).trim() : null;
+  const clienteDocumento = body.clienteDocumento ? String(body.clienteDocumento).trim() : null;
+  const clienteTipo = body.clienteTipo === "pf" || body.clienteTipo === "pj" ? body.clienteTipo : null;
+
   const docRef = db.collection(COL_ORC).doc();
   await docRef.set({
     id: docRef.id, requestId, tipo: "catalogo_vitre", marca: "vitre", status: "rascunho",
-    clienteNome, itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total,
+    clienteNome, clienteTel, clienteEmail, clienteCidade, clienteDocumento, clienteTipo,
+    itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total,
     prazoValidadeDias, validoAte: Date.now() + prazoValidadeDias * 86400000,
     origem: "valeria", conversationId: env.conversationId, organizationId: env.organizationId,
     criadoEm: Date.now(),
@@ -338,6 +356,8 @@ export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (re
   const body = req.body as {
     orcamentoId?: string; itens?: Array<{ sku: string; qtd: number; adicionais?: Array<{ nome?: string }> }>;
     descontoPct?: number; frete?: number; requestId?: string;
+    clienteTel?: string; clienteEmail?: string; clienteCidade?: string;
+    clienteDocumento?: string; clienteTipo?: "pf" | "pj";
   };
   const env = requireEnv(body as unknown as Record<string, unknown>);
   if (!env) { res.status(400).json({ ok: false, error: "conversationId e organizationId são obrigatórios (isolamento de conversa)" }); return; }
@@ -391,7 +411,19 @@ export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (re
   const valorDesconto = +(subtotal * (descontoPct / 100)).toFixed(2);
   const total = +(subtotal - valorDesconto + frete).toFixed(2);
 
-  await docRef.set({ itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total, atualizadoEm: Date.now() }, { merge: true });
+  // Etapa 9J — mesmos campos cadastrais opcionais de CriarRascunho, mas
+  // aqui SÓ preenche o que ainda está vazio no registro atual: "nunca
+  // sobrescreva informações já confirmadas pelo vendedor" (o vendedor pode
+  // já ter editado o rascunho em vitreOrcAbrirRascunho antes de uma nova
+  // mensagem do cliente chegar e chamar este mesmo endpoint).
+  const cadastroPatch: Record<string, string> = {};
+  if (!atual.clienteTel && body.clienteTel) cadastroPatch.clienteTel = String(body.clienteTel).trim();
+  if (!atual.clienteEmail && body.clienteEmail) cadastroPatch.clienteEmail = String(body.clienteEmail).trim();
+  if (!atual.clienteCidade && body.clienteCidade) cadastroPatch.clienteCidade = String(body.clienteCidade).trim();
+  if (!atual.clienteDocumento && body.clienteDocumento) cadastroPatch.clienteDocumento = String(body.clienteDocumento).trim();
+  if (!atual.clienteTipo && (body.clienteTipo === "pf" || body.clienteTipo === "pj")) cadastroPatch.clienteTipo = body.clienteTipo;
+
+  await docRef.set({ itens: itensSnapshot, descontoPct, valorDesconto, frete, subtotal, total, atualizadoEm: Date.now(), ...cadastroPatch }, { merge: true });
   await writeAudit(COL_AUDIT, "orcamento_atualizado_valeria", "valeria", "valeria_agent", { id: orcamentoId, total, conversationId: env.conversationId });
   res.json({ ok: true, jaProcessado: false, id: orcamentoId, total, adicionaisRejeitados: adicionaisRejeitadosGlobal });
 });

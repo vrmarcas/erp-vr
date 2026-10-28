@@ -4316,7 +4316,7 @@ function _authFirebaseError(code){
         <div style="font-size:12px;color:var(--muted)">Protótipo local (Etapa 9I) — agrega rascunhos Vitre + personalizados ainda não revisados, por atendimento.</div>
         <button class="topbar-btn" onclick="preOrcValeriaRender()">🔄 Atualizar</button>
       </div>
-      <div id="preOrcValeriaBody" style="font-size:12px;color:var(--muted)">Clique em Atualizar para carregar.</div>
+      <div id="preOrcValeriaBody" style="font-size:12px;color:var(--muted);overflow-x:auto;-webkit-overflow-scrolling:touch">Clique em Atualizar para carregar.</div>
     </div>
 
     <!-- ==============================
@@ -26724,6 +26724,20 @@ function preOrcValeriaAssumir(atendimentoId) {
       showToast('Ainda não conectado nesta etapa (' + (e && e.message || e) + ')', 'warn');
     });
 }
+function preOrcValeriaVerAtendimento(atendimentoId) {
+  nav('atendimentos', null);
+  setTimeout(function () { if (typeof atdSelecionar === 'function') atdSelecionar(atendimentoId); }, 0);
+}
+function preOrcValeriaCamposPendentesVitre(it) {
+  // Indicador de campos pendentes (Etapa 9J, seção 4) — mesmos campos
+  // cadastrais que valeriaVitreCriarRascunho agora aceita (ver
+  // valeria_vitre.ts); nunca inventa, só sinaliza o que falta.
+  var faltando = [];
+  if (!it.clienteTel) faltando.push('telefone');
+  if (!it.clienteEmail) faltando.push('e-mail');
+  if (!it.clienteCidade) faltando.push('cidade');
+  return faltando;
+}
 function preOrcValeriaRender() {
   var body = document.getElementById('preOrcValeriaBody');
   if (!body) return;
@@ -26735,12 +26749,31 @@ function preOrcValeriaRender() {
     .get()
     .then(function (snap) {
       return snap.docs
-        .map(function (d) { var o = d.data(); return { id: d.id, conversationId: o.conversationId, origem: o.origem, total: o.total, status: o.status }; })
+        .map(function (d) {
+          var o = d.data();
+          return {
+            id: d.id, conversationId: o.conversationId, origem: o.origem, total: o.total, status: o.status,
+            clienteTel: o.clienteTel || null, clienteEmail: o.clienteEmail || null, clienteCidade: o.clienteCidade || null,
+          };
+        })
         .filter(function (o) { return o.origem === 'valeria' || o.origem === 'valeria_v2'; });
     })
     .catch(function () { return []; });
 
-  Promise.resolve(vitrePromise).then(function (vitreItens) {
+  // Lock de revisão (Etapa 9I/9J) — leitura direta da coleção local; o
+  // onCall real (assumir/concluir) ainda não está registrado em
+  // functions/src/index.ts nesta etapa (decisão de segurança), então o
+  // status aqui pode ficar desatualizado até essa conexão ser autorizada.
+  var revisaoPromise = _db.collection('valeria_pre_orcamentos_revisao').get()
+    .then(function (snap) {
+      var porId = {};
+      snap.docs.forEach(function (d) { porId[d.id] = d.data(); });
+      return porId;
+    })
+    .catch(function () { return {}; });
+
+  Promise.all([vitrePromise, revisaoPromise]).then(function (res) {
+    var vitreItens = res[0], revisaoPorAtendimento = res[1];
     var enviados = (typeof orcGetEnviados === 'function') ? orcGetEnviados() : [];
     var personalizados = enviados.filter(preOrcValeriaEhOrigemValeria);
 
@@ -26760,22 +26793,45 @@ function preOrcValeriaRender() {
     var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
       + '<thead><tr style="background:var(--bg2)">'
       + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Atendimento</th>'
-      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Itens Vitre</th>'
-      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Itens personalizados</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">🌸 Itens Vitre</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">🔧 Itens personalizados</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Revisão</th>'
       + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Ações</th>'
       + '</tr></thead><tbody>';
     atendimentos.forEach(function (atd) {
       var grupo = porAtendimento[atd];
       var vitreBtns = grupo.vitre.map(function (it) {
-        return '<button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px;margin:1px" onclick="vitreOrcAbrirRascunho(\'' + it.id + '\')">Abrir Vitre (' + (it.status || '—') + ')</button>';
+        var pendentes = preOrcValeriaCamposPendentesVitre(it);
+        var badgePendente = pendentes.length ? ' <span style="color:#D97706;font-size:9px" title="Campos pendentes: ' + pendentes.join(', ') + '">⚠ ' + pendentes.length + ' pendente(s)</span>' : '';
+        return '<div style="margin:2px 0"><button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px" onclick="vitreOrcAbrirRascunho(\'' + it.id + '\')">Abrir Vitre (' + (it.status || '—') + ')</button>' + badgePendente + '</div>';
       }).join('') || '<span style="color:var(--muted)">—</span>';
       var persBtns = grupo.personalizados.map(function (o) {
-        return '<button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px;margin:1px" onclick="orcEnvAbrir(\'' + o.id + '\')">Abrir pedido (' + (o.status || '—') + ')</button>';
+        return '<div style="margin:2px 0"><button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px" onclick="orcEnvAbrir(\'' + o.id + '\')">Abrir pedido (' + (o.status || '—') + ')</button></div>';
       }).join('') || '<span style="color:var(--muted)">—</span>';
+
+      var revisao = revisaoPorAtendimento[atd];
+      var revisaoHtml;
+      if (!revisao || revisao.status === 'AGUARDANDO_REVISAO') {
+        revisaoHtml = '<span style="color:var(--muted);font-size:10px">Aguardando revisão</span>';
+      } else if (revisao.status === 'EM_REVISAO') {
+        revisaoHtml = '<span style="color:#1EB8D8;font-size:10px">Em revisão (' + (revisao.assumidoPorUid || '?') + ')</span>';
+      } else if (revisao.status === 'REVISADO') {
+        revisaoHtml = '<span style="color:#059669;font-size:10px">✅ Revisado</span>';
+      } else {
+        revisaoHtml = '<span style="color:var(--muted);font-size:10px">—</span>';
+      }
+      if (revisao && revisao.pendenciaPosRevisao) {
+        revisaoHtml += '<br><span style="color:#B91C1C;font-size:10px">⚠ Mudança após revisão — reconferir</span>';
+      }
+
       html += '<tr>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:monospace;font-size:11px">' + atd + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'
+        + '<div style="font-family:monospace;font-size:10px">' + atd + '</div>'
+        + '<button class="topbar-btn ghost" style="font-size:9px;padding:2px 5px;margin-top:2px" onclick="preOrcValeriaVerAtendimento(\'' + atd + '\')">💬 Ver atendimento</button>'
+        + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + vitreBtns + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + persBtns + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + revisaoHtml + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><button class="topbar-btn" style="font-size:10px;padding:3px 6px" onclick="preOrcValeriaAssumir(\'' + atd + '\')">Assumir revisão</button></td>'
         + '</tr>';
     });
@@ -42945,6 +43001,8 @@ async function mktForceSync() {
   <div class="mdrw-section" id="mspSec-comercial">Comercial</div>
   <div class="mdrw-item" id="mspItem-orcamento" onclick="mobilePanelNav('orcamento')"><span class="mdrw-ico">💰</span> Novo Orçamento</div>
   <div class="mdrw-item" id="mspItem-orcamentos-enviados" onclick="mobilePanelNav('orcamentos-enviados')"><span class="mdrw-ico">📤</span> Orçamentos Enviados</div>
+  <!-- Etapa 9J (2026-10-27) — protótipo local, nunca publicado: mesmo item da sidebar desktop. -->
+  <div class="mdrw-item" id="mspItem-preorcamentos-valeria" onclick="mobilePanelNav('preorcamentos-valeria')"><span class="mdrw-ico">🤖</span> Pré-orçamentos Valéria</div>
   <div class="mdrw-item" id="mspItem-vitre-catalogo" onclick="mobilePanelNav('vitre-catalogo')"><span class="mdrw-ico">🌸</span> Catálogo Vitre</div>
   <div class="mdrw-item" id="mspItem-comercial" onclick="mobilePanelNav('comercial')"><span class="mdrw-ico">📈</span> Dashboard Comercial</div>
   <div class="mdrw-item" id="mspItem-crm" onclick="mobilePanelNav('crm')"><span class="mdrw-ico">🤝</span> CRM</div>
