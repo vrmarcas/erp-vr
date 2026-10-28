@@ -4329,6 +4329,7 @@ function _authFirebaseError(code){
           <select id="orcEnvFiltroStatus" onchange="orcEnviadosRender()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px">
             <option value="">Todos os status</option>
             <option value="aguardando">Aguardando</option>
+            <option value="pre_orc_valeria">🤖 Pré-orçamento Valéria</option>
             <option value="aprovado">Aprovado</option>
             <option value="recusado">Recusado</option>
             <option value="expirado">Expirado</option>
@@ -18071,7 +18072,8 @@ function dashAbrirKanbanFiltrado(lbl) {
 //   orcamentosDoMes = COUNT(orçamentos) cujo mês de dataSalvo === mesFiltro (0 = todos)
 //   valorOrcado     = SUM(valorFinal||valorBase) dos orçamentos do filtro
 //   aprovados       = COUNT(status==='aprovado')
-//   aguardando      = COUNT(status==='aguardando' || sem status)
+//   aguardando      = COUNT(orcIsPendenteRevisao(o)) — inclui 'aguardando',
+//     sem status, e 'pre_orc_valeria' (Etapa 9K: motor novo da Valéria)
 //   cancelados      = COUNT(status==='recusado' || status==='cancelado')
 //     (este ERP usa 'recusado' como status real de orçamento rejeitado;
 //     'cancelado' é aceito como alias por compatibilidade de nomenclatura)
@@ -18098,7 +18100,7 @@ function dashCalcularKPIsComerciais(orcamentos, mesFiltro, marcaFiltro) {
   var val = function (o) { return orcEnvNormalizar(o).valorFinal || 0; };
   var aprovados = list.filter(function (o) { return o.status === 'aprovado'; });
   var cancelados = list.filter(function (o) { return o.status === 'recusado' || o.status === 'cancelado'; });
-  var aguardando = list.filter(function (o) { return o.status === 'aguardando' || !o.status; });
+  var aguardando = list.filter(orcIsPendenteRevisao);
   return {
     orcamentosDoMes: list.length,
     valorOrcado: list.reduce(function (s, o) { return s + val(o); }, 0),
@@ -18847,7 +18849,7 @@ function comercialRender() {
   // Orçamentos enviados
   var envList  = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
   var envCount = envList.length;
-  var envAgu   = envList.filter(function(o){return o.status==='aguardando';}).length;
+  var envAgu   = envList.filter(orcIsPendenteRevisao).length;
   var envAprov = envList.filter(function(o){return o.status==='aprovado';}).length;
   var envRecus = envList.filter(function(o){return o.status==='recusado';}).length;
   setEl('comEnvCount', String(envCount));
@@ -18860,7 +18862,7 @@ function comercialRender() {
   // ValerIA (.valorFinal inexistente). orcEnvNormalizar() reutilizado.
   var _envVal = function(o){ return orcEnvNormalizar(o).valorFinal||0; };
   var _envValTotal=envList.reduce(function(s,o){return s+_envVal(o);},0);
-  var _envValAgu=envList.filter(function(o){return o.status==='aguardando';}).reduce(function(s,o){return s+_envVal(o);},0);
+  var _envValAgu=envList.filter(orcIsPendenteRevisao).reduce(function(s,o){return s+_envVal(o);},0);
   var _envValAprov=envList.filter(function(o){return o.status==='aprovado';}).reduce(function(s,o){return s+_envVal(o);},0);
   var _envValRecus=envList.filter(function(o){return o.status==='recusado';}).reduce(function(s,o){return s+_envVal(o);},0);
   var _ecr=document.getElementById('comEnvCountR'); if(_ecr)_ecr.textContent=_fmtEnvR(_envValTotal);
@@ -26775,7 +26777,10 @@ function preOrcValeriaRender() {
   Promise.all([vitrePromise, revisaoPromise]).then(function (res) {
     var vitreItens = res[0], revisaoPorAtendimento = res[1];
     var enviados = (typeof orcGetEnviados === 'function') ? orcGetEnviados() : [];
-    var personalizados = enviados.filter(preOrcValeriaEhOrigemValeria);
+    // Etapa 9K — a fila é de PENDENTES de revisão; um pré-orçamento já
+    // aprovado/recusado pelo vendedor não pertence mais aqui (bug real
+    // corrigido nesta etapa: antes mostrava também os já decididos).
+    var personalizados = enviados.filter(function (o) { return preOrcValeriaEhOrigemValeria(o) && orcIsPendenteRevisao(o); });
 
     var porAtendimento = {};
     vitreItens.forEach(function (it) {
@@ -30977,7 +30982,7 @@ function orcLinkClienteOrcamento(orc) {
 
 function orcAtualizarBadgeEnviados() {
   var lista   = orcGetEnviados();
-  var pending = lista.filter(function(o){ return o.status==='aguardando'; }).length;
+  var pending = lista.filter(orcIsPendenteRevisao).length;
   var badge   = document.getElementById('orcEnvBadge');
   if(badge){
     badge.textContent = pending||'';
@@ -31083,12 +31088,18 @@ var ORC_STATUS_LABEL = {
   pago: '🏭 Enviado p/ Produção',
   recusado: '❌ Recusado',
   expirado: '🕐 Expirado',
+  // Etapa 9K — motor novo da Valéria (functions-valeria/action_executor.ts,
+  // produção) grava este status; rótulo PRÓPRIO (não um alias de
+  // 'aguardando') porque a semântica é diferente: aguarda REVISÃO do
+  // vendedor, não resposta do cliente.
+  pre_orc_valeria: '🤖 Pré-orçamento Valéria — Aguard. Revisão',
 };
 var ORC_STATUS_COLOR = {
   aguardando: '#D97706', aprovado: '#F59E0B', enviado_producao: '#7C3AED',
   em_producao: '#2563EB', pronto: '#0D9488', entregue: '#059669',
   aguardando_pagamento: '#7C3AED', pago: '#7C3AED',
   recusado: '#DC2626', expirado: '#9CA3AF',
+  pre_orc_valeria: '#1EB8D8',
 };
 function orcStatusLabel(status) { return ORC_STATUS_LABEL[status] || status; }
 function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
@@ -31113,6 +31124,21 @@ function orcStatusCor(status) { return ORC_STATUS_COLOR[status] || '#9CA3AF'; }
 // dados reais quando existem, nunca inventa o que falta (fallback
 // "—"/"(sem nome)", nunca R$0,00 fantasioso quando nem total nem
 // totalCost existem).
+// Etapa 9K (2026-10-27) — ÚNICO ponto de decisão "este orçamento está
+// pendente de revisão humana?" — nunca espalhar essa comparação solta
+// pelo arquivo (achado real desta etapa: o motor novo da Valéria,
+// functions-valeria/action_executor.ts em produção, grava
+// status:"pre_orc_valeria", que nenhum filtro/contador/gate de
+// Aprovar-Recusar reconhecia — pré-orçamentos reais da Valéria ficavam
+// invisíveis ao vendedor). "pre_orc_valeria" NUNCA é reescrito para
+// "aguardando" aqui — a única transição real continua sendo o clique
+// explícito em Aprovar/Recusar (orcEnvSetStatus), exatamente como já
+// funcionava para "aguardando". Esta função é só LEITURA/classificação,
+// nunca migra o campo `status` gravado.
+function orcIsPendenteRevisao(o) {
+  return !o || !o.status || o.status === 'aguardando' || o.status === 'pre_orc_valeria';
+}
+
 function orcEnvNormalizar(o) {
   return {
     num: o.num != null ? o.num : (o.n != null ? o.n : '—'),
@@ -31470,7 +31496,7 @@ function orcEnvAbrir(id) {
     // agora só acontece aqui, no detalhe, executando orcEnvSetStatus() de
     // verdade (que já cria a Conta a Receber ao aprovar) — nunca mais um
     // dropdown solto na listagem que só mudava a aparência.
-    +(o.status==='aguardando' ? (
+    +(orcIsPendenteRevisao(o) ? (
         '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
        +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
       ) : '')
@@ -39508,8 +39534,8 @@ function crmMsgFechar() {
 // ============================================================
 function crmRenderOrcPend() {
   var envList = (typeof orcGetEnviados==='function') ? orcGetEnviados() : [];
-  var vrPend  = envList.filter(function(o){ return o.status==='aguardando' && (!o.marca || (o.marca||'').toLowerCase().indexOf('vitre')<0); });
-  var vtPend  = envList.filter(function(o){ return o.status==='aguardando' && (o.marca||'').toLowerCase().indexOf('vitre')>=0; });
+  var vrPend  = envList.filter(function(o){ return orcIsPendenteRevisao(o) && (!o.marca || (o.marca||'').toLowerCase().indexOf('vitre')<0); });
+  var vtPend  = envList.filter(function(o){ return orcIsPendenteRevisao(o) && (o.marca||'').toLowerCase().indexOf('vitre')>=0; });
 
   // Render pending orçamentos inside the "Orçamento Emitido" column containers
   function renderPendContainer(containerId, colCountId, list, fixedCount) {
@@ -42043,7 +42069,7 @@ function intelRender() {
   // ── Conversão ──
   var total   = envList.length;
   var aprov   = envList.filter(function(o){return o.status==='aprovado';}).length;
-  var aguard  = envList.filter(function(o){return !o.status||o.status==='aguardando';}).length;
+  var aguard  = envList.filter(orcIsPendenteRevisao).length;
   var recusad = envList.filter(function(o){return o.status==='recusado';}).length;
   var conv    = total ? Math.round(aprov/total*100) : 0;
   var convBar = document.getElementById('intelConvBar');
@@ -42336,7 +42362,7 @@ function painelRender() {
   // ── Orçamentos do mês ──
   var orcEl = document.getElementById('painelOrcBody');
   if(orcEl) {
-    var orcPend2 = orcs.filter(function(o){return !o.status||o.status==='aguardando';}).length;
+    var orcPend2 = orcs.filter(orcIsPendenteRevisao).length;
     var orcAprov = orcs.filter(function(o){return o.status==='aprovado';}).length;
     orcEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
       +'<div style="background:var(--bg);border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:900;color:var(--brand-mid)">'+orcMes.length+'</div><div style="font-size:10px;color:var(--muted)">este mês</div></div>'
