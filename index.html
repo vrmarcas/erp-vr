@@ -2667,6 +2667,10 @@ function _authFirebaseError(code){
     <div class="sb-group" id="sbG-comercial">
       <div class="sb-item" onclick="nav('orcamento',this)"><span class="ico">💰</span> Novo Orçamento</div>
       <div class="sb-item" onclick="nav('orcamentos-enviados',this)"><span class="ico">📤</span> Orçamentos Enviados <span class="sb-badge" id="orcEnvBadge" style="display:none"></span></div>
+      <!-- Etapa 9I (2026-10-27) — protótipo local, nunca publicado: fila agregada
+           de pré-orçamentos da Valéria para revisão. Reusa os editores reais
+           (vitreOrcAbrirRascunho/orcEnvAbrir), nunca um terceiro motor. -->
+      <div class="sb-item" onclick="nav('preorcamentos-valeria',this)"><span class="ico">🤖</span> Pré-orçamentos Valéria</div>
       <div class="sb-item" onclick="nav('vitre-catalogo',this)"><span class="ico">🌸</span> Catálogo Vitre</div>
       <div class="sb-item" onclick="nav('comercial',this)"><span class="ico">📈</span> Dashboard Comercial</div>
       <!-- Inteligência Comercial removida a pedido -->
@@ -4291,6 +4295,28 @@ function _authFirebaseError(code){
           <button class="topbar-btn" style="background:#1EB8D8" onclick="orcCloseModal();nav('crm',null)">Ver no CRM</button>
         </div>
       </div>
+    </div>
+
+    <!-- ==============================
+         PRÉ-ORÇAMENTOS VALÉRIA (Etapa 9I, 2026-10-27)
+         PROTÓTIPO LOCAL — nunca publicado/deployado nesta etapa. Camada de
+         LEITURA/organização apenas: nunca um terceiro motor de orçamento.
+         Reusa 100% os editores reais (vitreOrcAbrirRascunho/orcEnvAbrir) —
+         esta tela só agrega, por atendimento, o que já existe em
+         vitre_orcamentos (origem valeria/valeria_v2) e em erp_vr/orcamentos
+         (heurística de campos próprios da Valéria, mesma distinção já usada
+         em orcEnviadosRender()). O botão "Assumir revisão" chama uma Cloud
+         Function (vendedorAssumirRevisaoPreOrcamento) que EXISTE no código
+         mas NÃO está registrada em functions/src/index.ts nesta etapa — por
+         decisão explícita de segurança — então essa chamada falhará
+         ("function not found") até uma etapa futura autorizar o deploy.
+         ============================== -->
+    <div id="pg-preorcamentos-valeria" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:12px;color:var(--muted)">Protótipo local (Etapa 9I) — agrega rascunhos Vitre + personalizados ainda não revisados, por atendimento.</div>
+        <button class="topbar-btn" onclick="preOrcValeriaRender()">🔄 Atualizar</button>
+      </div>
+      <div id="preOrcValeriaBody" style="font-size:12px;color:var(--muted)">Clique em Atualizar para carregar.</div>
     </div>
 
     <!-- ==============================
@@ -9349,7 +9375,7 @@ function nav(page, el) {
   // então só Master alcançava a página pela sidebar, e raramente saía dela
   // sem recarregar). Agora que Produção/Financeiro navegam para Compras
   // rotineiramente, o conteúdo ficava vazando por baixo de outras páginas.
-  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','vitre-catalogo','comercial','inteligencia','crm','atendimentos','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
+  var allPages = ['dashboard','kanban','os-list','orcamento','orcamentos-enviados','preorcamentos-valeria','vitre-catalogo','comercial','inteligencia','crm','atendimentos','tarefas','clientes','estoque','fornecedores','compras','financeiro','relatorios','config-orc','config-plan','config-usr','seguranca','marketing'];
   allPages.forEach(function(p) {
     var pgEl = document.getElementById('pg-' + p);
     if (pgEl) { pgEl.style.display = 'none'; pgEl.classList.remove('on'); }
@@ -9369,6 +9395,7 @@ function nav(page, el) {
     dashboard: 'Dashboard', kanban: 'Kanban de OS',
     'os-list': 'Todas as OS', orcamento: 'Novo Orçamento',
     'orcamentos-enviados': 'Orçamentos Enviados',
+    'preorcamentos-valeria': '🤖 Pré-orçamentos Valéria (protótipo local)',
     'vitre-catalogo': '🌸 Catálogo Vitre',
     comercial: 'Dashboard Comercial',
     inteligencia: '🧠 Inteligência Comercial',
@@ -9401,6 +9428,7 @@ function nav(page, el) {
   if (page === 'config-orc') { setTimeout(function(){ if(!_cfgData) _cfgData=cfgLoad(); cfgRenderTables(); cfgTab(1); }, 0); setTimeout(function(){ try{ cfgRenderTables(); }catch(e){} }, 1200); setTimeout(function(){ try{ if(_cfgDataLoaded) cfgRenderTables(); }catch(e){} }, 3500); }
   // Ao entrar no Financeiro, renderizar todos os painéis
   if (page === 'dashboard')    { setTimeout(function(){ dashRender(); painelStartTimer(); }, 0); }
+  if (page === 'preorcamentos-valeria') { setTimeout(function(){ if(typeof preOrcValeriaRender==='function') preOrcValeriaRender(); }, 0); }
   if (page === 'kanban')       { setTimeout(function(){ if(typeof kbRender==='function') kbRender(); try{renderOsTable();syncSidebarBadges();}catch(e){} }, 0); }
   if (page === 'inteligencia') { setTimeout(function(){ intelRender(); }, 0); }
   if (page === 'financeiro') { setTimeout(function(){ relSetMesAtualUmaVez(); finRefreshAll(); }, 0); }
@@ -26673,6 +26701,89 @@ function vitreOrcListenerInit() {
     }).join('');
   }, function (err) { console.warn('[Vitre] listener vitre_orcamentos falhou:', err); });
 }
+// ── Etapa 9I (2026-10-27) — PROTÓTIPO LOCAL, nunca publicado nesta etapa.
+// Fila agregada de pré-orçamentos da Valéria para revisão (ver comentário
+// no container #pg-preorcamentos-valeria). Só leitura; nunca escreve em
+// vitre_orcamentos/erp_vr/orcamentos — os dois motores reais permanecem
+// intocados. Reusa vitreOrcAbrirRascunho/orcEnvAbrir para abrir cada item
+// no editor existente, nunca uma tela de edição nova.
+function preOrcValeriaEhOrigemValeria(o) {
+  // Mesma heurística documentada em orcEnviadosRender(): orçamentos
+  // criados pelo motor novo da Valéria (functions-valeria/quote_core.ts)
+  // gravam campos próprios (n/nomeCliente), diferentes do schema legado.
+  return o && (typeof o.n !== 'undefined' || typeof o.nomeCliente !== 'undefined');
+}
+function preOrcValeriaAssumir(atendimentoId) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorAssumirRevisaoPreOrcamento')({ atendimentoId: atendimentoId })
+    .then(function () { showToast('Revisão assumida.', 'ok'); preOrcValeriaRender(); })
+    .catch(function (e) {
+      // Etapa 9I: esta Cloud Function ainda não está registrada em
+      // index.ts (decisão de segurança desta etapa) — falha esperada até
+      // uma etapa futura autorizar o deploy. Nunca escondido do vendedor.
+      showToast('Ainda não conectado nesta etapa (' + (e && e.message || e) + ')', 'warn');
+    });
+}
+function preOrcValeriaRender() {
+  var body = document.getElementById('preOrcValeriaBody');
+  if (!body) return;
+  body.textContent = 'Carregando...';
+  if (typeof _db === 'undefined' || !_db) { body.textContent = 'Firestore indisponível.'; return; }
+
+  var vitrePromise = _db.collection('vitre_orcamentos')
+    .where('status', 'in', ['rascunho', 'enviado'])
+    .get()
+    .then(function (snap) {
+      return snap.docs
+        .map(function (d) { var o = d.data(); return { id: d.id, conversationId: o.conversationId, origem: o.origem, total: o.total, status: o.status }; })
+        .filter(function (o) { return o.origem === 'valeria' || o.origem === 'valeria_v2'; });
+    })
+    .catch(function () { return []; });
+
+  Promise.resolve(vitrePromise).then(function (vitreItens) {
+    var enviados = (typeof orcGetEnviados === 'function') ? orcGetEnviados() : [];
+    var personalizados = enviados.filter(preOrcValeriaEhOrigemValeria);
+
+    var porAtendimento = {};
+    vitreItens.forEach(function (it) {
+      var atd = it.conversationId || '(sem atendimento)';
+      (porAtendimento[atd] = porAtendimento[atd] || { vitre: [], personalizados: [] }).vitre.push(it);
+    });
+    personalizados.forEach(function (o) {
+      var atd = o.conversationId || o.atendimentoId || '(sem atendimento)';
+      (porAtendimento[atd] = porAtendimento[atd] || { vitre: [], personalizados: [] }).personalizados.push(o);
+    });
+
+    var atendimentos = Object.keys(porAtendimento);
+    if (!atendimentos.length) { body.innerHTML = '<div style="padding:16px 0;color:var(--muted)">Nenhum pré-orçamento da Valéria pendente.</div>'; return; }
+
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg2)">'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Atendimento</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Itens Vitre</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Itens personalizados</th>'
+      + '<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Ações</th>'
+      + '</tr></thead><tbody>';
+    atendimentos.forEach(function (atd) {
+      var grupo = porAtendimento[atd];
+      var vitreBtns = grupo.vitre.map(function (it) {
+        return '<button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px;margin:1px" onclick="vitreOrcAbrirRascunho(\'' + it.id + '\')">Abrir Vitre (' + (it.status || '—') + ')</button>';
+      }).join('') || '<span style="color:var(--muted)">—</span>';
+      var persBtns = grupo.personalizados.map(function (o) {
+        return '<button class="topbar-btn ghost" style="font-size:10px;padding:3px 6px;margin:1px" onclick="orcEnvAbrir(\'' + o.id + '\')">Abrir pedido (' + (o.status || '—') + ')</button>';
+      }).join('') || '<span style="color:var(--muted)">—</span>';
+      html += '<tr>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:monospace;font-size:11px">' + atd + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + vitreBtns + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + persBtns + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><button class="topbar-btn" style="font-size:10px;padding:3px 6px" onclick="preOrcValeriaAssumir(\'' + atd + '\')">Assumir revisão</button></td>'
+        + '</tr>';
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  });
+}
+
 function vitreOrcAbrirRascunho(id) {
   if (typeof _db === 'undefined' || !_db) return;
   _db.collection('vitre_orcamentos').doc(id).get().then(function (snap) {
@@ -36700,7 +36811,7 @@ function secApplyPerms(funcao){
     var page=m[1];
     var mod=page;
     if(page==='config-orc'||page==='config-plan'||page==='config-usr'||page==='seguranca') mod='config';
-    if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
+    if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial'||page==='preorcamentos-valeria') mod='orcamento';
     if(page==='os-list') mod='os-list';
     if(page==='relatorios') mod='financeiro';
     var hasPerm=getPermForMod(mod, page);
@@ -36716,7 +36827,7 @@ function secApplyPerms(funcao){
     if(!page) return;
     var mod=page;
     if(page==='config-orc'||page==='config-plan'||page==='config-usr'||page==='seguranca') mod='config';
-    if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial') mod='orcamento';
+    if(page==='orcamento'||page==='orcamentos-enviados'||page==='comercial'||page==='preorcamentos-valeria') mod='orcamento';
     if(page==='relatorios') mod='financeiro';
     item.style.display=getPermForMod(mod,page)?'':'none';
   });
