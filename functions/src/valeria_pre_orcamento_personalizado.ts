@@ -130,8 +130,8 @@ function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", 
 export const valeriaCriarRascunhoPersonalizado = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  const { checkAuth } = await import("./valeria");
-  if (!await checkAuth(req, res)) return;
+  const { checkBridgeAuth } = await import("./erp_bridge_auth");
+  if (!await checkBridgeAuth(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
   try {
     const resultado = await criarRascunhoPersonalizadoCore(req.body as CriarRascunhoPersonalizadoInput);

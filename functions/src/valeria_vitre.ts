@@ -136,7 +136,12 @@ function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", 
 export const valeriaVitreBuscarCatalogo = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  // Rodada "fechamento da publicação controlada" (2026-10-28): este
+  // endpoint também é chamado pela ponte Central→ERP — aceita o secret
+  // dedicado da ponte OU o Bearer administrativo antigo (nunca um
+  // terceiro valor), para não quebrar quem já o chama hoje com o antigo.
+  const { checkAuthBridgeOrLegacy } = await import("./erp_bridge_auth");
+  if (!await checkAuthBridgeOrLegacy(req, res)) return;
   if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const q = String(req.query.q || "").trim().toLowerCase();
@@ -251,7 +256,9 @@ export const valeriaVitreSimularOrcamento = functions.https.onRequest(async (req
 export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  if (!await checkAuth(req, res)) return;
+  // Mesma transição incremental de valeriaVitreBuscarCatalogo acima.
+  const { checkAuthBridgeOrLegacy } = await import("./erp_bridge_auth");
+  if (!await checkAuthBridgeOrLegacy(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
 
   const body = req.body as {

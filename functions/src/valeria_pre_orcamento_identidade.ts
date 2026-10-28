@@ -189,8 +189,11 @@ function cors(res: functions.Response) { res.set("Access-Control-Allow-Origin", 
 export const valeriaConsultarClientePorTelefone = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  const { checkAuth } = await import("./valeria");
-  if (!await checkAuth(req, res)) return;
+  // Rodada "fechamento da publicação controlada" (2026-10-28): secret
+  // DEDICADO da ponte (erp_bridge_auth.ts), nunca o Bearer administrativo
+  // genérico de valeria.ts — este endpoint não tem nenhum chamador legado.
+  const { checkBridgeAuth } = await import("./erp_bridge_auth");
+  if (!await checkBridgeAuth(req, res)) return;
   if (req.method !== "GET") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
   const telefone = String(req.query.telefone || "").trim();
   if (!telefone) { res.status(400).json({ ok: false, error: "telefone obrigatório" }); return; }
@@ -201,8 +204,8 @@ export const valeriaConsultarClientePorTelefone = functions.https.onRequest(asyn
 export const valeriaPrepararCadastroProvisorio = functions.https.onRequest(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-  const { checkAuth } = await import("./valeria");
-  if (!await checkAuth(req, res)) return;
+  const { checkBridgeAuth } = await import("./erp_bridge_auth");
+  if (!await checkBridgeAuth(req, res)) return;
   if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Método não permitido" }); return; }
   const body = req.body as { telefone?: string; atendimentoId?: string };
   const telefone = String(body.telefone || "").trim();
