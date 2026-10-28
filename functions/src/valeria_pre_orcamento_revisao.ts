@@ -141,6 +141,20 @@ export async function consultarRevisaoCore(atendimentoId: string): Promise<Revis
   return ensureRevisaoDoc(atendimentoId);
 }
 
+// Etapa 9L — achado real (ligação com Functions Emulator de verdade pela
+// primeira vez nesta etapa): RevisaoJaAssumidaError/RevisaoConcluidaError
+// são Error puros (não HttpsError) — o onCall do SDK mascarava os dois
+// como "INTERNAL" genérico para o cliente, escondendo o motivo real
+// ("já assumido por outro vendedor" vs "já revisado"). Nunca vaza detalhe
+// interno — só a mensagem já pensada para o vendedor em cada classe.
+function paraHttpsError(e: unknown): functions.https.HttpsError {
+  if (e instanceof functions.https.HttpsError) return e;
+  if (e instanceof RevisaoJaAssumidaError) return new functions.https.HttpsError("already-exists", e.message);
+  if (e instanceof RevisaoConcluidaError) return new functions.https.HttpsError("failed-precondition", e.message);
+  if (e instanceof Error && e.message.startsWith("NAO_ASSUMIDO")) return new functions.https.HttpsError("failed-precondition", e.message);
+  return new functions.https.HttpsError("internal", e instanceof Error ? e.message : "Erro desconhecido");
+}
+
 // ── Wrappers onCall (Firebase Auth real, role "comercial") — NÃO exportados
 // em index.ts nesta etapa.
 export const vendedorAssumirRevisaoPreOrcamento = functions.https.onCall(async (data, context) => {
@@ -148,8 +162,12 @@ export const vendedorAssumirRevisaoPreOrcamento = functions.https.onCall(async (
   requireRole(caller, ["comercial"], "assumir revisão de pré-orçamento");
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório");
-  const doc = await assumirRevisaoCore(atendimentoId, caller.uid);
-  return { ok: true, revisao: doc };
+  try {
+    const doc = await assumirRevisaoCore(atendimentoId, caller.uid);
+    return { ok: true, revisao: doc };
+  } catch (e) {
+    throw paraHttpsError(e);
+  }
 });
 
 export const vendedorConcluirRevisaoPreOrcamento = functions.https.onCall(async (data, context) => {
@@ -157,6 +175,10 @@ export const vendedorConcluirRevisaoPreOrcamento = functions.https.onCall(async 
   requireRole(caller, ["comercial"], "concluir revisão de pré-orçamento");
   const atendimentoId = String(data?.atendimentoId || "").trim();
   if (!atendimentoId) throw new functions.https.HttpsError("invalid-argument", "atendimentoId obrigatório");
-  const doc = await concluirRevisaoCore(atendimentoId, caller.uid);
-  return { ok: true, revisao: doc };
+  try {
+    const doc = await concluirRevisaoCore(atendimentoId, caller.uid);
+    return { ok: true, revisao: doc };
+  } catch (e) {
+    throw paraHttpsError(e);
+  }
 });

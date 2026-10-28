@@ -26726,6 +26726,27 @@ function preOrcValeriaAssumir(atendimentoId) {
       showToast('Ainda não conectado nesta etapa (' + (e && e.message || e) + ')', 'warn');
     });
 }
+function preOrcValeriaConcluir(atendimentoId) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorConcluirRevisaoPreOrcamento')({ atendimentoId: atendimentoId })
+    .then(function () { showToast('Revisão concluída — agora é possível aprovar/recusar.', 'ok'); preOrcValeriaRender(); })
+    .catch(function (e) { showToast('Ainda não conectado nesta etapa (' + (e && e.message || e) + ')', 'warn'); });
+}
+// Etapa 9L — botão de ação correto conforme o estado real do lock
+// (nunca "Assumir revisão" sempre visível, independente do estado atual).
+function preOrcValeriaBotaoAcaoRevisao(atendimentoId, revisao) {
+  var myUid = (typeof _currentSession !== 'undefined' && _currentSession) ? _currentSession.uid : null;
+  if (revisao && revisao.status === 'EM_REVISAO' && revisao.assumidoPorUid === myUid) {
+    return '<button class="topbar-btn" style="font-size:10px;padding:3px 6px;background:#059669" onclick="preOrcValeriaConcluir(\'' + atendimentoId + '\')">Concluir revisão</button>';
+  }
+  if (revisao && revisao.status === 'EM_REVISAO') {
+    return '<span style="font-size:10px;color:var(--muted)">🔒 outro vendedor</span>';
+  }
+  if (revisao && revisao.status === 'REVISADO') {
+    return '<span style="font-size:10px;color:#059669">✅ Revisado</span>';
+  }
+  return '<button class="topbar-btn" style="font-size:10px;padding:3px 6px" onclick="preOrcValeriaAssumir(\'' + atendimentoId + '\')">Assumir revisão</button>';
+}
 function preOrcValeriaVerAtendimento(atendimentoId) {
   nav('atendimentos', null);
   setTimeout(function () { if (typeof atdSelecionar === 'function') atdSelecionar(atendimentoId); }, 0);
@@ -26837,7 +26858,7 @@ function preOrcValeriaRender() {
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + vitreBtns + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + persBtns + '</td>'
         + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + revisaoHtml + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><button class="topbar-btn" style="font-size:10px;padding:3px 6px" onclick="preOrcValeriaAssumir(\'' + atd + '\')">Assumir revisão</button></td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">' + preOrcValeriaBotaoAcaoRevisao(atd, revisao) + '</td>'
         + '</tr>';
     });
     html += '</tbody></table>';
@@ -31377,6 +31398,62 @@ function orcEnvReverterParaAguardando(id){
   }
 }
 
+// ── Etapa 9L (2026-10-27) — gate real de revisão humana para Aprovar/
+// Recusar de pré-orçamentos Valéria. Nunca aplicado a orçamentos comuns
+// (preOrcValeriaEhOrigemValeria filtra isso). O lock
+// (valeria_pre_orcamentos_revisao) é lido direto do Firestore para
+// EXIBIÇÃO (barato, mesmo padrão de preOrcValeriaRender); as AÇÕES
+// (assumir/concluir) passam pelo Functions Emulator real
+// (vendedorAssumirRevisaoPreOrcamento/vendedorConcluirRevisaoPreOrcamento
+// — mesmas Cloud Functions da Etapa 9I/9J, nunca registradas em
+// functions/src/index.ts de produção).
+function preOrcValeriaBotoesAprovarRecusar(o) {
+  return '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
+       + '<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>';
+}
+function orcEnvPatchAcoesRevisao(o) {
+  if (typeof _db === 'undefined' || !_db) return;
+  var atd = o.conversationId || o.atendimentoId;
+  if (!atd) { var b0 = document.getElementById('orcEnvAcoesRevisaoBox'); if (b0) b0.outerHTML = preOrcValeriaBotoesAprovarRecusar(o); return; }
+  _db.collection('valeria_pre_orcamentos_revisao').doc(atd).get().then(function (snap) {
+    var el = document.getElementById('orcEnvAcoesRevisaoBox');
+    var modal = document.getElementById('orcEnvModal');
+    // Mesmo guard de modal.dataset.orcId já usado pelo histórico financeiro
+    // nesta função — se o vendedor trocou de orçamento, descarta o patch.
+    if (!el || !modal || modal.dataset.orcId !== o.id) return;
+    var rev = snap.exists ? snap.data() : null;
+    var myUid = (typeof _currentSession !== 'undefined' && _currentSession) ? _currentSession.uid : null;
+    if (!rev || rev.status === 'AGUARDANDO_REVISAO') {
+      el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:#D97706">⚠ Revisão humana obrigatória antes de aprovar/recusar.</span> '
+        + '<button class="topbar-btn ghost" style="font-size:11px" onclick="orcEnvAssumirRevisao(\''+atd+'\',\''+o.id+'\')">📝 Assumir revisão</button>';
+    } else if (rev.status === 'EM_REVISAO' && rev.assumidoPorUid === myUid) {
+      el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:#1EB8D8">Em revisão por você.</span> '
+        + '<button class="topbar-btn ghost" style="font-size:11px;color:#059669;border-color:#059669" onclick="orcEnvConcluirRevisao(\''+atd+'\',\''+o.id+'\')">✅ Concluir revisão</button>';
+    } else if (rev.status === 'EM_REVISAO') {
+      el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:var(--muted)">🔒 Em revisão por outro vendedor ('+(rev.assumidoPorUid||'?')+').</span>';
+    } else if (rev.status === 'REVISADO') {
+      el.outerHTML = preOrcValeriaBotoesAprovarRecusar(o);
+    } else {
+      el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:var(--muted)">—</span>';
+    }
+  }).catch(function () {
+    var el = document.getElementById('orcEnvAcoesRevisaoBox');
+    if (el) el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:var(--muted)">Não foi possível verificar a revisão.</span>';
+  });
+}
+function orcEnvAssumirRevisao(atendimentoId, orcId) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorAssumirRevisaoPreOrcamento')({ atendimentoId: atendimentoId })
+    .then(function () { showToast('Revisão assumida.', 'ok'); orcEnvAbrir(orcId); })
+    .catch(function (e) { showToast('Falha ao assumir revisão: ' + (e && e.message || e), 'err'); });
+}
+function orcEnvConcluirRevisao(atendimentoId, orcId) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorConcluirRevisaoPreOrcamento')({ atendimentoId: atendimentoId })
+    .then(function () { showToast('Revisão concluída — agora é possível aprovar/recusar.', 'ok'); orcEnvAbrir(orcId); })
+    .catch(function (e) { showToast('Falha ao concluir revisão: ' + (e && e.message || e), 'err'); });
+}
+
 function orcEnvAbrir(id) {
   var lista = orcGetEnviados();
   var o = lista.find(function(x){ return x.id===id; });
@@ -31496,10 +31573,21 @@ function orcEnvAbrir(id) {
     // agora só acontece aqui, no detalhe, executando orcEnvSetStatus() de
     // verdade (que já cria a Conta a Receber ao aprovar) — nunca mais um
     // dropdown solto na listagem que só mudava a aparência.
-    +(orcIsPendenteRevisao(o) ? (
-        '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
-       +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
-      ) : '')
+    // Etapa 9L (2026-10-27) — achado real: Aprovar/Recusar apareciam para
+    // QUALQUER registro pendente, inclusive um pre_orc_valeria que NINGUÉM
+    // jamais assumiu/revisou (orcIsPendenteRevisao só decide "está
+    // pendente?", nunca "já foi revisado?" — auditoria pedida nesta etapa
+    // confirmou essa distinção não existia). Para origem Valéria, os
+    // botões reais só aparecem depois que orcEnvPatchAcoesRevisao() (lock
+    // valeria_pre_orcamentos_revisao) confirmar status REVISADO — nunca
+    // como efeito colateral de orcIsPendenteRevisao. Orçamentos comuns
+    // (não-Valéria) continuam EXATAMENTE como antes, zero mudança.
+    +(preOrcValeriaEhOrigemValeria(o) && orcIsPendenteRevisao(o)
+        ? '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:var(--muted)">Verificando revisão…</span>'
+        : (orcIsPendenteRevisao(o) ? (
+            '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
+           +'<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>'
+          ) : ''))
     // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 8 — reversão segura
     // Aprovado→Aguardando (ex.: "Cliente aprovou" marcado por engano). Só
     // oferece o botão quando ainda não há OS gerada (o.osRef) — nunca criar
@@ -31527,6 +31615,12 @@ function orcEnvAbrir(id) {
   // orçamento antes desta resposta chegar, o patch é descartado (nunca
   // pinta o histórico errado por cima de um orçamento diferente).
   modal.dataset.orcId = o.id;
+  // Etapa 9L — mesmo padrão de descarte por dataset.orcId acima: o gate
+  // real de Aprovar/Recusar para origem Valéria (orcEnvPatchAcoesRevisao)
+  // só é disparado quando há algo pendente de fato para essa origem.
+  if (preOrcValeriaEhOrigemValeria(o) && orcIsPendenteRevisao(o)) {
+    orcEnvPatchAcoesRevisao(o);
+  }
   if(typeof firebase!=='undefined' && firebase.functions){
     firebase.functions().httpsCallable('finCrHistoricoRecebimento')({ orcamentoId:o.id, osRef:o.osRef||'' })
       .then(function(res){
