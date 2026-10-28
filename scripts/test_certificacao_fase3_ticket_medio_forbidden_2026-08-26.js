@@ -44,7 +44,7 @@ function extractFn(name) {
 
 console.log('\n=== CERTIFICAÇÃO FASE 3 — Ticket Médio honesto para Comercial sem acesso a fin_tx ===\n');
 
-var FN_NAMES = ['setEl', 'comercialRender'];
+var FN_NAMES = ['setEl', 'comercialRender', 'orcIsPendenteRevisao'];
 var src = FN_NAMES.map(extractFn).join('\n\n') + '\n\nmodule.exports = {comercialRender: comercialRender};';
 var modPath = path.join(__dirname, '_certificacao_fase3_comercialrender.tmp.js');
 fs.writeFileSync(modPath, src);

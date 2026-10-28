@@ -38,7 +38,7 @@ function extractFn(name) {
 // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — dashOrcMesDoFiltro/
 // dashCalcularKPIsComerciais passaram a normalizar cada orçamento via
 // orcEnvNormalizar() (schema legado × ValerIA), nunca reimplementada.
-var FN_NAMES = ['dashOrcMesDoFiltro', 'dashCalcularKPIsComerciais', 'dashCalcularVendasRecebimentos', 'orcEnvNormalizar'];
+var FN_NAMES = ['dashOrcMesDoFiltro', 'dashCalcularKPIsComerciais', 'dashCalcularVendasRecebimentos', 'orcEnvNormalizar', 'orcIsPendenteRevisao'];
 var src = [
   FN_NAMES.map(extractFn).join('\n\n'),
   'module.exports = { comerciais: dashCalcularKPIsComerciais, vendasRecebimentos: dashCalcularVendasRecebimentos };'

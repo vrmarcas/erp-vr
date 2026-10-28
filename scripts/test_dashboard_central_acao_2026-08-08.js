@@ -32,7 +32,7 @@ function extractFn(name) {
 
 var FN_NAMES = [
   'dashCalcularEstoqueCritico', 'dashCalcularKPIsComerciais', 'dashOrcMesDoFiltro',
-  'dashCalcularVendasRecebimentos', 'dashCalcularOSBreakdown', 'dashCentralDeAcao',
+  'dashCalcularVendasRecebimentos', 'dashCalcularOSBreakdown', 'dashCentralDeAcao', 'orcIsPendenteRevisao',
   // HOTFIX BLOCO G/H (Rodada de Hardening, Fase 2, 2026-08-26) — dashOrcMesDoFiltro/
   // dashCalcularKPIsComerciais passaram a normalizar cada orçamento via
   // orcEnvNormalizar() (schema legado × ValerIA), nunca reimplementada.

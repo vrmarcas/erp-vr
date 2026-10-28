@@ -67,7 +67,7 @@ var FN_NAMES = [
   'orcProdutoNomeResolvido', 'cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos', 'orcItensDistribuidosDeOrc', '_orcItemEntraNaOperacao',
   'orcComparativoPendenteDOM', 'orcComparativoPendente', 'orcOpcaoSelecionar', 'orcMotorComercial', 'orcDistribuirParcelas',
-  'cfgMaqOperInfo', '_orcMaqInfo', 'orcSincronizarEspPecasHerdadas', 'orcPecasHerdarEspessura'
+  'cfgMaqOperInfo', '_orcMaqInfo', '_maqInfoPorMaquinaId', '_itemMaqInfo', 'orcSincronizarEspPecasHerdadas', 'orcPecasHerdarEspessura'
 ];
 var src = [
   'var ORC_REGRA_COMPARATIVO_ATUAL = 2;',
@@ -141,6 +141,7 @@ function montarPedido(itens, opts) {
   global.ORC_ITEM_AJUSTES = {};
   itens.forEach(function (it) { if (it.ajuste) global.ORC_ITEM_AJUSTES[it.idx] = it.ajuste; });
   global.ORC_ITEM_OPCOES = opts.opcoes || {};
+  global.ORC_ITEM_MAQUINAS = {};
   global._orcVitreItensPedido = [];
   global.orcVitreItensPedidoTotal = function () { return 0; };
   global.window = global;

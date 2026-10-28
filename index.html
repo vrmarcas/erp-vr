@@ -3628,13 +3628,27 @@ function _authFirebaseError(code){
                       <span id="soCorteValor" style="font-size:12px;font-weight:800;color:#92400E;margin-left:auto">R$ 0,00</span>
                     </div>
                   </div>
-                  <div class="section-lbl">Máquinas (minutos)</div>
+                  <!-- RODADA CIRÚRGICA 2026-10-28 — máquinas passam a ser por ITEM
+                       (botão "⚙️ Custos" de cada item, aba "🔧 Máquinas (min)"):
+                       selecionar QUAL máquina real do cadastro está sendo usada,
+                       por operação, DENTRO de cada item — nunca mais um único
+                       tempo/máquina compartilhado por todo o pedido (causa raiz do
+                       bug real "Item A sobrescreve Item B"). Os campos om_<op>
+                       abaixo continuam no DOM (ocultos) só como FALLBACK LEGADO —
+                       orcRecalc() ainda os lê para não reescrever silenciosamente
+                       orçamentos salvos ANTES desta rodada; nunca mais editáveis
+                       por aqui — mesmo padrão já usado para Consumíveis (Rodada 6). -->
+                  <div style="display:none">
+                  <div class="section-lbl">Máquinas (minutos) — legado</div>
                   <div class="cost-row"><div class="cost-name">⚡ Laser</div><div class="cost-unit" id="ocu_laser">—</div><input class="cost-inp" type="number" id="om_laser" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_laser">R$0,00</div><button onclick="orcAutoLaser()" title="Calcular automaticamente por espessura do material" style="background:var(--brand-mid);color:#fff;border:none;border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer;margin-left:2px;white-space:nowrap">Auto</button></div>
                   <div class="cost-row"><div class="cost-name">📐 Dobra</div><div class="cost-unit" id="ocu_dobra">—</div><input class="cost-inp" type="number" id="om_dobra" value="0"  min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_dobra">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">✨ Politrix</div><div class="cost-unit" id="ocu_pol">—</div><input class="cost-inp" type="number" id="om_pol" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_pol">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">☀️ UV</div><div class="cost-unit" id="ocu_uv">—</div><input class="cost-inp" type="number" id="om_uv" value="0"    min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_uv">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🔧 Lixadeira</div><div class="cost-unit" id="ocu_lixa">—</div><input class="cost-inp" type="number" id="om_lixa" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_lixa">R$0,00</div></div>
                   <div class="cost-row"><div class="cost-name">🔩 Tupia</div><div class="cost-unit" id="ocu_tupia">—</div><input class="cost-inp" type="number" id="om_tupia" value="0" min="0" oninput="orcRecalc()"><div class="cost-val" id="ocv_tupia">R$0,00</div></div>
+                  </div>
+                  <div class="section-lbl">🔧 Máquinas</div>
+                  <div style="font-size:10px;color:var(--muted);padding:4px 0;line-height:1.5">Máquina e tempo agora são configurados POR ITEM — abra "⚙️ Custos" em cada item e escolha a máquina usada em "🔧 Máquinas (min)".</div>
                   <div id="orcMaqAlertaSemCusto" style="display:none;margin-top:6px;padding:6px 9px;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:7px;font-size:10px;font-weight:700;color:#92400E;line-height:1.5"></div>
                 </div>
                 <!-- RODADA 6 — "Consumíveis" globais do orçamento saem da UI: passam
@@ -10006,6 +10020,13 @@ function orcDuplicarItemComoOpcao(idxOrig) {
   // Extras/ajuste do item — mesmo deep-clone usado em save/reabertura.
   if (ORC_ITEM_EXTRAS[idxOrig]) ORC_ITEM_EXTRAS[novoIdx] = JSON.parse(JSON.stringify(ORC_ITEM_EXTRAS[idxOrig]));
   if (ORC_ITEM_AJUSTES[idxOrig]) ORC_ITEM_AJUSTES[novoIdx] = JSON.parse(JSON.stringify(ORC_ITEM_AJUSTES[idxOrig]));
+  // RODADA CIRÚRGICA 2026-10-28 — máquina/tempo por item: a cópia nasce
+  // com a MESMA máquina/tempo da origem (ponto de partida razoável — ex.:
+  // duplicar "Caixa 3mm" como alternativa "Caixa 4mm" provavelmente usa o
+  // mesmo Laser), mas o vendedor pode mudar livremente depois — são
+  // entradas INDEPENDENTES (idxOrig/novoIdx), nunca compartilhadas (não
+  // existe mais vazamento entre alternativas A/B de um comparativo).
+  if (ORC_ITEM_MAQUINAS[idxOrig]) ORC_ITEM_MAQUINAS[novoIdx] = JSON.parse(JSON.stringify(ORC_ITEM_MAQUINAS[idxOrig]));
   // Planificação (peças/medidas) — copia o snapshot já calculado do item de
   // origem; o vendedor reabre "📐 Editar" na cópia se precisar ajustar.
   var rowNovo = document.getElementById('oir_'+novoIdx);
@@ -12060,6 +12081,9 @@ function orcRemItem(idx) {
   // novo ORC_ITEM_OPCOES).
   if (typeof ORC_ITEM_EXTRAS!=='undefined') delete ORC_ITEM_EXTRAS[idx];
   if (typeof ORC_ITEM_AJUSTES!=='undefined') delete ORC_ITEM_AJUSTES[idx];
+  // RODADA CIRÚRGICA 2026-10-28 — mesmo motivo acima: máquina/tempo por
+  // item também é um mapa global keyed por idx, mesma limpeza necessária.
+  if (typeof ORC_ITEM_MAQUINAS!=='undefined') delete ORC_ITEM_MAQUINAS[idx];
   // RODADA ESTABILIZAÇÃO 2026-09-04 — se o item removido era a opção
   // SELECIONADA de um grupo comparativo, o grupo inteiro ficava sem
   // nenhuma opção com `selecionada:true`: em orcRecalc() nenhuma opção
@@ -12165,6 +12189,20 @@ function _orcMaqInfo(opKey) {
   if (snap && snap[opKey]) return snap[opKey];
   return cfgMaqOperInfo(opKey);
 }
+// RODADA CIRÚRGICA 2026-10-28 — equivalente item-a-item de _orcMaqInfo()
+// acima: um item restaurado de orçamento salvo carrega `_snapshot` (taxa
+// EFETIVAMENTE usada na venda, ver orcEnvEditar) e nunca recalcula com a
+// config vigente; um item novo (ou editado nesta mesma sessão) sempre lê
+// a Config atual via _maqInfoPorMaquinaId(), pela MESMA fonte canônica
+// (cfgData.maquinas) — nunca duplicado. `min` (tempo) sempre vem do
+// próprio item, nunca de um campo global do pedido.
+function _itemMaqInfo(idx, opKey) {
+  var cfgItem = (ORC_ITEM_MAQUINAS[idx] || {})[opKey] || {};
+  var min = parseFloat(cfgItem.min) || 0;
+  if (cfgItem._snapshot) return Object.assign({ ok: true, motivo: null }, cfgItem._snapshot, { min: min });
+  var info = _maqInfoPorMaquinaId(cfgItem.machineId);
+  return Object.assign({}, info, { min: min });
+}
 function orcRecalc() {
   orcSincronizarEspPecasHerdadas();
   // Lê overhead, impostos e vrml do Config salvo (não mais do Step 3)
@@ -12214,16 +12252,10 @@ function orcRecalc() {
   window._orcMaqOpsCalc = _maqOpsCalc; // consumido pelo modal de Custos e pelo alerta pré-envio
   orcSetV('ocv_laser',laser); orcSetV('ocv_dobra',dobra); orcSetV('ocv_pol',pol);
   orcSetV('ocv_uv',uv); orcSetV('ocv_lixa',lixa); orcSetV('ocv_tupia',tupia);
-  var _alertaMaqEl = document.getElementById('orcMaqAlertaSemCusto');
-  if (_alertaMaqEl) {
-    if (_maqAlertaOps.length) {
-      _alertaMaqEl.style.display = 'block';
-      _alertaMaqEl.textContent = '⚠️ Máquina sem custo configurado para: ' + _maqAlertaOps.join(', ') + '. O preço final NÃO está contabilizando essa(s) operação(ões) — configure em Config. Orçamento → Máquinas antes de enviar.';
-    } else {
-      _alertaMaqEl.style.display = 'none';
-      _alertaMaqEl.textContent = '';
-    }
-  }
+  // RODADA CIRÚRGICA 2026-10-28 — a renderização do alerta (#orcMaqAlertaSemCusto)
+  // precisa acontecer DEPOIS do PASS 1 (mais abaixo), porque agora também
+  // acumula os alertas de máquina POR ITEM (_maqAlertaOps.push dentro do
+  // forEach de itemRows) — nunca só os do mecanismo global legado acima.
 
   // Adesivo/Adh. Branco por peça (Rodada 5) — resolução do preço/cm² tem
   // que vir ANTES do PASS1 porque o delta de adesivo por peça agora é
@@ -12245,7 +12277,7 @@ function orcRecalc() {
 
   // PASS 1: coletar custo de material de cada item
   var itemRows = [];
-  let matTotal=0, areaTotal=0, qtyTotal=0;
+  let matTotal=0, areaTotal=0, qtyTotal=0, maqItemTotal=0;
   document.querySelectorAll('#orcItemBody tr').forEach(function(row) {
     const idx = row.dataset.idx; if(!idx) return;
     // RODADA 5/6 — precisa ser calculado ANTES dos loops de peça abaixo:
@@ -12377,14 +12409,54 @@ function orcRecalc() {
     // para nunca deixar o extra de um item vazar no preço de outro.
     var _exItem = (typeof ORC_ITEM_EXTRAS!=='undefined' && ORC_ITEM_EXTRAS[idx]) || {};
     var itemExtrasSoma = (_exItem.acabamento||0)+(_exItem.instalacao||0)+(_exItem.outros||0);
+    // RODADA CIRÚRGICA 2026-10-28 — máquina por item/operação: cada item
+    // (ou alternativa de comparativo, já que cada uma tem seu próprio
+    // `idx`) pode escolher, para cada uma das 6 operações, QUAL máquina
+    // real do cadastro está usando — nunca mais um único tempo/máquina
+    // compartilhado pelo pedido inteiro (ver ORC_ITEM_MAQUINAS acima).
+    // Preço INFORMATIVO sempre calculado (mesmo padrão de matCost/adhOwn
+    // acima — RODADA 5): opção não selecionada de um comparativo continua
+    // com seu próprio custo de máquina, nunca herda nem perde o da outra
+    // alternativa. Setup cobrado 1x por operação em uso NESTE item (nunca
+    // por minuto) — mesma granularidade já usada pelo mecanismo global.
+    var _maqItemCusto = 0;
+    var _maqItemAlertas = [];
+    ORC_MAQ_OPS.forEach(function(op){
+      var infoItem = _itemMaqInfo(idx, op.key);
+      var custoOp = infoItem.min>0 ? (infoItem.min*infoItem.custoMin + infoItem.setup) : 0;
+      _maqItemCusto += custoOp;
+      if (infoItem.min>0 && !infoItem.ok) _maqItemAlertas.push(op.label.replace(/^\S+\s/,''));
+    });
+    if (_maqItemAlertas.length) _maqAlertaOps.push(_maqItemAlertas.map(function(l){ return l+' (item '+idx+')'; }).join(', '));
+    // RODADA CIRÚRGICA 2026-10-28 — maqItemTotal (agregado do PEDIDO) tem
+    // que entrar em totalCostParaMarkup (mais abaixo) com a MESMA regra de
+    // matTotal/areaTotal/qtyTotal — só itens que realmente contam (não uma
+    // alternativa de comparativo não escolhida) — senão finalPrice (calculado
+    // ANTES do PASS 3) ficaria sem a parcela de máquina que o PASS 3 já
+    // soma em cada linha, reabrindo o mesmo tipo de resíduo oculto que a
+    // RODADA CIRÚRGICA 2026-10-27 (arredondamento comercial) fechou.
+    if (_contaItem) maqItemTotal += _maqItemCusto;
     itemRows.push({
       idx:idx, qty:qty, matCost:matCost, itemExtrasSoma: _contaItem?itemExtrasSoma:0, conta:_contaItem,
       // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — consumíveis
       // de peça PRÓPRIOS deste item (nunca dependem do que outras linhas
       // têm) — usados pelo PASS 2/3 para precificar a linha isoladamente.
-      adhOwn:_adhItemLocal, adhbOwn:_adhbItemLocal, gravacaoOwn:_gravacaoItemLocal, sprayOwn:_sprayItemLocal, extraOwn:_extraItemLocal
+      adhOwn:_adhItemLocal, adhbOwn:_adhbItemLocal, gravacaoOwn:_gravacaoItemLocal, sprayOwn:_sprayItemLocal, extraOwn:_extraItemLocal, maqOwn:_maqItemCusto
     });
   });
+  // RODADA CIRÚRGICA 2026-10-28 — ver comentário acima (perto de ocv_tupia):
+  // só agora, DEPOIS do PASS 1, _maqAlertaOps já tem os alertas globais
+  // (legado) E os por item, então só agora a UI pode ser atualizada.
+  var _alertaMaqEl = document.getElementById('orcMaqAlertaSemCusto');
+  if (_alertaMaqEl) {
+    if (_maqAlertaOps.length) {
+      _alertaMaqEl.style.display = 'block';
+      _alertaMaqEl.textContent = '⚠️ Máquina sem custo configurado para: ' + _maqAlertaOps.join(', ') + '. O preço final NÃO está contabilizando essa(s) operação(ões) — configure a máquina no item (⚙️ Custos) ou em Config. Orçamento → Máquinas antes de enviar.';
+    } else {
+      _alertaMaqEl.style.display = 'none';
+      _alertaMaqEl.textContent = '';
+    }
+  }
 
   // consumíveis
   const adhYes  = document.getElementById('oc_adh')?.value==='sim';
@@ -12468,8 +12540,14 @@ function orcRecalc() {
   // real, para "Custo Total"/window._orcCalc.totalCost), mas EXCLUÍDOS da
   // base do markup (totalCostParaMarkup) — mesma regra que já existia só
   // para Gravação, agora uniforme para os três.
-  const totalCost = matTotal + extras + itemExtrasTotal + gravacaoCusto + sprayCusto + extraCusto;
-  const totalCostParaMarkup = matTotal + extras + itemExtrasTotal; // base do markup — SEM Gravação/Spray/Extra
+  // RODADA CIRÚRGICA 2026-10-28 — maqItemTotal (soma do custo de máquina
+  // POR ITEM, só dos itens que contam — ver PASS 1) entra aqui ao lado de
+  // `extras` (que só carrega o mecanismo GLOBAL legado, maqTotal) — as
+  // duas fontes são aditivas, nunca mutuamente exclusivas: um orçamento
+  // reaberto que ainda usa om_laser global E tem itens com máquina própria
+  // soma os dois corretamente, sem favorecer nenhum dos dois mecanismos.
+  const totalCost = matTotal + extras + maqItemTotal + itemExtrasTotal + gravacaoCusto + sprayCusto + extraCusto;
+  const totalCostParaMarkup = matTotal + extras + maqItemTotal + itemExtrasTotal; // base do markup — SEM Gravação/Spray/Extra
 
   // RODADA DE ESTABILIZAÇÃO — PREÇO POR ITEM 2026-09-10 — consumíveis
   // configurados pelos campos GLOBAIS do pedido (toggle "🩹 Adesivo"
@@ -12520,17 +12598,27 @@ function orcRecalc() {
       // inviolável: item não alterado nunca pode mudar de preço por causa
       // de outra linha. A base de venda da linha agora inclui SÓ o que é
       // PRÓPRIO deste item — material + Adesivo/Adh.Branco por peça deste
-      // item + extras "➕ deste Item" — nunca uma fatia de custos do
-      // PEDIDO (máquinas/montagem/deslocamento/desconto global), que saem
-      // daqui e passam a aparecer só no resumo do pedido (Custos gerais),
-      // nunca mais rateados de volta pra linha.
+      // item + extras "➕ deste Item" + máquina POR ITEM (ver maqOwn abaixo)
+      // — nunca uma fatia de custos do PEDIDO (montagem/deslocamento/
+      // desconto global, ou o mecanismo GLOBAL legado de máquina —
+      // om_laser etc., ver _maqOpsCalc acima —, mantido só para orçamentos
+      // salvos ANTES da RODADA CIRÚRGICA 2026-10-28), que saem daqui e
+      // passam a aparecer só no resumo do pedido (Custos gerais), nunca
+      // mais rateados de volta pra linha.
       // itemExtrasSoma ("➕ deste Item" — Acabamento/Instalação/Outros) fica
       // DE FORA daqui de propósito: é um valor FLAT por linha (nunca por
       // unidade) — RODADA DE ESTABILIZAÇÃO (2026-08-23), Bloco D já exigia
       // que nunca fosse dividido por qty; entra marcado (própria linha, já
       // calculado abaixo em item.extrasProprioMarkup) só no TOTAL da linha
       // (PASS 3), nunca no "ts" que alimenta o unitário.
-      var _costBaseOwn = item.matCost + (item.adhOwn||0) + (item.adhbOwn||0);
+      // RODADA CIRÚRGICA 2026-10-28 — maqOwn (custo de máquina ESCOLHIDA
+      // POR ESTE ITEM, PASS 1) entra na MESMA base que material/adesivo —
+      // passa pelo markup geral, igual ao mecanismo global que substitui
+      // (ver orcRecalc, extras = maqTotal+consTotal+mont+desl, mesma
+      // regra "passa pelo factor"). Dois itens (ou duas alternativas de um
+      // comparativo) com máquinas/tempos diferentes nunca se misturam —
+      // cada um soma só o PRÓPRIO maqOwn, nunca o de outro item.
+      var _costBaseOwn = item.matCost + (item.adhOwn||0) + (item.adhbOwn||0) + (item.maqOwn||0);
       var ts = _costBaseOwn / factor;             // total de venda da linha, ANTES do ajuste do item (markup s/ material+adesivo próprio)
       var precoOriginalItemCents = Math.round(ts * 100);
       var _aj = (typeof ORC_ITEM_AJUSTES!=='undefined' && ORC_ITEM_AJUSTES[item.idx]) || {};
@@ -13139,6 +13227,29 @@ var ORC_ITEM_AJUSTES = {};
 // preço informativo (nunca somado), mas continuam gerando OS quando
 // selecionados.
 var ORC_ITEM_OPCOES = {};
+// RODADA CIRÚRGICA 2026-10-28 — máquina por item/operação. Mesmo padrão de
+// ciclo de vida de ORC_ITEM_EXTRAS/ORC_ITEM_AJUSTES/ORC_ITEM_OPCOES acima
+// (mapa global keyed por índice da linha, reset em "Novo Orçamento",
+// gravado no snapshot do item ao salvar, restaurado ao reabrir). Substitui
+// a decisão anterior (RODADA CIRÚRGICA 2026-10-13, Bloco C) de uma única
+// máquina COMPARTILHADA por pedido (campos globais om_laser/om_dobra/...)
+// — essa decisão impedia dois itens (ou duas alternativas de um
+// comparativo) de usarem máquinas/tempos diferentes para a mesma operação
+// (achado real: usuário precisa de Item A=Laser Vermelha e Item B=Laser
+// Metal no MESMO pedido). Os campos globais om_<op> continuam existindo e
+// sendo lidos por orcRecalc() — nunca removidos — para não reescrever
+// silenciosamente orçamentos históricos salvos antes desta rodada; a UI
+// nova (por item, dentro de "⚙️ Custos") é a única forma de ESCREVER a
+// partir de agora, então om_<op> tende a ficar zerado em orçamentos novos
+// (ver card "🔧 Máquinas (min)" do Step 3, agora somente leitura/legado).
+//
+// Formato: ORC_ITEM_MAQUINAS[ri] = { <opKey>: { machineId: string|null,
+// min: number, _snapshot?: {nome,custoMin,setup} } }. `_snapshot` só existe
+// em item restaurado de um orçamento salvo (ver orcEnvEditar) — fixa a
+// taxa EFETIVAMENTE usada na venda, nunca recalculada por mudança
+// posterior em Config→Máquinas (mesmo princípio de window._orcMaqInfoSnapshot,
+// agora por item em vez de por pedido inteiro).
+var ORC_ITEM_MAQUINAS = {};
 
 function orcItemExtras(ri) {
   window._extrasRiAtual = ri; // usado por orcExtrasAutoLaser
@@ -13149,6 +13260,9 @@ function orcItemExtras(ri) {
   window._extrasSnapshot = JSON.parse(JSON.stringify(ex));
   window._ajusteSnapshot = JSON.parse(JSON.stringify(aj));
   window._extrasSalvo = false;
+  // RODADA CIRÚRGICA 2026-10-28 — mesmo padrão de snapshot/descarte acima,
+  // agora para máquina/tempo por item (ver orcItemExtrasFechar).
+  window._maquinasSnapshot = JSON.parse(JSON.stringify(ORC_ITEM_MAQUINAS[ri] || {}));
   // RODADA 9 (2026-08-22, Bloco E) — mesmo snapshot para om_laser (Step 3,
   // global) — ver achado logo abaixo, próximo a orcExtrasAutoLaser().
   window._omLaserSnapshot = (document.getElementById('om_laser')||{}).value;
@@ -13298,7 +13412,7 @@ function orcItemExtras(ri) {
   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
   +'<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">🔧 Máquinas (min)</div>'
   +'<div style="display:flex;gap:4px">'
-  +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:2px 5px" onchange="orcExtrasAplicarPreset(this.value)">'+presetOpts+'</select>'
+  +'<select id="m_presetSel" style="'+SEL+';font-size:10px;padding:2px 5px" onchange="orcExtrasAplicarPreset(this.value,'+ri+')">'+presetOpts+'</select>'
   +'<button onclick="orcSalvarPreset()" style="padding:2px 6px;border:1.5px solid var(--brand-mid);color:var(--brand-mid);background:transparent;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer">💾</button>'
   +'</div></div>'
   +[['⚡','Laser','m_laser','laser',true],
@@ -13308,15 +13422,31 @@ function orcItemExtras(ri) {
     ['🔧','Lixadeira','m_lixa','lixa',false],
     ['🔩','Tupia','m_tupia','tupia',false]
   ].map(function(r){
-    var curVal = g(r[2].replace('m_','om_'));
+    var opKey = r[3];
+    // RODADA CIRÚRGICA 2026-10-28 — máquina/tempo são propriedade DESTE
+    // item (ORC_ITEM_MAQUINAS[ri]), nunca mais do campo global om_<op> —
+    // ver comentário na declaração de ORC_ITEM_MAQUINAS. Select de máquina
+    // só lista as COMPATÍVEIS com a operação (_cfgMaquinasCompativeis),
+    // nunca todas — "não quero que Dobra ofereça Laser sem sentido".
+    var _itemMaq = (ORC_ITEM_MAQUINAS[ri]||{})[opKey] || {};
+    var curVal = _itemMaq.min || 0;
+    var _maquinasCompat = (typeof _cfgMaquinasCompativeis==='function') ? _cfgMaquinasCompativeis(opKey) : [];
+    var maqOpts = '<option value="">— sem máquina —</option>' + _maquinasCompat.map(function(m){
+      var selAttr = (m.id && m.id===_itemMaq.machineId) ? ' selected' : '';
+      return '<option value="'+cfgEsc(m.id||'')+'"'+selAttr+'>'+cfgEsc(m.nome)+'</option>';
+    }).join('');
     // RODADA CIRÚRGICA 2026-10-13, Bloco C — taxa exibida aqui não é mais
-    // literal: vem de cfgMaqOperInfo(), a MESMA fonte canônica do motor
-    // (orcRecalc). id="rate_<op>" é preenchido ao vivo por orcExtrasCalcMaq().
-    return '<div style="'+ROW+'">'
+    // literal: vem de _maqInfoPorMaquinaId() (mesma fonte canônica do
+    // cadastro de máquinas). id="rate_<op>" é preenchido ao vivo por
+    // orcExtrasCalcMaq(). Select e tempo chamam orcItemExtraPreview(ri) —
+    // nunca só a prévia: persiste em ORC_ITEM_MAQUINAS[ri] e recalcula de
+    // verdade (mesmo padrão já usado por exAcabamento/exAjusteValor).
+    return '<div style="'+ROW+';flex-wrap:wrap;gap:4px">'
       +'<span style="font-size:12px;width:16px">'+r[0]+'</span>'
-      +'<span style="'+RNAME+'">'+r[1]+'</span>'
-      +'<span id="rate_'+r[3]+'" style="'+RRATE+'">—</span>'
-      +'<input type="number" id="'+r[2]+'" value="'+curVal+'" min="0" oninput="orcExtrasCalcMaq()" style="'+INP+'">'
+      +'<span style="'+RNAME+';flex:0 0 auto;min-width:56px">'+r[1]+'</span>'
+      +'<select id="mm_'+opKey+'" onchange="orcItemExtraPreview('+ri+')" style="'+SEL+';font-size:10px;padding:2px 4px;max-width:130px;flex:1">'+maqOpts+'</select>'
+      +'<span id="rate_'+opKey+'" style="'+RRATE+'">—</span>'
+      +'<input type="number" id="'+r[2]+'" value="'+curVal+'" min="0" oninput="orcItemExtraPreview('+ri+')" style="'+INP+'">'
       +(r[4]?'<span id="m_laserManualTag" style="display:none;font-size:8px;color:#DC2626;font-weight:800">✏️MANUAL</span>':'')
       +'<span id="'+r[2]+'_v" style="'+RVAL+'">R$0,00</span>'
       +'</div>';
@@ -13364,25 +13494,18 @@ function orcItemExtras(ri) {
   // sem precisar clicar em nenhum botão (respeita o ajuste manual, se
   // estiver ativo).
   if(!window._orcLaserAjusteManual && typeof orcExtrasAutoLaser==='function') orcExtrasAutoLaser();
-  // RODADA 9, Bloco E — achado real (perda de R$0,10 no total do
-  // orçamento): orcExtrasAutoLaser() só atualizava o campo LOCAL do modal
-  // (m_laser); o total ao vivo (orcItemExtraPreview → orcRecalc) continua
-  // lendo o om_laser GLOBAL do Step 3, que só era sincronizado com
-  // m_laser no "✅ Salvar" do modal (orcItemExtrasSalvar) — se o
-  // recálculo automático do laser produzisse um valor diferente do
-  // om_laser atual, o total mudava ao salvar o modal mesmo que o
-  // vendedor só tivesse mexido no ajuste comercial, nunca em máquinas.
-  // Sincroniza aqui, na abertura (mesmo valor que "Salvar" aplicaria de
-  // qualquer forma), para que o total ao vivo sempre reflita o que será
-  // persistido — nunca uma surpresa entre "enquanto edito" e "depois de
-  // salvar". Cancelar (orcItemExtrasFechar) reverte via _omLaserSnapshot,
-  // exatamente como já faz para extras/ajuste comercial.
-  var _laserElAuto = document.getElementById('m_laser');
-  var _omLaserElAuto = document.getElementById('om_laser');
-  if(_laserElAuto && _omLaserElAuto && _omLaserElAuto.value !== _laserElAuto.value){
-    _omLaserElAuto.value = _laserElAuto.value;
-    if(typeof orcRecalc==='function') orcRecalc();
-  }
+  // RODADA 9, Bloco E / RODADA CIRÚRGICA 2026-10-28 — achado real (perda
+  // de R$0,10 no total do orçamento, 2026-08-22): orcExtrasAutoLaser()
+  // só atualiza o campo LOCAL do modal (m_laser) via JS — isso NUNCA
+  // dispara o evento `oninput` sozinho, então o valor calculado ficava
+  // visível mas não persistido até o vendedor tocar em outra coisa. Hoje
+  // (per-item, nunca mais om_laser global) a correção é chamar
+  // orcItemExtraPreview(ri) de novo aqui, na abertura — a MESMA função que
+  // já persiste tudo e recalcula de verdade — nunca uma sincronização
+  // paralela com um campo global. Cancelar (orcItemExtrasFechar) reverte
+  // via window._maquinasSnapshot, exatamente como já faz para extras/
+  // ajuste comercial.
+  orcItemExtraPreview(ri);
 }
 
 // Helpers do modal de custos
@@ -13391,12 +13514,19 @@ function orcItemExtras(ri) {
 // mantidas manualmente em sincronia). Agora lê _orcMaqInfo()/cfgMaqOperInfo()
 // — fonte única — e mostra o breakdown completo (taxa/min, setup, total),
 // igual ao que orcRecalc() grava em ocv_*/ocu_*.
+// RODADA CIRÚRGICA 2026-10-28 — a taxa agora vem da máquina ESCOLHIDA
+// PELO ITEM (select "mm_<op>" ao lado do tempo), nunca mais do vínculo
+// único de Config→Máquinas (cfgMaqOperInfo/_orcMaqInfo, que continua
+// existindo só para o mecanismo global legado — ver orcRecalc). Prévia
+// SEMPRE lê o estado AO VIVO do DOM (select + input), antes de qualquer
+// "Salvar" — mesmo princípio que os demais campos deste modal já seguem.
 function orcExtrasCalcMaq(){
   var idByKey={laser:'m_laser',dobra:'m_dobra',pol:'m_pol',uv:'m_uv',lixa:'m_lixa',tupia:'m_tupia'};
   Object.keys(idByKey).forEach(function(op){
     var k=idByKey[op];
     var v=parseFloat((document.getElementById(k)||{}).value)||0;
-    var info=(typeof _orcMaqInfo==='function') ? _orcMaqInfo(op) : {ok:false,motivo:'nao_vinculada',custoMin:0,setup:0};
+    var machineId=(document.getElementById('mm_'+op)||{}).value||'';
+    var info=(typeof _maqInfoPorMaquinaId==='function') ? _maqInfoPorMaquinaId(machineId) : {ok:false,motivo:'nao_vinculada',custoMin:0,setup:0};
     var val = v>0 ? (v*info.custoMin + info.setup) : 0;
     var el=document.getElementById(k+'_v');
     if(el) el.textContent='R$'+val.toFixed(2).replace('.',',');
@@ -13421,14 +13551,19 @@ function orcExtrasCorteChange(){
   if(panel) panel.style.display=chk?'flex':'none';
   orcExtrasCalcMaq();
 }
-function orcExtrasAplicarPreset(idx){
+function orcExtrasAplicarPreset(idx, ri){
   if(idx===''||typeof _MACH_PRESETS==='undefined') return;
   var p=_MACH_PRESETS[parseInt(idx)];
   if(!p) return;
   ['laser','dobra','pol','uv','lixa','tupia'].forEach(function(k){
     var el=document.getElementById('m_'+k); if(el&&p[k]!==undefined) el.value=p[k];
   });
-  orcExtrasCalcMaq();
+  // RODADA CIRÚRGICA 2026-10-28 — preset só define TEMPO (nunca máquina,
+  // que é uma escolha própria do item) — mas precisa persistir em
+  // ORC_ITEM_MAQUINAS[ri] e recalcular de verdade, não só atualizar a
+  // prévia (ver orcItemExtraPreview, que já faz as duas coisas).
+  if (ri != null && typeof orcItemExtraPreview === 'function') orcItemExtraPreview(ri);
+  else orcExtrasCalcMaq();
 }
 function orcExtrasToggleManual() {
   var chk = !!(document.getElementById('m_laserManual')||{}).checked;
@@ -13559,10 +13694,15 @@ function orcItemExtrasFechar() {
       var _omLaserElFechar = document.getElementById('om_laser');
       if(_omLaserElFechar) _omLaserElFechar.value = window._omLaserSnapshot;
     }
+    // RODADA CIRÚRGICA 2026-10-28 — mesmo descarte para máquina/tempo por
+    // item: Cancelar nunca pode deixar uma troca de máquina/tempo não
+    // salva afetando o preço do pedido.
+    if(window._maquinasSnapshot!=null) ORC_ITEM_MAQUINAS[window._extrasSnapshotRi] = window._maquinasSnapshot;
     if(typeof orcRecalc==='function') orcRecalc();
   }
   window._extrasSnapshotRi = null;
   window._omLaserSnapshot = null;
+  window._maquinasSnapshot = null;
 }
 function orcItemExtraPreview(ri){
   var row  = document.getElementById('oir_'+ri);
@@ -13620,6 +13760,34 @@ function orcItemExtraPreview(ri){
       }
     } else ajPrevEl.textContent = '';
   }
+
+  // RODADA CIRÚRGICA 2026-10-28 — máquina/tempo por item (mesmo padrão de
+  // recálculo em tempo real dos demais campos deste modal, sem esperar
+  // "Salvar"): lê o select de máquina + o tempo de CADA uma das 6
+  // operações e grava em ORC_ITEM_MAQUINAS[ri]. Preserva `_snapshot` (taxa
+  // congelada de um orçamento reaberto — ver orcEnvEditar) SE a máquina
+  // continuar a MESMA (só o tempo mudou, igual já acontecia com
+  // window._orcMaqInfoSnapshot no mecanismo global); descarta o snapshot
+  // se o vendedor trocar de máquina explicitamente — não existe histórico
+  // de taxa para uma máquina que nunca foi selecionada nesta linha, então
+  // a troca sempre lê a Config vigente (_maqInfoPorMaquinaId), nunca um
+  // valor congelado de outra máquina.
+  if (typeof ORC_MAQ_OPS !== 'undefined') {
+    var _prevMaquinasItem = ORC_ITEM_MAQUINAS[ri] || {};
+    var _novoMaquinasItem = {};
+    ORC_MAQ_OPS.forEach(function (op) {
+      var machineId = (document.getElementById('mm_' + op.key) || {}).value || null;
+      var min = parseFloat((document.getElementById('m_' + op.key) || {}).value) || 0;
+      var _prevOp = _prevMaquinasItem[op.key];
+      var _mantemSnapshot = _prevOp && _prevOp._snapshot && _prevOp.machineId === machineId;
+      _novoMaquinasItem[op.key] = _mantemSnapshot
+        ? { machineId: machineId, min: min, _snapshot: _prevOp._snapshot }
+        : { machineId: machineId, min: min };
+    });
+    ORC_ITEM_MAQUINAS[ri] = _novoMaquinasItem;
+  }
+  if (typeof orcExtrasCalcMaq === 'function') orcExtrasCalcMaq();
+
   if(typeof orcRecalc==='function') orcRecalc();
 }
 
@@ -13641,22 +13809,19 @@ function orcItemExtrasSalvar(ri){
       escopo: (document.getElementById('exAjusteEscopo')||{}).value||'linha'
     };
   } else delete ORC_ITEM_AJUSTES[ri];
-  // Escrever valores de máquinas + consumíveis de volta nos inputs do
-  // Step 3 — Desconto/Acréscimo/Montagem/Deslocamento NÃO fazem mais
-  // parte deste modal (Parte 1.3): são globais do orçamento, editados só
-  // na etapa final de revisão/envio, nunca sobrescritos por "Salvar"
-  // aqui (bug real corrigido: antes, salvar custos de UM item zerava o
-  // desconto/acréscimo do orçamento inteiro, porque os campos m_desc/
-  // m_descTipo/m_acres/m_acresTipo/m_mont/m_desl não existiam mais no
-  // DOM e eram lidos como 0/'pct').
-  var ws=function(id,val){var el=document.getElementById(id);if(el)el.value=val;};
+  // RODADA CIRÚRGICA 2026-10-28 — máquina/tempo são deste ITEM
+  // (ORC_ITEM_MAQUINAS[ri], já mantido ao vivo por orcItemExtraPreview);
+  // "Salvar" só confirma (mesmo princípio do ajuste comercial acima) —
+  // NUNCA MAIS espelha em om_<op> (Step 3, global): essa era exatamente a
+  // causa raiz do item A sobrescrever o item B (um único campo
+  // compartilhado por todo o pedido). om_<op> continua existindo só como
+  // mecanismo LEGADO, lido por orcRecalc() para orçamentos salvos antes
+  // desta rodada — nunca mais escrito por esta tela.
+  // Desconto/Acréscimo/Montagem/Deslocamento NÃO fazem parte deste modal
+  // (Parte 1.3): são globais do orçamento, editados só na etapa final de
+  // revisão/envio, nunca sobrescritos por "Salvar" aqui.
   var wc=function(id,val){var el=document.getElementById(id);if(el)el.checked=!!val;};
-  ws('om_laser',  (document.getElementById('m_laser')||{}).value||0);
-  ws('om_dobra',  (document.getElementById('m_dobra')||{}).value||0);
-  ws('om_pol',    (document.getElementById('m_pol')||{}).value||0);
-  ws('om_uv',     (document.getElementById('m_uv')||{}).value||0);
-  ws('om_lixa',   (document.getElementById('m_lixa')||{}).value||0);
-  ws('om_tupia',  (document.getElementById('m_tupia')||{}).value||0);
+  var ws=function(id,val){var el=document.getElementById(id);if(el)el.value=val;};
   // RODADA 6 — oc_adh/oc_adhb/oc_imp/oc_spray/oc_extra NÃO são mais
   // escritos aqui: os campos m_adh/m_adhb/m_imp/m_spray/m_extra saíram do
   // modal (Consumíveis agora é por peça — ver acima). Escrevê-los mesmo
@@ -13776,6 +13941,21 @@ function orcAutoLaser(silencioso){
 // precisa de clique manual no fluxo normal (Parte 2). window.
 // _orcLaserAjusteManual controla o override, ver orcExtrasToggleManual().
 window._orcLaserAjusteManual = false;
+// RODADA CIRÚRGICA 2026-10-28 — orcAutoLaser(silencioso) continua existindo
+// e disparando automaticamente, exatamente como antes desta rodada: soma o
+// tempo de corte de TODOS os itens do pedido no campo GLOBAL legado
+// om_laser (card "Máquinas" do Step 3, hoje oculto da edição manual, mas
+// ainda lido por orcRecalc() — ver _maqOpsCalc). Isso só produz custo
+// quando Config→Máquinas→Vínculo de Operação está configurado (decisão de
+// 2026-10-13: sem vínculo = R$0 sempre) — hoje não está, então é inerte em
+// produção. Mantido ATIVO (não virou no-op) porque desabilitá-lo reabriria
+// o bug real já corrigido em 2026-10-13 (excluir o item que justificava o
+// tempo de corte deixava om_laser com um resíduo "fantasma" — ver
+// test_hotfix_custo_residual_item_vr_excluido_2026-10-13.js). O mecanismo
+// NOVO por item (orcExtrasAutoLaser, dentro de orcItemExtras) é aditivo —
+// nunca duplica "por acidente": só cobra duas vezes se o vendedor
+// explicitamente configurar a MESMA máquina nos dois lugares ao mesmo
+// tempo, o que é uma escolha visível dele, nunca um custo escondido.
 function orcAutoLaserSeNecessario(){ if(typeof orcAutoLaser==='function') orcAutoLaser(true); }
 
 function orcDescTipoChange(){
@@ -25912,6 +26092,7 @@ function orcResetFormularioVR(){
   if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
   if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D — novo pedido nunca herda ajuste comercial do anterior
   if(typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES={}; // RODADA 5 — novo pedido nunca herda grupo de opções do anterior
+  if(typeof ORC_ITEM_MAQUINAS!=='undefined') ORC_ITEM_MAQUINAS={}; // RODADA CIRÚRGICA 2026-10-28 — novo pedido nunca herda máquina/tempo do anterior
   // RODADA 6, seção 10 — Híbrido VR+Vitre: novo pedido nunca herda itens
   // Vitre do pedido anterior.
   _orcVitreItensPedido = [];
@@ -30533,7 +30714,33 @@ async function _orcSalvarOrcamentoImpl() {
       // exatamente (ver orcEnvEditar) — inclusive qual opção estava
       // selecionada, preservando o histórico de "o que foi apresentado
       // versus o que foi escolhido".
-      grupoOpcao: (typeof ORC_ITEM_OPCOES!=='undefined' && ORC_ITEM_OPCOES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_OPCOES[ri])) : null
+      grupoOpcao: (typeof ORC_ITEM_OPCOES!=='undefined' && ORC_ITEM_OPCOES[ri]) ? JSON.parse(JSON.stringify(ORC_ITEM_OPCOES[ri])) : null,
+      // RODADA CIRÚRGICA 2026-10-28 — snapshot de máquina/tempo POR ITEM
+      // (nunca mais um único campo global do pedido — ver ORC_ITEM_MAQUINAS).
+      // Mesmo princípio de maqInfoSnapshot (pedido inteiro, mecanismo
+      // legado abaixo) e window._orcAdhPrecoSnapshot: congela nome/custoMin/
+      // setup EFETIVAMENTE usados na venda — reabrir não recalcula com a
+      // config vigente (ver orcEnvEditar/_itemMaqInfo). Null quando o item
+      // não usa nenhuma operação de máquina — zero mudança de payload para
+      // quem não usa o recurso.
+      maquinas: (function(){
+        if (typeof ORC_MAQ_OPS==='undefined' || typeof ORC_ITEM_MAQUINAS==='undefined') return null;
+        var _itemMaqSalvar = ORC_ITEM_MAQUINAS[ri] || {};
+        var _algumaMaqUsada = false;
+        var _maquinasSalvar = {};
+        ORC_MAQ_OPS.forEach(function(op){
+          var cfgOp = _itemMaqSalvar[op.key];
+          if (!cfgOp || (!cfgOp.machineId && !(parseFloat(cfgOp.min) > 0))) return;
+          _algumaMaqUsada = true;
+          var infoSalvar = _itemMaqInfo(ri, op.key); // prioriza _snapshot já existente
+          _maquinasSalvar[op.key] = {
+            machineId: cfgOp.machineId || null,
+            min: parseFloat(cfgOp.min) || 0,
+            nome: infoSalvar.nome, custoMin: infoSalvar.custoMin, setup: infoSalvar.setup
+          };
+        });
+        return _algumaMaqUsada ? _maquinasSalvar : null;
+      })()
     });
   });
   // RODADA 6, seção 10 — Híbrido VR+Vitre ("Ponte de OS vinculadas"): os
@@ -31838,6 +32045,7 @@ function orcEnvEditar(id) {
       if(typeof ORC_ITEM_EXTRAS!=='undefined') ORC_ITEM_EXTRAS={};
       if(typeof ORC_ITEM_AJUSTES!=='undefined') ORC_ITEM_AJUSTES={}; // Bloco D
       if(typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES={}; // RODADA 5
+      if(typeof ORC_ITEM_MAQUINAS!=='undefined') ORC_ITEM_MAQUINAS={}; // RODADA CIRÚRGICA 2026-10-28
       o.itens.forEach(function(it, idxOriginal){
         // RODADA 6, seção 10 — Híbrido VR+Vitre: itens do catálogo Vitre
         // salvos no mesmo itens[] não são linhas VR — voltam para o
@@ -31910,6 +32118,26 @@ function orcEnvEditar(id) {
         // grava nada em ORC_ITEM_OPCOES, então volta a se comportar
         // exatamente como um item normal.
         if(it.grupoOpcao && typeof ORC_ITEM_OPCOES!=='undefined') ORC_ITEM_OPCOES[ri]=JSON.parse(JSON.stringify(it.grupoOpcao));
+        // RODADA CIRÚRGICA 2026-10-28 — reabertura fiel de máquina/tempo
+        // POR ITEM (mesmo padrão de extras/ajuste acima): `it.maquinas[op]`
+        // já é o snapshot congelado (nome/custoMin/setup EFETIVAMENTE
+        // usados na venda) — vira `_snapshot` para _itemMaqInfo() nunca
+        // recalcular com a Config vigente (mesmo princípio de
+        // window._orcMaqInfoSnapshot, agora por item). Item salvo sem
+        // nenhuma operação de máquina não grava nada aqui — comportamento
+        // idêntico a um item sem máquina nenhuma.
+        if(it.maquinas && typeof ORC_ITEM_MAQUINAS!=='undefined'){
+          var _maquinasRestauradas = {};
+          Object.keys(it.maquinas).forEach(function(opKeyRestaurar){
+            var _opSalvo = it.maquinas[opKeyRestaurar];
+            _maquinasRestauradas[opKeyRestaurar] = {
+              machineId: _opSalvo.machineId || null,
+              min: parseFloat(_opSalvo.min) || 0,
+              _snapshot: { nome: _opSalvo.nome, custoMin: _opSalvo.custoMin, setup: _opSalvo.setup }
+            };
+          });
+          ORC_ITEM_MAQUINAS[ri] = _maquinasRestauradas;
+        }
         // RODADA 6, seção 11/12 — reabertura fiel: restaura planArea/peças/
         // recipeSnapshot EXATAMENTE como foram salvos (nunca busca a receita
         // vigente de novo aqui — ver orcItemVRRestaurarDados). Fecha o bug
@@ -34073,6 +34301,52 @@ function cfgMaqOperInfo(opKey) {
   var setup = parseFloat(maq.setup)||0;
   if (!(custoHora > 0)) return { ok:false, motivo:'sem_custo', nome:maq.nome, custoMin:0, setup:setup, unidade:'hora' };
   return { ok:true, motivo:null, nome:maq.nome, custoMin:custoHora/60, setup:setup, unidade:'hora' };
+}
+// RODADA CIRÚRGICA 2026-10-28 — máquina por item/operação. Fonte canônica
+// ÚNICA do custo/hora continua sendo cfgData.maquinas (nunca duplicado) —
+// só a CHAVE de lookup muda: por máquina (id escolhido no item), não mais
+// por operação (vínculo único do pedido inteiro, ver cfgMaqOperInfo acima,
+// mantido intacto para orçamentos que ainda usam os campos globais
+// om_<op>). Mesmas 3 regras de recusa (sem vínculo / unidade ≠ hora / sem
+// custo) — zero fallback oculto, igual à decisão de 2026-10-13.
+function _maqInfoPorMaquinaId(machineId) {
+  if (!machineId) return { ok:false, motivo:'nao_vinculada', nome:null, custoMin:0, setup:0, unidade:null };
+  var cfg = (typeof cfgLoad==='function') ? cfgLoad() : (_cfgData||{});
+  var maq = (cfg.maquinas||[]).filter(function(m){ return m.id===machineId; })[0];
+  if (!maq) return { ok:false, motivo:'nao_vinculada', nome:null, custoMin:0, setup:0, unidade:null };
+  if (maq.unidade !== 'hora') return { ok:false, motivo:'unidade_incompativel', nome:maq.nome, custoMin:0, setup:parseFloat(maq.setup)||0, unidade:maq.unidade };
+  var custoHora = parseFloat(maq.custo)||0;
+  var setup = parseFloat(maq.setup)||0;
+  if (!(custoHora > 0)) return { ok:false, motivo:'sem_custo', nome:maq.nome, custoMin:0, setup:setup, unidade:'hora' };
+  return { ok:true, motivo:null, nome:maq.nome, custoMin:custoHora/60, setup:setup, unidade:'hora' };
+}
+// Compatibilidade operação→máquinas: regra SIMPLES e DETERMINÍSTICA (não
+// havia nenhum conceito equivalente antes desta rodada) — uma máquina
+// aparece como opção para uma operação quando o NOME cadastrado contém uma
+// das palavras-chave da operação (nunca todas as máquinas em toda
+// operação: "não quero que Dobra ofereça uma máquina Laser sem sentido",
+// pedido explícito do usuário). Máquina com unidade ≠ 'hora' nunca aparece
+// (mesma regra de cfgMaqOperInfo/_maqInfoPorMaquinaId — não dá pra cobrar
+// m²/un por minuto). Residual conhecido: máquina cujo nome não contém
+// nenhuma palavra-chave de nenhuma operação não aparece em lugar nenhum —
+// aceitável por ora (o vendedor pode renomear a máquina no cadastro);
+// documentado no relatório desta rodada.
+var _MAQ_KEYWORDS_POR_OP = {
+  laser: ['laser', 'fiber'],
+  dobra: ['dobra'],
+  pol:   ['polit', 'pol'],
+  uv:    ['uv'],
+  lixa:  ['lixa'],
+  tupia: ['tupia', 'router']
+};
+function _cfgMaquinasCompativeis(opKey) {
+  var cfg = (typeof cfgLoad==='function') ? cfgLoad() : (_cfgData||{});
+  var keywords = _MAQ_KEYWORDS_POR_OP[opKey] || [];
+  return (cfg.maquinas || []).filter(function (m) {
+    if (!m || m.unidade !== 'hora') return false;
+    var nome = String(m.nome || '').toLowerCase();
+    return keywords.some(function (kw) { return nome.indexOf(kw) >= 0; });
+  });
 }
 function cfgSetOperacaoMaquina(opKey, maquinaId) {
   if(!_cfgData) _cfgData = cfgLoad();

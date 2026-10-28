@@ -34,6 +34,12 @@
  * cálculo geométrico de laser não relacionada ao bug; o mesmo padrão já
  * usado pelos testes existentes de orcRecalc() (_matGetRsm2 stubado).
  *
+ * ATUALIZAÇÃO (RODADA CIRÚRGICA 2026-10-28) — máquina/tempo deixou de ser
+ * um campo GLOBAL do pedido (om_laser) e passou a ser por ITEM
+ * (ORC_ITEM_MAQUINAS[ri][op].min — ver index.html). Os testes 4a/4b/5
+ * foram migrados para checar o campo novo; a invariante protegida (total
+ * ao vivo nunca diverge do total depois de salvar/cancelar) é a mesma.
+ *
  * Uso: node scripts/test_hotfix_ajuste_comercial_total_orcamento_2026-08-22.js
  */
 'use strict';
@@ -111,6 +117,7 @@ function reset(baseOverrides) {
   global._matGetRsm2 = function () { return 105.12; }; // material a R$105,12/m² (área 1m² → linha bate exatamente com o caso relatado)
   global.ORC_ITEM_EXTRAS = {};
   global.ORC_ITEM_AJUSTES = {};
+  global.ORC_ITEM_MAQUINAS = {};
   global._orcVitreItensPedido = [];
   global.orcVitreItensPedidoTotal = function () { return 0; };
   global.window = global;
@@ -175,23 +182,29 @@ console.log('\n=== RODADA 9, Bloco E — total do orçamento não pode mudar ent
   var totalAntesDeAbrir = _els.orcTotalVal.textContent;
 
   global._laserAutoValor = 20; // recálculo automático produziria um valor bem diferente
-  mod.orcItemExtras(1); // abre — sincroniza om_laser=20 (comportamento corrigido)
-  test('4a. ao abrir o modal, om_laser É sincronizado com o valor recalculado (mesmo que "Salvar" aplicaria)', _els.om_laser.value, '20');
+  mod.orcItemExtras(1); // abre — sincroniza ORC_ITEM_MAQUINAS[1].laser.min=20 (comportamento corrigido)
+  // RODADA CIRÚRGICA 2026-10-28 — máquina/tempo deixou de ser um campo
+  // GLOBAL do pedido (om_laser) e passou a ser por ITEM
+  // (ORC_ITEM_MAQUINAS[ri][op].min — ver index.html). A sincronização "na
+  // abertura do modal, o total ao vivo já reflete o que será persistido"
+  // continua existindo — só migrou de campo. om_laser permanece no DOM
+  // só como fallback LEGADO (nunca mais escrito por esta tela).
+  test('4a. ao abrir o modal, ORC_ITEM_MAQUINAS[1].laser.min É sincronizado com o valor recalculado (mesmo que "Salvar" aplicaria)', ORC_ITEM_MAQUINAS[1].laser.min, 20);
 
   mod.orcItemExtrasFechar(); // Cancelar — nunca clicou em "Salvar"
-  test('4b. ao CANCELAR (sem Salvar), om_laser volta ao valor de antes de abrir o modal — nunca fica com a sincronização automática presa', _els.om_laser.value, '3');
+  test('4b. ao CANCELAR (sem Salvar), ORC_ITEM_MAQUINAS[1].laser.min volta ao valor de antes de abrir o modal — nunca fica com a sincronização automática presa', (ORC_ITEM_MAQUINAS[1].laser || {}).min || 0, 0);
   mod.orcRecalc();
   test('4c. total do orçamento depois de abrir-e-cancelar é IDÊNTICO ao de antes de abrir — cancelar nunca muda o total', _els.orcTotalVal.textContent, totalAntesDeAbrir);
 })();
 
 // ── 5. Ajuste manual de laser (checkbox "MANUAL") nunca é sobrescrito pela sincronização ──
 (function () {
-  reset({ om_laser: makeEl({ value: '7' }), m_laser: makeEl({ value: '7' }) });
+  reset({ m_laser: makeEl({ value: '7' }) });
   _els.m_laserManual.checked = true; // vendedor já fixou o laser manualmente
   global._orcLaserAjusteManual = true;
   global._laserAutoValor = 99; // recálculo automático NUNCA deveria rodar neste modo
   mod.orcItemExtras(1);
-  test('5. modo manual de laser: abrir o modal não sobrescreve om_laser com nenhum recálculo automático', _els.om_laser.value, '7');
+  test('5. modo manual de laser: abrir o modal não sobrescreve o tempo (ORC_ITEM_MAQUINAS[1].laser.min) com nenhum recálculo automático', ORC_ITEM_MAQUINAS[1].laser.min, 7);
 })();
 
 // ── 6-10. Bases/acréscimos variados pedidos explicitamente — sempre exatos ──

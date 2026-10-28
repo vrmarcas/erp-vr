@@ -56,7 +56,7 @@ var FN_NAMES = [
   'orcProdutoNomeResolvido', 'cfgEsc', 'orcFmt', 'orcSetV', 'orcItemAplicarAjuste', 'osItemMateriaisResumo', 'orcItemDescricaoComercial',
   'orcGetItemExtrasTotal', 'orcRecalc', 'orcColetarItensDistribuidos', 'orcItensDistribuidosDeOrc', '_orcItemEntraNaOperacao',
   '_orcEntraNaOperacaoDoRegistro', 'orcComparativoPendenteDOM', 'orcComparativoPendente', 'orcTextoValorCliente',
-  'orcOpcaoSelecionar', 'orcMotorComercial', 'orcDistribuirParcelas', 'cfgMaqOperInfo', '_orcMaqInfo',
+  'orcOpcaoSelecionar', 'orcMotorComercial', 'orcDistribuirParcelas', 'cfgMaqOperInfo', '_orcMaqInfo', '_maqInfoPorMaquinaId', '_itemMaqInfo',
   'orcSincronizarEspPecasHerdadas', 'orcPecasHerdarEspessura'
 ];
 var src = [
@@ -138,6 +138,7 @@ function montarCenario(opts) {
   global.ORC_ITEM_OPCOES = {};
   global.ORC_ITEM_OPCOES[ITEM_A] = { grupoId: 'g1', selecionada: true, escolhaConfirmada: false };
   global.ORC_ITEM_OPCOES[ITEM_B] = { grupoId: 'g1', selecionada: false, escolhaConfirmada: false };
+  global.ORC_ITEM_MAQUINAS = {};
   global._orcVitreItensPedido = [];
   global.orcVitreItensPedidoTotal = function () { return 0; };
   global.window = global;

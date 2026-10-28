@@ -46,3 +46,15 @@ vm.runInThisContext('var ORC_REGRA_COMPARATIVO_ATUAL = 2;');
 // correto mesmo em testes antigos que não passavam om_laser/om_dobra etc.
 if (typeof global.ORC_MAQ_OPS === 'undefined') vm.runInThisContext(extractVarDecl('ORC_MAQ_OPS'));
 ['cfgMaqOperInfo', '_orcMaqInfo'].forEach(function (n) { if (typeof global[n] !== 'function') vm.runInThisContext(extractFn(n)); });
+// RODADA CIRÚRGICA 2026-10-28 — máquina/tempo por item/operação (nunca
+// mais um único campo global do pedido — ver ORC_ITEM_MAQUINAS em
+// index.html). orcRecalc() passou a depender de _itemMaqInfo()
+// (que por sua vez depende de _maqInfoPorMaquinaId() e do mapa
+// ORC_ITEM_MAQUINAS) — mesmo papel desta shim para as outras 3 entradas
+// acima: harness antigo que extrai só orcRecalc (sem essas 3) quebrava por
+// ReferenceError. Harness cujo próprio ORC_ITEM_MAQUINAS[idx] nunca é
+// populado simplesmente nunca tem máquina vinculada por item (custo
+// R$0,00 — mesmo comportamento real e intencional de cfgMaqOperInfo acima,
+// nunca um hardcode oculto).
+if (typeof global.ORC_ITEM_MAQUINAS === 'undefined') vm.runInThisContext('var ORC_ITEM_MAQUINAS = {};');
+['_maqInfoPorMaquinaId', '_itemMaqInfo'].forEach(function (n) { if (typeof global[n] !== 'function') vm.runInThisContext(extractFn(n)); });

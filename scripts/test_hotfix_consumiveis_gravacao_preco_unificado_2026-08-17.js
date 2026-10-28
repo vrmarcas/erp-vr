@@ -310,7 +310,13 @@ function rodarCenario(opts) {
   {
     var _mTcpm = /const totalCostParaMarkup = ([^;]*);/.exec(orcRecalcSrc);
     var _tcpmFormula = _mTcpm ? _mTcpm[1] : '';
-    ok('G4. base do markup exclui o custo da Gravação (fórmula de totalCostParaMarkup nunca cita gravacaoCusto)', _tcpmFormula==='matTotal + extras + itemExtrasTotal');
+    // RODADA CIRÚRGICA 2026-10-28 — totalCostParaMarkup ganhou uma parcela
+    // nova (maqItemTotal, custo de máquina por item/operação — nunca
+    // confundir com Gravação/Spray/Extra, que continuam fora do markup).
+    // Checar a ausência explícita de gravacaoCusto/sprayCusto/extraCusto
+    // (em vez de comparar a string inteira) é mais fiel à intenção real
+    // do teste e resiliente a essa e a futuras parcelas legítimas novas.
+    ok('G4. base do markup exclui o custo da Gravação/Spray/Extra (fórmula de totalCostParaMarkup nunca cita gravacaoCusto/sprayCusto/extraCusto)', _tcpmFormula.length > 0 && !/gravacaoCusto|sprayCusto|extraCusto/.test(_tcpmFormula));
   }
   ok('G5. finalPrice usa totalCostParaMarkup (não totalCost) na fórmula de markup', /_calcularFinalPriceVR\(totalCostParaMarkup\)/.test(orcRecalcSrc));
   ok('G6. Gravação é somada ao preço final DEPOIS do markup/desconto/acréscimo/Vitre', /finalPrice\s*=\s*finalPriceVR\s*\+\s*vitreItensPedidoTotal\s*\+\s*gravacaoAdicionalVenda/.test(orcRecalcSrc));
