@@ -26,9 +26,11 @@ if (!admin.apps.length) admin.initializeApp();
 const identidade = require("../functions/lib/valeria_pre_orcamento_identidade");
 const revisao = require("../functions/lib/valeria_pre_orcamento_revisao");
 const estado = require("../functions/lib/valeria_pre_orcamento_estado");
+const aprovacao = require("../functions/lib/valeria_pre_orcamento_aprovacao");
 
 exports.valeriaConsultarClientePorTelefone = identidade.valeriaConsultarClientePorTelefone;
 exports.valeriaPrepararCadastroProvisorio = identidade.valeriaPrepararCadastroProvisorio;
 exports.vendedorAssumirRevisaoPreOrcamento = revisao.vendedorAssumirRevisaoPreOrcamento;
 exports.vendedorConcluirRevisaoPreOrcamento = revisao.vendedorConcluirRevisaoPreOrcamento;
 exports.valeriaConsultarEstadoRevisao = estado.valeriaConsultarEstadoRevisao;
+exports.vendedorDecidirPreOrcamentoValeria = aprovacao.vendedorDecidirPreOrcamentoValeria;

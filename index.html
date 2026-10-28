@@ -31407,9 +31407,26 @@ function orcEnvReverterParaAguardando(id){
 // (vendedorAssumirRevisaoPreOrcamento/vendedorConcluirRevisaoPreOrcamento
 // — mesmas Cloud Functions da Etapa 9I/9J, nunca registradas em
 // functions/src/index.ts de produção).
+// Etapa 9M — para origem Valéria, Aprovar/Recusar NUNCA mais chamam
+// orcEnvSetStatus() (escrita direta client-side, sem verificação
+// nenhuma) — chamam vendedorDecidirPreOrcamentoValeria (onCall server-
+// side, Etapa 9M), que reconfirma o lock REVISADO e grava status+Conta
+// a Receber numa única transação Firestore antes de aceitar. Orçamentos
+// comuns continuam usando orcEnvSetStatus exatamente como antes (ver
+// preOrcValeriaEhOrigemValeria no chamador — nunca aplicado a eles).
+function preOrcValeriaDecidir(orcId, decisao) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorDecidirPreOrcamentoValeria')({ orcId: orcId, decisao: decisao })
+    .then(function (res) {
+      var r = res.data || {};
+      showToast(r.jaProcessado ? 'Já estava ' + r.status + '.' : (decisao === 'aprovado' ? 'Orçamento aprovado! Conta a Receber criada.' : 'Orçamento recusado.'), 'ok');
+      orcEnvAbrir(orcId);
+    })
+    .catch(function (e) { showToast('Falha ao ' + (decisao === 'aprovado' ? 'aprovar' : 'recusar') + ': ' + (e && e.message || e), 'err'); });
+}
 function preOrcValeriaBotoesAprovarRecusar(o) {
-  return '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="orcEnvSetStatus(\''+o.id+'\',\'aprovado\'); orcEnvAbrir(\''+o.id+'\')">✅ Aprovar</button>'
-       + '<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="orcEnvSetStatus(\''+o.id+'\',\'recusado\'); orcEnvAbrir(\''+o.id+'\')">❌ Recusar</button>';
+  return '<button class="topbar-btn ghost" style="color:#059669;border-color:#059669" onclick="preOrcValeriaDecidir(\''+o.id+'\',\'aprovado\')">✅ Aprovar</button>'
+       + '<button class="topbar-btn ghost" style="color:#DC2626;border-color:#DC2626" onclick="preOrcValeriaDecidir(\''+o.id+'\',\'recusado\')">❌ Recusar</button>';
 }
 function orcEnvPatchAcoesRevisao(o) {
   if (typeof _db === 'undefined' || !_db) return;
