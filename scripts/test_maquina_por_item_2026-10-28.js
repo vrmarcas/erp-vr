@@ -83,10 +83,17 @@ console.log('\n=== RODADA 2026-10-28 — Máquina selecionável por item/operaç
 
 function makeEl(props) { return Object.assign({ value: '', textContent: '', checked: false, dataset: {}, style: {} }, props || {}); }
 
+// RODADA CIRÚRGICA 2026-10-28 (fechamento — validação pós-relatório) —
+// valores REAIS do cadastro de produção (conferidos com o usuário): Laser
+// Vermelha/Verde/Metal têm Setup = R$130 cadastrado (não R$0 — achado real
+// de auditoria: a primeira versão deste teste usava setup:0 nas 3 máquinas
+// Laser, o que fazia os números baterem "por acidente" sem provar que o
+// Setup realmente entra no custo. Nunca ignorar um campo preenchido no
+// cadastro real só porque o teste antigo usava 0.).
 var MAQUINAS = [
-  { id: 'maq_laser_vermelha', nome: 'Laser Vermelha', unidade: 'hora', custo: 130, setup: 0 },
-  { id: 'maq_laser_verde', nome: 'Laser Verde', unidade: 'hora', custo: 130, setup: 0 },
-  { id: 'maq_laser_metal', nome: 'Laser Metal', unidade: 'hora', custo: 450, setup: 0 },
+  { id: 'maq_laser_vermelha', nome: 'Laser Vermelha', unidade: 'hora', custo: 130, setup: 130 },
+  { id: 'maq_laser_verde', nome: 'Laser Verde', unidade: 'hora', custo: 130, setup: 130 },
+  { id: 'maq_laser_metal', nome: 'Laser Metal', unidade: 'hora', custo: 450, setup: 130 },
   { id: 'maq_dobra', nome: 'Dobradeira CNC', unidade: 'hora', custo: 80, setup: 0 }
 ];
 
@@ -196,18 +203,27 @@ function montarPedido(itensSpec, opts) {
 // _itemMaqInfo — fonte única também usada por orcRecalc()/PASS 1)
 // ──────────────────────────────────────────────────────────────────────
 (function testes1a3() {
+  // ACHADO REAL DE AUDITORIA (pós-relatório, confirmado com o usuário) —
+  // Laser Vermelha/Verde/Metal têm Setup = R$130 no cadastro REAL (não
+  // R$0). A fórmula é custo = tempo/60×custoHora + setup (setup cobrado 1x
+  // por operação em uso, nunca por minuto) — tempo R$133,68 + setup
+  // R$130,00 = R$263,68 (nunca R$133,68 isolado, que seria o cálculo SEM
+  // o setup — exatamente o erro que passaria despercebido se o teste
+  // continuasse usando setup:0 nas máquinas, como na 1ª versão deste
+  // arquivo).
   global.cfgLoad = function () { return { maquinas: MAQUINAS, maquinasOperacoes: {} }; };
   global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_vermelha', min: 61.7 } } };
   var infoVermelha = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 1 — Laser Vermelha R$130/h, 61,7min ≈ R$133,68', infoVermelha.min * infoVermelha.custoMin + infoVermelha.setup, 133.68, 0.02);
+  ok('TESTE 1 — Laser Vermelha: Setup lido do cadastro é R$130,00 (não R$0, não ignorado)', infoVermelha.setup === 130);
+  testePerto('TESTE 1 — Laser Vermelha R$130/h + Setup R$130: 61,7min ⇒ R$133,68 (tempo) + R$130,00 (setup) = R$263,68', infoVermelha.min * infoVermelha.custoMin + infoVermelha.setup, 263.68, 0.02);
 
   global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_verde', min: 61.7 } } };
   var infoVerde = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 2 — Laser Verde R$130/h, 61,7min ≈ R$133,68', infoVerde.min * infoVerde.custoMin + infoVerde.setup, 133.68, 0.02);
+  testePerto('TESTE 2 — Laser Verde R$130/h + Setup R$130: 61,7min ⇒ R$263,68 (idêntico à Vermelha, mesmo custo/setup)', infoVerde.min * infoVerde.custoMin + infoVerde.setup, 263.68, 0.02);
 
   global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_metal', min: 61.7 } } };
   var infoMetal = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 3 — Laser Metal R$450/h, 61,7min ≈ R$462,75', infoMetal.min * infoMetal.custoMin + infoMetal.setup, 462.75, 0.02);
+  testePerto('TESTE 3 — Laser Metal R$450/h + Setup R$130: 61,7min ⇒ R$462,75 (tempo) + R$130,00 (setup) = R$592,75', infoMetal.min * infoMetal.custoMin + infoMetal.setup, 592.75, 0.02);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -216,14 +232,23 @@ function montarPedido(itensSpec, opts) {
 (function teste4() {
   var p = montarPedido([{ idx: '1' }]);
   p.configurarMaquina('1', 'laser', 'maq_laser_vermelha', 61.7);
-  var custoAntes = ORC_ITEM_MAQUINAS['1'].laser.min * mod._itemMaqInfo('1', 'laser').custoMin;
+  var infoAntes = mod._itemMaqInfo('1', 'laser');
+  var custoAntes = infoAntes.min * infoAntes.custoMin + infoAntes.setup;
   var totalAntes = p.finalPrice();
+  testePerto('TESTE 4 — custo com Laser Vermelha (tempo+setup) = R$263,68', custoAntes, 263.68, 0.02);
 
   p.configurarMaquina('1', 'laser', 'maq_laser_metal', 61.7); // mesmo tempo, máquina diferente
+  var infoDepois = mod._itemMaqInfo('1', 'laser');
+  var custoDepois = infoDepois.min * infoDepois.custoMin + infoDepois.setup;
   var totalDepois = p.finalPrice();
+  testePerto('TESTE 4 — custo com Laser Metal (tempo+setup) = R$592,75', custoDepois, 592.75, 0.02);
 
   ok('TESTE 4 — trocar Laser Vermelha→Metal (mesmo tempo) recalcula o total imediatamente', Math.abs(totalDepois - totalAntes) > 300);
-  testePerto('TESTE 4 — delta bate com a diferença de custo entre as duas máquinas', totalDepois - totalAntes, 462.75 - 133.68, 0.05);
+  // Setup (R$130) é IGUAL nas duas máquinas — cancela no delta; só a
+  // diferença de custo/hora (tempo×custoMin) aparece aqui. Confirmado
+  // separadamente acima (custoAntes/custoDepois) que o setup está, sim,
+  // presente nos dois valores absolutos — nunca "some" ao trocar de máquina.
+  testePerto('TESTE 4 — delta bate com a diferença de tempo×custo/hora entre as duas máquinas (setup igual nas duas, cancela no delta)', totalDepois - totalAntes, 462.75 - 133.68, 0.05);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -232,10 +257,20 @@ function montarPedido(itensSpec, opts) {
 (function teste5() {
   var p = montarPedido([{ idx: '1' }]);
   p.configurarMaquina('1', 'laser', 'maq_laser_vermelha', 30);
+  var custo30 = mod._itemMaqInfo('1', 'laser').min * mod._itemMaqInfo('1', 'laser').custoMin + mod._itemMaqInfo('1', 'laser').setup;
   var total30 = p.finalPrice();
+  testePerto('TESTE 5 — 30min (R$130/h + Setup R$130): R$65,00 (tempo) + R$130,00 (setup) = R$195,00', custo30, 195.00, 0.02);
+
   p.configurarMaquina('1', 'laser', 'maq_laser_vermelha', 60);
+  var custo60 = mod._itemMaqInfo('1', 'laser').min * mod._itemMaqInfo('1', 'laser').custoMin + mod._itemMaqInfo('1', 'laser').setup;
   var total60 = p.finalPrice();
-  testePerto('TESTE 5 — 30min→60min (R$130/h): delta ≈ R$65,00 (R$130,00 - R$65,00)', total60 - total30, 65.00, 0.02);
+  testePerto('TESTE 5 — 60min (R$130/h + Setup R$130): R$130,00 (tempo) + R$130,00 (setup) = R$260,00', custo60, 260.00, 0.02);
+
+  // Setup é cobrado 1x "em uso" (min>0) — não varia com o tempo, só o
+  // bloco de tempo varia. Delta continua R$65,00 (o setup, igual nos dois
+  // momentos, cancela no delta — confirmado em absoluto acima: R$195,00 e
+  // R$260,00, nunca R$65,00/R$130,00 isolados).
+  testePerto('TESTE 5 — 30min→60min: delta ≈ R$65,00 (só a parcela de tempo muda; setup constante)', total60 - total30, 65.00, 0.02);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -271,7 +306,8 @@ function montarPedido(itensSpec, opts) {
 
   var infoReaberto = mod._itemMaqInfo('1', 'laser');
   ok('TESTE 7 — máquina (Laser Vermelha) continua selecionada após reabrir', infoReaberto.nome === 'Laser Vermelha');
-  testePerto('TESTE 7 — tempo (61,7min) e custo continuam idênticos após reabrir', infoReaberto.min * infoReaberto.custoMin, 133.68, 0.02);
+  ok('TESTE 7 — Setup (R$130) também sobrevive ao snapshot/reabertura (não só custo/hora)', infoReaberto.setup === 130);
+  testePerto('TESTE 7 — tempo (61,7min) + custo + setup continuam idênticos após reabrir: R$263,68', infoReaberto.min * infoReaberto.custoMin + infoReaberto.setup, 263.68, 0.02);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -284,9 +320,10 @@ function montarPedido(itensSpec, opts) {
 
   var info1 = mod._itemMaqInfo('1', 'laser');
   var info2 = mod._itemMaqInfo('2', 'laser');
-  testePerto('TESTE 8 — Item 1 (Laser Vermelha, 10min): custo ≈ R$21,67', info1.min * info1.custoMin, 21.67, 0.02);
-  testePerto('TESTE 8 — Item 2 (Laser Metal, 20min): custo ≈ R$150,00', info2.min * info2.custoMin, 150.00, 0.02);
+  testePerto('TESTE 8 — Item 1 (Laser Vermelha, 10min + Setup R$130): R$21,67 (tempo) + R$130,00 (setup) = R$151,67', info1.min * info1.custoMin + info1.setup, 151.67, 0.02);
+  testePerto('TESTE 8 — Item 2 (Laser Metal, 20min + Setup R$130): R$150,00 (tempo) + R$130,00 (setup) = R$280,00', info2.min * info2.custoMin + info2.setup, 280.00, 0.02);
   ok('TESTE 8 — os dois itens coexistem no MESMO pedido sem um sobrescrever o outro', info1.nome === 'Laser Vermelha' && info2.nome === 'Laser Metal');
+  ok('TESTE 8 — cada item paga seu PRÓPRIO Setup (2 setups de R$130, um por item, nunca um só para o pedido)', info1.setup === 130 && info2.setup === 130);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -302,8 +339,8 @@ function montarPedido(itensSpec, opts) {
   var infoB = mod._itemMaqInfo('2', 'laser');
   ok('TESTE 9 — alternativa A usa Laser Vermelha (não herdou a máquina de B)', infoA.nome === 'Laser Vermelha');
   ok('TESTE 9 — alternativa B usa Laser Metal (não herdou a máquina de A)', infoB.nome === 'Laser Metal');
-  testePerto('TESTE 9 — custo de A (R$130/h×10min ≈ R$21,67) independente de B', infoA.min * infoA.custoMin, 21.67, 0.02);
-  testePerto('TESTE 9 — custo de B (R$450/h×10min = R$75,00) independente de A', infoB.min * infoB.custoMin, 75.00, 0.02);
+  testePerto('TESTE 9 — custo de A (R$130/h×10min+Setup R$130 = R$151,67) independente de B', infoA.min * infoA.custoMin + infoA.setup, 151.67, 0.02);
+  testePerto('TESTE 9 — custo de B (R$450/h×10min+Setup R$130 = R$205,00) independente de A', infoB.min * infoB.custoMin + infoB.setup, 205.00, 0.02);
 
   // Confirma a escolha de A — B nunca entra no total, mas continua com seu
   // PRÓPRIO custo calculável (preço informativo, nunca compartilhado).
@@ -317,23 +354,25 @@ function montarPedido(itensSpec, opts) {
 // item com snapshot (histórico) respeita a taxa congelada.
 // ──────────────────────────────────────────────────────────────────────
 (function teste10() {
-  // "Hoje": Laser Vermelha R$130/h, item NOVO (sem snapshot) lê a Config vigente.
+  // "Hoje": Laser Vermelha R$130/h + Setup R$130, item NOVO (sem
+  // snapshot) lê a Config vigente.
   global.cfgLoad = function () { return { maquinas: MAQUINAS, maquinasOperacoes: {} }; };
   global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_vermelha', min: 60 } } };
   var infoHoje = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 10 — item novo, Config R$130/h: custo = R$130,00', infoHoje.min * infoHoje.custoMin, 130.00, 0.01);
+  testePerto('TESTE 10 — item novo, Config R$130/h+Setup R$130: custo = R$130,00+R$130,00 = R$260,00', infoHoje.min * infoHoje.custoMin + infoHoje.setup, 260.00, 0.01);
 
-  // Config muda para R$150/h — item NOVO (sem snapshot) usa o valor novo.
+  // Config muda para R$150/h (Setup continua R$130) — item NOVO (sem
+  // snapshot) usa o valor novo.
   var MAQUINAS_NOVO_PRECO = MAQUINAS.map(function (m) { return m.id === 'maq_laser_vermelha' ? Object.assign({}, m, { custo: 150 }) : m; });
   global.cfgLoad = function () { return { maquinas: MAQUINAS_NOVO_PRECO, maquinasOperacoes: {} }; };
   var infoNovoPreco = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 10 — Config mudou p/ R$150/h: item NOVO usa o preço vigente (R$150,00)', infoNovoPreco.min * infoNovoPreco.custoMin, 150.00, 0.01);
+  testePerto('TESTE 10 — Config mudou p/ R$150/h: item NOVO usa o custo/hora vigente (R$150,00+R$130,00 = R$280,00)', infoNovoPreco.min * infoNovoPreco.custoMin + infoNovoPreco.setup, 280.00, 0.01);
 
-  // Item HISTÓRICO (reaberto, com _snapshot congelado em R$130/h) NUNCA
-  // recalcula com o novo preço de R$150/h.
-  global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_vermelha', min: 60, _snapshot: { nome: 'Laser Vermelha', custoMin: 130 / 60, setup: 0 } } } };
+  // Item HISTÓRICO (reaberto, com _snapshot congelado em R$130/h+Setup
+  // R$130) NUNCA recalcula com o novo preço de R$150/h.
+  global.ORC_ITEM_MAQUINAS = { '1': { laser: { machineId: 'maq_laser_vermelha', min: 60, _snapshot: { nome: 'Laser Vermelha', custoMin: 130 / 60, setup: 130 } } } };
   var infoHistorico = mod._itemMaqInfo('1', 'laser');
-  testePerto('TESTE 10 — item HISTÓRICO (snapshot) continua em R$130,00, mesmo com Config em R$150/h', infoHistorico.min * infoHistorico.custoMin, 130.00, 0.01);
+  testePerto('TESTE 10 — item HISTÓRICO (snapshot) continua em R$260,00 (R$130/h+Setup R$130), mesmo com Config em R$150/h', infoHistorico.min * infoHistorico.custoMin + infoHistorico.setup, 260.00, 0.01);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -348,9 +387,11 @@ function montarPedido(itensSpec, opts) {
   var totalComMaquina = pComMaquina.finalPrice();
 
   ok('TESTE 11 — preço final MUDA quando a máquina é configurada (não é só visual)', totalComMaquina > totalSemMaquina);
-  // factor=1 (overhead/vrml/impostos=0 no harness) → delta = custo de máquina direto.
-  testePerto('TESTE 11 — delta no preço final bate com o custo da máquina (R$133,68)', totalComMaquina - totalSemMaquina, 133.68, 0.05);
-  testePerto('TESTE 11 — subtotal do item também reflete o custo de máquina', pComMaquina.total('1') - pComMaquina.unit('1') * 1 === 0 ? pComMaquina.total('1') : pComMaquina.total('1'), totalComMaquina, 0.05);
+  // factor=1 (overhead/vrml/impostos=0 no harness) → delta = custo de
+  // máquina direto, JÁ incluindo o Setup de R$130 (tempo R$133,68 + setup
+  // R$130,00 = R$263,68) — nunca só a parcela de tempo isolada.
+  testePerto('TESTE 11 — delta no preço final bate com o custo da máquina, tempo+setup (R$263,68)', totalComMaquina - totalSemMaquina, 263.68, 0.05);
+  ok('TESTE 11 — UI (oi_unit_/oi_tot_), custo do item (_itemMaqInfo) e preço final (finalPrice) usam a MESMA fórmula/valor — nenhuma camada mostra um número diferente das outras', Math.abs((pComMaquina.unit('1') * 1) - pComMaquina.total('1')) < 0.01 && Math.abs(pComMaquina.total('1') - totalComMaquina) < 0.01);
 })();
 
 // ──────────────────────────────────────────────────────────────────────
@@ -366,6 +407,20 @@ function montarPedido(itensSpec, opts) {
 
   ok('EXTRA — Cancelar o modal não persiste a troca de máquina/tempo', ORC_ITEM_MAQUINAS['1'].laser.machineId === 'maq_laser_vermelha' && ORC_ITEM_MAQUINAS['1'].laser.min === 10);
   testePerto('EXTRA — total do pedido não muda ao cancelar', totalDepois, totalAntes, 0.01);
+})();
+
+// ──────────────────────────────────────────────────────────────────────
+// EXTRA 2 — o <select> renderizado na UI mostra as máquinas REAIS vindas
+// de Configuração → Máquinas (nunca uma lista hardcoded/mockada)
+// ──────────────────────────────────────────────────────────────────────
+(function testeSelectReal() {
+  var p = montarPedido([{ idx: '1' }]);
+  mod.orcItemExtras('1'); // abre o modal — renderiza o HTML completo, inclusive os <select> de máquina
+  var htmlModal = p.els.orcItemExtrasOverlay.innerHTML;
+  ok('EXTRA 2 — select da operação Laser contém a opção "Laser Vermelha" (vinda do cadastro real)', /<option value="maq_laser_vermelha"[^>]*>Laser Vermelha<\/option>/.test(htmlModal));
+  ok('EXTRA 2 — select da operação Laser contém a opção "Laser Verde" (vinda do cadastro real)', /<option value="maq_laser_verde"[^>]*>Laser Verde<\/option>/.test(htmlModal));
+  ok('EXTRA 2 — select da operação Laser contém a opção "Laser Metal" (vinda do cadastro real)', /<option value="maq_laser_metal"[^>]*>Laser Metal<\/option>/.test(htmlModal));
+  ok('EXTRA 2 — select da operação Dobra NÃO contém nenhuma opção Laser (compatibilidade respeitada na UI, não só no backend)', !/id="mm_dobra"[^]*?<option value="maq_laser[^]*?<\/select>/.test(htmlModal.replace(/\n/g, '')));
 })();
 
 // ──────────────────────────────────────────────────────────────────────
