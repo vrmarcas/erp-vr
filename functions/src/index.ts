@@ -169,3 +169,30 @@ export {
   // atdSolicitarHumano acima.
   atdSolicitarHumanoValeria,
 } from "./atendimentos";
+
+// ── Pré-orçamentos Valéria — revisão humana obrigatória (Etapas 9I-9N,
+//    2026-10-27/28) — fila do vendedor em index.html (nav
+//    'preorcamentos-valeria'/aba "Orçamentos Enviados"). Registradas
+//    AGORA pela primeira vez (preparação de lançamento, ainda sem
+//    deploy autorizado) — até aqui existiam só como módulos isolados,
+//    testados via functions_local_test_9l/ (nunca parte do deploy real).
+//
+//    Deliberadamente NÃO registradas junto (mesmo padrão de cautela já
+//    usado acima para valeria.ts/valeria_vitre.ts — evitar superfície
+//    redundante):
+//      - valeriaConsultarClientePorTelefone/valeriaPrepararCadastroProvisorio
+//        (valeria_pre_orcamento_identidade.ts) — redundantes com
+//        valeriaUpsertCliente (política lead-first já real em
+//        functions-valeria/valeria.ts, Etapa 9J); registrar os dois
+//        criaria um segundo caminho de identificação de cliente.
+//      - valeriaConsultarEstadoRevisao (valeria_pre_orcamento_estado.ts)
+//        — onRequest pensado para a Central consultar estado
+//        remotamente; a fila do vendedor hoje lê o lock
+//        (valeria_pre_orcamentos_revisao) direto via Firestore client
+//        SDK, nunca por este endpoint — sem consumidor real ainda.
+export {
+  vendedorAssumirRevisaoPreOrcamento,
+  vendedorConcluirRevisaoPreOrcamento,
+} from "./valeria_pre_orcamento_revisao";
+export { vendedorDecidirPreOrcamentoValeria } from "./valeria_pre_orcamento_aprovacao";
+export { vendedorExcluirOrcamento } from "./erp_orcamento_exclusao_segura";
