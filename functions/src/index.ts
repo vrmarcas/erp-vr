@@ -180,11 +180,6 @@ export {
 //    Deliberadamente NÃO registradas junto (mesmo padrão de cautela já
 //    usado acima para valeria.ts/valeria_vitre.ts — evitar superfície
 //    redundante):
-//      - valeriaConsultarClientePorTelefone/valeriaPrepararCadastroProvisorio
-//        (valeria_pre_orcamento_identidade.ts) — redundantes com
-//        valeriaUpsertCliente (política lead-first já real em
-//        functions-valeria/valeria.ts, Etapa 9J); registrar os dois
-//        criaria um segundo caminho de identificação de cliente.
 //      - valeriaConsultarEstadoRevisao (valeria_pre_orcamento_estado.ts)
 //        — onRequest pensado para a Central consultar estado
 //        remotamente; a fila do vendedor hoje lê o lock
@@ -196,3 +191,19 @@ export {
 } from "./valeria_pre_orcamento_revisao";
 export { vendedorDecidirPreOrcamentoValeria } from "./valeria_pre_orcamento_aprovacao";
 export { vendedorExcluirOrcamento } from "./erp_orcamento_exclusao_segura";
+
+// ── Ponte Central (Meta Cloud API)↔ERP (2026-10-28) — registradas agora
+//    porque passam a ter um consumidor real (a Central, worktree
+//    meta-cloud-api-fase2, via erp_bridge_client.ts). Identificação de
+//    cliente: NUNCA toca erp_vr/clientes diretamente — só lê (chave
+//    canônica, mais robusta que o normTel de valeriaGetCliente) e, se
+//    não encontrar, cria um registro PROVISÓRIO isolado — decisão
+//    deliberada de não reusar valeriaUpsertCliente (existe no código mas
+//    nunca foi registrada aqui — ver nota acima — e cria/atualiza o
+//    cadastro oficial sem tratar ambiguidade), evitando duplicar o
+//    cadastro oficial sem revisão humana.
+export {
+  valeriaConsultarClientePorTelefone,
+  valeriaPrepararCadastroProvisorio,
+} from "./valeria_pre_orcamento_identidade";
+export { valeriaCriarRascunhoPersonalizado } from "./valeria_pre_orcamento_personalizado";

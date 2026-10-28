@@ -34,6 +34,12 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { checkAuth } from "./valeria";
 import { acquireIdem, writeAudit } from "./auth_helper";
+// Ponte Central↔ERP (2026-10-28) — mesma trava de revisão humana usada
+// pelo resto do conjunto de módulos de pré-orçamento (Etapas 9I-9N):
+// nunca grava/edita um rascunho Vitre de origem Valéria depois que o
+// vendedor concluiu a revisão. Import local, sem alterar nenhuma outra
+// linha de lógica de elegibilidade/preço/variações já existente.
+import { assertValeriaPodeEscrever, RevisaoConcluidaError } from "./valeria_pre_orcamento_revisao";
 
 const COL_PRODUTOS = "vitre_produtos";
 const COL_ORC = "vitre_orcamentos";
@@ -268,6 +274,18 @@ export const valeriaVitreCriarRascunho = functions.https.onRequest(async (req, r
     res.status(409).json({ ok: false, error: "ROUTE_LOCKED_VR_CUSTOM", motivo: "Esta conversa já está no fluxo VR personalizado — use calcular_produto_personalizado/criar_orcamento_vr, não o catálogo Vitre." });
     return;
   }
+  // Ponte Central↔ERP (2026-10-28) — revisão humana obrigatória: nunca
+  // cria um rascunho Vitre para um atendimento já marcado REVISADO pelo
+  // vendedor (ver valeria_pre_orcamento_revisao.ts).
+  try {
+    await assertValeriaPodeEscrever(env.conversationId);
+  } catch (e) {
+    if (e instanceof RevisaoConcluidaError) {
+      res.status(409).json({ ok: false, error: "PENDING_HUMAN_REVIEW", motivo: e.message });
+      return;
+    }
+    throw e;
+  }
   const requestId = String(body.requestId || "").trim();
   if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }
   const clienteNome = String(body.clienteNome || "").trim();
@@ -366,6 +384,19 @@ export const valeriaVitreAtualizarRascunho = functions.https.onRequest(async (re
   if (await commercialRouteBloqueiaVitre(env.conversationId)) {
     res.status(409).json({ ok: false, error: "ROUTE_LOCKED_VR_CUSTOM", motivo: "Esta conversa já está no fluxo VR personalizado — use calcular_produto_personalizado/criar_orcamento_vr, não o catálogo Vitre." });
     return;
+  }
+  // Ponte Central↔ERP (2026-10-28) — revisão humana obrigatória: nunca
+  // edita um rascunho Vitre já marcado REVISADO pelo vendedor (é
+  // exatamente aqui, numa ATUALIZAÇÃO, que a Valéria poderia sobrescrever
+  // uma correção humana se esta trava não existisse).
+  try {
+    await assertValeriaPodeEscrever(env.conversationId);
+  } catch (e) {
+    if (e instanceof RevisaoConcluidaError) {
+      res.status(409).json({ ok: false, error: "PENDING_HUMAN_REVIEW", motivo: e.message });
+      return;
+    }
+    throw e;
   }
   const requestId = String(body.requestId || "").trim();
   if (!requestId) { res.status(400).json({ ok: false, error: "requestId obrigatório (idempotência)" }); return; }

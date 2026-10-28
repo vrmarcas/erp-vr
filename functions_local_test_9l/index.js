@@ -28,6 +28,8 @@ const revisao = require("../functions/lib/valeria_pre_orcamento_revisao");
 const estado = require("../functions/lib/valeria_pre_orcamento_estado");
 const aprovacao = require("../functions/lib/valeria_pre_orcamento_aprovacao");
 const exclusao = require("../functions/lib/erp_orcamento_exclusao_segura");
+const vitre = require("../functions/lib/valeria_vitre");
+const personalizado = require("../functions/lib/valeria_pre_orcamento_personalizado");
 
 exports.valeriaConsultarClientePorTelefone = identidade.valeriaConsultarClientePorTelefone;
 exports.valeriaPrepararCadastroProvisorio = identidade.valeriaPrepararCadastroProvisorio;
@@ -36,3 +38,10 @@ exports.vendedorConcluirRevisaoPreOrcamento = revisao.vendedorConcluirRevisaoPre
 exports.valeriaConsultarEstadoRevisao = estado.valeriaConsultarEstadoRevisao;
 exports.vendedorDecidirPreOrcamentoValeria = aprovacao.vendedorDecidirPreOrcamentoValeria;
 exports.vendedorExcluirOrcamento = exclusao.vendedorExcluirOrcamento;
+// Ponte Central↔ERP (2026-10-28) — catálogo Vitre REAL (já deployado em
+// produção, nunca uma cópia) + rascunho personalizado (novo).
+exports.valeriaVitreBuscarCatalogo = vitre.valeriaVitreBuscarCatalogo;
+exports.valeriaVitreConsultarProduto = vitre.valeriaVitreConsultarProduto;
+exports.valeriaVitreCriarRascunho = vitre.valeriaVitreCriarRascunho;
+exports.valeriaVitreAtualizarRascunho = vitre.valeriaVitreAtualizarRascunho;
+exports.valeriaCriarRascunhoPersonalizado = personalizado.valeriaCriarRascunhoPersonalizado;
