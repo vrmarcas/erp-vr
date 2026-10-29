@@ -1336,7 +1336,33 @@ function _homologFatal(reason) {
   throw new Error('[HOMOLOG] ' + reason);
 }
 
+// ── Hosting de homologação REAL (rodada "publicação segura", 2026-10-29)
+// — distinto de _HOMOLOG_MODE (que é só o Firebase Emulator LOCAL, atrás
+// de localhost+?emulator=1). Aqui a página é servida de verdade pelo
+// Firebase Hosting do projeto erp-vrmarcas-homolog — só os dois domínios
+// padrão desse Hosting ativam este modo; qualquer outro hostname (em
+// especial o domínio de produção) cai no branch de produção abaixo.
+// Isolamento é estrutural, não por esconder botão: TODO o app Firebase
+// principal (Firestore/Auth/Functions — _db, firebase.auth(),
+// firebase.functions(), todos os 100+ pontos de chamada do arquivo, que
+// passam por este único app) passa a apontar para o projeto
+// erp-vrmarcas-homolog inteiro, nunca erp-vrmarcas. Produção continua
+// 100% intocada — este branch nunca é alcançado fora desses 2 hostnames.
+var _HOMOLOG_HOSTING_DOMAINS = ['erp-vrmarcas-homolog.web.app', 'erp-vrmarcas-homolog.firebaseapp.com'];
+function _homologHostingComputeMode(hostname) {
+  return _HOMOLOG_HOSTING_DOMAINS.indexOf(hostname) !== -1;
+}
+function _homologHostingValidateConfig(hostingMode, projectId) {
+  if (!hostingMode) return { ok: true };
+  if (projectId !== 'erp-vrmarcas-homolog') {
+    return { ok: false, reason: 'Hosting de homologação ativo (hostname=' + location.hostname + '), mas projectId resolvido é "' + projectId + '" (esperado "erp-vrmarcas-homolog").' };
+  }
+  return { ok: true };
+}
+
 var _HOMOLOG_MODE = _homologComputeMode(location.hostname, new URLSearchParams(location.search).get('emulator'));
+var _HOMOLOG_HOSTING_MODE = _homologHostingComputeMode(location.hostname);
+if (_HOMOLOG_MODE && _HOMOLOG_HOSTING_MODE) { _homologFatal('_HOMOLOG_MODE e _HOMOLOG_HOSTING_MODE nunca podem ser true ao mesmo tempo — hostname inconsistente.'); }
 
 // Arquitetura oficial de Compras (RODADA FINAL, 2026-08-06) — independente
 // de _HOMOLOG_MODE (que só decide A QUAL projeto Firebase conectar,
@@ -1394,6 +1420,19 @@ var firebaseConfig = _HOMOLOG_MODE ? {
   storageBucket: "demo-erp-homolog.appspot.com",
   messagingSenderId: "000000000000",
   appId: "1:000000000000:web:0000000000000000000000"
+} : _HOMOLOG_HOSTING_MODE ? {
+  // Config REAL do Web App registrado em erp-vrmarcas-homolog (rodada
+  // "publicação segura", 2026-10-29) — MESMO projeto já usado pela ponte
+  // de fotos (_VALERIA_FOTOS_HOMOLOG_CONFIG abaixo). apiKey de app web
+  // Firebase não é segredo (não concede acesso por si só — toda
+  // autorização real é via Firestore/Functions Rules, igual à config de
+  // produção abaixo, que também já é pública no bundle há anos).
+  apiKey: "AIzaSyA_-u2nsL4QvCM6km6gzzozMkauVRK8hDA",
+  authDomain: "erp-vrmarcas-homolog.firebaseapp.com",
+  projectId: "erp-vrmarcas-homolog",
+  storageBucket: "erp-vrmarcas-homolog.firebasestorage.app",
+  messagingSenderId: "654939059406",
+  appId: "1:654939059406:web:a95153b8059095cf6f8c9f"
 } : {
   apiKey: "AIzaSyASz1dnDw39NpIpU07cbcyR4kl2dOXCsVA",
   authDomain: "erp-vrmarcas.firebaseapp.com",
@@ -1405,9 +1444,28 @@ var firebaseConfig = _HOMOLOG_MODE ? {
 
 var _homologCheck = _homologValidateProjectId(_HOMOLOG_MODE, firebaseConfig.projectId);
 if (!_homologCheck.ok) { _homologFatal(_homologCheck.reason); }
+var _homologHostingCheck = _homologHostingValidateConfig(_HOMOLOG_HOSTING_MODE, firebaseConfig.projectId);
+if (!_homologHostingCheck.ok) { _homologFatal(_homologHostingCheck.reason); }
+// Defesa adicional, nos dois sentidos: o domínio de Hosting de
+// homologação NUNCA pode resultar em projectId de produção, e o
+// projectId de produção NUNCA pode ser servido a partir desse domínio.
+if (_HOMOLOG_HOSTING_MODE && firebaseConfig.projectId === 'erp-vrmarcas') { _homologFatal('Config de produção resolvida no domínio de Hosting de homologação — bloqueado.'); }
+if (!_HOMOLOG_HOSTING_MODE && !_HOMOLOG_MODE && firebaseConfig.projectId !== 'erp-vrmarcas') { _homologFatal('Hostname de produção resolveu para projectId inesperado: ' + firebaseConfig.projectId); }
 
 if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
 var _db = firebase.firestore();
+
+if (_HOMOLOG_HOSTING_MODE) {
+  console.warn('[HOMOLOG-HOSTING] Servido pelo Hosting de homologação — projectId=' + firebaseConfig.projectId + '. NÃO é o backend de produção (erp-vrmarcas).');
+  document.addEventListener('DOMContentLoaded', function () {
+    try {
+      var b = document.createElement('div');
+      b.textContent = '⚠ AMBIENTE DE HOMOLOGAÇÃO — projeto erp-vrmarcas-homolog, nunca produção';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#B45309;color:#fff;font:700 11px/28px system-ui;text-align:center;letter-spacing:.3px';
+      document.body.prepend(b);
+    } catch (e) {}
+  });
+}
 
 // Só true depois que AMBOS os emuladores (Firestore e Auth) confirmarem
 // conexão — nenhuma leitura/gravação/login é permitida antes disso quando
@@ -31695,7 +31753,13 @@ var _VALERIA_FOTOS_HOMOLOG_CONFIG = {
   appId: "1:654939059406:web:a95153b8059095cf6f8c9f"
 };
 var _VALERIA_FOTOS_APP_NAME = 'valeriaFotosHomolog';
+// Quando o próprio painel já está rodando dentro do Hosting de
+// homologação (_HOMOLOG_HOSTING_MODE — ver topo do arquivo), o app
+// PRINCIPAL já É erp-vrmarcas-homolog: reusa-lo, em vez de abrir uma
+// segunda conexão redundante ao mesmo projeto/Function (nunca duplica
+// endpoint, nunca pede um segundo login para a mesma sessão/projeto).
 function _valeriaFotosApp() {
+  if (typeof _HOMOLOG_HOSTING_MODE !== 'undefined' && _HOMOLOG_HOSTING_MODE) return firebase.app();
   var existing = firebase.apps.find(function (a) { return a.name === _VALERIA_FOTOS_APP_NAME; });
   return existing || firebase.initializeApp(_VALERIA_FOTOS_HOMOLOG_CONFIG, _VALERIA_FOTOS_APP_NAME);
 }
