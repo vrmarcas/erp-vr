@@ -24,7 +24,8 @@
       "Id visual - VR e Vitre/**",
       "scripts/**",
       "index [0-9]*.html",
-      "*.gcloudignore*"
+      "*.gcloudignore*",
+      "functions_ponte_homolog/**"
     ],
     "rewrites": [
       { "source": "**", "destination": "/index.html" }
@@ -40,6 +41,18 @@
       "source": "functions",
       "codebase": "default",
       "predeploy": ["npm --prefix functions run build", "node scripts/guard_deploy_branch.js"],
+      "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
+    },
+    {
+      "source": "functions_ponte_homolog",
+      "codebase": "pontehomolog",
+      "predeploy": [
+        "node scripts/guard_deploy_branch.js",
+        "node scripts/guard_ponte_homolog_only_deploy.js",
+        "node scripts/prepare_ponte_homolog_deploy_package.js",
+        "npm --prefix functions_ponte_homolog install",
+        "npm --prefix functions_ponte_homolog run build"
+      ],
       "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
     }
   ],
