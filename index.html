@@ -31674,12 +31674,103 @@ function _fotosValeriaEsc(s) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
+// ── Ponte isolada para as Functions de revisão de foto (rodada "destravar
+// homologação", 2026-10-29) — vendedorListarFotosAtendimento/
+// vendedorVisualizarFotoAtendimento só existem no projeto Firebase
+// erp-vrmarcas-homolog (codebase metahomolog), NUNCA no projeto do painel
+// (erp-vrmarcas em produção, ou o Emulator local em _HOMOLOG_MODE). Por
+// isso usam um app Firebase SECUNDÁRIO, isolado, apontando sempre para
+// erp-vrmarcas-homolog — nunca o app principal (`firebase.app()`), para
+// nunca misturar sessão/dados de produção com esta ponte. Autenticação:
+// o vendedor precisa de uma sessão Firebase Auth PRÓPRIA nesse projeto
+// (distinta da sessão do painel) — por decisão explícita de segurança,
+// a senha NUNCA fica no código-fonte nem em localStorage: é pedida uma
+// vez por aba (prompt), mantida só em memória, nunca logada.
+var _VALERIA_FOTOS_HOMOLOG_CONFIG = {
+  apiKey: "AIzaSyA_-u2nsL4QvCM6km6gzzozMkauVRK8hDA",
+  authDomain: "erp-vrmarcas-homolog.firebaseapp.com",
+  projectId: "erp-vrmarcas-homolog",
+  storageBucket: "erp-vrmarcas-homolog.firebasestorage.app",
+  messagingSenderId: "654939059406",
+  appId: "1:654939059406:web:a95153b8059095cf6f8c9f"
+};
+var _VALERIA_FOTOS_APP_NAME = 'valeriaFotosHomolog';
+function _valeriaFotosApp() {
+  var existing = firebase.apps.find(function (a) { return a.name === _VALERIA_FOTOS_APP_NAME; });
+  return existing || firebase.initializeApp(_VALERIA_FOTOS_HOMOLOG_CONFIG, _VALERIA_FOTOS_APP_NAME);
+}
+// Modal de login dedicado (HTML real, nunca window.prompt() — não
+// suportado em todo navegador/contexto automatizado, achado real desta
+// rodada). Criado uma única vez, reaproveitado a cada chamada.
+function _valeriaFotosLoginModalEl() {
+  var el = document.getElementById('valeriaFotosLoginModal');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'valeriaFotosLoginModal';
+  el.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);align-items:center;justify-content:center';
+  el.innerHTML =
+    '<div style="background:var(--bg,#fff);border-radius:10px;padding:20px;width:320px;max-width:90vw;box-shadow:0 8px 30px rgba(0,0,0,.25)">'
+    + '<div style="font-size:13px;font-weight:800;margin-bottom:4px">Revisão de fotos Valéria</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Login dedicado do projeto de homologação (separado do seu login principal).</div>'
+    + '<label style="font-size:10px;font-weight:700;color:var(--muted)">E-MAIL</label>'
+    + '<input id="valeriaFotosLoginEmail" type="email" autocomplete="off" style="width:100%;padding:8px;margin:4px 0 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">'
+    + '<label style="font-size:10px;font-weight:700;color:var(--muted)">SENHA</label>'
+    + '<input id="valeriaFotosLoginSenha" type="password" autocomplete="off" style="width:100%;padding:8px;margin:4px 0 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">'
+    + '<div id="valeriaFotosLoginErro" style="display:none;color:#B91C1C;font-size:11px;margin-bottom:8px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button type="button" id="valeriaFotosLoginCancelar" class="topbar-btn ghost" style="font-size:11px">Cancelar</button>'
+    + '<button type="button" id="valeriaFotosLoginEntrar" class="topbar-btn" style="font-size:11px">Entrar</button>'
+    + '</div></div>';
+  document.body.appendChild(el);
+  return el;
+}
+// Garante sessão autenticada NO PROJETO erp-vrmarcas-homolog (nunca reusa
+// o login do painel principal, que é de outro projeto Firebase e nunca
+// seria aceito aqui). Pede e-mail/senha via modal dedicado, uma vez por
+// aba (sessão em memória do app secundário); nunca grava em disco, nunca
+// aparece em log/relatório.
+function _valeriaFotosAuthReady() {
+  var app = _valeriaFotosApp();
+  var auth = app.auth();
+  if (auth.currentUser) return Promise.resolve(auth);
+  if (window._valeriaFotosAuthPromise) return window._valeriaFotosAuthPromise;
+  window._valeriaFotosAuthPromise = new Promise(function (resolve, reject) {
+    var modal = _valeriaFotosLoginModalEl();
+    var elEmail = document.getElementById('valeriaFotosLoginEmail');
+    var elSenha = document.getElementById('valeriaFotosLoginSenha');
+    var elErro = document.getElementById('valeriaFotosLoginErro');
+    var btnEntrar = document.getElementById('valeriaFotosLoginEntrar');
+    var btnCancelar = document.getElementById('valeriaFotosLoginCancelar');
+    elErro.style.display = 'none'; elErro.textContent = '';
+    modal.style.display = 'flex';
+    function fechar() { modal.style.display = 'none'; elSenha.value = ''; }
+    function onCancelar() { fechar(); reject(new Error('Login cancelado.')); cleanup(); }
+    function onEntrar() {
+      var email = elEmail.value.trim();
+      var senha = elSenha.value;
+      if (!email || !senha) { elErro.textContent = 'Informe e-mail e senha.'; elErro.style.display = 'block'; return; }
+      btnEntrar.disabled = true;
+      auth.signInWithEmailAndPassword(email, senha)
+        .then(function () { fechar(); cleanup(); resolve(auth); })
+        .catch(function (e) { btnEntrar.disabled = false; elErro.textContent = 'Falha no login: ' + (e && e.message || e); elErro.style.display = 'block'; });
+    }
+    function cleanup() {
+      btnEntrar.removeEventListener('click', onEntrar);
+      btnCancelar.removeEventListener('click', onCancelar);
+    }
+    btnEntrar.addEventListener('click', onEntrar);
+    btnCancelar.addEventListener('click', onCancelar);
+  }).catch(function (e) { window._valeriaFotosAuthPromise = null; throw e; });
+  return window._valeriaFotosAuthPromise;
+}
 // Abre a foto original numa aba nova, dentro da janela de 60s da URL
 // assinada — por isso SEMPRE busca a URL no clique (nunca pré-busca e
 // guarda, que poderia já estar expirada quando o vendedor clicar).
 function orcEnvVerFotoValeria(externalMessageId) {
-  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
-  firebase.functions().httpsCallable('vendedorVisualizarFotoAtendimento')({ externalMessageId: externalMessageId })
+  _valeriaFotosAuthReady()
+    .then(function (auth) {
+      return auth.app.functions('us-central1').httpsCallable('vendedorVisualizarFotoAtendimento')({ externalMessageId: externalMessageId });
+    })
     .then(function (res) {
       var r = res.data || {};
       if (r.signedUrl) window.open(r.signedUrl, '_blank', 'noopener');
@@ -31693,12 +31784,14 @@ function orcEnvVerFotoValeria(externalMessageId) {
 // pinta a caixa errada se o vendedor trocar de orçamento antes da
 // resposta chegar.
 function orcEnvPatchFotosValeria(o) {
-  if (typeof firebase === 'undefined' || !firebase.functions) return;
   var atd = o.conversationId || o.atendimentoId;
   var box = document.getElementById('orcEnvFotosValeriaBox');
   var modal = document.getElementById('orcEnvModal');
   if (!atd) { if (box) box.outerHTML = ''; return; }
-  firebase.functions().httpsCallable('vendedorListarFotosAtendimento')({ atendimentoId: atd })
+  _valeriaFotosAuthReady()
+    .then(function (auth) {
+      return auth.app.functions('us-central1').httpsCallable('vendedorListarFotosAtendimento')({ atendimentoId: atd });
+    })
     .then(function (res) {
       box = document.getElementById('orcEnvFotosValeriaBox');
       if (!box || !modal || modal.dataset.orcId !== o.id) return; // modal já mudou de orçamento — descarta.
@@ -31720,9 +31813,10 @@ function orcEnvPatchFotosValeria(o) {
       box.outerHTML = '<div id="orcEnvFotosValeriaBox" style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">' + html + '</div>';
     })
     .catch(function () {
-      // Em produção (erp-vrmarcas), estas duas Functions ainda não
-      // existem nesta rodada — falha esperada, nunca quebra o resto do
-      // modal, só não mostra a caixa.
+      // Falha esperada em qualquer ambiente onde o vendedor não tenha
+      // (ou não conclua) o login dedicado de erp-vrmarcas-homolog, ou
+      // onde a conta não tenha o cadastro/claim comercial — nunca quebra
+      // o resto do modal, só não mostra a caixa.
       var el = document.getElementById('orcEnvFotosValeriaBox');
       if (el) el.outerHTML = '';
     });
@@ -31786,10 +31880,13 @@ function orcEnvAbrir(id) {
   // orcEnvPatchFotosValeria() (mesmo padrão de orcEnvPatchAcoesRevisao/
   // finCrHistoricoRecebimento acima) — nunca bloqueia a abertura do
   // modal. As duas Cloud Functions (vendedorListarFotosAtendimento/
-  // vendedorVisualizarFotoAtendimento) só existem em homologação
-  // (erp-vrmarcas-homolog) nesta rodada — em produção o patch falha
-  // silenciosamente (catch abaixo) e a caixa simplesmente não aparece,
-  // nunca quebra o resto do modal.
+  // vendedorVisualizarFotoAtendimento) só existem no projeto
+  // erp-vrmarcas-homolog (rodada "destravar homologação", 2026-10-29) —
+  // chamadas via app Firebase secundário isolado (_valeriaFotosApp,
+  // ver orcEnvPatchFotosValeria/_valeriaFotosAuthReady acima), exigindo
+  // login próprio do vendedor nesse projeto. Fora desse projeto, ou sem
+  // login concluído, o patch falha silenciosamente (catch abaixo) e a
+  // caixa simplesmente não aparece, nunca quebra o resto do modal.
   var fotosValeriaHtml = preOrcValeriaEhOrigemValeria(o)
     ? '<div id="orcEnvFotosValeriaBox" style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px;font-size:11px;color:var(--muted)">Carregando fotos recebidas pela Valéria…</div>'
     : '';
