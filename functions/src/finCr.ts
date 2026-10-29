@@ -464,6 +464,39 @@ export const finCrRegistrarRecebimento = functions.https.onCall(async (data, con
 // (gravar orc.status='aprovado' em `orcamentos`) continua client-side,
 // intocado — Comercial já tem Rules próprias para orcamentos.
 // ══════════════════════════════════════════════════════════════════════════
+const REVISAO_VALERIA_COL = "valeria_pre_orcamentos_revisao";
+
+/** Mesma heurística já usada em valeria_pre_orcamento_aprovacao.ts/valeria_orcamentos_integrity_guard.ts — nunca uma terceira definição divergente. */
+function pareceOrigemValeriaFinCr(o: { n?: number | string; nomeCliente?: string }): boolean {
+  return typeof o.n !== "undefined" || typeof o.nomeCliente !== "undefined";
+}
+
+/**
+ * ACHADO REAL (rodada "Operação Valéria", validação de segurança,
+ * 2026-10-29): esta Function aceitava `orcId`/`valor`/`cliente` do
+ * CLIENTE sem NENHUMA validação server-side contra o estado real do
+ * orçamento em `erp_vr/orcamentos` — qualquer `comercial` (via chamada
+ * direta, nunca precisando de devtools sofisticado) podia criar uma
+ * Conta a Receber para um `orcId` inexistente, com `valor` arbitrário,
+ * ou para um item de origem Valéria AINDA SEM revisão concluída —
+ * exatamente o "efeito financeiro após alteração indevida" identificado
+ * como risco a investigar nesta rodada. Mais direto e mais grave que o
+ * risco original de `erp_vr/orcamentos` (nem precisa escrever o blob —
+ * só chamar esta Function com parâmetros fabricados).
+ *
+ * CORREÇÃO (preventiva, nunca só detectiva — ao contrário da guarda
+ * pós-escrita de `valeria_orcamentos_integrity_guard.ts`, que roda
+ * DEPOIS do fato): dentro da MESMA transação, agora também lê
+ * `erp_vr/orcamentos`, confirma que o `orcId` existe, que seu
+ * `status` já é "aprovado" (nunca aceita criar CR para um orçamento que
+ * nem está aprovado no registro real), e — só para origem Valéria —
+ * que `valeria_pre_orcamentos_revisao/{atendimentoId}` está "REVISADO".
+ * `valor` passa a ser SEMPRE o `total` real do registro (nunca o valor
+ * que o client envia) — fecha também a falsificação de valor. 100%
+ * compatível com o fluxo legítimo (`orcEnvSetStatus()`, index.html),
+ * que já envia o `valor` real do próprio orçamento — nunca muda
+ * comportamento para uma chamada genuína.
+ */
 export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, context) => {
   const caller = await getCallerVerificado(context);
   requireRole(caller, ["comercial", "financeiro"], "criar Conta a Receber ao aprovar orçamento");
@@ -472,7 +505,6 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
   const cliente = String(data?.cliente || "(não informado)");
   const numOrc = String(data?.numOrc || "");
   const prodNome = String(data?.prodNome || "Produto");
-  const valor = Number(data?.valor) || 0;
   const marca = String(data?.marca || "vr");
   const metodo = String(data?.metodo || "PIX");
   // crId opcional: o client já gera e persiste este id em orcamentos ANTES
@@ -481,22 +513,76 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
   // senão, geramos um novo (fallback para chamadas sem esse pré-passo).
   const crIdSugerido = data?.crId ? String(data.crId) : ("cr" + Date.now());
   if (!orcId) throw new functions.https.HttpsError("invalid-argument", "orcId obrigatório.");
-  if (valor < 0) throw new functions.https.HttpsError("invalid-argument", "valor não pode ser negativo.");
 
   const db = admin.firestore();
   const refCR = db.collection(COL).doc("fin_cr");
+  const refOrc = db.collection(COL).doc("orcamentos");
   const dia = dataHojeBR();
 
-  try {
-    const resultado = await db.runTransaction(async (txn) => {
-      const snapCR = await txn.get(refCR);
+  // ACHADO REAL (revisão desta mesma rodada): `orcEnvSetStatus()`
+  // (index.html) NUNCA espera o próprio save do orçamento (`orcSetEnviados`,
+  // assíncrono) terminar antes de chamar esta Function — as duas
+  // requisições correm em paralelo pela rede. Sem isto, a validação nova
+  // acima poderia rejeitar por engano uma aprovação GENUÍNA só porque a
+  // escrita do client ainda não chegou ao servidor quando esta transação
+  // leu `erp_vr/orcamentos`. Retry curto e limitado (nunca indefinido)
+  // absorve essa corrida pré-existente sem enfraquecer a validação — se
+  // depois de todas as tentativas o orçamento ainda não está "aprovado"
+  // de verdade, o bloqueio é real, não uma corrida.
+  const MAX_TENTATIVAS = 4;
+  const ESPERA_MS = 150;
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
+    try {
+      const resultado = await tentarCriarCrAoAprovar();
+      if (!resultado.jaExistia) await writeAudit("auto_criar_ao_aprovar", caller, { orcId, valor: resultado.valor });
+      return { ok: true, crId: resultado.crId, jaExistia: resultado.jaExistia };
+    } catch (e) {
+      // Só repete para NOT_FOUND/status-ainda-não-aprovado (corrida
+      // plausível) — nunca para REVISÃO_PENDENTE (essa nunca se resolve
+      // só esperando, é uma decisão humana real que falta).
+      const motivoDeCorrida = e instanceof functions.https.HttpsError && (e.code === "not-found" || (e.code === "failed-precondition" && e.message.includes('não "aprovado"')));
+      if (motivoDeCorrida && tentativa < MAX_TENTATIVAS) {
+        await new Promise((r) => setTimeout(r, ESPERA_MS));
+        continue;
+      }
+      if (e instanceof functions.https.HttpsError) throw e;
+      functions.logger.error("[finCr] finCrAutoAprovarOrcamento erro inesperado:", e);
+      throw new functions.https.HttpsError("internal", "Erro ao criar Conta a Receber.");
+    }
+  }
+  // Nunca alcançado de fato (o loop sempre retorna ou lança antes) — só
+  // para o compilador TypeScript nunca reclamar de "nem todos os
+  // caminhos retornam".
+  throw new functions.https.HttpsError("internal", "Erro inesperado ao criar Conta a Receber.");
+
+  async function tentarCriarCrAoAprovar(): Promise<{ crId: string; jaExistia: boolean; valor: number }> {
+    return db.runTransaction(async (txn) => {
+      // ── Leituras primeiro (regra do Firestore) ──────────────────────
+      const [snapCR, snapOrc] = await Promise.all([txn.get(refCR), txn.get(refOrc)]);
+      const arrOrc = parseDoc<Array<{ id?: string; status?: string; total?: number | string; n?: number | string; nomeCliente?: string; conversationId?: string; atendimentoId?: string }>>(snapOrc, []);
+      const orc = arrOrc.find((o) => o.id === orcId);
+      if (!orc) throw new functions.https.HttpsError("not-found", `orcId "${orcId}" não encontrado em erp_vr/orcamentos — Conta a Receber nunca criada para um orçamento inexistente.`);
+      if (orc.status !== "aprovado") {
+        throw new functions.https.HttpsError("failed-precondition", `orçamento "${orcId}" está com status "${orc.status}", não "aprovado" — Conta a Receber nunca criada sem a aprovação real já registrada.`);
+      }
+      if (pareceOrigemValeriaFinCr(orc)) {
+        const atendimentoId = orc.conversationId || orc.atendimentoId || "";
+        const revisaoSnap = atendimentoId ? await txn.get(db.collection(REVISAO_VALERIA_COL).doc(atendimentoId)) : null;
+        const revisaoStatus = revisaoSnap?.exists ? (revisaoSnap.data() as { status?: string }).status : undefined;
+        if (revisaoStatus !== "REVISADO") {
+          throw new functions.https.HttpsError("failed-precondition", `orçamento de origem Valéria "${orcId}" sem revisão humana concluída — Conta a Receber bloqueada.`);
+        }
+      }
+      // `valor` SEMPRE do registro real — nunca do parâmetro do cliente (fecha falsificação de valor).
+      const valor = Number(orc.total) || 0;
+
       const arrCR = parseDoc<CrEntry[]>(snapCR, []);
       const idemDescricao = "ORC #" + numOrc + " — " + prodNome;
       // Idempotência: mesma checagem que o client já fazia via orc.crId —
       // reforçada aqui contra duplicidade (mesmo crId JÁ presente, ou
       // mesma descrição para o mesmo orçamento — cobre chamada 2x/retry).
       const jaExiste = arrCR.find((c) => c.id === crIdSugerido || (c.orcamentoId === orcId && c.descricao === idemDescricao));
-      if (jaExiste) return { crId: jaExiste.id, jaExistia: true };
+      if (jaExiste) return { crId: jaExiste.id, jaExistia: true, valor: jaExiste.valor };
 
       const crId = crIdSugerido;
       arrCR.unshift({
@@ -505,15 +591,8 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
         dataCriacao: dia, dataRecebimento: null,
       });
       txn.set(refCR, { data: JSON.stringify(arrCR), ts: Date.now() });
-      return { crId, jaExistia: false };
+      return { crId, jaExistia: false, valor };
     });
-
-    if (!resultado.jaExistia) await writeAudit("auto_criar_ao_aprovar", caller, { orcId, valor });
-    return { ok: true, ...resultado };
-  } catch (e) {
-    if (e instanceof functions.https.HttpsError) throw e;
-    functions.logger.error("[finCr] finCrAutoAprovarOrcamento erro inesperado:", e);
-    throw new functions.https.HttpsError("internal", "Erro ao criar Conta a Receber.");
   }
 });
 
