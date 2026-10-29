@@ -31665,6 +31665,68 @@ function orcEnvPatchAcoesRevisao(o) {
     if (el) el.outerHTML = '<span id="orcEnvAcoesRevisaoBox" style="font-size:11px;color:var(--muted)">Não foi possível verificar a revisão.</span>';
   });
 }
+// Rodada "finalizar storage e revisão humana em homologação" (2026-10-28)
+// — legenda/observações visuais vêm do cliente/LLM (nunca confiável),
+// então SEMPRE escapadas antes de innerHTML — nunca o padrão solto do
+// resto deste arquivo legado, que não se aplica a texto de origem externa.
+function _fotosValeriaEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+// Abre a foto original numa aba nova, dentro da janela de 60s da URL
+// assinada — por isso SEMPRE busca a URL no clique (nunca pré-busca e
+// guarda, que poderia já estar expirada quando o vendedor clicar).
+function orcEnvVerFotoValeria(externalMessageId) {
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
+  firebase.functions().httpsCallable('vendedorVisualizarFotoAtendimento')({ externalMessageId: externalMessageId })
+    .then(function (res) {
+      var r = res.data || {};
+      if (r.signedUrl) window.open(r.signedUrl, '_blank', 'noopener');
+    })
+    .catch(function (e) { showToast('Não foi possível abrir a foto: ' + (e && e.message || e), 'err'); });
+}
+// Carrega a lista de fotos do atendimento (metadados só — legenda e
+// observações visuais; a URL da foto em si só é buscada no clique, ver
+// orcEnvVerFotoValeria). Mesmo padrão de descarte por modal.dataset.orcId
+// já usado por orcEnvPatchAcoesRevisao/finCrHistoricoRecebimento — nunca
+// pinta a caixa errada se o vendedor trocar de orçamento antes da
+// resposta chegar.
+function orcEnvPatchFotosValeria(o) {
+  if (typeof firebase === 'undefined' || !firebase.functions) return;
+  var atd = o.conversationId || o.atendimentoId;
+  var box = document.getElementById('orcEnvFotosValeriaBox');
+  var modal = document.getElementById('orcEnvModal');
+  if (!atd) { if (box) box.outerHTML = ''; return; }
+  firebase.functions().httpsCallable('vendedorListarFotosAtendimento')({ atendimentoId: atd })
+    .then(function (res) {
+      box = document.getElementById('orcEnvFotosValeriaBox');
+      if (!box || !modal || modal.dataset.orcId !== o.id) return; // modal já mudou de orçamento — descarta.
+      var fotos = (res.data && res.data.fotos) || [];
+      if (!fotos.length) { box.outerHTML = ''; return; }
+      var html = '<div style="font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📷 Fotos recebidas pela Valéria ('+fotos.length+')</div>';
+      fotos.forEach(function (f) {
+        html += '<div style="padding:8px 0;border-top:1px dashed var(--border)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+          + '<div style="font-size:11px">'
+          + (f.caption ? '<div><span style="color:var(--muted)">Legenda do cliente:</span> ' + _fotosValeriaEsc(f.caption) + '</div>' : '<div style="color:var(--muted)">Sem legenda.</div>')
+          + (f.visualObservations && f.visualObservations.length
+              ? '<div style="margin-top:3px;color:#1EB8D8"><span style="color:var(--muted)">Observação visual da Valéria (inferência, nunca dado confirmado):</span> ' + f.visualObservations.map(_fotosValeriaEsc).join(' · ') + '</div>'
+              : '')
+          + '</div>'
+          + '<button class="topbar-btn ghost" style="font-size:11px;white-space:nowrap" onclick="orcEnvVerFotoValeria(\'' + _fotosValeriaEsc(f.externalMessageId) + '\')">👁 Ver foto original</button>'
+          + '</div></div>';
+      });
+      box.outerHTML = '<div id="orcEnvFotosValeriaBox" style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">' + html + '</div>';
+    })
+    .catch(function () {
+      // Em produção (erp-vrmarcas), estas duas Functions ainda não
+      // existem nesta rodada — falha esperada, nunca quebra o resto do
+      // modal, só não mostra a caixa.
+      var el = document.getElementById('orcEnvFotosValeriaBox');
+      if (el) el.outerHTML = '';
+    });
+}
 function orcEnvAssumirRevisao(atendimentoId, orcId) {
   if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
   firebase.functions().httpsCallable('vendedorAssumirRevisaoPreOrcamento')({ atendimentoId: atendimentoId })
@@ -31716,6 +31778,21 @@ function orcEnvAbrir(id) {
   } else {
     itensHtml='<div style="color:var(--muted);font-size:11px;padding:12px 0">Itens não disponíveis (salvo antes desta versão)</div>';
   }
+  // Rodada "finalizar storage e revisão humana em homologação"
+  // (2026-10-28) — fotografias recebidas pela Valéria durante a
+  // qualificação, só para orçamentos de origem Valéria (mesma checagem
+  // já usada para o lock de revisão, preOrcValeriaEhOrigemValeria).
+  // Conteúdo real carregado de forma assíncrona por
+  // orcEnvPatchFotosValeria() (mesmo padrão de orcEnvPatchAcoesRevisao/
+  // finCrHistoricoRecebimento acima) — nunca bloqueia a abertura do
+  // modal. As duas Cloud Functions (vendedorListarFotosAtendimento/
+  // vendedorVisualizarFotoAtendimento) só existem em homologação
+  // (erp-vrmarcas-homolog) nesta rodada — em produção o patch falha
+  // silenciosamente (catch abaixo) e a caixa simplesmente não aparece,
+  // nunca quebra o resto do modal.
+  var fotosValeriaHtml = preOrcValeriaEhOrigemValeria(o)
+    ? '<div id="orcEnvFotosValeriaBox" style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px;font-size:11px;color:var(--muted)">Carregando fotos recebidas pela Valéria…</div>'
+    : '';
   var descHtml='';
   if(o.descCond>0) descHtml+='<div style="font-size:11px;color:#D97706">⚡ Desconto condicional: '+o.descCond+'%'+(o.dcData?' até '+o.dcData.split('-').reverse().join('/'):'')+'</div>';
   if(o.descPix>0)  descHtml+='<div style="font-size:11px;color:#D97706">⚡ Desconto PIX: '+o.descPix+'%</div>';
@@ -31783,6 +31860,7 @@ function orcEnvAbrir(id) {
     +'</div>'
     +financeiroHtml
     +itensHtml
+    +fotosValeriaHtml
     +'<div style="margin-top:12px;padding:12px;background:var(--bg2);border-radius:8px">'
     +descHtml
     +'<div style="font-size:15px;font-weight:800;color:'+accent+';margin-top:6px">VALOR FINAL: '+(_n.valorPendente ? 'aguardando escolha do cliente' : fmtVal(_n.valorFinal))+'</div>'
@@ -31844,6 +31922,9 @@ function orcEnvAbrir(id) {
   // só é disparado quando há algo pendente de fato para essa origem.
   if (preOrcValeriaEhOrigemValeria(o) && orcIsPendenteRevisao(o)) {
     orcEnvPatchAcoesRevisao(o);
+  }
+  if (preOrcValeriaEhOrigemValeria(o)) {
+    orcEnvPatchFotosValeria(o);
   }
   if(typeof firebase!=='undefined' && firebase.functions){
     firebase.functions().httpsCallable('finCrHistoricoRecebimento')({ orcamentoId:o.id, osRef:o.osRef||'' })
