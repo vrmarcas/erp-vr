@@ -1831,6 +1831,21 @@ function _cloudSaveExec(key, payload, opts) {
   // valor capturado antes dela terminar.
   var baseline = _cloudLastPayload[key]; // undefined = nunca observamos este doc nesta aba — grava sem checar
 
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — bug real reproduzido em
+  // produção (orçamento #000268): opts.silencioso só suprimia o toast de
+  // CONFLITO (ver comentário acima de orcSetEnviados/_cloudSave), nunca os
+  // outros (cota/auth/erro genérico) — então o espelho best-effort do
+  // array legado, que já usava {silencioso:true}, ainda mostrava "Falha ao
+  // salvar 'orcamentos'" mesmo depois de erp_vr_orcamentos/{id} (fonte de
+  // verdade) já ter confirmado o save. opts.legacyMirror é NOVO e mais
+  // forte: suprime TODO toast desta chamada, nunca usado por nenhum outro
+  // chamador de _cloudSave() — só pelo espelho legado de orçamentos (ver
+  // _orcamentosSalvarComMergeContinuar/orcEnvGerarOS), que já decidiu o
+  // resultado real pelo lado v2 e só grava aqui por compatibilidade com
+  // leitores ainda não migrados. Uma falha aqui é só log/auditoria técnica
+  // — nunca pode inverter um save já confirmado.
+  var semToastNenhum = !!(opts && opts.legacyMirror);
+
   function tentar(jaRenovouToken) {
     return _db.runTransaction(function(txn){
       return txn.get(ref).then(function(snap){
@@ -1854,7 +1869,7 @@ function _cloudSaveExec(key, payload, opts) {
         _cloudLastPayload[key] = e.serverPayload;
         var dadoServidor = null;
         try { dadoServidor = JSON.parse(e.serverPayload); } catch(err) {}
-        if (!(opts && opts.silencioso) && typeof showToast === 'function') showToast('⚠️ "'+key+'" foi alterado por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.', 'warn');
+        if (!semToastNenhum && !(opts && opts.silencioso) && typeof showToast === 'function') showToast('⚠️ "'+key+'" foi alterado por outra sessão — esta mudança não foi salva. Repita a ação se ainda for necessária.', 'warn');
         return {ok:false, reason:'conflito', serverData: dadoServidor};
       }
       var ehErroDeAuth = e && (e.code === 'permission-denied' || e.code === 'unauthenticated' || (e.message||'').indexOf('PERMISSION_DENIED')>=0);
@@ -1865,19 +1880,19 @@ function _cloudSaveExec(key, payload, opts) {
         return firebase.auth().currentUser.getIdToken(true).then(function(){
           return tentar(true);
         }).catch(function(){
-          if (typeof showToast==='function') showToast('🔒 Sessão expirada — não foi possível salvar "'+key+'". Desbloqueie novamente para continuar.', 'err');
+          if (!semToastNenhum && typeof showToast==='function') showToast('🔒 Sessão expirada — não foi possível salvar "'+key+'". Desbloqueie novamente para continuar.', 'err');
           return {ok:false, reason:'auth-expirada', error:e};
         });
       }
       delete _cloudLastPayload[key]; // permitir nova tentativa
       console.warn("[Cloud] Erro ao salvar "+key+":", e);
       if(e && (e.code==='resource-exhausted' || (e.message||'').indexOf('Quota')>=0)){
-        if(typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
+        if(!semToastNenhum && typeof showToast==='function') showToast('⚠️ Cota do Firebase esgotada — alterações NÃO estão sendo salvas','err');
       } else if(ehErroDeAuth){
-        if(typeof showToast==='function') showToast('🔒 Sem permissão para salvar "'+key+'" — contate o administrador','err');
+        if(!semToastNenhum && typeof showToast==='function') showToast('🔒 Sem permissão para salvar "'+key+'" — contate o administrador','err');
         console.error('[Cloud] PERMISSÃO NEGADA ao salvar '+key+'. Verifique as Firestore Rules.');
       } else {
-        if(typeof showToast==='function') showToast('⚠️ Falha ao salvar "'+key+'" — tente novamente','err');
+        if(!semToastNenhum && typeof showToast==='function') showToast('⚠️ Falha ao salvar "'+key+'" — tente novamente','err');
       }
       return {ok:false, reason:'erro', error:e};
     });
@@ -30204,7 +30219,7 @@ function _orcamentosSalvarComMergeContinuar(arr, tentativas){
     // combinada via orcV2MergeComLegado) funcionando enquanto o array ainda
     // couber. AGUARDADO (nunca fire-and-forget) só para manter a ordem
     // determinística de gravações desta aba — nunca para decidir sucesso.
-    return _cloudSave('orcamentos', arr, { silencioso: true }).catch(function (e) { return { ok: false, reason: 'erro', error: e }; }).then(function (resLegado) {
+    return _cloudSave('orcamentos', arr, { legacyMirror: true }).catch(function (e) { return { ok: false, reason: 'erro', error: e }; }).then(function (resLegado) {
       if (!resLegado || !resLegado.ok) console.warn('[orcamentos] espelho legado não confirmou (não bloqueia o save — fonte de verdade é erp_vr_orcamentos/{id}):', resLegado);
 
       var conflito = resultados.find(function (x) { return x.r && x.r.reason === 'conflito'; });
@@ -31202,7 +31217,16 @@ async function _orcSalvarOrcamentoImpl() {
   // (nunca duplica, nunca fica congelado no snapshot da 1ª gravação).
   if (typeof crmUpsertLeadPorOrcamento === 'function') {
     var _crmLeadCriadoAgora = crmUpsertLeadPorOrcamento(orc, num);
-    if (_crmLeadCriadoAgora) orcSetEnviados(lista); // persiste orc.crmLeadId gravado no upsert
+    // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — achado real investigando
+    // o #000268: esta 2ª gravação (persistir orc.crmLeadId) era disparada
+    // SEM aguardar (fire-and-forget) — _orcSalvarOrcamentoImpl() já tinha
+    // retornado quando ela ainda estava em voo, então sua própria tentativa
+    // de espelho legado (best-effort, já silenciosa) podia "vazar" para a
+    // janela de tempo da PRÓXIMA ação do usuário, e uma falha real aqui
+    // (ex.: v2 indisponível) nunca era notada por ninguém. Agora aguardada
+    // como o resto da função — ainda nunca bloqueia o save principal (que
+    // já retornou `orc` de verdade; isto só persiste um campo adicional).
+    if (_crmLeadCriadoAgora) await orcSetEnviados(lista); // persiste orc.crmLeadId gravado no upsert
   }
   if(!orcExistente){
     // Libera a reserva — o PRÓXIMO orçamento (Novo Orçamento) deve gerar a
@@ -33157,7 +33181,7 @@ function orcEnvGerarOS(){
       var arrOrc = (snap.exists && snap.data() && snap.data().data) ? JSON.parse(snap.data().data) : [];
       var idx = arrOrc.findIndex(function(x){ return x.id===o.id; });
       if(idx>=0) arrOrc[idx] = resultado.orcAtual; else arrOrc.unshift(resultado.orcAtual);
-      return _cloudSave('orcamentos', arrOrc, {silencioso:true});
+      return _cloudSave('orcamentos', arrOrc, {legacyMirror:true});
     }).then(function(resLegado){
       if(!resLegado || !resLegado.ok) console.warn('[orcamentos] espelho legado não confirmou (Gerar OS — não bloqueia, fonte de verdade é erp_vr_orcamentos/{id}):', resLegado);
     }).catch(function(e){ console.warn('[orcamentos] espelho legado falhou (Gerar OS — não bloqueia):', e); });
