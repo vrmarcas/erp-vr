@@ -136,6 +136,19 @@ async function limparOrc(orcId) {
   var lista = JSON.parse(doc.data().data).filter(function (o) { return o.id !== orcId; });
   await ref.set({ data: JSON.stringify(lista), ts: Date.now() });
 }
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — erp_vr_orcamentos/{id} é
+// documento NATIVO (nunca embrulhado em {data: JSON.stringify(...)}, ao
+// contrário do array legado acima) — mesmo formato real.
+async function seedOrcamentoV2(orcId, campos) {
+  await db.collection('erp_vr_orcamentos').doc(orcId).set(Object.assign({ id: orcId, num: orcId, status: 'enviado_producao' }, campos || {}));
+}
+async function getOrcV2(orcId) {
+  var doc = await db.collection('erp_vr_orcamentos').doc(orcId).get();
+  return doc.exists ? doc.data() : null;
+}
+async function limparOrcV2(orcId) {
+  await db.collection('erp_vr_orcamentos').doc(orcId).delete();
+}
 async function limparMaterial(matKey) {
   var stockRef = db.collection('erp_vr').doc('stock');
   var stock = await stockRef.get();
@@ -152,7 +165,7 @@ var MAT = 'e2e_mat_sync_' + Date.now();
 console.log('\n=== GATE 1 — producaoIniciarOuEditar sincroniza o orçamento vinculado (Cloud Function real, Firestore Emulator) ===\n');
 
 (async () => {
-  var criados = { os: [], orc: [] }; // rastro para limpeza garantida no final, mesmo se algum teste falhar
+  var criados = { os: [], orc: [], orcV2: [] }; // rastro para limpeza garantida no final, mesmo se algum teste falhar
 
   // ── Cenário principal: OS nova + entrada parcial + orçamento "Enviado para Produção" ──
   var osId, orcId;
@@ -260,11 +273,59 @@ console.log('\n=== GATE 1 — producaoIniciarOuEditar sincroniza o orçamento vi
     assertEq(os.status, 'producao', 'OS.status mesmo com orçamento órfão');
   });
 
+  // ── RODADA MIGRAÇÃO v2 (2026-11-03) — Caso 5 do pedido do usuário: orçamento que
+  // existe SÓ em erp_vr_orcamentos/{id} (cenário real do #000268, nunca no array
+  // legado) — producaoIniciarOuEditar deve ler/gravar via v2, sem perder a
+  // atomicidade das demais escritas críticas da mesma transação. ──
+  var osId5, orcIdV2;
+  await test('10. SETUP — OS nova + orçamento SÓ em erp_vr_orcamentos/{id} (nunca no array legado, como o #000268 real)', async () => {
+    osId5 = novoOsId(); orcIdV2 = novoOrcId();
+    criados.os.push(osId5); criados.orcV2.push(orcIdV2);
+    criados.orc.push(orcIdV2); // o espelho best-effort pode criar este id também no array legado (ver teste 13) — limpeza deve cobrir os dois
+    await seedOsEStoque(osId5, {
+      os: { status: 'iniciada', orcRef: orcIdV2 },
+      stock: { [MAT]: { label: 'Acrílico E2E Sync V2', qty: 10 } },
+    });
+    await seedOrcamentoV2(orcIdV2, { valorFinal: 300, cliente: 'Cliente E2E Sync V2' });
+    var legado = await getOrc(orcIdV2);
+    assertEq(legado, null, 'pré-condição: este orçamento NUNCA deve existir no array legado');
+  });
+
+  await test('11. Iniciar Produção com orçamento v2-only — OS avança para "producao" (atomicidade preservada)', async () => {
+    var r = await producaoIniciarOuEditar.run({ osId: osId5, editMode: false, tipo: 'chapa', matKey: MAT, qty: 1, requestId: novoReqId() }, ctx(UID.producao, 'producao'));
+    assertTruthy(r.ok, 'esperava ok:true mesmo com orçamento só em v2');
+    assertEq(r.osStatus, 'producao', 'status retornado pela Function');
+    var os = await getOS(osId5);
+    assertEq(os.status, 'producao', 'OS.status pós-transação');
+  });
+
+  await test('12. Orçamento v2 (erp_vr_orcamentos/{id}) avança para "em_producao" NA MESMA transação', async () => {
+    var orcV2 = await getOrcV2(orcIdV2);
+    assertTruthy(orcV2, 'orçamento v2 deveria existir');
+    assertEq(orcV2.status, 'em_producao', 'orcV2.status');
+    assertEq(orcV2.valorFinal, 300, 'demais campos do orçamento v2 preservados — escrita não é destrutiva');
+  });
+
+  await test('13. Reload completo (nova leitura do Firestore) — v2 continua sincronizado; espelho legado (best-effort, fora da transação crítica) reflete o mesmo status', async () => {
+    var os = await getOS(osId5);
+    var orcV2 = await getOrcV2(orcIdV2);
+    assertEq(os.status, 'producao', 'OS.status após reload');
+    assertEq(orcV2.status, 'em_producao', 'orcV2.status após reload — v2 é a fonte de verdade, lida pela própria Function');
+    // espelharOrcamentoNoLegado() é best-effort e roda fora da transação crítica — por
+    // isso o array legado também recebe o registro (nunca existiu lá antes), com o
+    // mesmo status; isso é esperado (ver Caso 10 do pedido do usuário: mirror nunca
+    // bloqueia nem contradiz o v2, mas também não é silenciado/ignorado quando funciona).
+    var legado = await getOrc(orcIdV2);
+    assertTruthy(legado, 'espelho legado best-effort deveria ter criado o registro (nunca existia lá antes)');
+    assertEq(legado.status, 'em_producao', 'espelho legado reflete o mesmo status do v2 — nunca diverge quando o espelho funciona');
+  });
+
   // ── Limpeza — o Firestore Emulator é compartilhado entre suítes na mesma sessão; nunca deixar resíduo. ──
   for (var i = 0; i < criados.os.length; i++) await limparOS(criados.os[i]);
   for (var j = 0; j < criados.orc.length; j++) await limparOrc(criados.orc[j]);
+  for (var k = 0; k < criados.orcV2.length; k++) await limparOrcV2(criados.orcV2[k]);
   await limparMaterial(MAT);
-  console.log('  (limpeza: ' + criados.os.length + ' OS + ' + criados.orc.length + ' orçamento(s) + 1 material removidos do emulador)');
+  console.log('  (limpeza: ' + criados.os.length + ' OS + ' + criados.orc.length + ' orçamento(s) legado + ' + criados.orcV2.length + ' orçamento(s) v2 + 1 material removidos do emulador)');
 
   console.log('\n' + '='.repeat(70));
   console.log(' RESULTADO: ' + passed + ' passaram, ' + failed + ' falharam (' + (passed + failed) + ' total)');

@@ -97,7 +97,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   // (mesmo que a UI real faria: a situação financeira já está confirmada
   // antes de "Gerar OS" ficar habilitado); as 10 "abas" concorrem só na
   // etapa Gerar OS — que é onde o idempotency guard real está.
-  var FN_NAMES_OS = ['orcEnvNormalizar', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS'];
+  var FN_NAMES_OS = ['orcEnvNormalizar', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'orcRefrescarKbOsDoServidor'];
   var srcOS = [
     'var _ORC_ENVIADOS_DATA = [];',
     'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',
@@ -106,6 +106,14 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
     "var _COL = 'erp_vr';",
     'var _KB_OS_FIN_CACHE = {};',
     'var FIN_TX = [];',
+    // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() real
+    // atualiza este cache global (índice por id dos orçamentos já lidos/
+    // gravados via erp_vr_orcamentos/{id}) depois da transação confirmar
+    // (index.html ~33161); fora do range extraído por extractFn, então
+    // precisa ser declarado aqui como o restante do app já faz.
+    'var _ORC_V2_CACHE = {};',
+    'function _orcV2RecomputarERenderizar(){}', // só re-renderiza a tela de orçamentos enviados — nenhum efeito sob teste aqui
+    'var _orcV2LastPayload = {};', // baseline de CAS por orçamento (ver orcV2SalvarComConflito) — não usado neste cenário (a corrida sob teste é a transação de Gerar OS, não um save de orçamento), mas precisa existir
     FN_NAMES_OS.map(extractFn).join('\n\n'),
     'module.exports = {',
     '  orcRegistrarSituacaoFinanceira: orcRegistrarSituacaoFinanceira,',
@@ -160,7 +168,10 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   var _txnDelayMsOS = 0;
   function resetFakeStoreOS() { _fakeStoreOS = {}; }
   global._db = {
-    collection: function () { return { doc: function (key) { return { _key: key }; } }; },
+    // standalone .get() (fora de qualquer transação) — usado pelo espelho
+    // legado best-effort de orcEnvGerarOS(), que roda DEPOIS da transação
+    // crítica confirmar (ver index.html ~33146+).
+    collection: function () { return { doc: function (key) { return { _key: key, get: function () { var existing = _fakeStoreOS[key]; return Promise.resolve({ exists: !!existing, data: function () { return existing; } }); } }; } }; },
     runTransaction: function (fn) {
       var runIt = function () {
         var pendingWrites = {};
@@ -231,6 +242,14 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   }
   function seedFirestoreOS(orcamentos) {
     _fakeStoreOS['orcamentos'] = { data: JSON.stringify(orcamentos) };
+    // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() real lê
+    // SÓ erp_vr_orcamentos/{id} dentro da transação crítica (nunca mais o
+    // array legado inteiro, ver index.html:33055/33080); o mock de
+    // collection()/doc() aqui é "achatado" (ignora o nome da coleção, só usa
+    // a chave do doc), então o v2 é semeado com o próprio id do orçamento
+    // como chave, como documento NATIVO (nunca embrulhado em {data: JSON.
+    // stringify(...)} como o array legado).
+    orcamentos.forEach(function (o) { _fakeStoreOS[o.id] = o; });
     _fakeStoreOS['kb_os'] = { data: JSON.stringify({}) };
     _fakeStoreOS['kb_os_fin'] = { data: JSON.stringify({}) };
     _fakeStoreOS['fin_cr'] = { data: JSON.stringify([]) };

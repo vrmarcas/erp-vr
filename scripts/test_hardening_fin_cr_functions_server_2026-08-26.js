@@ -59,6 +59,11 @@ async function setDoc(docId, value) {
   await db.collection('erp_vr').doc(docId).set({ data: JSON.stringify(value), ts: Date.now() });
 }
 async function setOrcamentos(arr) { await setDoc('orcamentos', arr); }
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — erp_vr_orcamentos/{id} é
+// documento NATIVO (nunca embrulhado em {data: JSON.stringify(...)}, ao
+// contrário do array legado acima) — mesmo formato que
+// orcV2SalvarComConflito()/gravarOrcamentoV2() gravam de verdade.
+async function setOrcamentoV2(orc) { await db.collection('erp_vr_orcamentos').doc(orc.id).set(orc); }
 async function setKbOs(obj) { await setDoc('kb_os', obj); }
 async function setKbOsFin(obj) { await setDoc('kb_os_fin', obj); }
 async function setFinCr(arr) { await setDoc('fin_cr', arr); }
@@ -214,24 +219,48 @@ console.log('\n=== HARDENING fin_cr — Cloud Functions reais (Emulator, role re
   });
 
   // ── 20-21. finCrAutoAprovarOrcamento ──────────────────────────────────────
+  // ACHADO REAL (2026-11-03, ao rodar esta suíte contra o Emulator de
+  // verdade pela 1ª vez desde a RODADA DE SEGURANÇA 2026-10-29, commits
+  // c98f15c/2567eda): estes 2 testes nunca semeavam NENHUM orçamento
+  // (nem legado nem v2) — ficaram quebrados (sempre ORC_NAO_ENCONTRADO)
+  // desde que aquela rodada passou a validar o orçamento real contra o
+  // servidor, só nunca foi notado porque esta suíte nunca tinha rodado de
+  // verdade depois disso (sem Emulator disponível). Pré-existente, nunca
+  // causado pela migração v2 desta rodada — reproduzido e confirmado
+  // IDÊNTICO contra o código de ANTES desta rodada (commit da99755).
+  // Corrigido semeando o orçamento de verdade (status "aprovado", mesmo
+  // exigido pela validação real) — nunca alterando a regra de negócio.
+  // `valor` desde 2567eda SEMPRE vem de orc.total (nunca do parâmetro do
+  // client) — a fixture seguinte reflete isso.
   await test('20. finCrAutoAprovarOrcamento (Comercial): cria 1 entrada pendente ao aprovar', async function () {
     var orcId = 'e2e_orc_aprova_' + Date.now();
     await setFinCr([]);
-    var r = await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: '[TESTE] X', numOrc: '55', prodNome: 'Produto', valor: 743.35, marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
+    await setOrcamentoV2({ id: orcId, num: '55', cliente: '[TESTE] X', status: 'aprovado', total: 743.35 });
+    var r = await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: '[TESTE] X', numOrc: '55', prodNome: 'Produto', marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
     assertEq(r.jaExistia, false);
     var arrCR = await getDoc('fin_cr');
     assertEq(arrCR.length, 1);
-    assertEq(arrCR[0].valor, 743.35);
+    assertEq(arrCR[0].valor, 743.35, 'valor vem SEMPRE de orc.total (nunca do parâmetro do client, desde a rodada de segurança 2026-10-29)');
     assertEq(arrCR[0].status, 'pendente');
   });
   await test('21. finCrAutoAprovarOrcamento: chamar 2x pelo mesmo orçamento não duplica (idempotência)', async function () {
     var orcId = 'e2e_orc_aprova2_' + Date.now();
     await setFinCr([]);
-    await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: 'X', numOrc: '56', prodNome: 'P', valor: 100, marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
-    var r2 = await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: 'X', numOrc: '56', prodNome: 'P', valor: 100, marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
+    await setOrcamentoV2({ id: orcId, num: '56', cliente: 'X', status: 'aprovado', total: 100 });
+    await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: 'X', numOrc: '56', prodNome: 'P', marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
+    var r2 = await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: 'X', numOrc: '56', prodNome: 'P', marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
     assertEq(r2.jaExistia, true);
     var arrCR = await getDoc('fin_cr');
     assertEq(arrCR.length, 1, 'não deveria duplicar a entrada de aprovação');
+  });
+  await test('20b. finCrAutoAprovarOrcamento: orçamento SÓ no array legado (nunca migrado para v2) — fallback de leitura funciona', async function () {
+    var orcId = 'e2e_orc_aprova_legado_' + Date.now();
+    await setFinCr([]);
+    await setOrcamentos([{ id: orcId, num: '57', cliente: '[TESTE] Legado', status: 'aprovado', total: 250 }]);
+    var r = await finCrAutoAprovarOrcamento.run({ orcId: orcId, cliente: '[TESTE] Legado', numOrc: '57', prodNome: 'P', marca: 'vr', metodo: 'PIX' }, ctx(UID.comercial, 'comercial'));
+    assertEq(r.jaExistia, false);
+    var arrCR = await getDoc('fin_cr');
+    assertEq(arrCR.find(function (c) { return c.orcamentoId === orcId; }).valor, 250, 'achou o orçamento só no legado e usou o total real dele');
   });
 
   // ── 22-24. finCrHistoricoRecebimento — CONFIDENCIALIDADE ──────────────────
