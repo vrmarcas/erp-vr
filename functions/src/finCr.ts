@@ -28,6 +28,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { CallerVerificado, getCallerVerificado, requireRole, acquireIdem as acquireIdemShared, writeAudit as writeAuditShared, parseDoc } from "./auth_helper";
+import { lerOrcamentoV2ComFallback, gravarOrcamentoV2, espelharOrcamentoNoLegado } from "./orcamentos_v2_helper";
 
 const COL = "erp_vr";
 const COL_IDEM = "fin_cr_idem_keys";
@@ -71,6 +72,9 @@ function dataHojeBR(): string {
   return `${dd}/${mm}/${hoje.getFullYear()}`;
 }
 
+// lerOrcamentoV2ComFallback/gravarOrcamentoV2/espelharOrcamentoNoLegado —
+// ver orcamentos_v2_helper.ts (RODADA MIGRAÇÃO ORÇAMENTOS v2, 2026-11-03).
+
 // ══════════════════════════════════════════════════════════════════════════
 // finCrConfirmarPagamento — porte de orcRegistrarSituacaoFinanceira()/
 // aplicarCRTx() (index.html). Comercial confirma como um orçamento
@@ -108,26 +112,26 @@ export const finCrConfirmarPagamento = functions.https.onCall(async (data, conte
   }
 
   const db = admin.firestore();
-  const refOrc = db.collection(COL).doc("orcamentos");
   const refCR = db.collection(COL).doc("fin_cr");
   const refTx = db.collection(COL).doc("fin_tx");
   const dia = dataHojeBR();
 
   try {
     const resultado = await db.runTransaction(async (txn) => {
-      const [snapOrc, snapCR, snapTx] = await Promise.all([txn.get(refOrc), txn.get(refCR), txn.get(refTx)]);
-      const arrOrc = parseDoc<any[]>(snapOrc, []);
+      // RODADA MIGRAÇÃO ORÇAMENTOS v2 — lê de erp_vr_orcamentos/{id}
+      // primeiro (fonte de verdade); nunca mais presume que orcId está no
+      // array legado inteiro (ver lerOrcamentoV2ComFallback acima).
+      const orc = await lerOrcamentoV2ComFallback(db, txn, orcId);
+      const [snapCR, snapTx] = await Promise.all([txn.get(refCR), txn.get(refTx)]);
       const arrCR = parseDoc<CrEntry[]>(snapCR, []);
       const arrTx = parseDoc<TxEntry[]>(snapTx, []);
 
-      const idxOrc = arrOrc.findIndex((x) => x.id === orcId);
-      if (idxOrc < 0) throw new functions.https.HttpsError("not-found", "ORC_NAO_ENCONTRADO");
-      const orc = arrOrc[idxOrc];
+      if (!orc) throw new functions.https.HttpsError("not-found", "ORC_NAO_ENCONTRADO");
 
       // Idempotência REAL: mesmo comportamento do client — checa contra o
       // documento fresco do servidor, dentro da própria transação.
       if (orc.pgtoConfirmado) {
-        return { ok: true, jaConfirmado: true, dados: orc.pgtoConfirmado, semGravar: true };
+        return { ok: true, jaConfirmado: true, dados: orc.pgtoConfirmado, semGravar: true, orcAtualizado: null as Record<string, any> | null };
       }
 
       let txMutado = false;
@@ -178,19 +182,22 @@ export const finCrConfirmarPagamento = functions.https.onCall(async (data, conte
         confirmadoEm: dia, confirmadoPor: "cf:" + caller.uid,
       };
       orc.pgtoConfirmado = pgtoConfirmado;
-      arrOrc[idxOrc] = orc;
 
-      txn.set(refOrc, { data: JSON.stringify(arrOrc), ts: Date.now() });
+      gravarOrcamentoV2(db, txn, orc);
       txn.set(refCR, { data: JSON.stringify(arrCR), ts: Date.now() });
       if (txMutado) txn.set(refTx, { data: JSON.stringify(arrTx), ts: Date.now() });
 
-      return { ok: true, jaConfirmado: false, dados: pgtoConfirmado, semGravar: false };
+      return { ok: true, jaConfirmado: false, dados: pgtoConfirmado, semGravar: false, orcAtualizado: orc };
     });
 
     if (!resultado.semGravar) {
       await writeAudit("confirmar_pagamento", caller, { orcId, tipo, valorEntrada, restante });
+      // Espelho legado best-effort — FORA da transação crítica acima (nunca
+      // pode bloquear a confirmação de pagamento pelo mesmo motivo do
+      // #000268). Sua falha nunca é propagada ao chamador.
+      if (resultado.orcAtualizado) await espelharOrcamentoNoLegado(db, resultado.orcAtualizado);
     }
-    return resultado;
+    return { ok: resultado.ok, jaConfirmado: resultado.jaConfirmado, dados: resultado.dados, semGravar: resultado.semGravar };
   } catch (e) {
     if (e instanceof functions.https.HttpsError) throw e;
     functions.logger.error("[finCr] finCrConfirmarPagamento erro inesperado:", e);
@@ -289,20 +296,18 @@ export const finCrReceberSaldo = functions.https.onCall(async (data, context) =>
   const refKbFin = db.collection(COL).doc("kb_os_fin");
   const refCr = db.collection(COL).doc("fin_cr");
   const refTx = db.collection(COL).doc("fin_tx");
-  const refOrc = db.collection(COL).doc("orcamentos");
   const dia = dataHojeBR();
   const dtCurta = dia.slice(0, 5);
 
   try {
     const resultado = await db.runTransaction(async (txn) => {
-      const [snapKb, snapKbFin, snapCr, snapTx, snapOrc] = await Promise.all([
-        txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc),
+      const [snapKb, snapKbFin, snapCr, snapTx] = await Promise.all([
+        txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx),
       ]);
       const kbData = parseDoc<Record<string, any>>(snapKb, {});
       const kbFinData = parseDoc<Record<string, any>>(snapKbFin, {});
       let crArr = parseDoc<CrEntry[]>(snapCr, []);
       let txArr = parseDoc<TxEntry[]>(snapTx, []);
-      const orcArr = parseDoc<any[]>(snapOrc, []);
 
       const osServidor = kbData[osId];
       const finServidor = kbFinData[osId] || {};
@@ -310,6 +315,10 @@ export const finCrReceberSaldo = functions.https.onCall(async (data, context) =>
       if ((finServidor.restante || 0) <= 0) {
         throw new functions.https.HttpsError("failed-precondition", "SALDO_JA_QUITADO");
       }
+
+      // RODADA MIGRAÇÃO ORÇAMENTOS v2 — lê de erp_vr_orcamentos/{id}
+      // primeiro (fonte de verdade), só quando a OS tem orcRef.
+      const orc = osServidor.orcRef ? await lerOrcamentoV2ComFallback(db, txn, osServidor.orcRef) : null;
 
       const valorRecebido = finServidor.restante || 0;
       osServidor.status = "iniciada";
@@ -328,22 +337,22 @@ export const finCrReceberSaldo = functions.https.onCall(async (data, context) =>
       txArr = [novaTx, ...txArr];
 
       let orcMutado = false;
-      if (osServidor.orcRef && Array.isArray(orcArr)) {
-        const orcEntry = orcArr.find((o) => o.id === osServidor.orcRef);
-        if (orcEntry && orcEntry.status === "aguardando_pagamento") { orcEntry.status = "pago"; orcMutado = true; }
-      }
+      if (orc && orc.status === "aguardando_pagamento") { orc.status = "pago"; orcMutado = true; }
 
       txn.set(refKb, { data: JSON.stringify(kbData), ts: Date.now() });
       txn.set(refKbFin, { data: JSON.stringify(kbFinData), ts: Date.now() });
       txn.set(refTx, { data: JSON.stringify(txArr), ts: Date.now() });
       if (crEntry) txn.set(refCr, { data: JSON.stringify(crArr), ts: Date.now() });
-      if (orcMutado) txn.set(refOrc, { data: JSON.stringify(orcArr), ts: Date.now() });
+      if (orcMutado && orc) gravarOrcamentoV2(db, txn, orc);
 
-      return { osNum: osServidor.num, valorRecebido, orcRef: orcMutado ? osServidor.orcRef : null };
+      return { osNum: osServidor.num, valorRecebido, orcRef: orcMutado ? osServidor.orcRef : null, orcAtualizado: orcMutado ? orc : null };
     });
 
-    await writeAudit("receber_saldo", caller, { osId, ...resultado });
-    return { ok: true, jaProcessado: false, ...resultado };
+    await writeAudit("receber_saldo", caller, { osId, osNum: resultado.osNum, valorRecebido: resultado.valorRecebido, orcRef: resultado.orcRef });
+    // Espelho legado best-effort — FORA da transação crítica acima (nunca
+    // pode bloquear o recebimento de saldo pelo mesmo motivo do #000268).
+    if (resultado.orcAtualizado) await espelharOrcamentoNoLegado(db, resultado.orcAtualizado);
+    return { ok: true, jaProcessado: false, osNum: resultado.osNum, valorRecebido: resultado.valorRecebido, orcRef: resultado.orcRef };
   } catch (e) {
     if (e instanceof functions.https.HttpsError) throw e;
     functions.logger.error("[finCr] finCrReceberSaldo erro inesperado:", e);
@@ -375,7 +384,6 @@ export const finCrRegistrarRecebimento = functions.https.onCall(async (data, con
   const refKbFin = db.collection(COL).doc("kb_os_fin");
   const refCr = db.collection(COL).doc("fin_cr");
   const refTx = db.collection(COL).doc("fin_tx");
-  const refOrc = db.collection(COL).doc("orcamentos");
   // HOTFIX recebimentos canônicos: aceita a data informada pelo operador
   // (recebimento retroativo), mas em formato BR já resolvido — evita
   // portar finCaixaISOtoBR() só para isto; o client já valida o formato.
@@ -383,14 +391,13 @@ export const finCrRegistrarRecebimento = functions.https.onCall(async (data, con
 
   try {
     const resultado = await db.runTransaction(async (txn) => {
-      const [snapKb, snapKbFin, snapCr, snapTx, snapOrc] = await Promise.all([
-        txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx), txn.get(refOrc),
+      const [snapKb, snapKbFin, snapCr, snapTx] = await Promise.all([
+        txn.get(refKb), txn.get(refKbFin), txn.get(refCr), txn.get(refTx),
       ]);
       const kbData = parseDoc<Record<string, any>>(snapKb, {});
       const kbFinData = parseDoc<Record<string, any>>(snapKbFin, {});
       let crArr = parseDoc<CrEntry[]>(snapCr, []);
       let txArr = parseDoc<TxEntry[]>(snapTx, []);
-      const orcArr = parseDoc<any[]>(snapOrc, []);
 
       const osServidor = kbData[osId];
       const finServidor = kbFinData[osId] || {};
@@ -400,6 +407,10 @@ export const finCrRegistrarRecebimento = functions.https.onCall(async (data, con
       if (valorPagoCents > restanteServidorCents) {
         throw new functions.https.HttpsError("failed-precondition", "VALOR_MAIOR_QUE_SALDO:" + centsToMoney(restanteServidorCents));
       }
+
+      // RODADA MIGRAÇÃO ORÇAMENTOS v2 — lê de erp_vr_orcamentos/{id}
+      // primeiro (fonte de verdade), só quando a OS tem orcRef.
+      const orc = osServidor.orcRef ? await lerOrcamentoV2ComFallback(db, txn, osServidor.orcRef) : null;
 
       const novoRestanteCents = restanteServidorCents - valorPagoCents;
       const quitado = novoRestanteCents <= 0;
@@ -435,22 +446,30 @@ export const finCrRegistrarRecebimento = functions.https.onCall(async (data, con
       txArr = [novaTx, ...txArr];
 
       let orcMutado = false;
-      if (quitado && osServidor.orcRef && Array.isArray(orcArr)) {
-        const orcEntry = orcArr.find((o) => o.id === osServidor.orcRef);
-        if (orcEntry && orcEntry.status === "aguardando_pagamento") { orcEntry.status = "pago"; orcMutado = true; }
-      }
+      if (quitado && orc && orc.status === "aguardando_pagamento") { orc.status = "pago"; orcMutado = true; }
 
       txn.set(refKb, { data: JSON.stringify(kbData), ts: Date.now() });
       txn.set(refKbFin, { data: JSON.stringify(kbFinData), ts: Date.now() });
       txn.set(refTx, { data: JSON.stringify(txArr), ts: Date.now() });
       txn.set(refCr, { data: JSON.stringify(crArr), ts: Date.now() });
-      if (orcMutado) txn.set(refOrc, { data: JSON.stringify(orcArr), ts: Date.now() });
+      if (orcMutado && orc) gravarOrcamentoV2(db, txn, orc);
 
-      return { osNum: osServidor.num, valorPago: centsToMoney(valorPagoCents), quitado, restanteAtual: finServidor.restante, orcRef: orcMutado ? osServidor.orcRef : null };
+      return {
+        osNum: osServidor.num, valorPago: centsToMoney(valorPagoCents), quitado, restanteAtual: finServidor.restante,
+        orcRef: orcMutado ? osServidor.orcRef : null, orcAtualizado: orcMutado ? orc : null,
+      };
     });
 
-    await writeAudit("registrar_recebimento", caller, { osId, origem, ...resultado });
-    return { ok: true, ...resultado };
+    await writeAudit("registrar_recebimento", caller, {
+      osId, origem, osNum: resultado.osNum, valorPago: resultado.valorPago, quitado: resultado.quitado, orcRef: resultado.orcRef,
+    });
+    // Espelho legado best-effort — FORA da transação crítica acima (nunca
+    // pode bloquear o registro de recebimento pelo mesmo motivo do #000268).
+    if (resultado.orcAtualizado) await espelharOrcamentoNoLegado(db, resultado.orcAtualizado);
+    return {
+      ok: true, osNum: resultado.osNum, valorPago: resultado.valorPago, quitado: resultado.quitado,
+      restanteAtual: resultado.restanteAtual, orcRef: resultado.orcRef,
+    };
   } catch (e) {
     if (e instanceof functions.https.HttpsError) throw e;
     functions.logger.error("[finCr] finCrRegistrarRecebimento erro inesperado:", e);
@@ -516,7 +535,6 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
 
   const db = admin.firestore();
   const refCR = db.collection(COL).doc("fin_cr");
-  const refOrc = db.collection(COL).doc("orcamentos");
   const dia = dataHojeBR();
 
   // ACHADO REAL (revisão desta mesma rodada): `orcEnvSetStatus()`
@@ -558,10 +576,12 @@ export const finCrAutoAprovarOrcamento = functions.https.onCall(async (data, con
   async function tentarCriarCrAoAprovar(): Promise<{ crId: string; jaExistia: boolean; valor: number }> {
     return db.runTransaction(async (txn) => {
       // ── Leituras primeiro (regra do Firestore) ──────────────────────
-      const [snapCR, snapOrc] = await Promise.all([txn.get(refCR), txn.get(refOrc)]);
-      const arrOrc = parseDoc<Array<{ id?: string; status?: string; total?: number | string; n?: number | string; nomeCliente?: string; conversationId?: string; atendimentoId?: string }>>(snapOrc, []);
-      const orc = arrOrc.find((o) => o.id === orcId);
-      if (!orc) throw new functions.https.HttpsError("not-found", `orcId "${orcId}" não encontrado em erp_vr/orcamentos — Conta a Receber nunca criada para um orçamento inexistente.`);
+      // RODADA MIGRAÇÃO ORÇAMENTOS v2 — lê de erp_vr_orcamentos/{id}
+      // primeiro (fonte de verdade); nunca mais presume que orcId está no
+      // array legado inteiro. Esta função só LÊ o orçamento (nunca escreve
+      // nele), então não há espelho a fazer aqui.
+      const [snapCR, orc] = await Promise.all([txn.get(refCR), lerOrcamentoV2ComFallback(db, txn, orcId)]);
+      if (!orc) throw new functions.https.HttpsError("not-found", `orcId "${orcId}" não encontrado em erp_vr_orcamentos/erp_vr/orcamentos — Conta a Receber nunca criada para um orçamento inexistente.`);
       if (orc.status !== "aprovado") {
         throw new functions.https.HttpsError("failed-precondition", `orçamento "${orcId}" está com status "${orc.status}", não "aprovado" — Conta a Receber nunca criada sem a aprovação real já registrada.`);
       }

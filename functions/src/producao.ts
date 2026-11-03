@@ -29,6 +29,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { CallerVerificado, getCallerVerificado, requireRole, acquireIdem as acquireIdemShared, writeAudit as writeAuditShared, parseDoc } from "./auth_helper";
+import { lerOrcamentoV2ComFallback, gravarOrcamentoV2, espelharOrcamentoNoLegado } from "./orcamentos_v2_helper";
 
 const COL = "erp_vr";
 const COL_IDEM = "producao_idem_keys";
@@ -54,10 +55,6 @@ interface MatProd {
 interface OS {
   num?: string | number; status?: string; producaoStartId?: string; producaoIniciadaEm?: number;
   inicioProducaoTs?: number; matProd?: MatProd; matProdOrigens?: MatProd[]; orcRef?: string | null;
-  [key: string]: unknown;
-}
-interface Orcamento {
-  id?: string; status?: string;
   [key: string]: unknown;
 }
 interface LogEntry {
@@ -167,22 +164,26 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
   const stockRef = db.collection(COL).doc("stock");
   const retRef = db.collection(COL).doc("retalhos");
   const logRef = db.collection(COL).doc("erp_stock_log");
-  const orcRef = db.collection(COL).doc("orcamentos");
   const osProducaoIdemKey = "producao_inicio:" + input.osId; // mesma chave de negócio usada pelo legado (producaoStartId da OS)
 
   try {
     const resultado = await db.runTransaction(async (tx) => {
-      const [snapOs, snapStock, snapRet, snapLog, snapOrc] = await Promise.all([
-        tx.get(kbOsRef), tx.get(stockRef), tx.get(retRef), tx.get(logRef), tx.get(orcRef),
+      const [snapOs, snapStock, snapRet, snapLog] = await Promise.all([
+        tx.get(kbOsRef), tx.get(stockRef), tx.get(retRef), tx.get(logRef),
       ]);
       const objOS = parseDoc<Record<string, OS>>(snapOs, {});
       const sd = parseDoc<Record<string, StockItem>>(snapStock, {});
       const retList = parseDoc<Retalho[]>(snapRet, []);
       let log = parseDoc<LogEntry[]>(snapLog, []);
-      const orcList = parseDoc<Orcamento[]>(snapOrc, []);
 
       const osFresh = objOS[input.osId];
       if (!osFresh) throw new functions.https.HttpsError("not-found", "OS_NAO_ENCONTRADA");
+
+      // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — lê de
+      // erp_vr_orcamentos/{id} primeiro (fonte de verdade); nunca mais
+      // presume que orcRef está no array legado inteiro. Só lê quando a OS
+      // tem orcRef (mesmo guard de antes — "dado órfão" nunca bloqueia).
+      const orc = osFresh.orcRef ? await lerOrcamentoV2ComFallback(db, tx, osFresh.orcRef) : null;
 
       if (!input.editMode) {
         if (["pronta", "entregue", "cancelado"].indexOf(osFresh.status || "") >= 0) {
@@ -348,12 +349,9 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
         // aqui — só o campo `status`, nunca toca valorFinal/entrada/saldo/
         // fin_cr/fin_tx. Se o orçamento não existir mais (dado órfão), segue
         // sem erro — sincronizar o rótulo nunca pode bloquear a produção.
-        if (osFresh.orcRef) {
-          const orcIdx = orcList.findIndex((o) => o.id === osFresh.orcRef);
-          if (orcIdx >= 0 && orcList[orcIdx].status !== "em_producao") {
-            orcList[orcIdx].status = "em_producao";
-            orcListMutada = true;
-          }
+        if (orc && orc.status !== "em_producao") {
+          orc.status = "em_producao";
+          orcListMutada = true;
         }
       } else if (!osFresh.producaoStartId) {
         osFresh.producaoStartId = osProducaoIdemKey;
@@ -367,14 +365,17 @@ export const producaoIniciarOuEditar = functions.https.onCall(async (data, conte
       tx.set(stockRef, { data: JSON.stringify(sd), ts: Date.now() });
       tx.set(logRef, { data: JSON.stringify(log), ts: Date.now() });
       if (retListMutada) tx.set(retRef, { data: JSON.stringify(retList), ts: Date.now() });
-      if (orcListMutada) tx.set(orcRef, { data: JSON.stringify(orcList), ts: Date.now() });
+      if (orcListMutada && orc) gravarOrcamentoV2(db, tx, orc);
 
-      return { osFresh, matProd: matProdEntries[0], matProdOrigens: matProdEntries };
+      return { osFresh, matProd: matProdEntries[0], matProdOrigens: matProdEntries, orcAtualizado: orcListMutada ? orc : null };
     });
 
     await writeAudit(input.editMode ? "producao_editada" : "producao_iniciada", caller.uid, caller.role, {
       osId: input.osId, osNum: resultado.osFresh.num, matProd: resultado.matProd, origensCount: resultado.matProdOrigens.length,
     });
+    // Espelho legado best-effort — FORA da transação crítica acima (nunca
+    // pode bloquear o início de produção pelo mesmo motivo do #000268).
+    if (resultado.orcAtualizado) await espelharOrcamentoNoLegado(db, resultado.orcAtualizado);
 
     return { ok: true, jaProcessado: false, matProd: resultado.matProd, matProdOrigens: resultado.matProdOrigens, osStatus: resultado.osFresh.status };
   } catch (e) {
