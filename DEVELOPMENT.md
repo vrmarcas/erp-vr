@@ -88,13 +88,15 @@ node validate_functions.js
 `scripts/test_*.js` — a maioria roda só com Firestore Emulator, mas 3 arquivos
 (`test_lock_token_transporte_real.js`, `test_valeria_consultar_os_fin_2026-08-08.js`,
 `test_valeria_vitre_server.js`) exigem o **Functions Emulator com transporte
-HTTP real** (não `.run()`). O Functions Emulator exige **Node 20**
-(`functions/package.json` → `engines.node: "20"`) — se o Node do sistema for
-mais novo, instale via `brew install node@20` (fica keg-only, não afeta o
-Node padrão) e prefixe o PATH só para este comando:
+HTTP real** (não `.run()`). O Functions Emulator exige **Node 22**
+(`functions/package.json` → `engines.node: "22"` — subido de "20" em
+2026-11-03, dia em que o Google Cloud decomissionou o runtime Node 20 para
+Cloud Functions) — se o Node do sistema for diferente, instale via
+`brew install node@22` (fica keg-only, não afeta o Node padrão) e prefixe o
+PATH só para este comando:
 
 ```bash
-export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+export PATH="/opt/homebrew/opt/node@22/bin:$PATH"
 firebase emulators:start --only firestore,auth,functions --project demo-erp-homolog
 # noutro terminal, com o mesmo PATH:
 node scripts/e2e_clean_env.js reset   # sempre antes de rodar a suíte
