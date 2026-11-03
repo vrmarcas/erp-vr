@@ -41,14 +41,20 @@ var limparSrc = extractFn('secLimparAudit');
 ok('1c. secLimparAudit() também não usa mais _cloudSave', !/_cloudSave\(/.test(limparSrc));
 
 // ── 2. orcSetEnviados()/merge: nunca compara o array inteiro como se fosse um conflito de entidade única ──
-var mergeSrc = extractFn('_orcamentosSalvarComMerge') + '\n' + extractFn('_orcamentosSalvarComMergeContinuar');
-ok('2a. _orcamentosSalvarComMerge() identifica quais ids ESTA sessão mudou (diff por id, não o array inteiro)', /meusIds/.test(mergeSrc));
-ok('2b. Conflito só é reportado quando um dos MEUS ids mudou no servidor (nunca por causa de outro id)', /if\(fresco && JSON\.stringify\(fresco\) !== JSON\.stringify\(antes\)\)/.test(mergeSrc));
-ok('2c. Sem conflito real: faz merge automático (array fresco do servidor + meus ids) e tenta de novo', /_orcamentosSalvarComMerge\(merged, tentativas\+1\)/.test(mergeSrc));
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — a escrita autoritativa
+// passou do array compartilhado (erp_vr/orcamentos, CAS + merge/retry) para
+// transação POR DOCUMENTO em erp_vr_orcamentos/{id} (orcV2SalvarComConflito).
+// A garantia de negócio (zero falso conflito entre orçamentos diferentes,
+// conflito real sempre detectado para o MESMO orçamento) é a MESMA — só o
+// mecanismo mudou; ver a prova comportamental na seção 3 abaixo.
+var mergeSrc = extractFn('_orcamentosSalvarComMerge') + '\n' + extractFn('_orcamentosSalvarComMergeContinuar') + '\n' + extractFn('orcV2SalvarComConflito');
+ok('2a. _orcamentosSalvarComMergeContinuar() identifica quais ids ESTA sessão mudou (diff por id, não o array inteiro)', /meusIds/.test(mergeSrc));
+ok('2b. Conflito real é checado POR DOCUMENTO em erp_vr_orcamentos/{id} (nunca comparando o array inteiro)', /erp_vr_orcamentos/.test(mergeSrc) && /noServidorStr !== baseline/.test(mergeSrc));
+ok('2c. Cada orçamento muda numa transação PRÓPRIA (Promise.all por id) — orçamentos diferentes nunca disputam a mesma transação/documento', /Promise\.all\(meusIds\.map/.test(mergeSrc));
 
 // ── 3. Execução real com mock de Firestore: 2 "sessões" (tabs) simulando o bug relatado ──
 {
-  var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar'];
+  var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito'];
   var missing = [];
   FN_NAMES.forEach(function(n){ try { extractFn(n); } catch(e){ missing.push(n); } });
   if (missing.length) {
@@ -64,9 +70,13 @@ ok('2c. Sem conflito real: faz merge automático (array fresco do servidor + meu
       "function criarSessao(db){",
       "  var _cloudLastPayload = {};",
       "  var _cloudSaveQueue = {};",
+      "  var _orcV2LastPayload = {};", // RODADA MIGRAÇÃO ORÇAMENTOS v2 — baseline por id, por sessão (nunca compartilhado entre abas)
+      "  var _ORC_V2_CACHE = {};",
       "  var _db = db;",
       "  " + extractFn('_cloudSave').replace(/^function _cloudSave/, 'var _cloudSave = function'),
       "  " + extractFn('_cloudSaveExec').replace(/^function _cloudSaveExec/, 'var _cloudSaveExec = function'),
+      "  " + extractFn('orcV2SalvarComConflito').replace(/^function orcV2SalvarComConflito/, 'var orcV2SalvarComConflito = function'),
+      "  function _orcV2RecomputarERenderizar(){}", // sem DOM/render nesta sessão de teste — só a CAS por documento importa aqui
       "  " + extractFn('_orcamentosSalvarComMerge').replace(/^function _orcamentosSalvarComMerge/, 'var _orcamentosSalvarComMerge = function'),
       "  " + extractFn('_orcamentosSalvarComMergeContinuar').replace(/^function _orcamentosSalvarComMergeContinuar/, 'var _orcamentosSalvarComMergeContinuar = function'),
       "  var _ORC_ENVIADOS_DATA = [];",

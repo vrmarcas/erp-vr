@@ -61,10 +61,13 @@ function extractFn(name) {
 // HOTFIX BLOCO G (Rodada de Hardening, Fase 2, 2026-08-26) — orcRegistrarSituacaoFinanceira()/
 // orcEnvGerarOS() passaram a normalizar o orçamento via orcEnvNormalizar()
 // (schema legado × ValerIA), nunca reimplementada.
-var FN_NAMES = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'kbReceberSaldo', 'orcEnvNormalizar'];
+var FN_NAMES = ['orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'kbReceberSaldo', 'orcEnvNormalizar', 'orcRefrescarKbOsDoServidor'];
 var COL = 'erp_vr';
 var src = [
   'var _ORC_ENVIADOS_DATA = [];',
+  'var _ORC_V2_CACHE = {};', // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() real lê/escreve estes globais
+  'var _orcV2LastPayload = {};',
+  'function _orcV2RecomputarERenderizar(){}',
   'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',
   'function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; }',
   'var _OS_COUNTER = 0;',
@@ -135,7 +138,10 @@ var _fakeStore = {};
 var _txnLock = Promise.resolve();
 function resetFakeStore() { _fakeStore = {}; }
 global._db = {
-  collection: function () { return { doc: function (key) { return { _key: key }; } }; },
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() agora faz
+  // um .get() avulso (fora de transação) no espelho legado best-effort,
+  // depois de confirmar a transação crítica; só txn.get() era suportado antes.
+  collection: function () { return { doc: function (key) { return { _key: key, get: function () { return Promise.resolve({ exists: !!_fakeStore[key], data: function () { return _fakeStore[key]; } }); } }; } }; },
   runTransaction: function (fn) {
     var runIt = function () {
       var pendingWrites = {};
@@ -274,6 +280,11 @@ function makeOrc(id, num, valorFinal) {
 }
 function seedFirestore(orcamentos) {
   _fakeStore['orcamentos'] = { data: JSON.stringify(orcamentos) };
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() agora lê a
+  // fonte de verdade em erp_vr_orcamentos/{id} antes de gerar a OS; este
+  // mock ignora o nome da coleção (chaveia só por .doc(key)), então o doc
+  // por id vive na MESMA _fakeStore, numa chave separada do array legado.
+  orcamentos.forEach(function (o) { if (o && o.id) _fakeStore[o.id] = o; });
   _fakeStore['kb_os'] = { data: JSON.stringify({}) };
   _fakeStore['kb_os_fin'] = { data: JSON.stringify({}) };
   _fakeStore['fin_cr'] = { data: JSON.stringify([]) };
@@ -321,7 +332,11 @@ console.log('\n=== SMOKE E2E — fluxo VR: aprovar → confirmar pagamento (50/5
     assertEq(cr.filter(function (c) { return c.status === 'recebido'; }).length, 1, 'entrada de 50% já lançada como recebida');
     assertEq(cr.filter(function (c) { return c.status === 'pendente'; }).length, 1, 'saldo de 50% lançado como pendente');
     assertEq(cr.every(function (c) { return c.osId === os.id; }), true, 'Gerar OS vinculou os CRs já registrados na Confirmação à OS recém-criada, sem duplicar');
-    var orcAtualizado = JSON.parse(_fakeStore['orcamentos'].data)[0];
+    // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — fonte de verdade agora é
+    // o documento próprio em erp_vr_orcamentos/{id} (_fakeStore[id]); o
+    // array legado pode ficar desatualizado (espelho best-effort/stub
+    // nesta suíte — ver global._cloudSave acima).
+    var orcAtualizado = _fakeStore['ORC-SMOKE-1'];
     assertEq(orcAtualizado.osRef, os.id, 'orçamento fica vinculado à OS gerada');
     global.__smokeOsId = os.id;
   });

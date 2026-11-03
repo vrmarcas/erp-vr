@@ -508,13 +508,24 @@ ok('K4. fonte: orcSetEnviados reconcilia com serverData em qualquer conflito', /
     ok('M4. nova tentativa aceita após o conflito: sucesso aparece', sucesso(toasts) === 1);
   });
 })();
-ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promessa real)', /orcFeedbackSalvamento\(_pSalvarOrc, num, !!orcExistente, orc\.cliente\);/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')) && !/showToast\(\(orcExistente\?'Orçamento #'\+num\+' atualizado!'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
+// RODADA CIRÚRGICA 2026-11-03 — _orcSalvarOrcamentoImpl() passou a aguardar
+// a confirmação real (await _pSalvarOrc) ANTES de chamar orcFeedbackSalvamento,
+// então o 1º argumento virou o resultado já resolvido (Promise.resolve(_resSalvarOrc))
+// em vez da promessa ainda em voo (_pSalvarOrc) — mesma garantia desta prova
+// (sucesso só depois da confirmação real), call site aceita qualquer uma das
+// duas formas. Ver scripts/test_save_confirmacao_real_2026-11-03.js para a
+// prova comportamental completa de que nada "finge" sucesso antes da nuvem confirmar.
+ok('M5. orcSalvarOrcamento não dispara sucesso de forma síncrona (usa a promessa real)', /orcFeedbackSalvamento\((?:_pSalvarOrc|Promise\.resolve\(_resSalvarOrc\)), num, !!orcExistente, orc\.cliente\);/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')) && !/showToast\(\(orcExistente\?'Orçamento #'\+num\+' atualizado!'/.test(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')));
 
 // N — OS: vínculo conhecido no primeiro write; base/memória de kb_os voltam à nuvem
 (function () {
   var src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   ok('N1. criação da OS: grupoPedidoId entra no primeiro write (pedido com Vitre)', /grupoPedidoId:\(_vitreItensPayload\.length\?newId:undefined\)/.test(src));
-  ok('N2. após o vínculo CR e após o vínculo Vitre, a base de kb_os é atualizada (orcRefrescarKbOsDoServidor)', /_vincularCrPromise\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)/.test(src) && /\}\)\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)\.then\(function\(\)\{ return resultado; \}\)/.test(src));
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — o 1º orcRefrescarKbOsDoServidor()
+  // passou a aguardar também _espelhoLegadoPromise (espelho best-effort do
+  // array legado, nunca mais só _vincularCrPromise) antes de rodar — mesma
+  // garantia (CR vinculado E Vitre classificado antes de atualizar kb_os).
+  ok('N2. após o vínculo CR e após o vínculo Vitre, a base de kb_os é atualizada (orcRefrescarKbOsDoServidor)', /Promise\.all\(\[_vincularCrPromise, _espelhoLegadoPromise\]\)\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)/.test(src) && /\}\)\.then\(function\(\)\{ return orcRefrescarKbOsDoServidor\(\); \}\)\.then\(function\(\)\{ return resultado; \}\)/.test(src));
   var ctx = { console: console, _COL: 'erp_vr', _cloudLastPayload: {}, KB_OS: {}, _KB_OS_FIN_CACHE: {}, _kbMergeFinCache: function () {}, kbRender: function () {} };
   var srvKb = JSON.stringify({ 'os1': { id: 'os1', num: '1', material: 'Acrílico Cristal 3mm', grupoPedidoId: 'os1', vitreOsRef: 'vx1' } });
   var srvFin = JSON.stringify({ 'os1': { cr: [] } });

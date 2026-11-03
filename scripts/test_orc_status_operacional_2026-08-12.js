@@ -78,7 +78,11 @@ console.log('\n=== Status do orçamento: nunca mais "Aguardando Pagamento" com O
   var bugPattern = "status = restante>0 ? 'aguardando_pagamento' : 'pago'";
   test('2a. padrão do bug (status = restante>0 ? aguardando_pagamento : pago) não existe mais no código-fonte', html.indexOf(bugPattern) >= 0, false);
   test('2b. caminho fallback local usa o.status = \'enviado_producao\' na geração da OS', /o\.status = 'enviado_producao';/.test(html), true);
-  test('2c. caminho transacional real usa arrOrc[idxOrc].status = \'enviado_producao\' na geração da OS', /arrOrc\[idxOrc\]\.status = 'enviado_producao';/.test(html), true);
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — o caminho transacional real
+  // passou a ler/escrever erp_vr_orcamentos/{id} (orcAtual), não mais
+  // arrOrc[idxOrc] (array legado inteiro) — mesma regra (nunca mais
+  // 'aguardando_pagamento'/'pago' na geração da OS), mecanismo diferente.
+  test('2c. caminho transacional real usa status:\'enviado_producao\' (via orcAtual) na geração da OS', /status:'enviado_producao'/.test(html), true);
 })();
 
 // ── 3. Listagem e detalhe usam a fonte única (nunca mais texto cru nem cópias divergentes) ──

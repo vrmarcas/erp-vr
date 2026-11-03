@@ -66,7 +66,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito'];
 var COL = 'erp_vr';
 // SPRINT PRÉ-GO-LIVE, Bloco H — envolvido numa fábrica para que cada
 // chamada da fábrica produza uma instância com seu PRÓPRIO
@@ -85,6 +85,9 @@ var src = [
   "var _HOMOLOG_EMULATORS_CONNECTED = true;",
   "var _cloudReady = true;",
   "var _ORC_ENVIADOS_DATA = [];",
+  "var _ORC_V2_CACHE = {};", // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — isolado por instância, como _cloudLastPayload
+  "var _orcV2LastPayload = {};",
+  "function _orcV2RecomputarERenderizar(){ if (typeof orcEnviadosRender === 'function') orcEnviadosRender(); }",
   FN_NAMES.map(extractFn).join('\n\n'),
   "return {",
   "  _cloudSave: _cloudSave, orcSetEnviados: orcSetEnviados, orcGetEnviados: orcGetEnviados,",
@@ -107,7 +110,19 @@ var _getIdTokenCalls = 0;
 var _txnLock = Promise.resolve(); // serializa transações concorrentes, como o Firestore real faz por documento
 function resetFakeStore() { _fakeStore = {}; _forceErrorOnce = null; _getIdTokenCalls = 0; _txnLock = Promise.resolve(); }
 global._db = {
-  collection: function () { return { doc: function (key) { return { _key: key }; } }; },
+  collection: function () {
+    return {
+      doc: function (key) {
+        return {
+          _key: key,
+          // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — _orcamentosSalvarComMerge()
+          // faz um .get() avulso (fora de transação) quando esta aba nunca
+          // observou o documento ainda; só txn.get() era suportado antes.
+          get: function () { return Promise.resolve({ exists: !!_fakeStore[key], data: function () { return _fakeStore[key]; } }); }
+        };
+      }
+    };
+  },
   runTransaction: function (fn) {
     var runIt = function () {
       if (_forceErrorOnce) {
@@ -205,36 +220,39 @@ await test('5. conflito reconcilia _cloudLastPayload com a verdade do servidor (
   assertEq(mod.getLastPayload('orcamentos'), JSON.stringify(makeArr(['A', 'EXTERNO'])), 'baseline local atualizado para o valor real do servidor após o conflito');
 });
 
-await test('6. orcSetEnviados(): EXTERNO é um orçamento DIFERENTE de MEU — HOTFIX P0.5 faz merge automático em vez de recusar (nunca mais falso conflito entre vendedores diferentes)', async function () {
-  // HOTFIX OPERACIONAL 2026-08-12, P0.5 — este cenário (outra sessão salvou um
-  // orçamento diferente "EXTERNO" enquanto esta aba, com baseline desatualizado,
-  // tenta salvar seu PRÓPRIO orçamento novo "MEU") é exatamente o bug real relatado
-  // em produção: dois vendedores, dois orçamentos DIFERENTES, sem nenhuma relação
-  // entre si — nunca deveria falhar. Antes deste hotfix, _cloudSave() tratava
-  // qualquer divergência do array inteiro como conflito e recusava a gravação
-  // (r.ok=false), obrigando o vendedor a tentar de novo manualmente. Agora
-  // _orcamentosSalvarComMerge() identifica que "MEU" não conflita com nenhum id
-  // que esta aba já conhecia, funde automaticamente com o array fresco do servidor
-  // (que já contém EXTERNO) e grava os dois juntos — sem perder nenhuma gravação.
+await test('6. orcSetEnviados(): EXTERNO é um orçamento DIFERENTE de MEU — cada orçamento é um documento próprio, nunca mais falso conflito entre vendedores diferentes', async function () {
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — este cenário (outra sessão
+  // salvou um orçamento diferente "EXTERNO" enquanto esta aba, com baseline
+  // desatualizado, tenta salvar seu PRÓPRIO orçamento novo "MEU") é
+  // exatamente o bug real relatado em produção que o HOTFIX P0.5
+  // (2026-08-12) corrigiu primeiro com merge automático sobre o array
+  // compartilhado. Agora a garantia é estrutural, não mais um merge: "MEU"
+  // e "EXTERNO" são documentos DIFERENTES em erp_vr_orcamentos/{id} — não
+  // existe mecanismo nenhum pelo qual gravar um possa interferir no outro.
   resetFakeStore();
+  // Instância FRESCA (nunca a `mod` compartilhada pelos testes 1-5 acima) —
+  // a diferença por id (meusIds) agora também alimenta o baseline POR
+  // DOCUMENTO v2 (_orcV2LastPayload), então um _cloudLastPayload['orcamentos']
+  // reaproveitado de um teste anterior poderia mascarar 'A' como "já
+  // conhecido" antes mesmo desta aba tê-lo gravado em erp_vr_orcamentos.
+  var mod = _makeCloudModule();
   mod.setEnviadosRaw(makeArr(['A', 'B']));
-  await mod._cloudSave('orcamentos', makeArr(['A', 'B'])); // sincroniza baseline
-  _fakeStore['orcamentos'] = { data: JSON.stringify(makeArr(['A', 'B', 'EXTERNO'])), ts: Date.now() };
+  await mod.orcSetEnviados(makeArr(['A', 'B'])); // sincroniza baseline real (legado + documentos v2) desta aba
+  _fakeStore['EXTERNO'] = { id: 'EXTERNO', cliente: 'E2E_FASEF_20260805_EXTERNO' }; // outra sessão criou um documento v2 que esta aba nunca viu
   var r = await mod.orcSetEnviados(makeArr(['A', 'B', 'MEU'])); // array local desatualizado (não viu EXTERNO ainda)
-  assertEq(r.ok, true, 'merge automático — salva com sucesso, nunca recusa por causa de um orçamento diferente');
-  var servidorFinal = JSON.parse(_fakeStore['orcamentos'].data);
-  assertEq(servidorFinal.some(function (o) { return o.id === 'EXTERNO'; }), true, 'orçamento externo (de outra sessão) preservado no servidor');
-  assertEq(servidorFinal.some(function (o) { return o.id === 'MEU'; }), true, 'meu orçamento novo também foi salvo — nenhuma gravação perdida');
+  assertEq(r.ok, true, 'salva com sucesso — nunca recusa por causa de um orçamento diferente');
+  assertTruthy(!!_fakeStore['EXTERNO'], 'orçamento externo (de outra sessão) nunca foi tocado/apagado');
+  assertTruthy(!!_fakeStore['MEU'], 'meu orçamento novo foi salvo como documento próprio em erp_vr_orcamentos — nenhuma gravação perdida');
 });
 
 await test('6b. orcSetEnviados(): conflito LEGÍTIMO continua sendo detectado quando é o MESMO id que mudou nos dois lados', async function () {
   resetFakeStore();
+  var mod = _makeCloudModule(); // instância fresca — ver comentário no teste 6 acima
   mod.setEnviadosRaw(makeArr(['A', 'B']));
-  await mod._cloudSave('orcamentos', makeArr(['A', 'B'])); // sincroniza baseline
-  // Outra sessão ALTEROU o id 'A' (mesmo orçamento que esta aba também vai alterar)
-  var aAlteradoExterno = makeArr(['A', 'B']); aAlteradoExterno[0] = { id: 'A', v: 'editado por outra sessão' };
-  _fakeStore['orcamentos'] = { data: JSON.stringify(aAlteradoExterno), ts: Date.now() };
-  var meuAAlterado = makeArr(['A', 'B']); meuAAlterado[0] = { id: 'A', v: 'editado por esta aba' };
+  await mod.orcSetEnviados(makeArr(['A', 'B'])); // sincroniza baseline real (legado + documento v2 de A) desta aba
+  // Outra sessão ALTEROU o documento v2 de 'A' (mesmo orçamento que esta aba também vai alterar) sem esta aba saber
+  _fakeStore['A'] = { id: 'A', cliente: 'editado por outra sessão' };
+  var meuAAlterado = makeArr(['A', 'B']); meuAAlterado[0] = { id: 'A', cliente: 'editado por esta aba' };
   var rendersAntes = global._renderCalls;
   var r = await mod.orcSetEnviados(meuAAlterado);
   assertEq(r.ok, false, 'conflito real (mesmo id A mudou nos dois lados) continua sendo recusado');

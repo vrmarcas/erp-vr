@@ -92,6 +92,9 @@ var src = [
   "var _KB_OS_FIN_CACHE = {};",
   "var FIN_CR = []; var FIN_TX = [];",
   "var _ORC_ENVIADOS_DATA = [];",
+  "var _ORC_V2_CACHE = {};", // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() real lê/escreve estes globais
+  "var _orcV2LastPayload = {};",
+  "function _orcV2RecomputarERenderizar(){}",
   "var _kbOsId = null;",
   "var _kbStatusMap = { iniciada:{cls:'si',txt:'Iniciada'}, aguardando_saldo:{cls:'sas',txt:'Aguard. Saldo'}, pronta:{cls:'sp',txt:'Pronta'} };",
   "var _KB_OS_FIN_FIELDS = ['valor','totalGeral','parcelas','formaPgto','pagtoTipo','valorEntrada','restante'];",
@@ -130,7 +133,10 @@ function seedDoc(key, value) { _fakeStore[key] = { data: JSON.stringify(value), 
 function readDoc(key) { var raw = _fakeStore[key]; return raw ? JSON.parse(raw.data) : null; }
 
 global._db = {
-  collection: function () { return { doc: function (key) { return { _key: key }; } }; },
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() agora faz
+  // um .get() avulso (fora de transação) no espelho legado best-effort,
+  // depois de confirmar a transação crítica; só txn.get() era suportado antes.
+  collection: function () { return { doc: function (key) { return { _key: key, get: function () { return Promise.resolve({ exists: !!_fakeStore[key], data: function () { return _fakeStore[key]; } }); } }; } }; },
   runTransaction: function (fn) {
     var runIt = function () {
       var pendingWrites = {};
@@ -344,6 +350,14 @@ async function gerarOSReal(numOrc, valorFinal, tipo, entradaVal) {
   var arrOrc = readDoc('orcamentos') || [];
   arrOrc.push(orc);
   seedDoc('orcamentos', arrOrc);
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — orcEnvGerarOS() agora lê a
+  // fonte de verdade em erp_vr_orcamentos/{id} (documento por orçamento)
+  // antes de gerar a OS. Diferente de seedDoc() (que embrulha tudo em
+  // {data: JSON.stringify(...)} — convenção só do array legado erp_vr/{key}),
+  // erp_vr_orcamentos/{id} é um documento Firestore nativo direto (sem
+  // esse embrulho) — grava o objeto puro na MESMA _fakeStore (que ignora o
+  // nome da coleção, só chaveia por key), nunca via seedDoc().
+  _fakeStore[orc.id] = orc;
   if (!readDoc('kb_os')) seedDoc('kb_os', {});
   if (!readDoc('kb_os_fin')) seedDoc('kb_os_fin', {});
   if (!readDoc('fin_cr')) seedDoc('fin_cr', []);

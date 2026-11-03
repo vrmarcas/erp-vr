@@ -2101,7 +2101,21 @@ function _watchRetalhos(){
   _cloudWatch("retalhos", function(d){ _retryResetar('retalhos'); if(d){ RETALHOS=d; try{retalhoRender();}catch(e){} } });
 }
 function _watchOrcamentos(){
-  _cloudWatch("orcamentos", function(d){ _retryResetar('orcamentos'); if(d&&d.length){ _ORC_ENVIADOS_DATA=d; try{orcEnviadosRender();}catch(e){} var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } });
+  _cloudWatch("orcamentos", function(d){ _retryResetar('orcamentos'); if(d&&d.length){ _ORC_LEGADO_CACHE=d; _orcV2RecomputarERenderizar(); } });
+}
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — mesmo padrão já provado em
+// produção para Compras (comprasV2Init(), erp_vr_compras): listener em
+// tempo real da coleção documento-por-orçamento. _orcV2LastPayload (ver
+// orcV2SalvarComConflito) é alimentado aqui também — único ponto que
+// observa o estado real do servidor para TODOS os orçamentos de uma vez.
+function _watchOrcamentosV2(){
+  if(typeof _db==='undefined' || !_db) return;
+  _db.collection('erp_vr_orcamentos').onSnapshot(function(snap){
+    var novo = {};
+    snap.docs.forEach(function(d){ var val=d.data(); novo[d.id]=val; _orcV2LastPayload[d.id]=JSON.stringify(val); });
+    _ORC_V2_CACHE = novo;
+    _orcV2RecomputarERenderizar();
+  }, function(err){ console.warn('[orcamentos v2] listener erp_vr_orcamentos falhou:', err); });
 }
 // Botão "Tentar novamente" genérico para as leituras acima — reutiliza
 // _retryComBackoff (mesmo padrão de Atendimentos), nunca uma
@@ -2198,6 +2212,7 @@ function _cloudLoadAll() {
     _cloudWatch("kb_os_fin", function(d){ _KB_OS_FIN_CACHE = (d&&typeof d==='object'&&!Array.isArray(d)) ? d : {}; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); if(typeof kbRender==='function') try{kbRender();}catch(e){} });
     // _cloudWatch("stock") removido — onSnapshot em tempo real (linha ~1147) já cobre este listener
     _watchOrcamentos(); // atribuição direta — orcSetEnviados aqui causava LOOP infinito de gravações (estourou a cota do Firebase)
+    _watchOrcamentosV2(); // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — ver orcV2MergeComLegado
     _cloudWatch("clientes_lixeira", function(d){ if(d&&Array.isArray(d)){ CLIENTES_LIXEIRA=d; try{cliRenderLixeira();}catch(e){} } });
     _watchClientes();
     _cloudWatch("fin_tx", function(d){ if(d&&Array.isArray(d)){ FIN_TX=d; try{finRenderTx();finDashKPIs();dashRender();}catch(e){} try{relRefreshCurrent();}catch(e){} } });
@@ -2323,7 +2338,7 @@ function _cloudLoadAll() {
   // financeiros de KB_OS[*] nunca são populados para esse papel.
   _cloudLoad("kb_os_fin", function(d){ if(d&&typeof d==="object"&&!Array.isArray(d)){ _KB_OS_FIN_CACHE=d; if(typeof _kbMergeFinCache==='function') _kbMergeFinCache(); } done(); });
   _cloudLoad("stock", function(d){ done(); }); // onSnapshot em tempo real (linha ~1147) gerencia STOCK
-  _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_ENVIADOS_DATA=d; var _pg=document.getElementById('pg-inteligencia'); if(_pg&&_pg.style.display!=='none') try{intelRender();}catch(e){} } done(); }); // atribuição direta — sem regravar (anti-loop)
+  _cloudLoad("orcamentos", function(d){ if(d&&d.length){ _ORC_LEGADO_CACHE=d; _orcV2RecomputarERenderizar(); } done(); }); // atribuição direta — sem regravar (anti-loop)
   _cloudLoad("erp_metas_vendedor", function(d){ if(d&&typeof d==='object'){ _METAS_VENDEDOR=d; } done(); });
   // RODADA 6 — achado real: crmBaseLoadIdx é uma função top-level deste
   // mesmo arquivo (hoisted), portanto SEMPRE está definida quando
@@ -29979,6 +29994,41 @@ var _chatvoltFase    = 'ia_novo';
 var _SHOPIFY_CFG = {};
 var SITE_LEADS = [];
 var _ORC_ENVIADOS_DATA = [];
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03), FASE DE LEITURA — _ORC_ENVIADOS_DATA
+// deixa de ser alimentado só pelo array legado (erp_vr/orcamentos, hoje a
+// 1.981 bytes do limite de 1MiB do Firestore). _ORC_LEGADO_CACHE guarda o
+// último array legado observado (base/fallback) e _ORC_V2_CACHE guarda o
+// último estado de erp_vr_orcamentos/{id} (por id — fonte de verdade a
+// partir de agora, ver orcV2SalvarComConflito). orcV2MergeComLegado() funde
+// os dois: todo id presente em v2 SUBSTITUI a versão legada (sempre a mais
+// fresca); um id só no legado (nunca migrado — não deveria mais acontecer
+// depois do backfill, mas nunca presume isso) continua vindo do legado —
+// nenhum orçamento desaparece se o doc novo ainda não existir (rollback de
+// leitura automático para o legado). Pura — testável sem Firestore (ver
+// scripts/test_migracao_orcamentos_v2_leitura_2026-11-03.js).
+var _ORC_V2_CACHE = {};
+var _ORC_LEGADO_CACHE = [];
+function orcV2MergeComLegado(legadoArr, v2PorId) {
+  legadoArr = legadoArr || [];
+  v2PorId = v2PorId || {};
+  var vistos = {};
+  var mesclado = legadoArr.map(function (o) {
+    if (!o || !o.id) return o;
+    vistos[o.id] = true;
+    return Object.prototype.hasOwnProperty.call(v2PorId, o.id) ? v2PorId[o.id] : o;
+  });
+  // Órfão em v2 (existe lá, nunca existiu no legado) — só pode acontecer se
+  // o espelho legado falhar na criação de um orçamento novo; entra na
+  // frente, mesma convenção do unshift() usado para orçamento novo.
+  var extrasV2 = Object.keys(v2PorId).filter(function (id) { return !vistos[id]; }).map(function (id) { return v2PorId[id]; });
+  return extrasV2.concat(mesclado);
+}
+function _orcV2RecomputarERenderizar() {
+  _ORC_ENVIADOS_DATA = orcV2MergeComLegado(_ORC_LEGADO_CACHE, _ORC_V2_CACHE);
+  try { if (typeof orcEnviadosRender === 'function') orcEnviadosRender(); } catch (e) {}
+  var _pg = document.getElementById('pg-inteligencia');
+  if (_pg && _pg.style.display !== 'none') { try { if (typeof intelRender === 'function') intelRender(); } catch (e) {} }
+}
 // HOTFIX saneamento (2026-08-10) — ponto único de leitura de orçamentos
 // enviados; filtrar isTest aqui protege de uma vez Orçamentos Enviados,
 // Dashboard Comercial e Dashboard principal (todos leem por aqui).
@@ -30074,6 +30124,60 @@ function _orcamentosSalvarComMerge(arr, tentativas){
   }
   return _orcamentosSalvarComMergeContinuar(arr, tentativas);
 }
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03), FASE DE CORTE DE ESCRITA —
+// erp_vr_orcamentos/{id} (documento por orçamento, id determinístico =
+// o próprio orc.id, já único — 'ORC-'+num) é agora a ÚNICA fonte que
+// decide sucesso/falha do save — nunca mais bloqueada pelo limite de
+// 1MiB do array legado (achado real: erp_vr/orcamentos a 1.046.595 de
+// 1.048.576 bytes em produção, margem de ~2KB — causa raiz de o
+// orçamento #000266 não salvar). Transação por DOCUMENTO, nunca mais no
+// array inteiro: dois vendedores editando orçamentos DIFERENTES são, por
+// construção, documentos diferentes — NUNCA MAIS existe falso conflito
+// entre eles (a máquina de merge/retry que existia antes para contornar
+// isso no array compartilhado deixa de ser necessária aqui). Duas
+// sessões editando o MESMO orçamento continuam detectando o conflito
+// real (mesma UX de sempre — "foi atualizado por outra sessão"), agora
+// com garantia MAIS forte (zero chance de falso-positivo OU
+// falso-negativo vindo de outro orçamento). _orcV2LastPayload é o
+// baseline por id (CAS), alimentado por _watchOrcamentosV2() e por toda
+// gravação confirmada desta aba — mesmo princípio de _cloudSaveExec()
+// legado, só que por id em vez de por chave única global.
+var _orcV2LastPayload = {};
+function orcV2SalvarComConflito(id, novoValor) {
+  if (typeof _db === 'undefined' || !_db) return Promise.resolve({ ok: false, reason: 'sem-conexao' });
+  // O Firestore nativo REJEITA campos `undefined` (ex.: valorPendenteComparativo/
+  // crmLeadId, que o array legado tolera porque vai para uma STRING via
+  // JSON.stringify, que já descarta `undefined` silenciosamente) — mesma
+  // fidelidade aqui, round-trip JSON em vez de gravar o objeto direto.
+  var payload = JSON.parse(JSON.stringify(novoValor));
+  var payloadStr = JSON.stringify(payload);
+  var baseline = _orcV2LastPayload[id]; // undefined = nunca observei este doc nesta aba — grava sem checar
+  if (baseline === payloadStr) return Promise.resolve({ ok: true, unchanged: true });
+  var ref = _db.collection('erp_vr_orcamentos').doc(id);
+  return _db.runTransaction(function (txn) {
+    return txn.get(ref).then(function (snap) {
+      var noServidor = snap.exists ? snap.data() : null;
+      var noServidorStr = noServidor ? JSON.stringify(noServidor) : null;
+      if (baseline !== undefined && noServidorStr !== null && noServidorStr !== baseline) {
+        var conflito = new Error('ORC_V2_CONFLITO');
+        conflito.code = 'ORC_V2_CONFLITO';
+        conflito.serverData = noServidor;
+        throw conflito;
+      }
+      txn.set(ref, payload);
+    });
+  }).then(function () {
+    _orcV2LastPayload[id] = payloadStr;
+    return { ok: true };
+  }).catch(function (e) {
+    if (e && e.code === 'ORC_V2_CONFLITO') {
+      _orcV2LastPayload[id] = JSON.stringify(e.serverData);
+      return { ok: false, reason: 'conflito', serverData: e.serverData };
+    }
+    console.warn('[orcamentos v2] erro ao salvar ' + id + ':', e);
+    return { ok: false, reason: 'erro', error: e };
+  });
+}
 function _orcamentosSalvarComMergeContinuar(arr, tentativas){
   var baselineStr = _cloudLastPayload['orcamentos'];
   var baselineArr = [];
@@ -30086,47 +30190,34 @@ function _orcamentosSalvarComMergeContinuar(arr, tentativas){
     var antes = baselineById[o.id];
     if(!antes || JSON.stringify(antes) !== JSON.stringify(o)) meusIds.push(o.id);
   });
+  if (!meusIds.length) return Promise.resolve({ ok: true, unchanged: true });
 
-  return _cloudSave('orcamentos', arr).then(function(res){
-    if(res.ok || res.unchanged) return res;
-    if(res.reason!=='conflito' || !res.serverData){
-      return res;
-    }
-    var freshArr = res.serverData;
-    var freshById = {};
-    freshArr.forEach(function(o){ if(o && o.id) freshById[o.id]=o; });
-    // Conflito real: algum dos ids que EU mudei também mudou no servidor
-    // desde a última vez que eu o li.
-    var idConflito = null;
-    for(var i=0;i<meusIds.length;i++){
-      var id = meusIds[i];
-      var antes = baselineById[id];
-      if(!antes) continue; // era novo para mim — não posso conflitar com algo que eu não conhecia
-      var fresco = freshById[id];
-      if(fresco && JSON.stringify(fresco) !== JSON.stringify(antes)) { idConflito = id; break; }
-    }
-    if(idConflito){
-      var confOrc = freshById[idConflito];
-      _ORC_ENVIADOS_DATA = freshArr; try{ orcEnviadosRender(); }catch(e){}
-      if(typeof showToast==='function') showToast('⚠️ O orçamento #'+(confOrc?confOrc.num:'?')+' foi atualizado por outro usuário. Atualize os dados antes de continuar.','warn');
-      return {ok:false, reason:'conflito_orcamento', orcId:idConflito, serverData: freshArr};
-    }
-    if(tentativas >= 5){
-      _ORC_ENVIADOS_DATA = freshArr; try{ orcEnviadosRender(); }catch(e){}
-      if(typeof showToast==='function') showToast('⚠️ Não foi possível salvar após múltiplas tentativas — tente novamente.','warn');
-      return {ok:false, reason:'conflito-persistente', serverData: freshArr};
-    }
-    // Nenhum conflito real — outra sessão só mexeu em outro orçamento.
-    // Merge automático: array fresco do servidor + os MEUS ids por cima.
-    var merged = freshArr.slice();
-    var mergedIdxById = {};
-    merged.forEach(function(o,i){ if(o && o.id) mergedIdxById[o.id]=i; });
-    arr.forEach(function(o){
-      if(!o || !o.id || meusIds.indexOf(o.id) < 0) return; // só reaplica o que é meu
-      if(mergedIdxById.hasOwnProperty(o.id)) merged[mergedIdxById[o.id]] = o;
-      else merged.unshift(o);
+  var porId = {};
+  arr.forEach(function (o) { if (o && o.id) porId[o.id] = o; });
+
+  return Promise.all(meusIds.map(function (id) {
+    return orcV2SalvarComConflito(id, porId[id]).then(function (r) { return { id: id, r: r }; });
+  })).then(function (resultados) {
+    // Espelho do array legado — melhor-esforço (o resultado real já foi
+    // decidido acima: a FALHA dele nunca é propagada), uma única tentativa,
+    // nunca retenta: mantém os consumidores ainda não migrados (leitura
+    // combinada via orcV2MergeComLegado) funcionando enquanto o array ainda
+    // couber. AGUARDADO (nunca fire-and-forget) só para manter a ordem
+    // determinística de gravações desta aba — nunca para decidir sucesso.
+    return _cloudSave('orcamentos', arr, { silencioso: true }).catch(function (e) { return { ok: false, reason: 'erro', error: e }; }).then(function (resLegado) {
+      if (!resLegado || !resLegado.ok) console.warn('[orcamentos] espelho legado não confirmou (não bloqueia o save — fonte de verdade é erp_vr_orcamentos/{id}):', resLegado);
+
+      var conflito = resultados.find(function (x) { return x.r && x.r.reason === 'conflito'; });
+      if (conflito) {
+        if (typeof showToast === 'function') showToast('⚠️ Este orçamento foi atualizado por outro usuário. Atualize os dados antes de continuar.', 'warn');
+        _ORC_V2_CACHE[conflito.id] = conflito.r.serverData;
+        _orcV2RecomputarERenderizar();
+        return { ok: false, reason: 'conflito_orcamento', orcId: conflito.id, serverData: conflito.r.serverData };
+      }
+      var erro = resultados.find(function (x) { return !x.r || !x.r.ok; });
+      if (erro) return erro.r;
+      return { ok: true };
     });
-    return _orcamentosSalvarComMerge(merged, tentativas+1);
   });
 }
 
@@ -30550,16 +30641,26 @@ function orcSalvarOrcamento() {
   // se alguma operação de máquina REALMENTE usada neste pedido (minutos>0)
   // ainda não tem custo configurado em Config→Máquinas — orcRecalc() já
   // populou window._orcMaqOpsCalc com o motivo de cada operação.
-  (function(){
-    var calc = window._orcMaqOpsCalc || {};
-    var semCusto = (typeof ORC_MAQ_OPS!=='undefined' ? ORC_MAQ_OPS : []).filter(function(op){
-      return calc[op.key] && calc[op.key].min>0 && !calc[op.key].info.ok;
-    }).map(function(op){ return op.label.replace(/^\S+\s/,''); });
-    if (semCusto.length && typeof showToast==='function') {
-      showToast('⚠️ Orçamento salvo SEM custo de máquina configurado para: '+semCusto.join(', ')+'. Confira Config→Máquinas.', 'warn');
+  // RODADA CIRÚRGICA 2026-11-03 — bug real reproduzido com o orçamento
+  // #000266: este aviso disparava de forma SÍNCRONA e incondicional, antes
+  // até de _orcSalvarOrcamentoImpl() rodar — então aparecia com a palavra
+  // "salvo" mesmo quando o salvamento real em seguida FALHAVA (causa raiz
+  // separada: erp_vr/orcamentos perto do limite de 1MiB do Firestore).
+  // Regra geral de feedback (mesma de orcFeedbackSalvamento): nenhum toast
+  // pode dizer "salvo" antes da confirmação real da nuvem. Cálculo do
+  // semCusto continua síncrono (mesmo dado), só o showToast foi movido para
+  // depois que _orcSalvarOrcamentoImpl() resolve com um orçamento REALMENTE
+  // persistido (ela mesma já aguarda a confirmação do Firestore — ver abaixo).
+  var _maqCalcSalvar = window._orcMaqOpsCalc || {};
+  var _semCustoSalvar = (typeof ORC_MAQ_OPS!=='undefined' ? ORC_MAQ_OPS : []).filter(function(op){
+    return _maqCalcSalvar[op.key] && _maqCalcSalvar[op.key].min>0 && !_maqCalcSalvar[op.key].info.ok;
+  }).map(function(op){ return op.label.replace(/^\S+\s/,''); });
+  var _p = _orcSalvarOrcamentoImpl().then(function(orc){
+    if (orc && _semCustoSalvar.length && typeof showToast==='function') {
+      showToast('⚠️ Orçamento salvo SEM custo de máquina configurado para: '+_semCustoSalvar.join(', ')+'. Confira Config→Máquinas.', 'warn');
     }
-  })();
-  var _p = _orcSalvarOrcamentoImpl();
+    return orc;
+  });
   // RODADA 9, FECHAMENTO (2026-08-23) — Bloqueador 2, Ação 3: quando este
   // orçamento nasceu de "Revisar e criar orçamento" (Atendimentos), vincula
   // o orcamentoId de volta na conversa DEPOIS que o orçamento real existe —
@@ -31045,29 +31146,51 @@ async function _orcSalvarOrcamentoImpl() {
   window._orcSessaoAtualId = orc.id;
   window._orcSessaoRegraComparativo = (orc.regraComparativo === ORC_REGRA_COMPARATIVO_ATUAL) ? ORC_REGRA_COMPARATIVO_ATUAL : 'legado';
   if(typeof _orcAtualizarVisibilidadeEnvio==='function') _orcAtualizarVisibilidadeEnvio();
+  var _ORC_ENVIADOS_ANTES_SALVAR = _ORC_ENVIADOS_DATA;
   var _pSalvarOrc = orcSetEnviados(lista);
+  // RODADA CIRÚRGICA 2026-11-03 — bug real reproduzido com o orçamento
+  // #000266: esta função é `async` mas nunca aguardava a confirmação real
+  // do Firestore (_pSalvarOrc) antes de devolver `orc` — um save REJEITADO
+  // (ex.: erp_vr/orcamentos excedeu o limite de 1MiB do Firestore,
+  // conflito, falha de rede) ainda assim fazia os chamadores (botão
+  // "Salvar e iniciar novo", geração de PDF/WhatsApp, vínculo com
+  // Atendimento) tratarem o salvamento como bem-sucedido — e o estado
+  // local otimista que orcSetEnviados() já tinha aplicado em
+  // _ORC_ENVIADOS_DATA antes de saber o resultado fingia que o orçamento
+  // persistiu. Agora aguarda a confirmação real; sem ela, desfaz o estado
+  // otimista e devolve null (mesmo contrato de falha já usado pelos outros
+  // `return null` desta função) — nenhum dos efeitos abaixo (dual-write,
+  // CRM, auto-cadastro de cliente, liberar número reservado, limpar
+  // rascunho) roda sobre algo que nunca foi de fato salvo.
+  var _resSalvarOrc = await _pSalvarOrc;
+  var _salvouOk = !!(_resSalvarOrc && (_resSalvarOrc.ok || _resSalvarOrc.unchanged));
+  orcFeedbackSalvamento(Promise.resolve(_resSalvarOrc), num, !!orcExistente, orc.cliente);
+  if (!_salvouOk) {
+    // Conflito real: orcSetEnviados() já reidratou _ORC_ENVIADOS_DATA com a
+    // verdade do servidor — não sobrescrever de volta com o estado antigo
+    // desta aba. Qualquer OUTRA falha (erro genérico, documento grande
+    // demais, sem rede) não trocou o array — só desfaz o otimismo local.
+    if (!(_resSalvarOrc && typeof _resSalvarOrc.reason === 'string' && _resSalvarOrc.reason.indexOf('conflito') === 0)) {
+      _ORC_ENVIADOS_DATA = _ORC_ENVIADOS_ANTES_SALVAR;
+    }
+    window._orcSessaoAtualId = idOrigem;
+    orcAtualizarBadgeEnviados();
+    if (typeof orcEnviadosRender === 'function') { try { orcEnviadosRender(); } catch(e){} }
+    return null;
+  }
   // HOTFIX 2026-08-16 (P0.12-P0.13) — sincroniza a OS já gerada (se
   // houver) com os dados operacionais recém-salvos deste orçamento. Ver
   // _orcSincronizarOSVinculada() para as regras de antes/depois da
   // produção iniciar.
   if (typeof _orcSincronizarOSVinculada === 'function') _orcSincronizarOSVinculada(orc);
-  // Dual-write: além do array legado (erp_vr/orcamentos, ainda a fonte de
-  // verdade lida pela UI existente), grava também o núcleo comercial deste
-  // orçamento em erp_vr_orcamentos/{id} — só campos voltados ao cliente,
-  // nada de custo/margem/markup interno (ver Rules: subcoleção /interno é
-  // Financeiro/Master-only e não é escrita por este caminho porque este
-  // objeto nunca carregou esses campos). Preparação para migrar a leitura
-  // definitivamente para a coleção normalizada numa rodada futura.
-  if(typeof _db!=='undefined' && _db && _HOMOLOG_MODE){
-    try{
-      _db.collection('erp_vr_orcamentos').doc(orc.id).set({
-        id: orc.id, num: orc.num, cliente: orc.cliente, tel: orc.tel, email: orc.email,
-        vendedor: orc.vendedor||'', produto: orc.produto, marca: orc.marca, valorBase: orc.valorBase, valorFinal: orc.valorFinal,
-        status: orc.status, dataSalvo: orc.dataSalvo, itens: orc.itens,
-        criadoPorEmail: (_currentSession&&_currentSession.email)||null
-      });
-    }catch(e){ console.warn('[orcamentos] dual-write erp_vr_orcamentos falhou:', e); }
-  }
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — o dual-write completo e
+  // incondicional para erp_vr_orcamentos/{id} agora roda dentro de
+  // orcSetEnviados()/_orcamentosSalvarComMergeContinuar() (ver
+  // orcV2DualWrite), funil único usado por este save E por todos os
+  // outros 13 chamadores de orcSetEnviados (confirmação de pagamento,
+  // status fiscal, mudança/reversão de status) — cobre o registro
+  // INTEIRO, não só o subconjunto comercial que este bloco gravava antes,
+  // e não depende mais de _HOMOLOG_MODE. Ver scripts/migrate_orcamentos_v2.js.
   orcAtualizarBadgeEnviados();
   orcLinkClienteOrcamento(orc);
   // Auto-cadastra cliente se ainda não existir
@@ -31081,7 +31204,6 @@ async function _orcSalvarOrcamentoImpl() {
     var _crmLeadCriadoAgora = crmUpsertLeadPorOrcamento(orc, num);
     if (_crmLeadCriadoAgora) orcSetEnviados(lista); // persiste orc.crmLeadId gravado no upsert
   }
-  orcFeedbackSalvamento(_pSalvarOrc, num, !!orcExistente, orc.cliente);
   if(!orcExistente){
     // Libera a reserva — o PRÓXIMO orçamento (Novo Orçamento) deve gerar a
     // sua própria, nunca reaproveitar o número deste que acabou de salvar.
@@ -32898,6 +33020,15 @@ function orcEnvGerarOS(){
     return;
   }
 
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — refOrcV2 (documento por
+  // orçamento) é a fonte de verdade desta transação a partir de agora;
+  // refOrc (array legado inteiro) NUNCA MAIS entra na transação crítica —
+  // se o array legado estivesse perto/acima do limite de 1MiB (como está
+  // hoje em produção), um único txn.set() grande demais abortaria TAMBÉM
+  // os writes de kb_os/kb_os_fin/contador, reproduzindo o mesmo bug do
+  // #000266 só que em "Gerar OS". O espelho legado é best-effort, FORA da
+  // transação, depois que ela confirmar — ver mais abaixo.
+  var refOrcV2 = _db.collection('erp_vr_orcamentos').doc(o.id);
   var refOrc=_db.collection(_COL).doc('orcamentos');
   var refOS =_db.collection(_COL).doc('kb_os');
   // Rodada 2, P0.6 — campos financeiros da OS vão para um documento
@@ -32917,19 +33048,20 @@ function orcEnvGerarOS(){
   var _newIdCaptured = null; // grupoPedidoId/kbOsRef para vínculo Vitre — capturado dentro da transação, usado depois que ela confirmar
 
   return _db.runTransaction(function(txn){
-    return Promise.all([txn.get(refOrc), txn.get(refOS), txn.get(refOSFin), txn.get(refCnt)])
+    return Promise.all([txn.get(refOrcV2), txn.get(refOS), txn.get(refOSFin), txn.get(refCnt)])
       .then(function(snaps){
-        var docOrc=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCnt=snaps[3];
-        var arrOrc = (docOrc.exists && docOrc.data() && docOrc.data().data) ? JSON.parse(docOrc.data().data) : [];
+        var docOrcV2=snaps[0], docOS=snaps[1], docOSFin=snaps[2], docCnt=snaps[3];
+        // Fonte de verdade: erp_vr_orcamentos/{id} — nunca mais presume que
+        // o array legado tem (ou está atualizado para) este orçamento.
+        var orcAtual = docOrcV2.exists ? docOrcV2.data() : null;
         var objOS  = (docOS.exists  && docOS.data()  && docOS.data().data)  ? JSON.parse(docOS.data().data)  : {};
         var objOSFin = (docOSFin.exists && docOSFin.data() && docOSFin.data().data) ? JSON.parse(docOSFin.data().data) : {};
         var cnt    = (docCnt.exists && docCnt.data() && typeof docCnt.data().data!=='undefined') ? (JSON.parse(docCnt.data().data)||0) : 0;
 
-        var idxOrc = arrOrc.findIndex(function(x){ return x.id===o.id; });
-        if(idxOrc<0) throw new Error('ORC_NAO_ENCONTRADO');
+        if(!orcAtual) throw new Error('ORC_NAO_ENCONTRADO');
         // Barreira 1: campo osRef já gravado no Firestore (não no que
         // estava na tela).
-        if(arrOrc[idxOrc].osRef) throw new Error('OS_JA_EXISTE');
+        if(orcAtual.osRef) throw new Error('OS_JA_EXISTE');
         // Barreira 2: nenhuma OS já vinculada a este orçamento, mesmo que
         // osRef tenha ficado ausente por dado legado/gravação parcial.
         var jaTemOS = Object.keys(objOS).some(function(k){ return objOS[k] && objOS[k].orcRef===o.id; });
@@ -32983,32 +33115,52 @@ function orcEnvGerarOS(){
         // caminho transacional real: OS gerada = "Enviado p/ Produção",
         // nunca "Aguardando Pagamento" (que confundia saldo pendente do
         // fluxo normal 50/50 com "cliente ainda não pagou nada").
-        arrOrc[idxOrc].status = 'enviado_producao';
-        arrOrc[idxOrc].osRef = newId;
+        orcAtual = Object.assign({}, orcAtual, { status:'enviado_producao', osRef:newId });
 
-        txn.set(refOrc, {data:JSON.stringify(arrOrc), ts:Date.now()});
+        // Mesma sanitização de orcV2SalvarComConflito — Firestore nativo
+        // rejeita `undefined` (campos como valorPendenteComparativo/crmLeadId).
+        txn.set(refOrcV2, JSON.parse(JSON.stringify(orcAtual)));
         txn.set(refOS,  {data:JSON.stringify(objOS),  ts:Date.now()});
         txn.set(refOSFin, {data:JSON.stringify(objOSFin), ts:Date.now()});
         txn.set(refCnt, {data:JSON.stringify(n), ts:Date.now()});
 
-        return {num:n, arrOrc:arrOrc, objOS:objOS, objOSFin:objOSFin};
+        return {num:n, orcAtual:orcAtual, objOS:objOS, objOSFin:objOSFin};
       });
   }).then(function(resultado){
-    // Sucesso: o Firestore é a fonte de verdade — sincroniza o estado em
-    // memória com exatamente o que a transação gravou. KB_OS recebe o
-    // financeiro de volta via _kbMergeFinCache() — quem chama
-    // orcEnvGerarOS() é sempre Comercial/Master, que tem permissão real
-    // de ler kb_os_fin, então este merge local não vaza nada que o papel
-    // atual já não pudesse ler do próprio Firestore.
-    _ORC_ENVIADOS_DATA = resultado.arrOrc;
+    // Sucesso: erp_vr_orcamentos/{id} é a fonte de verdade — sincroniza o
+    // estado em memória (cache v2 + recompõe a leitura combinada, nunca
+    // mais atribui _ORC_ENVIADOS_DATA direto). KB_OS recebe o financeiro de
+    // volta via _kbMergeFinCache() — quem chama orcEnvGerarOS() é sempre
+    // Comercial/Master, que tem permissão real de ler kb_os_fin, então
+    // este merge local não vaza nada que o papel atual já não pudesse ler
+    // do próprio Firestore.
+    _ORC_V2_CACHE[o.id] = resultado.orcAtual;
+    _orcV2RecomputarERenderizar();
+    _orcV2LastPayload[o.id] = JSON.stringify(resultado.orcAtual);
     KB_OS = resultado.objOS;
     _KB_OS_FIN_CACHE = resultado.objOSFin;
     if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
     _OS_COUNTER = resultado.num;
-    _cloudLastPayload['orcamentos'] = JSON.stringify(resultado.arrOrc);
     _cloudLastPayload['kb_os'] = JSON.stringify(resultado.objOS);
     _cloudLastPayload['kb_os_fin'] = JSON.stringify(resultado.objOSFin);
     _cloudLastPayload['erp_os_counter'] = JSON.stringify(resultado.num);
+    // Espelho legado best-effort, FORA da transação crítica acima (nunca
+    // pode bloquear Gerar OS pelo mesmo motivo do #000266 — ver o save
+    // principal em _orcamentosSalvarComMergeContinuar). Lê o array mais
+    // recente do servidor (nunca o _ORC_LEGADO_CACHE local, que pode estar
+    // atrasado), aplica a MESMA mudança de status/osRef e tenta gravar uma
+    // única vez; se o array já estiver grande demais, só fica registrado em
+    // console — a OS/orçamento já estão confirmados de verdade. AGUARDADO
+    // (nunca fire-and-forget) só para ordem determinística; sua FALHA nunca
+    // é propagada — ver Promise.all abaixo.
+    var _espelhoLegadoPromise = _db.collection(_COL).doc('orcamentos').get().then(function(snap){
+      var arrOrc = (snap.exists && snap.data() && snap.data().data) ? JSON.parse(snap.data().data) : [];
+      var idx = arrOrc.findIndex(function(x){ return x.id===o.id; });
+      if(idx>=0) arrOrc[idx] = resultado.orcAtual; else arrOrc.unshift(resultado.orcAtual);
+      return _cloudSave('orcamentos', arrOrc, {silencioso:true});
+    }).then(function(resLegado){
+      if(!resLegado || !resLegado.ok) console.warn('[orcamentos] espelho legado não confirmou (Gerar OS — não bloqueia, fonte de verdade é erp_vr_orcamentos/{id}):', resLegado);
+    }).catch(function(e){ console.warn('[orcamentos] espelho legado falhou (Gerar OS — não bloqueia):', e); });
     // HARDENING DE CONFIDENCIALIDADE FINANCEIRA (2026-08-26) — vincular as
     // entradas de fin_cr/fin_tx já criadas por orcRegistrarSituacaoFinanceira()
     // à OS recém-gerada é, a partir de agora, um passo DEPOIS da transação
@@ -33033,7 +33185,7 @@ function orcEnvGerarOS(){
     // segundo orçamento/venda/lançamento financeiro. Se esta etapa falhar,
     // a OS/orçamento VR permanecem válidos (o operador pode tentar de novo
     // pelo Kanban); nunca desfazemos a transação já confirmada por isso.
-    return _vincularCrPromise.then(function(){ return orcRefrescarKbOsDoServidor(); }).then(function(){
+    return Promise.all([_vincularCrPromise, _espelhoLegadoPromise]).then(function(){ return orcRefrescarKbOsDoServidor(); }).then(function(){
       if(_vitreItensPayload.length && _newIdCaptured && typeof firebase!=='undefined' && firebase.functions){
         var _vitreReqId = 'vitreunif:'+_newIdCaptured+':'+Date.now()+':'+Math.random().toString(36).slice(2);
         return firebase.functions().httpsCallable('vitreClassificarItensPedidoUnificado')({
