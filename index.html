@@ -40572,6 +40572,22 @@ function _planCalcAndMerge() {
   // then append manual pieces with their own espessura cost
   if(!_planCalcOrig) return;
   _planCalcOrig();
+  // RODADA 2026-11-05 — achado real (smoke de produção): #planEspBreakdown
+  // ("📏 Chapa Xmm: Y m²") é escrito SÓ por _planRecompute(), nunca
+  // resetado/recalculado em planAbrir()/planCalc() — fica com o HTML da
+  // ÚLTIMA peça editada/consumível alterado de QUALQUER item anterior
+  // (inclusive de um orçamento diferente, se a página não recarregou).
+  // Abrir um item que nunca disparou uma edição de peça (o caso comum:
+  // só preencher L/A/P e olhar a planificação) mostrava esse resíduo como
+  // se fosse a espessura REAL do item atual — mesmo ele estando 100%
+  // correto no motor de cálculo (preço/custo já usavam a espessura certa;
+  // só esta label ficava presa no passado). Chamado AQUI (logo após
+  // _planCalcOrig() repopular _planEditPieces para o item atual, ANTES do
+  // merge de peças manuais abaixo) para a quebra por espessura refletir
+  // sempre o item que está de fato aberto; o tfoot/sumBox mais detalhado
+  // montado pelo resto desta função roda depois e tem a palavra final
+  // sobre esses dois elementos — nunca regride o que já existia ali.
+  _planRecompute();
   var manualArea = 0, manualQty = 0;
   var tbody = document.getElementById('planPiecesBody');
   // Preço/m² do material principal do item
@@ -41332,7 +41348,17 @@ function _planRecompute() {
 var _planCalcOrig = (typeof planCalc !== 'undefined') ? planCalc : null;
 if(_planCalcOrig) {
   planCalc = function() {
-    if(planManualPieces.length) { _planCalcAndMerge(); } else { _planCalcOrig(); }
+    if(planManualPieces.length) {
+      _planCalcAndMerge(); // já chama _planRecompute() internamente — ver comentário lá
+    } else {
+      _planCalcOrig();
+      // RODADA 2026-11-05 — mesmo achado/correção do comentário em
+      // _planCalcAndMerge(): item sem nenhuma peça manual (o caso comum,
+      // ex. "Display") passava por aqui DIRETO, nunca chamando
+      // _planRecompute() — #planEspBreakdown ficava com o resíduo da
+      // última peça editada de QUALQUER item anterior.
+      _planRecompute();
+    }
     _planSincronizarComItem();
   };
 }
