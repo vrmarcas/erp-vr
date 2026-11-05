@@ -68,3 +68,34 @@ export async function espelharOrcamentoNoLegado(db: admin.firestore.Firestore, o
     functions.logger.warn("[orcamentos v2] espelho legado não confirmou (não bloqueia — fonte de verdade é erp_vr_orcamentos/{id}):", e);
   }
 }
+
+/**
+ * deletarOrcamentoV2() — exclusão real, dentro da MESMA transação crítica
+ * que decide o resultado (mesmo princípio de gravarOrcamentoV2: nunca o
+ * array legado inteiro dentro da transação que decide sucesso/falha).
+ */
+export function deletarOrcamentoV2(db: admin.firestore.Firestore, txn: admin.firestore.Transaction, orcId: string): void {
+  txn.delete(db.collection(COL_ORCAMENTOS_V2).doc(orcId));
+}
+
+/**
+ * removerOrcamentoDoLegadoEspelho() — espelho best-effort da EXCLUSÃO,
+ * SEMPRE fora da transação crítica, chamado só depois dela confirmar —
+ * mesmo contrato de espelharOrcamentoNoLegado(): sua falha (ex.: array
+ * grande demais para regravar) nunca é propagada ao chamador.
+ */
+export async function removerOrcamentoDoLegadoEspelho(db: admin.firestore.Firestore, orcId: string): Promise<void> {
+  try {
+    const refOrc = db.collection(COL).doc("orcamentos");
+    await db.runTransaction(async (txn) => {
+      const snap = await txn.get(refOrc);
+      const arr = parseDoc<any[]>(snap, []);
+      const idx = arr.findIndex((o) => o && o.id === orcId);
+      if (idx < 0) return; // já não existia no legado — nada a fazer
+      const novoArr = arr.filter((o) => o && o.id !== orcId);
+      txn.set(refOrc, { data: JSON.stringify(novoArr), ts: Date.now() });
+    });
+  } catch (e) {
+    functions.logger.warn("[orcamentos v2] espelho legado não confirmou exclusão (não bloqueia — fonte de verdade é erp_vr_orcamentos/{id}):", e);
+  }
+}

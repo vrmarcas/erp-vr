@@ -1846,6 +1846,28 @@ function _cloudSaveExec(key, payload, opts) {
   // — nunca pode inverter um save já confirmado.
   var semToastNenhum = !!(opts && opts.legacyMirror);
 
+  // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-04) — achado real de produção:
+  // o espelho legado de orçamentos (erp_vr/orcamentos) passou a exceder DE
+  // FORMA PERMANENTE os 1.048.576 bytes do Firestore (cada orçamento
+  // migrado ganhou campos extras de auditoria da migração, e todo
+  // orçamento novo desde então nunca mais coube) — nunca mais vai caber de
+  // volta, só cresce. Sem este atalho, TODA gravação de orçamento (nova ou
+  // edição) esperava um round-trip de rede inteiro — serializar >1MB,
+  // enviar, ser rejeitado pelo Firestore com "longer than ... bytes" — só
+  // para descartar o resultado (best-effort, nunca bloqueava o save real;
+  // ver a opção que suprime o toast, acima). Isso fica como lentidão real sentida a
+  // cada save/exclusão e o mesmo erro sempre repetido no console (achado
+  // do smoke de produção). Detecta o estouro ANTES de tentar a rede — o
+  // resultado final é o MESMO ({ok:false}, nunca propagado), só sem a
+  // espera e sem o erro redundante.
+  var FIRESTORE_DOC_MAX_BYTES = 1048487; // margem real observada no erro do próprio Firestore ("longer than 1048487 bytes")
+  var payloadBytes = (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(payload).length : payload.length;
+  if (payloadBytes > FIRESTORE_DOC_MAX_BYTES) {
+    delete _cloudLastPayload[key];
+    console.warn('[Cloud] "'+key+'" excede o limite de '+FIRESTORE_DOC_MAX_BYTES+' bytes do Firestore ('+payloadBytes+' bytes) — gravação pulada sem round-trip de rede (nunca bloqueia quem chamou).');
+    return Promise.resolve({ok:false, reason:'tamanho-excedido'});
+  }
+
   function tentar(jaRenovouToken) {
     return _db.runTransaction(function(txn){
       return txn.get(ref).then(function(snap){
@@ -30174,6 +30196,15 @@ function orcV2SalvarComConflito(id, novoValor) {
       var noServidor = snap.exists ? snap.data() : null;
       var noServidorStr = noServidor ? JSON.stringify(noServidor) : null;
       if (baseline !== undefined && noServidorStr !== null && noServidorStr !== baseline) {
+        // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-04) — achado do smoke de
+        // produção: usuário reportou "outro usuário editou" sem concorrência
+        // real aparente. Diagnóstico definitivo nunca existia além do toast
+        // genérico — loga aqui os 3 estados completos (o que esta aba
+        // imaginava que estava no servidor, o que REALMENTE está, e o que
+        // esta aba tentou gravar) para a PRÓXIMA ocorrência ter evidência
+        // real, nunca mais inferência. Nunca muda o resultado — só torna a
+        // causa raiz investigável se recorrer.
+        console.error('[orcamentos v2] CONFLITO em ' + id + ' — baseline(aba) != noServidor(real). baseline=' + baseline + ' | noServidor=' + noServidorStr + ' | tentativaDeGravar=' + payloadStr);
         var conflito = new Error('ORC_V2_CONFLITO');
         conflito.code = 'ORC_V2_CONFLITO';
         conflito.serverData = noServidor;
