@@ -66,11 +66,25 @@ export async function excluirOrcamentoCore(orcId: string, caller: { uid: string 
   const refOrcLegado = db.collection(COL).doc(ORC_DOC);
 
   const resultado = await db.runTransaction(async (tx) => {
-    const [snapV2, snapLegado] = await Promise.all([tx.get(refOrcV2), tx.get(refOrcLegado)]);
-    const orcV2 = snapV2.exists ? (snapV2.data() as OrcamentoEnviadoLike) : null;
-    const arrLegado = parseDoc<OrcamentoEnviadoLike[]>(snapLegado, []);
-    const orcLegado = arrLegado.find((o) => o && o.id === orcId) || null;
-    const orc = orcV2 || orcLegado;
+    // ACHADO REAL (smoke de produção, 2026-11-05): a versão anterior sempre
+    // lia o array legado (~1MB) em Promise.all, mesmo quando o v2 já tinha
+    // o orçamento — logs reais mostraram 3,6 a 9,2 SEGUNDOS por chamada
+    // (confirmado via `firebase functions:log`), para TODA exclusão, mesmo
+    // das centenas de orçamentos v2-only criados desde a migração (o caso
+    // comum agora). Essa lentidão real é o motivo mais provável do usuário
+    // ter clicado "Excluir" várias vezes seguidas (sem nenhum debounce no
+    // client — ver orcEnvExcluir) acreditando que nada tinha acontecido,
+    // gerando rajadas de chamadas concorrentes (confirmado nos logs: ~12
+    // invocações em 15s para o mesmo clique). V2 primeiro (doc pequeno,
+    // rápido); só lê o array legado (caro) no caso raro em que o v2 de
+    // fato não tem o orçamento — nunca mais no caminho comum pós-migração.
+    const snapV2 = await tx.get(refOrcV2);
+    let orc: OrcamentoEnviadoLike | null = snapV2.exists ? (snapV2.data() as OrcamentoEnviadoLike) : null;
+    if (!orc) {
+      const snapLegado = await tx.get(refOrcLegado);
+      const arrLegado = parseDoc<OrcamentoEnviadoLike[]>(snapLegado, []);
+      orc = arrLegado.find((o) => o && o.id === orcId) || null;
+    }
     if (!orc) return { ok: true as const, jaProcessado: true };
 
     if (orc.osRef) {
@@ -83,12 +97,15 @@ export async function excluirOrcamentoCore(orcId: string, caller: { uid: string 
     // erp_vr_orcamentos/{id} é a autoridade — excluída AQUI, na mesma
     // transação que decide o resultado. O array legado NUNCA entra nesta
     // transação (ver cabeçalho do arquivo): removido à parte, best-effort.
-    if (orcV2) deletarOrcamentoV2(db, tx, orcId);
-    return { ok: true as const, jaProcessado: false, existiaNoLegado: !!orcLegado };
+    if (snapV2.exists) deletarOrcamentoV2(db, tx, orcId);
+    return { ok: true as const, jaProcessado: false };
   });
 
   if (!resultado.jaProcessado) {
-    if (resultado.existiaNoLegado) await removerOrcamentoDoLegadoEspelho(db, orcId);
+    // Best-effort, sempre tentado — já no-opa internamente (idx<0) quando o
+    // orçamento nunca existiu no legado (o caso comum agora); nunca lança,
+    // nunca bloqueia o resultado já decidido acima.
+    await removerOrcamentoDoLegadoEspelho(db, orcId);
     try {
       await db.collection(AUDIT_COL).add({ action: "orcamento_excluido", callerUid: caller.uid, detail: { orcId }, timestamp: Date.now() });
     } catch (e) {

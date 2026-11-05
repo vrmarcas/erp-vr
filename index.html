@@ -32281,9 +32281,21 @@ function orcEnvAbrir(id) {
 // (onCall, functions/src/erp_orcamento_exclusao_segura.ts) bloqueia a
 // exclusão quando já existe OS gerada ou Conta a Receber associada —
 // nunca mais uma escrita direta client-side para esta operação.
+// RODADA 2026-11-05 — achado real: nenhum guard de "em voo" protegia esta
+// função (ao contrário de orcSalvarOrcamento/_orcSalvarEmVoo) — logs reais
+// da Function (firebase functions:log) mostraram ~12 chamadas concorrentes
+// para a mesma exclusão em 15s, cada uma levando 3,6 a 9,2s (causa raiz
+// real dessa lentidão: a Function lia o array legado de ~1MB mesmo para
+// orçamentos v2-only — ver erp_orcamento_exclusao_segura.ts, corrigido na
+// mesma rodada). Sem feedback nem bloqueio, o clique parecia "não
+// funcionar" e o vendedor clicava de novo — mesmo princípio de
+// _orcSalvarEmVoo, agora por id (exclusões de orçamentos DIFERENTES nunca
+// precisam esperar uma da outra).
+var _orcExcluirEmVoo = {};
 function orcEnvExcluir(id) {
-  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return; }
-  firebase.functions().httpsCallable('vendedorExcluirOrcamento')({ orcId: id })
+  if (typeof firebase === 'undefined' || !firebase.functions) { showToast('Functions indisponível.', 'err'); return _orcExcluirEmVoo[id] || Promise.resolve(); }
+  if (_orcExcluirEmVoo[id]) return _orcExcluirEmVoo[id];
+  var p = firebase.functions().httpsCallable('vendedorExcluirOrcamento')({ orcId: id })
     .then(function () {
       // Atualização otimista local (mesmo padrão já usado em orcSetEnviados
       // — "a memória é otimista") até a nuvem resincronizar via listener.
@@ -32295,6 +32307,8 @@ function orcEnvExcluir(id) {
       showToast('Orçamento removido.', 'info');
     })
     .catch(function (e) { showToast('Falha ao excluir: ' + (e && e.message || e), 'err'); });
+  _orcExcluirEmVoo[id] = p.finally(function () { delete _orcExcluirEmVoo[id]; });
+  return _orcExcluirEmVoo[id];
 }
 
 // ── Editar orçamento salvo: preenche o formulário e navega para o orçamento ──
