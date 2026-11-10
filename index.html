@@ -11736,14 +11736,27 @@ function _planResincronizarPecasHerdadas(idx) {
     persisted.forEach(function(p){ if (p && p.origem==='AUTOMATICA') byId['auto_'+_planPieceSlug(p.nome)] = p; });
 
     var mudou = false;
-    var novasAutomaticas = freshPieces.map(function(pc){
+    // RODADA DE CORREÇÃO (2026-11-10) — achado real (usuário reportou peça
+    // automática excluída "voltando sozinha"): troca de material/espessura
+    // NUNCA altera o CONJUNTO de peças que a receita devolve (rec.pieces()
+    // depende de L/A/P/campos extras — nenhum dos quais orcMatChanged()
+    // toca; só `e`/espMm muda, afetando só a GEOMETRIA das peças que já
+    // existem) — logo um nome ausente de `persisted` (`!byId[id]`) só pode
+    // ser uma peça que o vendedor excluiu deliberadamente (mesma convenção
+    // já usada em _planSeedFromPersisted/_planBuildAllPecas: "ausente no
+    // snapshot persistido = foi excluída"), nunca uma peça nova e
+    // legítima. Filtra ANTES do map — sem isto, tanto o ramo de espOverride
+    // quanto o default `_deleted:false` abaixo recriavam a peça do zero a
+    // cada troca de material.
+    var freshPiecesExistentes = freshPieces.filter(function(pc){ return !!byId['auto_' + _planPieceSlug(pc.nome)]; });
+    var novasAutomaticas = freshPiecesExistentes.map(function(pc){
       var id = 'auto_' + _planPieceSlug(pc.nome);
       var prev = byId[id];
       var _espOverride = (pc.esp!=null && pc.esp!=='') ? String(pc.esp) : '';
       if (_espOverride) {
         // Override real — a fórmula pode depender da espessura PRÓPRIA da
         // peça, nunca da do item; preserva geometria tal como persistida.
-        return prev || Object.assign({}, pc, { espOverride:_espOverride, esp:_espOverride, espessuraMm: parseInt(_espOverride,10)||null, origem:'AUTOMATICA', _deleted:false, adesivoNormal:false, adesivoBranco:false, gravacao:0, spray:0, extra:0 });
+        return prev;
       }
       var novaLarg = Math.round(pc.larg*100)/100, novaAlt = Math.round(pc.alt*100)/100;
       // RODADA DE CORREÇÃO DEFINITIVA (2026-09-01), Bloco 3/9 — achado real
