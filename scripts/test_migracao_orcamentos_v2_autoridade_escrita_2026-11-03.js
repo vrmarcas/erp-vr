@@ -35,7 +35,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2CanonJSON'];
 var src = [
   "var _homologGuardOrThrow = function(){};",
   "var _cloudReady = true;",
@@ -44,6 +44,7 @@ var src = [
   "var showToast = function(m,k){ _toasts.push({msg:m,kind:k}); };",
   "var _ORC_V2_CACHE = {};",
   "var _orcV2RecomputarERenderizar = function(){};",
+  extractFn('_orcV2CanonJSON'),
   "module.exports = { criarSessao: criarSessao, getToasts: function(){ return _toasts; } };",
   "function criarSessao(db){",
   "  var _cloudLastPayload = {};",

@@ -66,7 +66,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2CanonJSON'];
 var COL = 'erp_vr';
 // SPRINT PRÉ-GO-LIVE, Bloco H — envolvido numa fábrica para que cada
 // chamada da fábrica produza uma instância com seu PRÓPRIO

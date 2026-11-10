@@ -49,12 +49,12 @@ ok('1c. secLimparAudit() também não usa mais _cloudSave', !/_cloudSave\(/.test
 // mecanismo mudou; ver a prova comportamental na seção 3 abaixo.
 var mergeSrc = extractFn('_orcamentosSalvarComMerge') + '\n' + extractFn('_orcamentosSalvarComMergeContinuar') + '\n' + extractFn('orcV2SalvarComConflito');
 ok('2a. _orcamentosSalvarComMergeContinuar() identifica quais ids ESTA sessão mudou (diff por id, não o array inteiro)', /meusIds/.test(mergeSrc));
-ok('2b. Conflito real é checado POR DOCUMENTO em erp_vr_orcamentos/{id} (nunca comparando o array inteiro)', /erp_vr_orcamentos/.test(mergeSrc) && /noServidorStr !== baseline/.test(mergeSrc));
+ok('2b. Conflito real é checado POR DOCUMENTO em erp_vr_orcamentos/{id} (nunca comparando o array inteiro)', /erp_vr_orcamentos/.test(mergeSrc) && /noServidorCanon !== baseline/.test(mergeSrc));
 ok('2c. Cada orçamento muda numa transação PRÓPRIA (Promise.all por id) — orçamentos diferentes nunca disputam a mesma transação/documento', /Promise\.all\(meusIds\.map/.test(mergeSrc));
 
 // ── 3. Execução real com mock de Firestore: 2 "sessões" (tabs) simulando o bug relatado ──
 {
-  var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito'];
+  var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2CanonJSON'];
   var missing = [];
   FN_NAMES.forEach(function(n){ try { extractFn(n); } catch(e){ missing.push(n); } });
   if (missing.length) {
@@ -66,6 +66,7 @@ ok('2c. Cada orçamento muda numa transação PRÓPRIA (Promise.all por id) — 
       "var _COL = 'erp_vr';",
       "var showToast = function(){};",
       "var orcEnviadosRender = function(){};",
+      extractFn('_orcV2CanonJSON'),
       "module.exports = { criarSessao: criarSessao };",
       "function criarSessao(db){",
       "  var _cloudLastPayload = {};",

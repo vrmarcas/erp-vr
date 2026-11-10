@@ -92,7 +92,7 @@ var FN_NAMES = [
   'orcSalvarOrcamento', '_orcSalvarOrcamentoImpl', 'orcFeedbackSalvamento',
   'orcObterNumeroOficial', 'orcLimparNumeroOficial', '_isTestRecord', 'orcGetEnviados',
   '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito',
-  '_cloudSave', '_cloudSaveExec', 'crmUpsertLeadPorOrcamento', 'orcAvaliarRevisaoFinanceira',
+  '_cloudSave', '_cloudSaveExec', 'crmUpsertLeadPorOrcamento', 'orcAvaliarRevisaoFinanceira', '_orcV2CanonJSON',
 ];
 var src = [
   'var _orcSalvarEmVoo = null;',

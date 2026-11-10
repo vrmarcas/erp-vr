@@ -54,7 +54,7 @@ var FN_NAMES = [
   'orcV2MergeComLegado', '_orcV2RecomputarERenderizar', 'orcGetEnviados',
   'orcSetEnviados', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar',
   'orcV2SalvarComConflito', '_isTestRecord', 'orcReidratarGruposDoServidor',
-  'crmUpsertLeadPorOrcamento', '_watchOrcamentosV2',
+  'crmUpsertLeadPorOrcamento', '_watchOrcamentosV2', '_orcV2CanonJSON',
 ];
 
 var src = [
@@ -79,6 +79,7 @@ var src = [
   '  crmUpsertLeadPorOrcamento: crmUpsertLeadPorOrcamento,',
   '  iniciarListenerV2: function(){ _watchOrcamentosV2(); },',
   '  setState: function(s){ _ORC_LEGADO_CACHE=s.legado||[]; _cloudLastPayload={orcamentos: JSON.stringify(s.legado||[])}; _ORC_V2_CACHE=s.v2||{}; _orcV2LastPayload=s.baseline||{}; _ORC_ENVIADOS_DATA=s.enviados||[]; },',
+  '  canonJSON: _orcV2CanonJSON,',
   '};',
 ].join('\n\n');
 
@@ -112,7 +113,13 @@ function mockDb(delayListenerMs) {
   };
 }
 
-function montarCenarioBase() {
+function montarCenarioBase(canonJSON) {
+  // RODADA 2026-11-10 — baseline precisa ser construído com a MESMA forma
+  // canônica que _watchOrcamentosV2() real agora usa (_orcV2CanonJSON) —
+  // um JSON.stringify crú aqui não é mais fiel ao que o código real
+  // armazena em _orcV2LastPayload desde o fix do falso conflito por ordem
+  // de chaves.
+  var canon = canonJSON || JSON.stringify;
   var legadoArr = [];
   var v2PorId = {};
   var baseline = {};
@@ -123,7 +130,7 @@ function montarCenarioBase() {
     legadoArr.push(base);
     var v2obj = Object.assign({}, base, { migradoDe: 'erp_vr/orcamentos', migracaoVersao: 1 });
     v2PorId[id] = v2obj;
-    baseline[id] = JSON.stringify(v2obj);
+    baseline[id] = canon(v2obj);
   }
   return { legadoArr: legadoArr, v2PorId: v2PorId, baseline: baseline };
 }
@@ -138,7 +145,7 @@ function montarCenarioBase() {
     fs.writeFileSync(modPath, src);
     delete require.cache[require.resolve(modPath)];
     var mod = require(modPath);
-    var cenario = montarCenarioBase();
+    var cenario = montarCenarioBase(mod.canonJSON);
     var db = mockDb(25); // listener chega ~25ms depois do commit — nunca síncrono, igual produção real
     global._db = db;
     global.showToast = function () {};
@@ -215,7 +222,7 @@ function montarCenarioBase() {
     fs.writeFileSync(modPath, src);
     delete require.cache[require.resolve(modPath)];
     var modD = require(modPath);
-    var cenarioD = montarCenarioBase(); // 50 orçamentos com divergência legado×v2 real (migradoDe etc.)
+    var cenarioD = montarCenarioBase(modD.canonJSON); // 50 orçamentos com divergência legado×v2 real (migradoDe etc.)
     var db4 = mockDb(10);
     global._db = db4;
     global.showToast = function () {};

@@ -97,7 +97,7 @@ console.log('\n=== RODADA 2.1 — idempotência sob 10 chamadas concorrentes (es
   // (mesmo que a UI real faria: a situação financeira já está confirmada
   // antes de "Gerar OS" ficar habilitado); as 10 "abas" concorrem só na
   // etapa Gerar OS — que é onde o idempotency guard real está.
-  var FN_NAMES_OS = ['orcEnvNormalizar', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'orcRefrescarKbOsDoServidor'];
+  var FN_NAMES_OS = ['orcEnvNormalizar', 'orcRegistrarSituacaoFinanceira', 'orcEnvGerarOS', 'orcRefrescarKbOsDoServidor', '_orcV2CanonJSON'];
   var srcOS = [
     'var _ORC_ENVIADOS_DATA = [];',
     'function orcGetEnviados(){ return _ORC_ENVIADOS_DATA; }',

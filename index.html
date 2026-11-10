@@ -2149,7 +2149,7 @@ function _watchOrcamentosV2(){
   if(typeof _db==='undefined' || !_db) return;
   _db.collection('erp_vr_orcamentos').onSnapshot(function(snap){
     var novo = {};
-    snap.docs.forEach(function(d){ var val=d.data(); novo[d.id]=val; _orcV2LastPayload[d.id]=JSON.stringify(val); });
+    snap.docs.forEach(function(d){ var val=d.data(); novo[d.id]=val; _orcV2LastPayload[d.id]=_orcV2CanonJSON(val); });
     _ORC_V2_CACHE = novo;
     _orcV2RecomputarERenderizar();
   }, function(err){ console.warn('[orcamentos v2] listener erp_vr_orcamentos falhou:', err); });
@@ -30180,6 +30180,31 @@ function _orcamentosSalvarComMerge(arr, tentativas){
 // gravação confirmada desta aba — mesmo princípio de _cloudSaveExec()
 // legado, só que por id em vez de por chave única global.
 var _orcV2LastPayload = {};
+// RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-10) — achado real confirmado contra
+// o ORC-000046 de produção (log do diagnóstico instrumentado abaixo): o
+// conflito comparava baseline/servidor/tentativa por IGUALDADE DE STRING
+// (JSON.stringify), sensível à ORDEM das chaves — nunca ao conteúdo. Dois
+// objetos com os MESMOS valores, só com chaves inseridas em ordem diferente
+// (ex.: o literal do client sempre constrói na mesma ordem do código-fonte;
+// o que volta de snap.data()/do listener reflete a ordem real de
+// armazenamento do Firestore, que não é garantida bater com essa — campos
+// adicionados depois, como crmLeadId, por exemplo, confirmados fora de
+// posição num orçamento real), produziam strings DIFERENTES e, portanto,
+// um "conflito" sem nenhuma edição concorrente real. _orcV2CanonJSON()
+// serializa com as chaves de todo objeto (nunca de arrays — a ordem de
+// array É semanticamente relevante, ex. a ordem dos itens/peças) ordenadas
+// recursivamente — dois objetos com o mesmo conteúdo produzem sempre a
+// MESMA string canônica, independente de como cada lado os construiu.
+// Usada SÓ para comparação/baseline; a escrita real (txn.set) continua
+// usando o objeto normal — ordem de campos nunca importou para o Firestore
+// em si, só para esta comparação local.
+function _orcV2CanonJSON(valor) {
+  if (Array.isArray(valor)) return '[' + valor.map(_orcV2CanonJSON).join(',') + ']';
+  if (valor && typeof valor === 'object') {
+    return '{' + Object.keys(valor).sort().map(function (k) { return JSON.stringify(k) + ':' + _orcV2CanonJSON(valor[k]); }).join(',') + '}';
+  }
+  return JSON.stringify(valor);
+}
 function orcV2SalvarComConflito(id, novoValor) {
   if (typeof _db === 'undefined' || !_db) return Promise.resolve({ ok: false, reason: 'sem-conexao' });
   // O Firestore nativo REJEITA campos `undefined` (ex.: valorPendenteComparativo/
@@ -30187,15 +30212,15 @@ function orcV2SalvarComConflito(id, novoValor) {
   // JSON.stringify, que já descarta `undefined` silenciosamente) — mesma
   // fidelidade aqui, round-trip JSON em vez de gravar o objeto direto.
   var payload = JSON.parse(JSON.stringify(novoValor));
-  var payloadStr = JSON.stringify(payload);
+  var payloadCanon = _orcV2CanonJSON(payload); // só para comparação/baseline — nunca para a escrita
   var baseline = _orcV2LastPayload[id]; // undefined = nunca observei este doc nesta aba — grava sem checar
-  if (baseline === payloadStr) return Promise.resolve({ ok: true, unchanged: true });
+  if (baseline === payloadCanon) return Promise.resolve({ ok: true, unchanged: true });
   var ref = _db.collection('erp_vr_orcamentos').doc(id);
   return _db.runTransaction(function (txn) {
     return txn.get(ref).then(function (snap) {
       var noServidor = snap.exists ? snap.data() : null;
-      var noServidorStr = noServidor ? JSON.stringify(noServidor) : null;
-      if (baseline !== undefined && noServidorStr !== null && noServidorStr !== baseline) {
+      var noServidorCanon = noServidor ? _orcV2CanonJSON(noServidor) : null;
+      if (baseline !== undefined && noServidorCanon !== null && noServidorCanon !== baseline) {
         // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-04) — achado do smoke de
         // produção: usuário reportou "outro usuário editou" sem concorrência
         // real aparente. Diagnóstico definitivo nunca existia além do toast
@@ -30203,8 +30228,10 @@ function orcV2SalvarComConflito(id, novoValor) {
         // imaginava que estava no servidor, o que REALMENTE está, e o que
         // esta aba tentou gravar) para a PRÓXIMA ocorrência ter evidência
         // real, nunca mais inferência. Nunca muda o resultado — só torna a
-        // causa raiz investigável se recorrer.
-        console.error('[orcamentos v2] CONFLITO em ' + id + ' — baseline(aba) != noServidor(real). baseline=' + baseline + ' | noServidor=' + noServidorStr + ' | tentativaDeGravar=' + payloadStr);
+        // causa raiz investigável se recorrer. A partir de 2026-11-10 esta
+        // comparação já é canônica (ordem de chaves nunca mais conta como
+        // diferença) — se este log disparar agora, é um conflito REAL.
+        console.error('[orcamentos v2] CONFLITO REAL em ' + id + ' — baseline(aba) != noServidor(real) mesmo após comparação canônica (ordem de chaves já normalizada). baseline=' + baseline + ' | noServidor=' + noServidorCanon + ' | tentativaDeGravar=' + payloadCanon);
         var conflito = new Error('ORC_V2_CONFLITO');
         conflito.code = 'ORC_V2_CONFLITO';
         conflito.serverData = noServidor;
@@ -30213,11 +30240,11 @@ function orcV2SalvarComConflito(id, novoValor) {
       txn.set(ref, payload);
     });
   }).then(function () {
-    _orcV2LastPayload[id] = payloadStr;
+    _orcV2LastPayload[id] = payloadCanon;
     return { ok: true };
   }).catch(function (e) {
     if (e && e.code === 'ORC_V2_CONFLITO') {
-      _orcV2LastPayload[id] = JSON.stringify(e.serverData);
+      _orcV2LastPayload[id] = _orcV2CanonJSON(e.serverData);
       return { ok: false, reason: 'conflito', serverData: e.serverData };
     }
     console.warn('[orcamentos v2] erro ao salvar ' + id + ':', e);
@@ -33205,7 +33232,7 @@ function orcEnvGerarOS(){
     // do próprio Firestore.
     _ORC_V2_CACHE[o.id] = resultado.orcAtual;
     _orcV2RecomputarERenderizar();
-    _orcV2LastPayload[o.id] = JSON.stringify(resultado.orcAtual);
+    _orcV2LastPayload[o.id] = _orcV2CanonJSON(resultado.orcAtual);
     KB_OS = resultado.objOS;
     _KB_OS_FIN_CACHE = resultado.objOSFin;
     if(typeof _kbMergeFinCache==='function') _kbMergeFinCache();
