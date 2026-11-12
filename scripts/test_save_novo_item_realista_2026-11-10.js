@@ -66,14 +66,16 @@ function ok(desc, cond, extra) { if (cond) { console.log('  ✅  ' + desc); pass
 var FN_NAMES = [
   'orcSalvarOrcamento', '_orcSalvarOrcamentoImpl', 'orcFeedbackSalvamento',
   'orcObterNumeroOficial', 'orcLimparNumeroOficial', '_isTestRecord', 'orcGetEnviados',
-  '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito',
+  '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2SalvarComConflitoExec',
   '_cloudSave', '_cloudSaveExec', 'crmUpsertLeadPorOrcamento', 'orcAvaliarRevisaoFinanceira',
   '_orcV2CanonJSON', 'orcProdutoNomeResolvido', '_itemMaqInfo', 'orcCondicaoPagamentoAtual', 'orcCondicaoLabelPorTipo',
+  'orcEnvOrdenarCanonico', '_orcEnvChaveOrdenacao', 'orcEnvNormalizar', 'orcEnvParseDataSalvo',
 ];
 var src = [
   'var _orcSalvarEmVoo = null;',
   'var _ORC_V2_CACHE = {};',
   'var _orcV2LastPayload = {};',
+  'var _orcV2SaveQueue = {};',
   'var _orcV2RecomputarERenderizar = function(){};',
   'var _ORC_ENVIADOS_DATA = [];',
   'function orcSetEnviados(arr){ _ORC_ENVIADOS_DATA = arr; return _orcamentosSalvarComMerge(arr, 0); }',

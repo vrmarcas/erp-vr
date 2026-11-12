@@ -66,7 +66,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2CanonJSON'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_homologGuardOrThrow', 'orcSetEnviados', 'orcGetEnviados', '_isTestRecord', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2SalvarComConflitoExec', '_orcV2CanonJSON', 'orcEnvOrdenarCanonico', '_orcEnvChaveOrdenacao', 'orcEnvNormalizar', 'orcEnvParseDataSalvo'];
 var COL = 'erp_vr';
 // SPRINT PRÉ-GO-LIVE, Bloco H — envolvido numa fábrica para que cada
 // chamada da fábrica produza uma instância com seu PRÓPRIO
@@ -87,6 +87,7 @@ var src = [
   "var _ORC_ENVIADOS_DATA = [];",
   "var _ORC_V2_CACHE = {};", // RODADA MIGRAÇÃO ORÇAMENTOS v2 (2026-11-03) — isolado por instância, como _cloudLastPayload
   "var _orcV2LastPayload = {};",
+  "var _orcV2SaveQueue = {};", // RODADA PÓS-SMOKE 2026-11-12 — fila por id de orcV2SalvarComConflito, isolada por instância (mesmo princípio de _cloudSaveQueue)
   "function _orcV2RecomputarERenderizar(){ if (typeof orcEnviadosRender === 'function') orcEnviadosRender(); }",
   FN_NAMES.map(extractFn).join('\n\n'),
   "return {",

@@ -51,8 +51,9 @@ function extractFn(name) {
 
 var src = [
   extractFn('_orcV2CanonJSON'),
-  'var _db;', 'var _orcV2LastPayload = {};',
+  'var _db;', 'var _orcV2LastPayload = {};', 'var _orcV2SaveQueue = {};',
   extractFn('orcV2SalvarComConflito'),
+  extractFn('_orcV2SalvarComConflitoExec'),
   'module.exports = { canonJSON: _orcV2CanonJSON, orcV2SalvarComConflito: orcV2SalvarComConflito, setDb: function(db){ _db = db; }, setBaseline: function(id, v){ _orcV2LastPayload[id] = v; }, getBaseline: function(id){ return _orcV2LastPayload[id]; } };',
 ].join('\n\n');
 

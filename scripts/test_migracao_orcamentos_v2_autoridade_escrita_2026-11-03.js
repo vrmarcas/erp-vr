@@ -35,7 +35,7 @@ function extractFn(name) {
   return html.slice(start, i + 1);
 }
 
-var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2CanonJSON'];
+var FN_NAMES = ['_cloudSave', '_cloudSaveExec', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar', 'orcV2SalvarComConflito', '_orcV2SalvarComConflitoExec', '_orcV2CanonJSON'];
 var src = [
   "var _homologGuardOrThrow = function(){};",
   "var _cloudReady = true;",
@@ -50,10 +50,12 @@ var src = [
   "  var _cloudLastPayload = {};",
   "  var _cloudSaveQueue = {};",
   "  var _orcV2LastPayload = {};",
+  "  var _orcV2SaveQueue = {};",
   "  var _db = db;",
   "  " + extractFn('_cloudSave').replace(/^function _cloudSave/, 'var _cloudSave = function'),
   "  " + extractFn('_cloudSaveExec').replace(/^function _cloudSaveExec/, 'var _cloudSaveExec = function'),
   "  " + extractFn('orcV2SalvarComConflito').replace(/^function orcV2SalvarComConflito/, 'var orcV2SalvarComConflito = function'),
+  "  " + extractFn('_orcV2SalvarComConflitoExec').replace(/^function _orcV2SalvarComConflitoExec/, 'var _orcV2SalvarComConflitoExec = function'),
   "  " + extractFn('_orcamentosSalvarComMerge').replace(/^function _orcamentosSalvarComMerge/, 'var _orcamentosSalvarComMerge = function'),
   "  " + extractFn('_orcamentosSalvarComMergeContinuar').replace(/^function _orcamentosSalvarComMergeContinuar/, 'var _orcamentosSalvarComMergeContinuar = function'),
   "  var _ORC_ENVIADOS_DATA = [];",

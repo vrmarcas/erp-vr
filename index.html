@@ -30079,10 +30079,40 @@ function _orcV2RecomputarERenderizar() {
   var _pg = document.getElementById('pg-inteligencia');
   if (_pg && _pg.style.display !== 'none') { try { if (typeof intelRender === 'function') intelRender(); } catch (e) {} }
 }
+// RODADA PÓS-SMOKE 2026-11-12 — achado real (smoke de produção): a lista
+// de "Orçamentos Enviados" aparecia em ordem aparentemente aleatória.
+// Causa: nenhum ponto do pipeline (orcV2MergeComLegado/orcGetEnviados/
+// orcEnviadosRender) jamais ordenava — a ordem era a do array legado para
+// ids migrados e, para orçamentos v2-only, a ordem BRUTA do snapshot do
+// Firestore (erp_vr_orcamentos.onSnapshot SEM orderBy — não garantida,
+// pode mudar entre snapshots). `num` (reservado atomicamente e nunca
+// reatribuído — ver orcObterNumeroOficial) é a chave de ordenação
+// canônica: monotonicamente crescente, idêntica em toda aba/listener,
+// nunca se move num reload/merge/listener. orcEnvNormalizar() já resolve
+// `num`/`n` (ValerIA). Fallback (num ausente/não numérico, caso raro) usa
+// dataSalvo com resolução de minuto — nunca usado no caminho comum.
+function _orcEnvChaveOrdenacao(o) {
+  var n = (typeof orcEnvNormalizar === 'function') ? orcEnvNormalizar(o) : (o||{});
+  var numInt = parseInt(String(n.num==null?'':n.num).replace(/\D/g,''), 10);
+  if (!isNaN(numInt)) return numInt;
+  var d = (typeof orcEnvParseDataSalvo === 'function') ? orcEnvParseDataSalvo(n.dataSalvo) : null;
+  if (!d) return -Infinity; // sem num nem data reconhecível — vai para o fim, nunca para o topo
+  var horaMin = 0;
+  var partesHora = (n.dataSalvo||'').split(' ')[1];
+  if (partesHora) {
+    var hm = partesHora.split(':');
+    horaMin = (parseInt(hm[0],10)||0)*60 + (parseInt(hm[1],10)||0);
+  }
+  return d.getTime() + horaMin*60000;
+}
+function orcEnvOrdenarCanonico(lista) {
+  return (lista||[]).slice().sort(function(a,b){ return _orcEnvChaveOrdenacao(b) - _orcEnvChaveOrdenacao(a); });
+}
 // HOTFIX saneamento (2026-08-10) — ponto único de leitura de orçamentos
 // enviados; filtrar isTest aqui protege de uma vez Orçamentos Enviados,
-// Dashboard Comercial e Dashboard principal (todos leem por aqui).
-function orcGetEnviados(){ return _ORC_ENVIADOS_DATA.filter(function(o){ return !_isTestRecord(o); }); }
+// Dashboard Comercial e Dashboard principal (todos leem por aqui). Desde
+// 2026-11-12 também é o ponto único de ORDENAÇÃO — mais recente primeiro.
+function orcGetEnviados(){ return orcEnvOrdenarCanonico(_ORC_ENVIADOS_DATA.filter(function(o){ return !_isTestRecord(o); })); }
 // Após conflito de gravação: a tela do orçamento aberto volta a refletir o que a
 // nuvem tem (escolha não persistida some dos badges/rótulo/total). Alinhamento por
 // ordem: linhas VR da tela ↔ itens VR do registro (Vitre é cumulativo, fora das linhas).
@@ -30218,12 +30248,40 @@ function _orcV2CanonJSON(valor) {
   }
   return JSON.stringify(valor);
 }
+// RODADA PÓS-SMOKE 2026-11-12 — achado real (smoke de produção: "o
+// orçamento está salvando de forma inconsistente, salva quando quer", SEM
+// o falso conflito já corrigido por _orcV2CanonJSON). Causa raiz: alguns
+// chamadores gravam o MESMO orçamento duas vezes em sequência síncrona,
+// sem aguardar a 1ª terminar (ex.: orcEnvSetStatus() — grava `status` e,
+// logo em seguida, `crId` do orçamento recém-aprovado; ambas chamadas a
+// orcSetEnviados() não são `await`adas). Cada uma dispara sua própria
+// orcV2SalvarComConflito(id,...) — SEM nenhuma serialização por id. A 2ª
+// capturava baseline/payload ANTES da 1ª confirmar no servidor; quando a
+// 2ª transação lia o servidor (já atualizado pela 1ª, desta MESMA aba), o
+// valor não batia com o baseline antigo — autoconflito desta mesma aba,
+// indistinguível de "outro usuário editou". Exatamente a mesma classe de
+// bug já corrigida para o array legado (ver _cloudSave/_cloudSaveQueue,
+// comentário "SPRINT PRÉ-GO-LIVE, Blocos H/K") — nunca portada para este
+// caminho v2 quando ele foi criado. Mesma correção: fila por id — a 2ª
+// gravação só começa sua transação depois que a 1ª (desta mesma aba,
+// mesmo id) já terminou, e lê baseline/payload FRESCOS no momento em que
+// de fato roda (nunca no momento da chamada).
+var _orcV2SaveQueue = {};
 function orcV2SalvarComConflito(id, novoValor) {
+  var fila = (_orcV2SaveQueue[id] || Promise.resolve()).catch(function(){});
+  var atual = fila.then(function(){ return _orcV2SalvarComConflitoExec(id, novoValor); });
+  _orcV2SaveQueue[id] = atual;
+  return atual;
+}
+function _orcV2SalvarComConflitoExec(id, novoValor) {
   if (typeof _db === 'undefined' || !_db) return Promise.resolve({ ok: false, reason: 'sem-conexao' });
   // O Firestore nativo REJEITA campos `undefined` (ex.: valorPendenteComparativo/
   // crmLeadId, que o array legado tolera porque vai para uma STRING via
   // JSON.stringify, que já descarta `undefined` silenciosamente) — mesma
   // fidelidade aqui, round-trip JSON em vez de gravar o objeto direto.
+  // Lidos só agora (depois de aguardar a fila deste id) — refletem
+  // qualquer gravação anterior deste MESMO id, nesta mesma aba, que já
+  // tenha confirmado, nunca um valor capturado antes dela terminar.
   var payload = JSON.parse(JSON.stringify(novoValor));
   var payloadCanon = _orcV2CanonJSON(payload); // só para comparação/baseline — nunca para a escrita
   var baseline = _orcV2LastPayload[id]; // undefined = nunca observei este doc nesta aba — grava sem checar
@@ -30265,21 +30323,36 @@ function orcV2SalvarComConflito(id, novoValor) {
   });
 }
 function _orcamentosSalvarComMergeContinuar(arr, tentativas){
-  var baselineStr = _cloudLastPayload['orcamentos'];
-  var baselineArr = [];
-  if(baselineStr){ try{ baselineArr = JSON.parse(baselineStr)||[]; }catch(e){ baselineArr=[]; } }
-  var baselineById = {};
-  baselineArr.forEach(function(o){ if(o && o.id) baselineById[o.id]=o; });
-  var meusIds = [];
-  arr.forEach(function(o){
-    if(!o || !o.id) return;
-    var antes = baselineById[o.id];
-    if(!antes || JSON.stringify(antes) !== JSON.stringify(o)) meusIds.push(o.id);
-  });
-  if (!meusIds.length) return Promise.resolve({ ok: true, unchanged: true });
-
+  // RODADA PÓS-SMOKE 2026-11-12 — achado real (smoke de produção: "o
+  // orçamento está salvando de forma inconsistente, salva quando quer",
+  // SEM o falso conflito já corrigido). Causa raiz: meusIds comparava
+  // `arr` (a lista INTEIRA de orçamentos em memória, não só o que esta
+  // chamada pretende salvar) contra o baseline do ARRAY LEGADO
+  // (_cloudLastPayload['orcamentos']) — e esse array excede
+  // PERMANENTEMENTE 1MiB desde a Rodada de Migração v2 (ver
+  // _cloudSaveExec), então toda tentativa de espelho DELETA esse baseline
+  // (nunca fica populado a partir do 2º save em diante). Com baseline
+  // sempre vazio, TODO id do array inteiro — centenas de orçamentos nunca
+  // tocados por esta aba — entrava em meusIds e disparava sua PRÓPRIA
+  // chamada a orcV2SalvarComConflito(); se QUALQUER UM deles batesse um
+  // conflito real (outra sessão editando aquele outro orçamento) ou erro
+  // transitório, o resultado inteiro deste save virava `ok:false` — mesmo
+  // que o orçamento que o usuário de fato editou já tivesse sido
+  // confirmado. erp_vr_orcamentos/{id} é a fonte de verdade por
+  // orçamento — o baseline correto para decidir "o que esta aba de fato
+  // mudou" é o baseline POR ID já mantido pelo listener v2
+  // (_orcV2LastPayload, alimentado por _watchOrcamentosV2() e por toda
+  // gravação confirmada — ver orcV2SalvarComConflito), nunca o array
+  // legado. Reduz meusIds a, no caso comum, só o orçamento realmente
+  // editado — e, como bônus, elimina a amplificação de escrita (centenas
+  // de comparações desnecessárias a cada save).
   var porId = {};
   arr.forEach(function (o) { if (o && o.id) porId[o.id] = o; });
+  var meusIds = Object.keys(porId).filter(function(id){
+    var payloadCanon = _orcV2CanonJSON(JSON.parse(JSON.stringify(porId[id])));
+    return _orcV2LastPayload[id] !== payloadCanon;
+  });
+  if (!meusIds.length) return Promise.resolve({ ok: true, unchanged: true });
 
   return Promise.all(meusIds.map(function (id) {
     return orcV2SalvarComConflito(id, porId[id]).then(function (r) { return { id: id, r: r }; });
@@ -41030,14 +41103,26 @@ function _planReconcilePieces(freshPieces, defaultEspMm) {
     // deixa de existir se a peça for excluída ou deixar de existir na
     // receita (perde o `prev`, nasce de novo com a dimensão fresca).
     var _dimOverride = !!(prev && prev.dimOverride);
+    // RODADA PÓS-SMOKE 2026-11-12 — achado real (usuário reportou peça
+    // automática "voltando" ao clicar "+ Adicionar Peça"): esta função já
+    // preservava _deleted/dimOverride/espOverride/adesivo/gravação/spray/
+    // extra de `prev`, mas NUNCA qty — toda reconciliação relia a
+    // quantidade da receita fresca, descartando em silêncio uma redução
+    // manual (ex.: receita manda 2 Laterais, vendedor edita para 1).
+    // Mesmo padrão de dimOverride: só congela quando o vendedor de fato
+    // editou o campo (_planEditField), nunca por padrão — uma receita cuja
+    // fórmula de qty dependa de campos extras continua recalculando
+    // normalmente enquanto não houver edição manual explícita.
+    var _qtyOverride = !!(prev && prev.qtyOverride);
     // RODADA 8 — Adesivo normal/branco independentes (ver _planPecaAdesivos).
     var _adesPrev = prev ? _planPecaAdesivos(prev) : _planPecaAdesivos(pc);
     return {
-      id: id, nome: pc.nome, qty: pc.qty,
+      id: id, nome: pc.nome,
+      qty: _qtyOverride ? prev.qty : pc.qty,
       larg: _dimOverride ? prev.larg : Math.round(pc.larg*100)/100,
       alt:  _dimOverride ? prev.alt  : Math.round(pc.alt*100)/100,
       esp: _espOverride || defaultEspMm || '', tipo: pc.tipo||'',
-      espOverride: _espOverride, dimOverride: _dimOverride,
+      espOverride: _espOverride, dimOverride: _dimOverride, qtyOverride: _qtyOverride,
       adesivoNormal: _adesPrev.normal, adesivoBranco: _adesPrev.branco,
       // RODADA 6 — Gravação/Spray/Extra por peça (mesmo padrão do Adesivo
       // acima): preserva o valor em memória mesmo quando a receita fresca
@@ -41083,6 +41168,11 @@ function _planHidratarDireto(planPecasJson, defaultEspMm) {
       // propaga o dimOverride persistido para uma reconciliação futura
       // dentro desta sessão continuar respeitando a dimensão manual.
       dimOverride: !!saved.dimOverride,
+      // RODADA PÓS-SMOKE 2026-11-12 — mesmo motivo do dimOverride acima:
+      // propaga qtyOverride persistido para uma reconciliação futura
+      // dentro desta sessão (ver _planReconcilePieces) continuar
+      // respeitando a quantidade manual já salva.
+      qtyOverride: !!saved.qtyOverride,
       adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
       gravacao: saved.gravacao||0, spray: saved.spray||0, extra: saved.extra||0,
       _deleted: false
@@ -41138,6 +41228,11 @@ function _planSeedFromPersisted(freshPieces, planPecasJson, defaultEspMm) {
       // "+ Adicionar Peça" de novo) continue respeitando a dimensão
       // manual já salva, em vez de recalculá-la da receita.
       dimOverride: saved ? !!saved.dimOverride : false,
+      // RODADA PÓS-SMOKE 2026-11-12 — mesmo motivo do dimOverride acima
+      // (ver _planReconcilePieces): sem propagar aqui, reabrir um item
+      // cuja qty foi reduzida manualmente e então disparar qualquer
+      // reconciliação dentro da mesma sessão reaberta perdia a edição.
+      qtyOverride: saved ? !!saved.qtyOverride : false,
       tipo: pc.tipo||'',
       adesivoNormal: _adesSaved.normal, adesivoBranco: _adesSaved.branco,
       // RODADA 6 — restaura Gravação/Spray/Extra do snapshot persistido ao
@@ -41290,6 +41385,13 @@ function _planEditField(input) {
   // outra peça, mexer em consumíveis etc.) revertia a dimensão editada de
   // volta para o valor bruto da receita.
   if (field === 'larg' || field === 'alt') _planEditPieces[pci].dimOverride = true;
+  // RODADA PÓS-SMOKE 2026-11-12 — achado real: diferente de larg/alt (ver
+  // dimOverride acima), qty nunca tinha um override equivalente — reduzir
+  // manualmente a quantidade de uma peça automática (sem excluí-la) era
+  // revertido pela próxima reconciliação (_planReconcilePieces, disparada
+  // por "+ Adicionar Peça", outra exclusão, consumível etc.), que sempre
+  // relia qty da receita fresca. Mesmo padrão do dimOverride.
+  if (field === 'qty') _planEditPieces[pci].qtyOverride = true;
   // Atualizar célula de área da linha
   var p = _planEditPieces[pci];
   var aEl = document.getElementById('planEditArea_'+pci);

@@ -53,8 +53,9 @@ function extractFn(name) {
 var FN_NAMES = [
   'orcV2MergeComLegado', '_orcV2RecomputarERenderizar', 'orcGetEnviados',
   'orcSetEnviados', '_orcamentosSalvarComMerge', '_orcamentosSalvarComMergeContinuar',
-  'orcV2SalvarComConflito', '_isTestRecord', 'orcReidratarGruposDoServidor',
+  'orcV2SalvarComConflito', '_orcV2SalvarComConflitoExec', '_isTestRecord', 'orcReidratarGruposDoServidor',
   'crmUpsertLeadPorOrcamento', '_watchOrcamentosV2', '_orcV2CanonJSON',
+  'orcEnvOrdenarCanonico', '_orcEnvChaveOrdenacao', 'orcEnvNormalizar', 'orcEnvParseDataSalvo',
 ];
 
 var src = [
@@ -62,6 +63,7 @@ var src = [
   'var _ORC_V2_CACHE = {};',
   'var _ORC_LEGADO_CACHE = [];',
   'var _orcV2LastPayload = {};',
+  'var _orcV2SaveQueue = {};',
   'var _cloudLastPayload = {};',
   'var _cloudReady = true;',
   'var CRM_LEADS = {};',

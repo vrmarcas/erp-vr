@@ -77,7 +77,7 @@ function extractArr(name) {
   return html.slice(start, i + 1) + ';';
 }
 
-var FN_NAMES = ['orcSalvarOrcamento', '_orcSalvarOrcamentoImpl', 'orcFeedbackSalvamento', 'orcObterNumeroOficial', 'orcLimparNumeroOficial', '_isTestRecord', 'orcGetEnviados'];
+var FN_NAMES = ['orcSalvarOrcamento', '_orcSalvarOrcamentoImpl', 'orcFeedbackSalvamento', 'orcObterNumeroOficial', 'orcLimparNumeroOficial', '_isTestRecord', 'orcGetEnviados', 'orcEnvOrdenarCanonico', '_orcEnvChaveOrdenacao', 'orcEnvNormalizar', 'orcEnvParseDataSalvo'];
 var src = [
   'var _orcSalvarEmVoo = null;',
   extractArr('ORC_MAQ_OPS'),
